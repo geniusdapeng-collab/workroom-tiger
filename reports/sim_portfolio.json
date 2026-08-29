@@ -1,0 +1,54 @@
+{
+ "started": "2026-07-30",
+ "initial_cash": 100000.0,
+ "cash": 100000.0,
+ "positions": [],
+ "pending": [
+  {
+   "ticker": "CAT",
+   "shares": 26,
+   "stop_price": 579.3,
+   "risk_usd": 800.0,
+   "chain": "industrials",
+   "sector": "XLI",
+   "signal_date": "2026-07-30",
+   "note": "标准｜质量 7.47/10"
+  },
+  {
+   "ticker": "STX",
+   "shares": 18,
+   "stop_price": 396.35,
+   "risk_usd": 280.0,
+   "chain": "semis",
+   "sector": "SMH",
+   "signal_date": "2026-07-30",
+   "note": "标准｜质量 7.97/10"
+  },
+  {
+   "ticker": "LRCX",
+   "shares": 21,
+   "stop_price": 277.97,
+   "risk_usd": 280.0,
+   "chain": "semis",
+   "sector": "SMH",
+   "signal_date": "2026-07-30",
+   "note": "标准｜质量 7.86/10"
+  }
+ ],
+ "closed": [],
+ "equity_curve": [
+  {
+   "date": "2026-07-30",
+   "equity": 100000.0
+  }
+ ],
+ "ops_log": [
+  {
+   "date": "2026-07-30",
+   "ops": [
+    "😴 今日按兵不动——纪律优先，空仓也是一种仓位"
+   ],
+   "equity": 100000.0
+  }
+ ]
+}

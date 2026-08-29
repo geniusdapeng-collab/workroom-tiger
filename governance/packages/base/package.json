@@ -1,0 +1,35 @@
+{
+  "name": "@workloom/base",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./bundles": "./bundles/index.ts",
+    "./workdata": "./workdata/index.ts",
+    "./im-channels": "./im-channels/index.ts",
+    "./inspection": "./inspection/index.ts",
+    "./skills": "./skills/index.ts",
+    "./fence-engine": "./fence-engine/index.ts",
+    "./model-router": "./model-router/index.ts",
+    "./night-shift": "./night-shift/index.ts",
+    "./review-console": "./review-console/index.ts",
+    "./tenancy": "./tenancy/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@workloom/db": "workspace:*",
+    "@workloom/shared": "workspace:*",
+    "jose": "6.2.9",
+    "pg": "8.23.0",
+    "yaml": "2.9.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

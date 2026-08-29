@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["workdata", "fence-engine", "model-router", "night-shift", "review-console", "tenancy"]
+}

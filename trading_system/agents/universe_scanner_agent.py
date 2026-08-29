@@ -1,0 +1,146 @@
+"""全市场扫描 Agent（Layer 0）— v4.0 核心修复。
+
+v3 根因：engine 内置硬编码 watchlist（AAPL/MSFT/GOOGL/NVDA/TSLA/AMD/META/
+AMZN/SPY/QQQ），每次运行都分析同样的 10 只。本 Agent 彻底替换该机制：
+
+  1. 载入股票池（core / extended / 自定义文件）
+  2. 硬过滤（流动性与可交易性）：
+       收盘价 ≥ $5；20 日平均成交额 ≥ $20M；历史 ≥ 260 日；ATR14/价 ≤ 12%
+  3. 量化初排（真实数据计算，非搜索关键词）：
+       RS63 分位 30% + RS20 分位 25% + 均线结构 20% + 波动收缩 15% + 接近新高 10%
+  4. 输出 Top N 进入 TSS 精评层
+
+扫描结果每次运行随市场数据变化而变化 —— “总是同样几只票”问题在此终结。
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pandas as pd
+
+from .. import config
+from ..chains import chain_of
+from ..data_models import StockCandidate
+from ..indicators import atr, last, percentile_rank, rs_line, sma
+from .base import BaseAgent
+
+
+class UniverseScannerAgent(BaseAgent):
+    name = "Universe-Scanner"
+    layer = 0
+
+    def __init__(self, provider, universe: list[str], top_n: int = config.SCAN_TOP_N):
+        super().__init__(provider)
+        self.universe = universe
+        self.top_n = top_n
+
+    def execute(self, context: dict) -> list[StockCandidate]:
+        spy_close: pd.Series = context["market_data"]["spy"]["Close"]
+        stock_data: dict[str, pd.DataFrame] = context["market_data"]["stock_ohlcv"]
+
+        passed: list[dict] = []
+        rejected = {"price": 0, "adv": 0, "history": 0, "atr": 0, "nodata": 0}
+
+        for ticker in self.universe:
+            df = stock_data.get(ticker)
+            if df is None or len(df) < config.SCAN_MIN_HISTORY_DAYS * 0.6:
+                rejected["nodata"] += 1
+                continue
+            close = df["Close"]
+            price = last(close)
+            if price < config.SCAN_MIN_PRICE:
+                rejected["price"] += 1
+                continue
+            adv = float((close * df["Volume"]).tail(20).mean())
+            if adv < config.SCAN_MIN_ADV_USD:
+                rejected["adv"] += 1
+                continue
+            a14 = last(atr(df, 14))
+            atr_pct = a14 / price if price > 0 else 9.9
+            if atr_pct > config.SCAN_MAX_ATR_PCT:
+                rejected["atr"] += 1
+                continue
+
+            # ---- 量化初排 ----
+            rs = rs_line(close, spy_close)
+            q63 = percentile_rank(rs.pct_change(63))
+            q20 = percentile_rank(rs.pct_change(20))
+
+            sma10, sma20, sma50 = last(sma(close, 10)), last(sma(close, 20)), last(sma(close, 50))
+            ma_score = 10.0 if price > sma10 > sma20 > sma50 else \
+                       8.0 if price > sma20 > sma50 else \
+                       5.0 if price > sma50 else 2.0
+
+            a50 = last(atr(df, 50))
+            vc = a14 / a50 if a50 and not math.isnan(a50) else 1.0
+            contraction = 10.0 if vc <= 0.7 else 8.0 if vc <= 0.85 else \
+                          6.0 if vc <= 1.0 else 4.0 if vc <= 1.15 else 2.0
+
+            hhv = float(df["High"].tail(252).max())
+            near_high = min(10.0, max(0.0, (price / hhv - 0.75) / 0.25 * 10))
+
+            q63n = 5.0 if math.isnan(q63) else q63 * 10
+            q20n = 5.0 if math.isnan(q20) else q20 * 10
+            w = config.SCAN_RANK_WEIGHTS
+            rank = (q63n * w["rs_63"] + q20n * w["rs_20"] + ma_score * w["ma_align"]
+                    + contraction * w["contraction"] + near_high * w["near_high"])
+
+            passed.append({
+                "ticker": ticker, "price": price, "adv": adv,
+                "atr_pct": atr_pct, "rank": round(rank, 3),
+                "rs63_q": round(q63, 3) if not math.isnan(q63) else None,
+            })
+
+        passed.sort(key=lambda x: x["rank"], reverse=True)
+        top = passed[: self.top_n]
+
+        # ---- 主线定向补扫（理论方向聚焦）：主线/准主线板块内的强结构票
+        # 即使未进全局 Top N，也带入 TSS 精评（最多 SCAN_MAINLINE_BOOST 只）----
+        boost = 0
+        if config.SCAN_MAINLINE_BOOST > 0:
+            from ..chains import mainline_tickers
+            sectors = context.get("sectors", [])
+            # v5.4：准主线口径与 sector_agent 主线闸门对齐——广度缺失（NaN）
+            # 不再视同通过（白皮书：补扫资格需"SHS≥7.0 且广度≥60"证据）。
+            hot_etfs = [s.etf for s in sectors
+                        if s.in_main_pool
+                        or (s.shs >= config.SHS_SUB_POOL
+                            and not math.isnan(s.breadth)
+                            and s.breadth >= config.BREADTH_HEALTHY)]
+            ml = mainline_tickers(hot_etfs) if hot_etfs else set()
+            chosen = {r["ticker"] for r in top}
+            for row in passed:
+                if boost >= config.SCAN_MAINLINE_BOOST:
+                    break
+                if row["ticker"] in ml and row["ticker"] not in chosen:
+                    top.append(row)
+                    chosen.add(row["ticker"])
+                    boost += 1
+
+        candidates: list[StockCandidate] = []
+        for row in top:
+            cid, link = chain_of(row["ticker"])
+            candidates.append(StockCandidate(
+                ticker=row["ticker"], rank_score=row["rank"],
+                price=row["price"], adv_usd=row["adv"], atr_pct=row["atr_pct"],
+                chain_id=cid or "", chain_link=link or "",
+            ))
+
+        context["scan_stats"] = {
+            "universe_size": len(self.universe),
+            "data_ok": len(passed) + sum(rejected.values()) - rejected["nodata"],
+            "rejected": rejected,
+            "passed": len(passed),
+            "selected": len(candidates),
+            "mainline_boost": boost,
+            # v6.3：候选链映射率披露（无映射候选在 L4 被隐性降权，必须显性化）
+            "chain_mapped": f"{sum(1 for c in candidates if c.chain_id)}/{len(candidates)}",
+            "top10": [(c.ticker, c.rank_score) for c in candidates[:10]],
+        }
+        context["watchlist"] = candidates
+        self.log.info("扫描完成: 池 %d → 通过过滤 %d → 候选 %d；Top10=%s",
+                      len(self.universe), len(passed), len(candidates),
+                      context["scan_stats"]["top10"])
+        return candidates
