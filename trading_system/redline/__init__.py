@@ -53,6 +53,7 @@ STEP_REGISTRY: tuple[StepSpec, ...] = (
     StepSpec("search.collect",   "rules", "空文档集透传（源级失败不阻塞）",    "search.hub"),
     StepSpec("clean.rule_base",  "rules", "未去重原始文档透传",               "cleaning.pipeline"),
     StepSpec("clean.llm_semantic", "llm", "规则清洗后文档透传（无语义标注）",  "cleaning.pipeline"),
+    StepSpec("clean.cross_validate", "rules", "全部文档按未验证透传披露（不阻塞管线）", "search.credibility"),
     StepSpec("data.prepare",     "rules", "（不可透传：行情数据是决策地基）",   "pipeline"),
     StepSpec("tech.monitor",     "rules", "行情动能空表透传",                 "tech_chain.agents"),
     StepSpec("tech.cycle_linkage", "rules", "全球联动空表透传",               "tech_chain.agents"),
@@ -66,10 +67,21 @@ STEP_REGISTRY: tuple[StepSpec, ...] = (
     StepSpec("layer0.scan",      "rules", "（不可透传：无候选=当日AVOID）",    "agents.universe_scanner"),
     StepSpec("layer3.tss",       "hybrid","期权维度缺失→剔除再归一化",         "agents.tss_agent"),
     StepSpec("layer4.risk",      "rules", "（不可透传）",                     "agents.risk_manager_agent"),
+    StepSpec("decision.debate",  "llm",   "无辩论证据透传（交易卡片第六段标注本轮无辩论）", "agents.debate_agent"),
+    StepSpec("iteration.calibration", "rules", "（不可透传：失败则跳过披露并记录）", "calibration"),
     StepSpec("report.emit",      "rules", "（不可透传）",                     "report"),
+    # S6 复盘闭环：复盘纪要在 pipeline 之外编排（依赖 daily 尾部的 journal
+    # 落账/结算），属延迟环节——注册进全链路契约，pipeline 结束记账为
+    # deferred，main.daily 尾部由 review.chief 实际执行后补记 executed。
+    StepSpec("review.daily",     "rules", "纪要缺失→披露未生成原因",          "review.chief"),
 )
 
 LLM_STEPS = {s.name for s in STEP_REGISTRY if s.driver == "llm"}
+
+# 延迟环节：由 pipeline 之外的编排层执行并补账（当前仅 review.daily）。
+# assert_complete 不强制 pipeline 内打点；pipeline 末尾统一记 deferred 占位，
+# 外层（main.daily）执行后把 redline 中该环节改写为 executed 留痕。
+DEFERRED_STEPS = frozenset({"review.daily"})
 
 
 @dataclass
@@ -124,10 +136,19 @@ class ExecutionTracer:
 
     def assert_complete(self) -> None:
         executed = {r.name for r in self.records}
-        missing = [s.name for s in STEP_REGISTRY if s.name not in executed]
+        missing = [s.name for s in STEP_REGISTRY
+                   if s.name not in executed and s.name not in DEFERRED_STEPS]
         if missing:
             raise RedlineViolation(
                 f"全链路环节缺失（红线 1 违反，系统性事故）: {missing}")
+
+    def mark_deferred(self, name: str, note: str = "") -> None:
+        """延迟环节占位记账（deferred）：pipeline 内不执行，由外层编排补账。"""
+        if name not in DEFERRED_STEPS:
+            raise RedlineViolation(f"非延迟环节不得记 deferred: {name}")
+        self.records.append(StepRecord(
+            name=name, status="deferred", elapsed_ms=0.0,
+            note=note or "延迟至 pipeline 外编排层执行（执行后补记 executed）"))
 
     def summary(self) -> list[dict]:
         return [{"step": r.name, "status": r.status,

@@ -34,18 +34,22 @@ class MRSAgent(BaseAgent):
     def execute(self, context: dict) -> MRSResult:
         p = self.provider
 
-        tnx: pd.Series = context["market_data"]["tnx"]       # 百分数收益率
-        vix: pd.Series = context["market_data"]["vix"]
+        # S4 多市场：基准组（指数/利率/波动率）由市场规格映射；CN/HK 免费源
+        # 不可得维度为 None → 该维记缺失走"剔除再归一化"（D2，不钉中性分）。
+        labels = context["market_data"].get(
+            "benchmark_labels", {"index": "SPY", "rate": "TNX", "vol": "VIX"})
+        tnx: pd.Series | None = context["market_data"].get("tnx")     # 百分数收益率
+        vix: pd.Series | None = context["market_data"].get("vix")
         vix9d: pd.Series | None = context["market_data"].get("vix9d")
         spy: pd.DataFrame = context["market_data"]["spy"]
         universe_closes: dict[str, pd.Series] = context["market_data"]["universe_closes"]
 
         dims: dict[str, DimensionScore] = {}
-        dims["macro"] = self._macro(tnx)
+        dims["macro"] = self._macro(tnx, labels["rate"])
         dims["flow"] = self._flow(universe_closes,
                                   context["market_data"].get("precomputed"))
-        dims["sent"] = self._sentiment(vix, vix9d)
-        dims["tech"] = self._technical(spy)
+        dims["sent"] = self._sentiment(vix, vix9d, labels["vol"])
+        dims["tech"] = self._technical(spy, labels["index"])
         dims["micro"] = self._micro()
 
         scores = {k: d.score for k, d in dims.items()}
@@ -53,6 +57,8 @@ class MRSAgent(BaseAgent):
 
         # 一致性修正：Δ = 可用维度极差
         vals = [v for v in scores.values() if v is not None]
+        if not vals:
+            raise RuntimeError("MRS 五维全部缺失：基准组不可用，诚实失败（D2）")
         delta = round(max(vals) - min(vals), 2)
         k = config.consistency_k(delta)
         mrs_star = round(mrs_raw * k, 2)
@@ -63,7 +69,7 @@ class MRSAgent(BaseAgent):
         allow = mrs_star >= config.MRS_GATE_BLOCK
 
         # ---- v6.0 三重现实折扣的机器执行（白皮书§4.5/§10.4，此前仅有文档）----
-        shock, shock_reason = self._detect_shock(spy, vix)
+        shock, shock_reason = self._detect_shock(spy, vix, labels["index"], labels["vol"])
         if shock:
             allow = False                     # Kill Switch：停止新开仓，只许减仓对冲
         liq_discount, liq_note = self._liquidity_discount(
@@ -99,22 +105,26 @@ class MRSAgent(BaseAgent):
     # ---------------- 现实折扣（v6.0） ----------------
 
     @staticmethod
-    def _detect_shock(spy: pd.DataFrame, vix: pd.Series) -> tuple[bool, str]:
+    def _detect_shock(spy: pd.DataFrame, vix: pd.Series | None,
+                      index_label: str = "SPY", vol_label: str = "VIX") -> tuple[bool, str]:
         """冲击折扣（Kill Switch，白皮书§4.5）：突发冲击导致逻辑断裂。
 
-        触发任一：SPY 单日跌幅 ≤ SHOCK_SPY_1D_DROP（默认 -4%）；
-                  VIX 单日涨幅 ≥ SHOCK_VIX_1D_SPIKE（默认 +30%）。
+        触发任一：指数单日跌幅 ≤ SHOCK_SPY_1D_DROP（默认 -4%）；
+                  波动率单日涨幅 ≥ SHOCK_VIX_1D_SPIKE（默认 +30%）。
+        波动率基准缺失（CN/HK 免费源不可得）时仅执行指数腿（缺失不编造）。
         """
         close = spy["Close"].dropna()
         if len(close) >= 2:
             spy_1d = float(close.iloc[-1] / close.iloc[-2] - 1.0)
             if spy_1d <= config.SHOCK_SPY_1D_DROP:
-                return True, f"SPY 单日 {spy_1d:+.1%}（阈值 {config.SHOCK_SPY_1D_DROP:+.0%}），逻辑断裂级冲击"
+                return True, f"{index_label} 单日 {spy_1d:+.1%}（阈值 {config.SHOCK_SPY_1D_DROP:+.0%}），逻辑断裂级冲击"
+        if vix is None:
+            return False, ""
         v = vix.dropna()
         if len(v) >= 2 and float(v.iloc[-2]) > 0:
             vix_1d = float(v.iloc[-1] / v.iloc[-2] - 1.0)
             if vix_1d >= config.SHOCK_VIX_1D_SPIKE:
-                return True, f"VIX 单日 {vix_1d:+.0%}（阈值 {config.SHOCK_VIX_1D_SPIKE:+.0%}），恐慌冲击"
+                return True, f"{vol_label} 单日 {vix_1d:+.0%}（阈值 {config.SHOCK_VIX_1D_SPIKE:+.0%}），恐慌冲击"
         return False, ""
 
     @staticmethod
@@ -148,7 +158,12 @@ class MRSAgent(BaseAgent):
 
     # ---------------- 五维 ----------------
 
-    def _macro(self, tnx: pd.Series) -> DimensionScore:
+    def _macro(self, tnx: pd.Series | None, rate_label: str = "TNX") -> DimensionScore:
+        if tnx is None or len(tnx.dropna()) == 0:
+            return DimensionScore(
+                name="macro", score=None,
+                evidence=[f"宏观: 利率基准（{rate_label}）缺失 → 整维剔除再归一化（D2）"],
+                missing=[f"利率基准({rate_label})"])
         tnx = tnx.dropna()
         chg_bp = (tnx.iloc[-1] - tnx.iloc[-21]) * 100 if len(tnx) > 21 else 0.0
         sma200 = tnx.tail(200).mean()
@@ -158,7 +173,7 @@ class MRSAgent(BaseAgent):
         score = round(0.6 * a + 0.4 * b)
         return DimensionScore(
             name="macro", score=score, sub_scores={"A_tnx_chg": a, "B_tnx_vs200": b},
-            evidence=[f"宏观: TNX20日变化 {chg_bp:+.0f}bp→{a}分; TNX相对200D {vs200:+.1%}→{b}分 ⇒ S_macro={score}"],
+            evidence=[f"宏观: {rate_label}20日变化 {chg_bp:+.0f}bp→{a}分; {rate_label}相对200D {vs200:+.1%}→{b}分 ⇒ S_macro={score}"],
         )
 
     def _flow(self, universe_closes: dict[str, pd.Series],
@@ -192,23 +207,29 @@ class MRSAgent(BaseAgent):
                               sub_scores={"A_breadth200": a} if a is not None else {},
                               evidence=ev, missing=missing)
 
-    def _sentiment(self, vix: pd.Series, vix9d: pd.Series | None) -> DimensionScore:
+    def _sentiment(self, vix: pd.Series | None, vix9d: pd.Series | None,
+                   vol_label: str = "VIX") -> DimensionScore:
+        if vix is None or len(vix.dropna()) == 0:
+            return DimensionScore(
+                name="sent", score=None,
+                evidence=[f"情绪: 波动率基准（{vol_label}）缺失 → 整维剔除再归一化（D2）"],
+                missing=[f"波动率基准({vol_label})"])
         vix_last = last(vix)
         a = score_vix_level(vix_last)
         missing: list[str] = []
         if vix9d is None or len(vix9d) == 0:
             score = a
-            missing.append("VIX9D 期限结构")
-            ev = [f"情绪: VIX={vix_last:.1f}→{a}分 ⇒ S_sent={score}"]
+            missing.append(f"{vol_label}9D 期限结构")
+            ev = [f"情绪: {vol_label}={vix_last:.1f}→{a}分 ⇒ S_sent={score}"]
         else:
             ts = last(vix9d) / vix_last
             b = score_vix_term_structure(ts)
             score = round(0.6 * a + 0.4 * b)
-            ev = [f"情绪: VIX={vix_last:.1f}→{a}分; VIX9D/VIX={ts:.2f}→{b}分 ⇒ S_sent={score}"]
+            ev = [f"情绪: {vol_label}={vix_last:.1f}→{a}分; {vol_label}9D/{vol_label}={ts:.2f}→{b}分 ⇒ S_sent={score}"]
         return DimensionScore(name="sent", score=score,
                               sub_scores={"A_vix": a}, evidence=ev, missing=missing)
 
-    def _technical(self, spy: pd.DataFrame) -> DimensionScore:
+    def _technical(self, spy: pd.DataFrame, index_label: str = "SPY") -> DimensionScore:
         close = spy["Close"]
         c = last(close)
         sma50 = last(sma(close, 50))
@@ -233,7 +254,7 @@ class MRSAgent(BaseAgent):
         score = aggregate({"A": a, "B": b, "C": d}, {"A": 0.5, "B": 0.3, "C": 0.2})
         slope_txt = f"{slope:+.1%}" if b is not None else "缺失"
         b_txt = f"{b}分" if b is not None else "缺失→剔除"
-        ev = [f"技术: SPY相对50/200D→{a}分; SMA50斜率{slope_txt}→{b_txt}; 回撤{dd:.1%}→{d}分 ⇒ S_tech={score}"]
+        ev = [f"技术: {index_label}相对50/200D→{a}分; SMA50斜率{slope_txt}→{b_txt}; 回撤{dd:.1%}→{d}分 ⇒ S_tech={score}"]
         return DimensionScore(name="tech", score=score,
                               sub_scores={"A_pos": a, "B_slope": b, "C_dd": d}, evidence=ev)
 

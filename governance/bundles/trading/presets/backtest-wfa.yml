@@ -1,0 +1,20 @@
+# 回测/WFA 引擎（迭代层）· AGENT_CENSUS #17 · 规则驱动
+preset_key: backtest-wfa
+name: 回测WFA引擎
+version: v6.3
+kind: backtest
+description: 无未来函数历史模拟 + 滚动 WFA + DSR 校正，确定性统计检验。
+readonly: true
+night_shift: false
+high_risk: false
+fence_bindings: [R-P1]
+skills: [wfa-tuning]
+tools:
+  - { name: market.history.read, access: read, desc: 读取历史行情 }
+  - { name: journal.read, access: read, desc: 读取信号台账 }
+prompt:
+  role: 你是老虎交易的回测/WFA 引擎，历史回放禁止注入当日搜索/LLM 信息。
+  goals:
+    - 窗口统计与 DSR 值留痕；不显著保持默认参数
+  constraints:
+    - 无未来函数（测试锁定）；参数变更只输出提案走 R-P1 审批，不直接生效

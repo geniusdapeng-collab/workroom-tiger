@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>老虎交易 · 治理责任界面</title>
+<style>
+* { box-sizing: border-box; }
+body { margin:0; background:#f4fae4; color:#1c2a10;
+  font:14px/1.65 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+.wrap { max-width:1080px; margin:0 auto; padding:28px 22px 60px; }
+h1 { font-size:24px; margin:0 0 4px; }
+h2 { font-size:18px; margin:36px 0 14px; padding:0 0 8px 20px; position:relative;
+  letter-spacing:0.5px;
+  background:linear-gradient(90deg,#d4af3733,transparent 62%);
+  border-bottom:2px solid; border-image:linear-gradient(90deg,#d4af37,#d4af3700) 1; }
+h2::before { content:''; position:absolute; left:2px; top:7px; width:9px; height:9px;
+  background:linear-gradient(135deg,#ffe27a,#d4af37); transform:rotate(45deg);
+  box-shadow:0 0 8px #d4af3780; }
+.sub { color:#5f7050; font-size:13px; }
+.grid { display:grid; gap:14px; }
+.g3 { grid-template-columns:repeat(3,1fr); }
+@media (max-width:820px) { .g3 { grid-template-columns:1fr; } }
+.card { background:#fcfff2; border:1px solid #d8e6b8; border-radius:12px;
+  padding:16px 18px; }
+.colhead { font-weight:700; font-size:15px; margin-bottom:10px; }
+.colhead .cnt { color:#5f7050; font-weight:400; font-size:12px; margin-left:6px; }
+.ev { border:1px solid #d8e6b8; border-radius:10px; padding:10px 12px; margin:8px 0;
+  background:#fff; }
+.ev .eid { display:inline-block; padding:0 8px; border-radius:999px; font-size:11px;
+  background:#e6eecd; border:1px solid #d8e6b8; color:#5f7050; margin-right:6px; }
+.ev .act { font-weight:600; }
+.ev .meta { color:#5f7050; font-size:12px; margin-top:3px; }
+.ev.blocked { border-color:#dc262655; background:#fdeaea; }
+.ev.review { border-color:#d4af37; background:#fffbe8; }
+.tag { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px;
+  border:1px solid #d8e6b8; color:#5f7050; margin-left:6px; }
+.tag.ok { color:#16a34a; border-color:#16a34a55; }
+.tag.bad { color:#dc2626; border-color:#dc262655; }
+.tag.warn { color:#b45309; border-color:#b4530955; }
+.basis { display:none; margin-top:8px; padding:8px 10px; background:#e6eecd;
+  border-radius:8px; font-size:12.5px; }
+.basis div { margin:2px 0; }
+.ev.open .basis { display:block; }
+.ev .toggle { cursor:pointer; color:#b45309; font-size:12px; user-select:none; }
+table { width:100%; border-collapse:collapse; font-size:13px; background:#fcfff2; }
+th,td { padding:7px 9px; border-bottom:1px solid #d8e6b8; text-align:left; }
+th { color:#5f7050; font-weight:500; }
+tr.blocked td { background:#fdeaea; }
+.demo-banner { background:linear-gradient(135deg,#ffe27a,#ffd700); color:#241a02;
+  border-radius:10px; padding:8px 16px; font-weight:700; display:inline-block;
+  margin:10px 0; box-shadow:0 2px 12px #ffd70066; }
+.footer { color:#5f7050; font-size:12px; margin-top:36px; text-align:center; }
+.chain-status { font-size:13px; margin:6px 0 0; }
+a { color:#7a6a1f; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>老虎交易 · 治理责任界面</h1>
+  <div class="sub">五元事件留痕 · 哈希链验真 · 围栏命中日志 — WorkLoom 治理外壳（只做治理不做决策）</div>
+  <div class="demo-banner">本页当前展示【演示】数据（demo 管线事件投影），非真实交易记录</div>
+
+  <h2>一、清晨决策包</h2>
+  <div class="sub">夜间事件投影三栏：已完成 / 待审批 / 需介入（模拟盘阶段 review 只推送不阻塞，裁决 R1）</div>
+  <div class="grid g3" id="pkg">
+    <div class="card"><div class="colhead">已完成<span class="cnt" id="c-done"></span></div><div id="col-done"></div></div>
+    <div class="card"><div class="colhead">待审批<span class="cnt" id="c-review"></span></div><div id="col-review"></div></div>
+    <div class="card"><div class="colhead">需介入<span class="cnt" id="c-blocked"></span></div><div id="col-blocked"></div></div>
+  </div>
+
+  <h2>二、决策回放</h2>
+  <div class="sub">事件时间线 · 每条事件前端重算 sha256(prev_hash‖canonicalJson) 验真 · 点击展开五段依据</div>
+  <div class="chain-status" id="chain-status"></div>
+  <div class="card" id="timeline"></div>
+
+  <h2>三、围栏命中日志</h2>
+  <div class="sub">R-T 规则命中表（围栏版本 trading-baseline/v1，由 config.py 生成，单一口径）</div>
+  <table id="fence-table">
+    <thead><tr><th>规则</th><th>时间</th><th>对象</th><th>动作</th><th>结果</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="footer">
+    披露：本页治理事件为留痕旁路（治理外壳只记录与验真，不产出任何交易评分），
+    不构成投资建议 · 系统当前仅运行于模拟盘 ·
+    围栏阈值 single source of truth = trading_system/config.py（生成器 scripts/gen_fences.py）·
+    <a href="index.html">返回日报</a>
+  </div>
+</div>
+
+<script>
+// ================= 演示数据（demo 管线事件投影，含真实哈希链） =================
+const EVENTS = [
+{"payload": {"event_id": "E-8801", "who": {"type": "agent", "id": "search.collect", "version": "v6.3"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "report", "id": "2026-08-29"}, "decision": {"action": "pipeline.step.search.collect", "after": {"status": "executed", "ms": 412.3}, "basis": ["环节状态: executed"]}, "rule_impact": [{"rule_id": "R-T15", "version": "trading-baseline/v1", "result": "pass"}]}, "prev_hash": "GENESIS", "hash": "f7b78f82ec89d343d7b813e9aebee94f4f0c483ed0086737ccfd49de81c9d823"},
+{"payload": {"event_id": "E-8802", "who": {"type": "agent", "id": "clean.llm_semantic", "version": "v6.3"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "report", "id": "2026-08-29"}, "decision": {"action": "pipeline.step.clean.llm_semantic", "after": {"status": "executed", "ms": 8910.0}, "basis": ["环节状态: executed"]}, "rule_impact": [{"rule_id": "R-T15", "version": "trading-baseline/v1", "result": "pass"}]}, "prev_hash": "f7b78f82ec89d343d7b813e9aebee94f4f0c483ed0086737ccfd49de81c9d823", "hash": "d9c209f8db9aa2ae68607a9aa217b11aa3591c812ff5f05c24b55339584f6c6c"},
+{"payload": {"event_id": "E-8803", "who": {"type": "agent", "id": "layer1.mrs", "version": "v6.3"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "report", "id": "2026-08-29"}, "decision": {"action": "pipeline.step.layer1.mrs", "after": {"status": "executed", "ms": 33.1}, "basis": ["环节状态: executed"]}, "rule_impact": [{"rule_id": "R-T15", "version": "trading-baseline/v1", "result": "pass"}]}, "prev_hash": "d9c209f8db9aa2ae68607a9aa217b11aa3591c812ff5f05c24b55339584f6c6c", "hash": "ba73cae0c078019de4de624e0a1ba1ca7469bf52754c3d4bbc77f3ab8e4e6dc7"},
+{"payload": {"event_id": "E-8804", "who": {"type": "agent", "id": "layer4.risk", "version": "v6.3"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "report", "id": "2026-08-29"}, "decision": {"action": "pipeline.step.layer4.risk", "after": {"status": "executed", "ms": 57.8}, "basis": ["环节状态: executed"]}, "rule_impact": [{"rule_id": "R-T15", "version": "trading-baseline/v1", "result": "pass"}]}, "prev_hash": "ba73cae0c078019de4de624e0a1ba1ca7469bf52754c3d4bbc77f3ab8e4e6dc7", "hash": "013f4ed0210728deaddc84096758c15fc4c1e3f25f74e518e4b247b11fbcefc7"},
+{"payload": {"event_id": "E-8805", "who": {"type": "agent", "id": "risk-manager", "version": "v6.3"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "signal", "id": "2026-08-29"}, "decision": {"action": "gate.l4", "after": {"action": "BUY", "picks": ["NVDA", "AVGO"], "mrs_star": 7.1}, "basis": ["action=BUY", "MRS*=7.1", "picks=2: NVDA, AVGO", "三分数联动: MRS*≥6 ✓ SHS≥7.5 ✓ TSS≥7.2 ✓", "仓位: 1R=净值0.8%，分批40/40/20", "止损: 结构位下方；≥2R启动盈利保护"], "memory_refs": ["reports/result_2026-08-29.json"]}, "rule_impact": [{"rule_id": "R-T10", "version": "trading-baseline/v1", "result": "pass"}]}, "prev_hash": "013f4ed0210728deaddc84096758c15fc4c1e3f25f74e518e4b247b11fbcefc7", "hash": "89d632d681014857b4fb51e4782a92265f225e75b18703983de4de16d171ea74"},
+{"payload": {"event_id": "E-8806", "who": {"type": "system", "id": "sim-engine", "version": "v6.3"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "portfolio", "id": "sim"}, "decision": {"action": "sim.fill", "after": {"equity": 101230.5}, "basis": ["🟢 买入 NVDA 12 股 @ 178.40（首批 40%）", "🛡️ AMD 浮盈达 2R，止损上移至成本线 162.10"], "memory_refs": ["reports/sim_portfolio.json"]}, "rule_impact": [{"rule_id": "R-T1", "version": "trading-baseline/v1", "result": "pass"}]}, "prev_hash": "89d632d681014857b4fb51e4782a92265f225e75b18703983de4de16d171ea74", "hash": "b41970e327c61c66bd930d2c065ab3bbaddaa8c64edd75038cc162a81c715186"},
+{"payload": {"event_id": "E-8807", "who": {"type": "agent", "id": "compliance-officer", "version": "v0.1"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "risk_event", "id": "0700.HK:2026-08-29"}, "decision": {"action": "compliance.check", "after": {"ticker": "0700.HK", "side": "buy", "allowed": false}, "basis": ["HK VCM 冷静期触发，禁止追单"]}, "rule_impact": [{"rule_id": "R-T8", "version": "trading-baseline/v1", "result": "blocked"}]}, "prev_hash": "b41970e327c61c66bd930d2c065ab3bbaddaa8c64edd75038cc162a81c715186", "hash": "7429531d9bbe7d60da2985b5976b83f32258b069c4cff25cf351e234510663de"},
+{"payload": {"event_id": "E-8808", "who": {"type": "agent", "id": "strategy-optimizer", "version": "v0.1"}, "context": {"tenant_id": "tiger", "workspace_id": "trading", "time": "2026-08-29T06:05:00+08:00", "channel": "pipeline", "market": "us", "stage": "paper"}, "object": {"type": "report", "id": "wfa-2026-08"}, "decision": {"action": "param.change", "before": {"OPEN_LONG.tss": 7.2}, "after": {"OPEN_LONG.tss": 7.4}, "basis": ["WFA 126/63/63 窗口", "DSR=0.31 不显著 → 建议驳回保持默认"], "memory_refs": ["reports/journal.json"]}, "rule_impact": [{"rule_id": "R-P1", "version": "trading-baseline/v1", "result": "review"}]}, "prev_hash": "7429531d9bbe7d60da2985b5976b83f32258b069c4cff25cf351e234510663de", "hash": "b5237b5f6f3dc8a2028863fb3dc129cb18f3a89344b9df98f47c0db9c88b9250"}
+];
+
+// ================= canonicalJson + sha256（对齐 governance workdata/events.ts） =================
+function canonicalJson(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return "[" + v.map(canonicalJson).join(",") + "]";
+  const entries = Object.entries(v).filter(([, x]) => x !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return "{" + entries.map(([k, x]) => JSON.stringify(k) + ":" + canonicalJson(x)).join(",") + "}";
+}
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ================= 验链 =================
+async function verifyChain(events) {
+  let prev = "GENESIS";
+  const status = [];
+  for (const rec of events) {
+    const expect = await sha256Hex(prev + canonicalJson(rec.payload));
+    status.push(rec.prev_hash === prev && rec.hash === expect);
+    prev = rec.hash;
+  }
+  return status;
+}
+
+// ================= 渲染 =================
+function evCard(rec, verified) {
+  const p = rec.payload;
+  const ri = (p.rule_impact || [])[0] || {};
+  const cls = ri.result === "blocked" ? "blocked" : (ri.result === "review" ? "review" : "");
+  const vtag = verified ? '<span class="tag ok">哈希 ✓</span>' : '<span class="tag bad">哈希 ✗</span>';
+  const basis = (p.decision.basis || []).map(b => `<div>· ${esc(b)}</div>`).join("");
+  const refs = (p.decision.memory_refs || []).map(m => `<div>↳ 引用 ${esc(m)}</div>`).join("");
+  return `<div class="ev ${cls}" onclick="this.classList.toggle('open')">
+    <span class="eid">${esc(p.event_id)}</span>
+    <span class="act">${esc(p.decision.action)}</span>${vtag}
+    <span class="tag">${esc(p.who.id)}</span>
+    <div class="meta">${esc(p.context.time)} ｜ ${esc(p.object.type)}${p.object.id ? " · " + esc(p.object.id) : ""}
+      ｜ ${esc(ri.rule_id || "-")} → ${esc(ri.result || "-")}</div>
+    <div class="toggle">展开/收起依据 ▾</div>
+    <div class="basis">${basis || "<div>（无依据记录）</div>"}${refs}</div>
+  </div>`;
+}
+
+async function render() {
+  const verified = await verifyChain(EVENTS);
+  const allOk = verified.every(Boolean);
+  document.getElementById("chain-status").innerHTML = allOk
+    ? `<span class="tag ok">✓ 哈希链完整：${EVENTS.length} 条事件逐条重算一致</span>`
+    : `<span class="tag bad">✗ 哈希链存在断点/篡改</span>`;
+
+  // 三栏投影：pass→已完成 review→待审批 blocked→需介入
+  const cols = { "col-done": [], "col-review": [], "col-blocked": [] };
+  EVENTS.forEach((rec, i) => {
+    const ri = (rec.payload.rule_impact || [])[0] || { result: "pass" };
+    const col = ri.result === "blocked" ? "col-blocked"
+              : ri.result === "review" ? "col-review" : "col-done";
+    cols[col].push(evCard(rec, verified[i]));
+  });
+  for (const [id, html] of Object.entries(cols)) {
+    document.getElementById(id).innerHTML = html.join("") ||
+      '<div class="sub" style="padding:10px 4px;border:1px dashed #d8e6b8;border-radius:8px">（空）</div>';
+  }
+  document.getElementById("c-done").textContent = cols["col-done"].length + " 条";
+  document.getElementById("c-review").textContent = cols["col-review"].length + " 条";
+  document.getElementById("c-blocked").textContent = cols["col-blocked"].length + " 条";
+
+  // 决策回放时间线
+  document.getElementById("timeline").innerHTML =
+    EVENTS.map((rec, i) => evCard(rec, verified[i])).join("");
+
+  // 围栏命中表
+  const rows = [];
+  EVENTS.forEach(rec => {
+    const p = rec.payload;
+    (p.rule_impact || []).forEach(ri => {
+      rows.push(`<tr class="${ri.result === "blocked" ? "blocked" : ""}">
+        <td>${esc(ri.rule_id)}</td><td>${esc(p.context.time)}</td>
+        <td>${esc(p.object.type)}${p.object.id ? " · " + esc(p.object.id) : ""}</td>
+        <td>${esc(p.decision.action)}</td>
+        <td>${ri.result === "blocked" ? '<span class="tag bad">blocked</span>'
+            : ri.result === "review" ? '<span class="tag warn">review</span>'
+            : '<span class="tag ok">pass</span>'}</td></tr>`);
+    });
+  });
+  document.querySelector("#fence-table tbody").innerHTML = rows.join("") ||
+    '<tr><td colspan="5">本轮无围栏命中</td></tr>';
+}
+render();
+</script>
+</body>
+</html>

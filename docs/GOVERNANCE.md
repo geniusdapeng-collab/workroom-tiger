@@ -46,11 +46,14 @@
 - **模拟盘阶段（当前）**：遵守白皮书第15章"小G 全 AI 掌控"——review 级规则仅推送清晨决策包供人观察，**不阻塞执行**
 - **实盘阶段（未来）**：review 级规则启用阻塞式审批，人三手势裁决（采纳/编辑后采纳/驳回）
 
-## 六、当前状态（S1 完成）
+## 六、当前状态（S6 完成）
 
 - [x] WorkLoom 底座代码接入 `governance/`（快照 2026-08-21 main）
-- [x] 财神爷内核原样保留并跑通（148 测试全绿 + demo 端到端）
-- [ ] 事件适配器（内核→五元事件）（S5）
-- [ ] 围栏包从 config.py 生成器（S5）
-- [ ] Quest 三市编排（S5）
-- [ ] site 责任界面（S5）
+- [x] 财神爷内核原样保留并跑通（252 测试全绿 + demo 端到端）
+- [x] 事件适配器（内核→五元事件）（S5：`trading_system/governance_bridge.py`，pipeline 环节/L4 闸门/模拟盘成交/合规命中 → 五元事件 + SHA-256 哈希链）
+- [x] 围栏包从 config.py 生成器（S5：`scripts/gen_fences.py` → `governance/bundles/trading/fences/trading-baseline.yml`，R-T1~R-T15）
+- [x] bundles/trading 角色包（S5：`governance/bundles/trading/` 六装配槽；根目录 `bundles/trading/` 保留指向性说明）
+- [x] 复盘闭环（S6：`trading_system/review/` 诸葛团队——日度归因+违规六条（附录D）/周度体检三档/月度 WFA 提案（DSR 不显著自动 reject）；`review.daily` 注册进 STEP_REGISTRY 延迟环节；审批流 `--review-list/--review-approve/--review-reject`（驳回原因必填），approve 次日生效并披露（复用 --use-tuned 纪律）；纪要 `reports/复盘_<日期>.md` 进治理事件）
+- [x] 双语文档（S6：`README_EN.md`、`docs/PROJECT_INTRO.md` / `docs/PROJECT_INTRO_EN.md`）
+- [ ] Quest 三市编排（后续阶段）
+- [ ] site 责任界面（后续阶段）

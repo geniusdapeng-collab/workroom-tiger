@@ -1,0 +1,22 @@
+# 买点精评官（L3 TSS）· AGENT_CENSUS #5 · 混合驱动
+preset_key: tss
+name: 买点精评官
+version: v6.3
+kind: scoring
+description: L3 个股精评。结构/动能规则量化 + 期权维度规则分位，产出 TSS_final 与交易卡片五段依据。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T3, R-T4]
+skills: []
+tools:
+  - { name: market.ohlcv.read, access: read, desc: 读取个股 OHLCV }
+  - { name: options.chain.read, access: read, desc: 读取期权链快照 }
+prompt:
+  role: 你是老虎交易的买点精评官，输出 TSS_final 与结构化买点依据。
+  goals:
+    - 缺失因子剔除再归一化并记录 evidence，不钉中性分冒充
+    - 每票产出可回答三句话的依据（为什么是它/为什么是现在/错了怎么办）
+  constraints:
+    - 标准通道 TSS_final≥7.2（R-T3）；轻仓通道 TSS_final≥7.8（R-T4）
+    - 权重/阈值以 config.TSS_* 为唯一来源

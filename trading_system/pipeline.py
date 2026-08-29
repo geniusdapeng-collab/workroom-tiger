@@ -221,18 +221,36 @@ def run_pipeline(
     account_usd: float = 100_000,
     trade_date: str | None = None,
     use_tuned: bool = False,
+    market: str = "us",
 ) -> PipelineResult:
     started = time.time()
     _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
     _HEALTH.clear()    # 零基线：provider 健康度每轮重新度量
     trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
     provider = get_provider(provider_name)
+    # S4 多市场（D1 框架不变、输入替换）：市场规格解析——日历/基准组/板块代理/
+    # 扫描过滤/合规规则/轻仓毕业门槛全部来自 spec（参数 single source = config）。
+    from .markets import get_market
+    spec = get_market(market)
+    bmk = spec.benchmarks
+    benchmark_labels = {"index": bmk.get("index_label", bmk["index"]),
+                        "rate": bmk.get("rate_label", bmk["rate"]),
+                        "vol": bmk.get("vol_label", bmk["vol"])}
+    ah_enabled = bool(config.AH_TOPICS_ENABLED
+                      or spec.market_id in config.AH_AUTO_MARKETS)
+    market_grad = spec.graduation()
     universe_source = universe_mode
-    if universe_mode == "full":
-        from .universe import load_full_universe
-        universe, universe_source = load_full_universe()   # nasdaqtrader/cache/fallback
+    if spec.market_id == "us":
+        if universe_mode == "full":
+            from .universe import load_full_universe
+            universe, universe_source = load_full_universe()   # nasdaqtrader/cache/fallback
+        else:
+            universe = load_universe(universe_mode, universe_file)
     else:
-        universe = load_universe(universe_mode, universe_file)
+        # CN/HK：full=东财全量清单（两级拉取复刻 US）；其他=内嵌池/文件
+        from .universe import load_market_universe
+        universe, universe_source = load_market_universe(
+            spec.market_id, universe_mode, universe_file)
     tracer = ExecutionTracer(run_id=trade_date)
     demo_mode = (provider_name == "demo") or getattr(provider, "name", "") == "demo"
     if not demo_mode and getattr(provider, "name", "") == "demo":
@@ -243,15 +261,18 @@ def run_pipeline(
 
     with tracer.step("search.collect"):
         hub = SearchHub(demo=demo_mode)
-        raw_docs = []
-        # v6.3：科技六子链 + 全领域八主题——每个板块都要有自己的情报输入，
-        # 否则非科技板块的 LLM 叙事维度被架空（情报偏科即评分偏科）
-        all_topics = list(CHAIN_TOPICS.values()) + list(SECTOR_TOPICS.values())
-        for topic in all_topics:
-            raw_docs.extend(hub.gather(topic, limit_per_query=4, deep=True))
-        logger.info("search.collect: %d 篇原始文档（%d 主题：科技 %d + 全领域 %d）",
+        # 主题集注册（SearchHub 同款机制）：科技六子链 + 全领域八主题——每个板块
+        # 都要有自己的情报输入，否则非科技板块的 LLM 叙事维度被架空（情报偏科即评分偏科）。
+        # S3：AH（A股/港股）主题默认关闭（config.AH_TOPICS_ENABLED，S4 多市场启用），
+        # 关闭时整体缺席、不产生任何网络调用，开关状态写入日报披露。
+        hub.register_topic_set("chains", CHAIN_TOPICS)
+        hub.register_topic_set("sectors", SECTOR_TOPICS)
+        hub.register_topic_set("ah", config.AH_TOPICS, enabled=ah_enabled)
+        raw_docs = hub.gather_topic_sets(limit_per_query=4, deep=True)
+        all_topics = hub.active_topics()
+        logger.info("search.collect: %d 篇原始文档（%d 主题；AH主题=%s）",
                     len(raw_docs), len(all_topics),
-                    len(CHAIN_TOPICS), len(SECTOR_TOPICS))
+                    "启用" if ah_enabled else "关闭")
 
     with tracer.step("clean.rule_base"):
         base_docs = rule_base_clean(raw_docs)
@@ -261,6 +282,20 @@ def run_pipeline(
         cleaned = unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer))
         degraded_n = sum(1 for c in cleaned if c.degraded)
         logger.info("clean.llm_semantic: %d 篇（语义缺失 %d）", len(cleaned), degraded_n)
+
+    # S3 数据层：交叉验证（规则层调度，D9 不引入 LLM）。关键事件类文档需
+    # ≥2 个不同源（且至少一个 ≤T2）佐证；未达标标记 corroborated=False——
+    # 不删除（透传纪律），但叙事/舆情打分输入只使用 corroborated=True 的集合；
+    # 被降级文档在决策侧仅作背景参考（tech.risk / decision.debate 仍可见全集）。
+    with tracer.step("clean.cross_validate"):
+        from .search.credibility import CrossValidator, scoring_docs
+        cv_stats = CrossValidator().validate(cleaned)
+        score_docs = scoring_docs(cleaned)
+        logger.info("clean.cross_validate: 总 %d 篇｜关键事件 %d｜通过 %d｜降级 %d"
+                    "（LLM标注缺失 %d｜缺发布时间 %d）",
+                    cv_stats["total"], cv_stats["key_event_docs"],
+                    cv_stats["corroborated"], cv_stats["downgraded"],
+                    cv_stats["llm_missing"], cv_stats["missing_published_at"])
 
     # WFA 调优参数：默认【不加载】——tuned_params.json 属于上一轮生产残留，
     # 零基线纪律下每轮从零开始；仅当调用方显式 use_tuned=True 时才覆盖默认闸门。
@@ -274,86 +309,130 @@ def run_pipeline(
                 logger.info(tuned_note)
         except Exception:
             pass
-    logger.info("=== Pipeline 启动 provider=%s universe=%s(%d) ===",
-                provider.name, universe_mode, len(universe))
+    logger.info("=== Pipeline 启动 market=%s provider=%s universe=%s(%d) ===",
+                spec.market_id, provider.name, universe_mode, len(universe))
 
     # ---------- 数据真实性与时效性闸门（v6.1，白皮书§12"地基不牢评分皆是沙上之塔"）----------
-    from .calendar import prev_trading_day as _prev_td
+    # S4：日历/指数名/板块清单全部按市场规格参数化（US 行为与现状完全一致）
 
     def _freshness_gate(spy_df, tnx_s, vix_s, etfs: dict, stocks: dict) -> dict:
         """硬依赖充足性 + 末根日期新鲜度 + 陈旧标的剔除。
 
-        - SPY/TNX/VIX 行数不足 → 诚实失败（短数据照样能"算出分"，但口径全错）；
-        - SPY 末根日期落后最近交易日 >3 天 → 诚实失败（基准数据陈旧）；
-        - 板块 ETF 覆盖率 < 2/3 → 诚实失败（在 4/12 个板块上选主线是瞎指挥）；
-        - 个股末根日期落后 SPY 末根 >5 天 → 判定停牌/源不完整，【剔除】并披露
+        - 指数行数不足 → 诚实失败（短数据照样能"算出分"，但口径全错）；
+        - 指数末根日期落后最近交易日 >3 天 → 诚实失败（基准数据陈旧）；
+        - 利率/波动率历史不足：US → 诚实失败（现状行为）；CN/HK → 记缺失
+          走"剔除再归一化"（D2，不可得维度不编造）；
+        - 板块覆盖率 < 2/3：US → 诚实失败；CN/HK → 按缺失披露继续（D2）；
+        - 个股末根日期落后指数末根 >5 天 → 判定停牌/源不完整，【剔除】并披露
           （绝不把上一周的价格当"当前价格"参与评分）。
         """
         report: dict = {}
+        idx_name = bmk["index"]
         if len(spy_df) < 260:
             raise RuntimeError(
-                f"SPY 历史不足（{len(spy_df)} < 260 行）：SMA200/252 日分位口径不成立，"
+                f"[{spec.market_id}] {idx_name} 历史不足（{len(spy_df)} < 260 行）："
+                "SMA200/252 日分位口径不成立，"
                 "宁可中止也不产出带污点的评分（白皮书§1.3 诚实失败）")
-        if len(tnx_s) < 100 or len(vix_s) < 30:
-            raise RuntimeError(
-                f"TNX/VIX 历史不足（{len(tnx_s)}/{len(vix_s)} 行），MRS 宏观/情绪维口径不成立")
-        expect = _prev_td(trade_date)
+        tnx_ok = tnx_s is not None and len(tnx_s) >= 100
+        vix_ok = vix_s is not None and len(vix_s) >= 30
+        if spec.benchmark_hard_fail:
+            if not tnx_ok or not vix_ok:
+                raise RuntimeError(
+                    f"[{spec.market_id}] {bmk['rate']}/{bmk['vol']} 历史不足"
+                    f"（{0 if tnx_s is None else len(tnx_s)}/"
+                    f"{0 if vix_s is None else len(vix_s)} 行），MRS 宏观/情绪维口径不成立")
+        else:
+            missing_bmk = [lbl for lbl, ok in ((bmk["rate"], tnx_ok), (bmk["vol"], vix_ok))
+                           if not ok]
+            if missing_bmk:
+                report["benchmark_missing"] = missing_bmk   # 缺失维披露（再归一化）
+        expect = spec.prev_trading_day(trade_date)
         spy_last = spy_df.index[-1].date()
         lag = (expect - spy_last).days
         report["benchmark_last_bar"] = str(spy_last)
         report["benchmark_lag_days"] = lag
         if lag > 3:
             raise RuntimeError(
-                f"基准数据陈旧：SPY 末根 {spy_last}，最近交易日 {expect}（滞后 {lag} 天）——"
+                f"[{spec.market_id}] 基准数据陈旧：{idx_name} 末根 {spy_last}，"
+                f"最近交易日 {expect}（滞后 {lag} 天）——"
                 "用陈旧数据产出'今日'评分是数据造假，立即中止（白皮书§12.3）")
         if lag >= 1:
-            logger.warning("数据时效披露：SPY 末根 %s（最近交易日 %s，滞后 %d 天）",
-                           spy_last, expect, lag)
-        need_etf = (len(config.SECTOR_ETFS) * 2 + 2) // 3     # ≥2/3
+            logger.warning("数据时效披露：%s 末根 %s（最近交易日 %s，滞后 %d 天）",
+                           idx_name, spy_last, expect, lag)
+        sector_list = spec.sector_symbols
+        need_etf = (len(sector_list) * 2 + 2) // 3     # ≥2/3
         if len(etfs) < need_etf:
-            missing = [e for e in config.SECTOR_ETFS if e not in etfs]
-            raise RuntimeError(
-                f"板块 ETF 覆盖率不足（{len(etfs)}/{len(config.SECTOR_ETFS)} < 2/3，"
-                f"缺 {missing}）：SHS 主线判定地基不全，诚实失败")
+            missing = [e for e in sector_list if e not in etfs]
+            if spec.sector_hard_fail:
+                raise RuntimeError(
+                    f"[{spec.market_id}] 板块 ETF 覆盖率不足（{len(etfs)}/{len(sector_list)} < 2/3，"
+                    f"缺 {missing}）：SHS 主线判定地基不全，诚实失败")
+            report["sector_breadth_missing"] = (
+                f"板块广度数据不足（{len(etfs)}/{len(sector_list)}，缺 {missing}）→ "
+                "SHS 板块维度按缺失披露（D2：宁可缺失不可编造）")
+            logger.warning("[%s] %s", spec.market_id, report["sector_breadth_missing"])
         stale = [t for t, df in stocks.items()
                  if df is not None and len(df)
                  and (spy_last - df.index[-1].date()).days > 5]
         for t in stale:
             del stocks[t]
         if stale:
-            logger.warning("剔除 %d 只陈旧/停牌标的（末根滞后 SPY 超 5 天）: %s%s",
-                           len(stale), stale[:10], "..." if len(stale) > 10 else "")
+            logger.warning("剔除 %d 只陈旧/停牌标的（末根滞后 %s 超 5 天）: %s%s",
+                           len(stale), idx_name, stale[:10], "..." if len(stale) > 10 else "")
         report["stale_removed"] = stale
-        report["etf_coverage"] = f"{len(etfs)}/{len(config.SECTOR_ETFS)}"
+        report["etf_coverage"] = f"{len(etfs)}/{len(sector_list)}"
         return report
 
     # ---------- 数据准备 ----------
     days = 420
-    market_data: dict = {}
+    market_data: dict = {"benchmark_labels": benchmark_labels}
     with tracer.step("data.prepare"):
+        idx_sym = bmk["index"]
         try:
-            spy = _single_with_fallback(provider, "ohlcv", config.BENCHMARK, days=days)
+            spy = _single_with_fallback(provider, "ohlcv", idx_sym, days=days)
         except Exception as exc:
-            raise RuntimeError(f"{config.BENCHMARK} 基准数据获取失败（含降级源），MRS 无法计算: {exc}") from exc
+            # D2 诚实失败：该市场基准（指数）全断 → 当日中止，其余市场不受影响
+            raise RuntimeError(
+                f"[{spec.market_id}] {idx_sym} 基准数据获取失败（含降级源），"
+                f"该市场当日诚实失败，MRS 无法计算: {exc}") from exc
         market_data["spy"] = spy
+        # 利率基准：US 硬依赖（现状行为）；CN/HK 缺失 → 记 None 走再归一化
         try:
-            market_data["tnx"] = _single_with_fallback(provider, "tnx_yield", days=days)
+            market_data["tnx"] = _single_with_fallback(
+                provider, "rate_yield_for", bmk["rate"], days=days)
         except Exception as exc:
-            raise RuntimeError(f"TNX 数据获取失败（含降级源），MRS 无法计算: {exc}") from exc
+            if spec.benchmark_hard_fail:
+                raise RuntimeError(
+                    f"[{spec.market_id}] {bmk['rate']} 数据获取失败（含降级源），"
+                    f"MRS 无法计算: {exc}") from exc
+            logger.warning("[%s] 利率基准 %s 不可得（%s）→ 宏观维缺失再归一化",
+                           spec.market_id, bmk["rate"], exc)
+            market_data["tnx"] = None
+        # 波动率基准：同上
         try:
-            market_data["vix"] = _single_with_fallback(provider, "vix", days=days)
+            market_data["vix"] = _single_with_fallback(
+                provider, "vol_index_for", bmk["vol"], days=days)
         except Exception as exc:
-            raise RuntimeError(f"VIX 数据获取失败（含降级源），MRS 无法计算: {exc}") from exc
+            if spec.benchmark_hard_fail:
+                raise RuntimeError(
+                    f"[{spec.market_id}] {bmk['vol']} 数据获取失败（含降级源），"
+                    f"MRS 无法计算: {exc}") from exc
+            logger.warning("[%s] 波动率基准 %s 不可得（%s）→ 情绪维缺失再归一化",
+                           spec.market_id, bmk["vol"], exc)
+            market_data["vix"] = None
         try:
-            market_data["vix9d"] = _single_with_fallback(provider, "vix9d", days=days)
+            market_data["vix9d"] = (_single_with_fallback(
+                provider, "vol_index_for", bmk["vol_short"], days=days)
+                if bmk.get("vol_short") else None)
         except Exception:
             market_data["vix9d"] = None
 
-        sector_etfs = _batch_with_fallback(provider, config.SECTOR_ETFS, days)
+        sector_etfs = _batch_with_fallback(provider, spec.sector_symbols, days)
         market_data["sector_etfs"] = sector_etfs
 
         # full 模式两级拉取：先用 30 日短历史做流动性预筛，再对幸存者拉全历史
         prefilter_note = ""
+        scan_filt = spec.scan_filters()
         if len(universe) > config.FULL_PREFILTER_THRESHOLD:
             logger.info("池规模 %d > %d，启动流动性预筛（%d 日短历史）",
                         len(universe), config.FULL_PREFILTER_THRESHOLD,
@@ -365,7 +444,7 @@ def run_pipeline(
                     continue
                 px = float(df["Close"].iloc[-1])
                 adv = float((df["Close"] * df["Volume"]).tail(20).mean())
-                if px >= config.SCAN_MIN_PRICE and adv >= config.SCAN_MIN_ADV_USD:
+                if px >= scan_filt["min_price"] and adv >= scan_filt["min_adv"]:
                     survivors.append((t, adv))
             survivors.sort(key=lambda x: x[1], reverse=True)
             kept = survivors[: config.FULL_HEAVY_CAP]
@@ -375,11 +454,13 @@ def run_pipeline(
             universe = [t for t, _ in kept]
 
         # 全市场股票数据（扫描 + 产业链 + 广度共用一份）
+        # S4：US 产业链为美股映射，仅 US 市场并入拉取；CN/HK 链覆盖率如实披露为 0
         chain_tickers: set[str] = set()
-        from .chains import CHAINS
-        for c in CHAINS.values():
-            for link in ("upstream", "midstream", "downstream"):
-                chain_tickers.update(c[link]["tickers"])
+        if spec.market_id == "us":
+            from .chains import CHAINS
+            for c in CHAINS.values():
+                for link in ("upstream", "midstream", "downstream"):
+                    chain_tickers.update(c[link]["tickers"])
         all_tickers = sorted(set(universe) | chain_tickers)
         stock_data = _batch_with_fallback(provider, all_tickers, days)
         market_data["stock_ohlcv"] = stock_data
@@ -398,7 +479,7 @@ def run_pipeline(
     with tracer.step("tech.cycle_linkage"):
         tech_linkage = CycleLinkageAgent(provider).execute(tracer)
     with tracer.step("tech.sentiment"):
-        tech_sentiment = ChainSentimentAgent(llm).execute(cleaned, tracer)
+        tech_sentiment = ChainSentimentAgent(llm).execute(score_docs, tracer)
     with tracer.step("tech.risk"):
         tech_alerts = ChainRiskAgent(llm).execute(cleaned, tracer)
     with tracer.step("tech.fusion"):
@@ -410,7 +491,7 @@ def run_pipeline(
     # ================= SHS 叙事维度（LLM 化） =================
     narrative_llm: dict = {}
     with tracer.step("sector.narrative"):
-        narr_res = NarrativeAgent(llm).execute(cleaned, list(config.SECTOR_ETFS), tracer)
+        narr_res = NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer)
         if not isinstance(narr_res, Passthrough):
             narrative_llm = narr_res
 
@@ -425,6 +506,10 @@ def run_pipeline(
         "market_data": market_data,
         "trade_date": trade_date,
         "chain_coverage": chain_coverage,
+        # S4 多市场：市场规格 / 扫描过滤 / 轻仓毕业门槛（agents 只读）
+        "market_spec": spec,
+        "scan_filters": scan_filt,
+        "market_grad": market_grad,
         # v6.0：事件日历（白皮书§11 事件风险管理的机器执行）
         "event_calendar": EventCalendar(),
         # 科技链子集群标准化汇入（核心因子之一）
@@ -450,6 +535,46 @@ def run_pipeline(
     with tracer.step("layer4.risk"):
         picks = RiskManagerAgent(provider, account_usd=account_usd,
                                  max_picks=max_picks).execute(context)
+
+    # ================= 多空辩论证据层（v6.3 S2，桥水 AIA 辩论制） =================
+    # 铁律：辩论在 L4 闸门产出【之后】执行，只读 picks/rationale/watchlist，
+    # 绝不回写任何分数与闸门输出；产出仅作交易卡片"第六段"进报告层。
+    # 回测路径不经过本 pipeline（无未来函数：历史回放禁止注入 LLM）。
+    with tracer.step("decision.debate"):
+        from .agents.debate_agent import DebateAgent, select_debate_targets
+        debate_raw: dict = {"status": "disabled", "triggered": [], "evidence": {}}
+        if config.DEBATE_ENABLED:
+            targets = select_debate_targets(
+                context.get("picks", []), context.get("pick_rationale", {}),
+                context.get("watchlist", []), context.get("action", "HOLD"))
+            debate_raw["triggered"] = [t["symbol"] for t in targets]
+            if targets:
+                res = DebateAgent(llm).execute(targets, cleaned, tracer)
+                if isinstance(res, Passthrough):
+                    debate_raw["status"] = "passthrough"   # 报告标注"本轮无辩论证据"
+                else:
+                    debate_raw["status"] = "ok"
+                    debate_raw["evidence"] = {s: e.to_dict() for s, e in res.items()}
+            else:
+                debate_raw["status"] = "no_target"         # 灰区外，本轮不辩论
+        context["debate"] = debate_raw
+        logger.info("decision.debate: status=%s triggered=%s",
+                    debate_raw["status"], debate_raw["triggered"])
+
+    # ================= 统计校准层（v6.3 S2，迭代层·只进报告不改闸门） =================
+    # 会计账白名单（与 journal 同级）：只读已结算台账，输出仅进报告披露，
+    # 绝不进入决策输入（代码层隔离，见 calibration.py 头注）。
+    with tracer.step("iteration.calibration"):
+        from .calibration import CalibrationLayer
+        try:
+            calibration_summary = CalibrationLayer().run()
+        except Exception as exc:
+            # 注册表约定：本环节不可透传——失败则跳过披露并记录（不阻塞主链路）
+            logger.warning("iteration.calibration 失败，跳过披露并记录: %s", exc)
+            calibration_summary = {"status": "skipped", "reason": str(exc)}
+        context["calibration"] = calibration_summary
+        logger.info("iteration.calibration: status=%s n=%s",
+                    calibration_summary.get("status"), calibration_summary.get("n"))
 
     with tracer.step("report.emit"):
         notes = context.get("notes", [])
@@ -483,10 +608,24 @@ def run_pipeline(
                 "docs_collected": len(raw_docs),
                 "docs_cleaned": len(cleaned),
                 "docs_semantic_degraded": degraded_n,
+                # v6.3 S3：交叉验证统计与 AH 主题开关（数据层披露）
+                "cross_validation": cv_stats,
+                "ah_topics_enabled": ah_enabled,
+                # v6.3 S4：市场标识 / 合规校验记录 / 轻仓毕业状态（日报披露）
+                "market": spec.to_dict(),
+                "compliance": context.get("compliance", []),
+                "market_grad": market_grad,
+                # v6.3 S2：辩论证据与校准摘要（只读证据/披露，不含决策输入）
+                "debate": context.get("debate", {}),
+                "calibration": context.get("calibration", {}),
             },
         )
     # 红线 1：全链路环节完整性强制校验（缺环节 = 系统性事故，立即停止）
     tracer.assert_complete()
+    # S6：review.daily 属延迟环节（依赖 main.daily 尾部的 journal 落账/结算），
+    # 记 deferred 占位；main.daily 由 review.chief 实际执行后改写为 executed。
+    tracer.mark_deferred("review.daily",
+                         "复盘纪要由 main.daily 尾部 review.chief 生成并补账")
     result.raw["redline"] = tracer.summary()
     logger.info("=== Pipeline 完成 %.1fs action=%s picks=%d ===",
                 time.time() - started, result.action, len(result.picks))

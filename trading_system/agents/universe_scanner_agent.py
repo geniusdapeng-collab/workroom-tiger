@@ -39,6 +39,11 @@ class UniverseScannerAgent(BaseAgent):
     def execute(self, context: dict) -> list[StockCandidate]:
         spy_close: pd.Series = context["market_data"]["spy"]["Close"]
         stock_data: dict[str, pd.DataFrame] = context["market_data"]["stock_ohlcv"]
+        # S4 多市场：硬过滤阈值按市场微调（config.MARKET_SCAN_FILTERS）；
+        # US 缺省回退全局 SCAN_* 常量（现状行为不变）
+        filt = context.get("scan_filters") or {}
+        min_price = filt.get("min_price", config.SCAN_MIN_PRICE)
+        min_adv = filt.get("min_adv", config.SCAN_MIN_ADV_USD)
 
         passed: list[dict] = []
         rejected = {"price": 0, "adv": 0, "history": 0, "atr": 0, "nodata": 0}
@@ -50,11 +55,11 @@ class UniverseScannerAgent(BaseAgent):
                 continue
             close = df["Close"]
             price = last(close)
-            if price < config.SCAN_MIN_PRICE:
+            if price < min_price:
                 rejected["price"] += 1
                 continue
             adv = float((close * df["Volume"]).tail(20).mean())
-            if adv < config.SCAN_MIN_ADV_USD:
+            if adv < min_adv:
                 rejected["adv"] += 1
                 continue
             a14 = last(atr(df, 14))

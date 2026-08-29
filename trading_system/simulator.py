@@ -20,6 +20,8 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+from . import config
+
 log = logging.getLogger(__name__)
 
 TIME_STOP_DAYS = 7          # 时间止损：7 个交易日未推进
@@ -29,11 +31,31 @@ SIM_FILENAME = "sim_portfolio.json"
 
 @dataclass
 class Bar:
-    """单根日 K（来自四环行情链的最新完整交易日）。"""
+    """单根日 K（来自四环行情链的最新完整交易日）。
+
+    adv: 20 日平均成交额（USD），用于 ADV 分档滑点（v6.3 摩擦模型）；
+    adv≤0 表示未知（旧台账/外部注入），回落 v6.0 合并口径 COST_BPS。
+    """
     open: float
     high: float
     low: float
     close: float
+    adv: float = 0.0
+
+
+def friction_bps(adv: float) -> float:
+    """单边摩擦成本（bp）= ADV 分档滑点 + 单边佣金（v6.3，防滑点断崖）。
+
+    - adv > 0：按 config.SIM_SLIPPAGE_BY_ADV 分档（ADV 越小滑点越大）
+      + config.SIM_COMMISSION_BPS（与 v6.0 回测净口径一致的单边 10bp）；
+    - adv ≤ 0（未知）：回落 v6.0 合并口径 config.COST_BPS（10bp），
+      保证旧台账与未携带 ADV 的 Bar 口径不变。
+    """
+    if adv and adv > 0:
+        for lo, slip in config.SIM_SLIPPAGE_BY_ADV:
+            if adv >= lo:
+                return slip + config.SIM_COMMISSION_BPS
+    return config.COST_BPS
 
 
 class SimEngine:
@@ -92,9 +114,10 @@ class SimEngine:
             if risk_ps <= 0:
                 continue
             shares = min(p["shares"], int(p["risk_usd"] / risk_ps))
-            # v6.0：成交价含单边成本（净口径记账）
-            from .exit_engine import cost_adj_buy
-            fill_net = round(cost_adj_buy(fill), 4)
+            # v6.3：成交价 = 开盘价 × (1 + 单边摩擦)——ADV 分档滑点 + 单边佣金
+            # （保守摩擦口径，防滑点断崖；ADV 未知时回落 v6.0 合并 10bp）
+            bps = friction_bps(bar.adv)
+            fill_net = round(fill * (1 + bps / 10_000), 4)
             cost = shares * fill_net
             if shares <= 0 or cost > s["cash"]:
                 ops.append(f"⚠️ {p['ticker']} 开盘价漂移后风险/现金超限，放弃该信号")
@@ -116,6 +139,8 @@ class SimEngine:
                 "risk_usd": round(shares * risk_ps, 2),
                 "time_stop_days": p.get("time_stop_days", 0),
                 "peak_price": fill, "note": p.get("note", ""),
+                # v6.3 三栏台账：毛口径入场价与入场摩擦档位（出场摩擦按当时 ADV 重定档）
+                "entry_raw": fill, "friction_bps": bps,
             })
             ops.append(f"🟢 买入 {p['ticker']} {shares} 股 @ {fill:.2f}"
                        f"（开盘价成交，止损 {p['stop_price']:.2f}）")
@@ -129,8 +154,8 @@ class SimEngine:
                 kept.append(pos)
                 continue
             # v6.0：出场判定统一调用 exit_engine.evaluate_day（与 journal/回测同一套
-            # 规则语义，含 ATR 档位化时间止损）；卖出按净价（扣单边成本）。
-            from .exit_engine import cost_adj_sell, evaluate_day
+            # 规则语义，含 ATR 档位化时间止损）；卖出按净价（v6.3 ADV 分档摩擦）。
+            from .exit_engine import evaluate_day
             days = _trading_days(pos["entry_date"], trade_date, s["equity_curve"])
             act = evaluate_day(bar.open, bar.high, bar.low, bar.close,
                                pos["entry_price"], pos["stop"], days,
@@ -142,10 +167,19 @@ class SimEngine:
                 pos["stop"] = pos["entry_price"]
                 ops.append(f"🛡️ {pos['ticker']} 浮盈达 2R，止损上移至成本线 {pos['stop']:.2f}")
             if exit_price is not None:
-                exit_price = round(cost_adj_sell(exit_price), 4)
+                # v6.3：卖出净价 = 毛价 × (1 − 单边摩擦)；出场 ADV 未知时沿用入场档位
+                exit_raw = exit_price
+                bps_out = (friction_bps(bar.adv) if bar.adv and bar.adv > 0
+                           else float(pos.get("friction_bps") or friction_bps(0.0)))
+                exit_price = round(exit_raw * (1 - bps_out / 10_000), 4)
                 proceeds = exit_price * pos["shares"]
                 pnl = round((exit_price - pos["entry_price"]) * pos["shares"], 2)
                 r_mult = round(pnl / max(pos["risk_usd"], 1e-9), 2)
+                # v6.3 三栏台账：毛收益 / 摩擦成本 / 净收益（恒等式 毛−摩擦=净）
+                entry_raw = float(pos.get("entry_raw") or pos["entry_price"])
+                gross_pnl = round((exit_raw - entry_raw) * pos["shares"], 2)
+                friction = max(0.0, round(gross_pnl - pnl, 2))   # 摩擦永不为负
+                gross_r = round(gross_pnl / max(pos["risk_usd"], 1e-9), 2)
                 s["cash"] = round(s["cash"] + proceeds, 2)
                 s["closed"].append({
                     "ticker": pos["ticker"], "entry_date": pos["entry_date"],
@@ -153,6 +187,8 @@ class SimEngine:
                     "exit": exit_price, "shares": pos["shares"],
                     "pnl_usd": pnl, "r_multiple": r_mult, "reason": reason,
                     "days": _trading_days(pos["entry_date"], trade_date, s["equity_curve"]),
+                    "gross_pnl": gross_pnl, "gross_r": gross_r,
+                    "friction_cost": friction, "net_r": r_mult,
                 })
                 ops.append(f"🔴 卖出 {pos['ticker']} {pos['shares']} 股 @ {exit_price:.2f}"
                            f"（{reason}，{'盈' if pnl >= 0 else '亏'} ${abs(pnl):,.0f}，{r_mult}R）")
@@ -221,10 +257,16 @@ class SimEngine:
             peak = max(peak, e)
             max_dd = max(max_dd, (peak - e) / peak if peak else 0.0)
         equity = curve[-1] if curve else self.initial_cash
+        # v6.3 三栏汇总：毛收益 / 摩擦成本 / 净收益（旧台账缺字段时摩擦按 0 计）
+        gross_pnl = round(sum(c.get("gross_pnl", c["pnl_usd"]) for c in closed), 2)
+        net_pnl = round(sum(c["pnl_usd"] for c in closed), 2)
+        friction_total = round(sum(c.get("friction_cost", 0.0) for c in closed), 2)
         return {
             "equity": equity, "cash": s["cash"],
             "invested": round(equity - s["cash"], 2),
             "cum_return": (equity / self.initial_cash - 1.0) if self.initial_cash else 0.0,
+            "pnl_gross": gross_pnl, "pnl_net": net_pnl,
+            "friction_total": friction_total,
             "n_closed": n, "win_rate": (len(wins) / n) if n else None,
             "expectancy_r": (sum(c["r_multiple"] for c in closed) / n) if n else None,
             "profit_factor": (round(gross_w / gross_l, 2) if gross_l > 0 else None) if n else None,

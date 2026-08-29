@@ -1226,7 +1226,10 @@ def _sim_tab(sim: dict) -> str:
              f"<b style='color:{RED}'>⚠️ 全 AI 掌控的模拟盘（Paper Trading）</b>"
              f"<div style='margin-top:4px'>本页所有交易均由<b>财神爷AI炒股系统（Caishen AI）</b>"
              f"自动决策与记账，初始资金 $100,000 为虚拟资金，目的是验证 AI 的投资能力。"
-             f"<b>不构成任何投资建议或决策参考</b>，据此操作风险自负。</div></div>")
+             f"<b>不构成任何投资建议或决策参考</b>，据此操作风险自负。"
+             f"<div style='margin-top:4px'><b>口径披露：含保守摩擦成本口径"
+             f"（滑点按ADV分档+单边10bp）</b>——成交额越小的标的滑点越大，"
+             f"台账按毛/摩擦/净三栏记账，绝不用毛收益冒充净收益。</div></div></div>")
     P.append("<div class='eyebrow-l' style='margin-bottom:6px'>LIVE EXPERIMENT · 公开实验</div>"
              "<div style='font-size:15px;margin-bottom:12px;line-height:1.7'>"
              "<b>一个不自嗨的 AI：</b>用虚拟资金按真实规则交易，每一笔都公开记账，"
@@ -1274,6 +1277,20 @@ def _sim_tab(sim: dict) -> str:
     if svg:
         P.append(f"<div style='margin-top:10px'>{svg}</div>")
     P.append("</div>")
+    # —— 毛 / 摩擦 / 净 三栏汇总（v6.3 保守摩擦口径，防滑点断崖）——
+    if stats["n_closed"]:
+        P.append(f"<div class='card' style='margin-top:12px'>"
+                 f"<b>📒 三栏台账汇总</b> <span class='sub'>——恒等式：毛收益 − 摩擦成本 = 净收益"
+                 f"（滑点按ADV分档+单边10bp佣金）</span>"
+                 f"<div class='grid g3' style='margin-top:10px'>"
+                 f"<div><div class='sub'>毛收益（无摩擦口径）</div>"
+                 f"<div class='kpi' style='font-size:20px'>${stats.get('pnl_gross', 0):+,.0f}</div></div>"
+                 f"<div><div class='sub'>摩擦成本（滑点+佣金）</div>"
+                 f"<div class='kpi' style='font-size:20px;color:{YELLOW}'>−${stats.get('friction_total', 0):,.0f}</div></div>"
+                 f"<div><div class='sub'>净收益（真实到手）</div>"
+                 f"<div class='kpi' style='font-size:20px;color:{GREEN if stats.get('pnl_net', 0) >= 0 else RED}'>"
+                 f"${stats.get('pnl_net', 0):+,.0f}</div></div>"
+                 f"</div></div>")
     # —— 风控边界（公开卖点：最坏情况亏多少，是设计出来的）——
     P.append(
         f"<div class='card' style='margin-top:12px'>"
@@ -1334,17 +1351,32 @@ def _sim_tab(sim: dict) -> str:
                  f"{_esc('、'.join(p['ticker'] for p in st['pending']))}</div>")
     P.append("</div>")
     # —— 历史交易 ——
-    P.append("<div class='card' style='margin-top:12px'><b>历史交易记录</b>")
+    P.append("<div class='card' style='margin-top:12px'><b>历史交易记录</b>"
+             "<span class='sub'>（毛 / 摩擦 / 净 三栏台账：恒等式 毛−摩擦=净）</span>")
     if st["closed"]:
         P.append("<table style='margin-top:6px'><tr><th>标的</th><th>入场</th><th>出场</th>"
-                 "<th>股数</th><th>盈亏</th><th>R</th><th>天数</th><th>出场原因</th></tr>")
+                 "<th>股数</th><th>盈亏(净)</th><th>毛R</th><th>摩擦</th><th>净R</th>"
+                 "<th>天数</th><th>出场原因</th></tr>")
         for c in reversed(st["closed"][-50:]):
             col = GREEN if c["pnl_usd"] > 0 else RED
+            gross_r = c.get("gross_r")
+            friction = c.get("friction_cost")
             P.append(f"<tr><td><b>{c['ticker']}</b></td>"
                      f"<td>{c['entry_date'][5:]} @{c['entry']:.2f}</td>"
                      f"<td>{c['exit_date'][5:]} @{c['exit']:.2f}</td>"
                      f"<td>{c['shares']}</td>"
                      f"<td style='color:{col}'>${c['pnl_usd']:+,.0f}</td>"
+                     f"<td>{gross_r if gross_r is not None else '—'}R</td>"
+                     f"<td class='sub'>${friction:,.0f}</td>"
+                     f"<td>{c['r_multiple']}R</td><td>{c['days']}</td>"
+                     f"<td class='sub'>{_esc(c['reason'])}</td></tr>"
+                     if friction is not None else
+                     f"<tr><td><b>{c['ticker']}</b></td>"
+                     f"<td>{c['entry_date'][5:]} @{c['entry']:.2f}</td>"
+                     f"<td>{c['exit_date'][5:]} @{c['exit']:.2f}</td>"
+                     f"<td>{c['shares']}</td>"
+                     f"<td style='color:{col}'>${c['pnl_usd']:+,.0f}</td>"
+                     f"<td>—</td><td class='sub'>—</td>"
                      f"<td>{c['r_multiple']}R</td><td>{c['days']}</td>"
                      f"<td class='sub'>{_esc(c['reason'])}</td></tr>")
         P.append("</table>")

@@ -75,6 +75,7 @@ def _daily(args, provider) -> None:
         max_picks=args.picks,
         account_usd=args.account,
         use_tuned=args.use_tuned,
+        market=args.market,
     )
     json_path = to_json(result, args.out)
     md_path = to_markdown(result, args.out)
@@ -105,8 +106,12 @@ def _daily(args, provider) -> None:
             df = _single_with_fallback(settle_provider, "ohlcv", ticker, days=400)
             if df is not None and len(df):
                 row = df.iloc[-1]
+                # v6.3：20 日平均成交额（ADV）用于分档滑点（保守摩擦口径）
+                adv = float((df["Close"] * df["Volume"]).tail(20).mean()) \
+                    if "Volume" in df.columns else 0.0
                 bar = Bar(open=float(row["Open"]), high=float(row["High"]),
-                          low=float(row["Low"]), close=float(row["Close"]))
+                          low=float(row["Low"]), close=float(row["Close"]),
+                          adv=adv)
         except Exception as exc:
             logging.getLogger(__name__).warning("小G模拟盘取 %s 日K失败（顺延）: %s", ticker, exc)
         _bar_cache[ticker] = bar
@@ -114,9 +119,56 @@ def _daily(args, provider) -> None:
 
     sim_out = sim.step(result.trade_date, result, get_bar)
     sim.save()
+
     sim_payload = {"state": sim.state, "stats": sim.stats()}
     logging.getLogger(__name__).info("小G模拟盘: 净值 $%.0f，操作 %d 条",
                                      sim_out["equity"], len(sim_out["ops"]))
+
+    # ---- S5 治理桥：内核 → 五元事件（治理旁路，失败只记 WARNING 不阻塞）----
+    # 事件账 governance_events.jsonl 属会计账白名单（跨轮累计，不进决策输入）。
+    from trading_system.governance_bridge import GovernanceBridge
+    bridge = None
+    try:
+        bridge = GovernanceBridge(os.path.join(args.out, "governance_events.jsonl"))
+    except Exception as exc:
+        logging.getLogger(__name__).warning("治理桥初始化异常（不阻塞内核）: %s", exc)
+
+    # ---- S6 复盘闭环：诸葛团队日度复盘（归因+违规标记+校准状态 → 复盘纪要）----
+    # 复盘产物属会计账白名单，只进报告层与治理事件，不进决策输入（D5）。
+    # review.daily 为延迟环节：pipeline 内记 deferred，此处实际执行后补账，
+    # 补账先于 emit_from_result——治理事件中的 review.daily 状态才是真实的。
+    review_path = None
+    try:
+        from trading_system.review.chief import ReviewChief
+        chief = ReviewChief(out_dir=args.out, journal_path=j.path, bridge=bridge)
+        review_out = chief.daily(result.trade_date)
+        review_path = review_out["memo_path"]
+        for step in result.raw.get("redline", []):
+            if step["step"] == "review.daily":
+                step.update(status="executed", ms=review_out["ms"], note="")
+        logging.getLogger(__name__).info(
+            "复盘纪要: %s（违规命中 %d 条）", review_path,
+            review_out["attribution"]["total_violations"])
+    except Exception as exc:
+        # 注册表透传约定：纪要缺失→披露未生成原因（不阻塞内核）
+        logging.getLogger(__name__).warning("复盘纪要未生成（披露原因）: %s", exc)
+        for step in result.raw.get("redline", []):
+            if step["step"] == "review.daily":
+                step.update(status="passthrough", note=f"纪要未生成: {exc}")
+
+    if bridge is not None:
+        try:
+            n_events = bridge.emit_from_result(result, sim_out)
+            ok, errs = GovernanceBridge.verify_chain(bridge.path)
+            logging.getLogger(__name__).info(
+                "治理桥: 写入 %d 条五元事件，哈希链校验 %s", n_events,
+                "通过" if ok else f"失败 {errs[:2]}")
+        except Exception as exc:
+            logging.getLogger(__name__).warning("治理桥异常（不阻塞内核）: %s", exc)
+
+    # review.daily 补账（executed/未生成原因）在首次 to_json 之后——重写 JSON
+    # 让落盘结果中的环节状态与治理事件一致（账实相符）。
+    json_path = to_json(result, args.out)
 
     # ---- 盘前计划（premarket 模式）----
     plan_path = None
@@ -154,7 +206,8 @@ def _daily(args, provider) -> None:
 
     print(f"\n报告已生成:\n  {md_path}\n  {json_path}" +
           (f"\n  {html_path}" if html_path else "") +
-          (f"\n  {plan_path}" if plan_path else "") + "\n")
+          (f"\n  {plan_path}" if plan_path else "") +
+          (f"\n  {review_path}" if review_path else "") + "\n")
     if not args.quiet:
         print(render_markdown(result))
 
@@ -274,9 +327,65 @@ def _tune(args, provider) -> None:
     print(f"\nWFA 报告: {path}" + (f"\n调优参数已写入: {saved}" if saved else ""))
 
 
+def _review_admin(args) -> None:
+    """S6 复盘审批流：--review-list / --review-approve / --review-reject。
+
+    模拟盘阶段审批不阻塞 pipeline 运行（只影响参数提案生效）；
+    对齐 WorkLoom 三手势：采纳（approve）/ 驳回（reject，原因必填）。
+    """
+    import os
+    from trading_system.governance_bridge import GovernanceBridge
+    from trading_system.review.chief import ReviewChief
+    from trading_system.review.monthly import list_proposals
+
+    proposals_dir = os.path.join(args.out, "review_proposals")
+    bridge = GovernanceBridge(os.path.join(args.out, "governance_events.jsonl"))
+    chief = ReviewChief(out_dir=args.out, proposals_dir=proposals_dir,
+                        bridge=bridge)
+
+    if args.review_list:
+        props = list_proposals(proposals_dir)
+        if not props:
+            print("暂无参数提案（月度 WFA 生成；DSR 不显著的提案已自动 reject）。")
+            return
+        print(f"共 {len(props)} 个提案（{proposals_dir}）：")
+        for p in props:
+            line = (f"  {p.proposal_id}  [{p.status}]  DSR={p.dsr}  "
+                    f"OOS期望={p.oos_expectancy}R  "
+                    f"参数={p.grid_result.get('recommended_params')}")
+            if p.status == "approved":
+                line += f"  生效自 {p.effective_from}"
+            if p.reason:
+                line += f"\n      原因: {p.reason}"
+            print(line)
+        pending = [p for p in props if p.status == "pending_review"]
+        if pending:
+            print(f"\n待审批 {len(pending)} 个：--review-approve <id> 或 "
+                  "--review-reject <id> --reason \"...\"")
+        return
+
+    if args.review_approve:
+        p = chief.approve(args.review_approve,
+                          tuned_path=os.path.join(args.out, "tuned_params.json"))
+        print(f"提案 {p.proposal_id} 已批准：自 {p.effective_from} 起随 "
+              f"--use-tuned 显式启用（默认仍不加载：零基线纪律）。\n"
+              f"披露已写入 {os.path.join(args.out, 'tuned_params.json')} "
+              f"并记入治理事件；次日运行的日报与复盘纪要将披露本次生效。")
+        return
+
+    if args.review_reject:
+        if not args.reason or not args.reason.strip():
+            raise SystemExit("错误：--review-reject 必须同时提供 "
+                             "--reason \"...\"（驳回原因必填，三手势纪律）。")
+        p = chief.reject(args.review_reject, args.reason)
+        print(f"提案 {p.proposal_id} 已驳回，原因已记录并回流: {p.reason}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI 短线美股交易系统 v4.1")
     parser.add_argument("--mode", choices=["daily", "premarket", "intraday"], default="daily")
+    parser.add_argument("--market", choices=["us", "cn", "hk"], default="us",
+                        help="目标市场（S4 多市场：框架不变、输入替换；默认 us 与现状一致）")
     parser.add_argument("--provider",
                         choices=["yahoo", "stooq", "tencent", "sina", "eastmoney",
                                  "agentgw", "demo"],
@@ -303,6 +412,15 @@ def main() -> None:
                         help="生成自包含 HTML 日报（默认开）")
     parser.add_argument("--no-html", dest="html", action="store_false",
                         help="关闭 HTML 日报")
+    # S6 复盘审批流（三手势；模拟盘阶段不阻塞 pipeline，只影响提案生效）
+    parser.add_argument("--review-list", action="store_true",
+                        help="列出全部 WFA 参数提案及审批状态")
+    parser.add_argument("--review-approve", default=None, metavar="ID",
+                        help="批准提案：状态→approved，次日随 --use-tuned 生效并披露")
+    parser.add_argument("--review-reject", default=None, metavar="ID",
+                        help="驳回提案：必须同时提供 --reason（原因必填）")
+    parser.add_argument("--reason", default=None,
+                        help="驳回原因（--review-reject 必填，回流组织记忆）")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -310,6 +428,10 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     provider = "demo" if args.demo else args.provider
+
+    if args.review_list or args.review_approve or args.review_reject:
+        _review_admin(args)
+        return
 
     if args.backtest or args.tune:
         if args.backtest:

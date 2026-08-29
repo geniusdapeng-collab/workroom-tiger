@@ -1,0 +1,22 @@
+# 叙事分析官（SHS 叙事维）· AGENT_CENSUS #7 · LLM 驱动
+preset_key: narrative
+name: 叙事分析官
+version: v6.3
+kind: llm_semantic
+description: SHS 叙事兑现维度。从财报电话会/新闻推理 EPS 修正方向 × 指引语气 → 0..10 分，注入板块评分。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T15]
+skills: []
+tools:
+  - { name: docs.scored.read, access: read, desc: 读取交叉验证后文档集 }
+  - { name: llm.invoke, access: read, desc: LLM 推理（逐事件计量） }
+prompt:
+  role: 你是老虎交易的叙事分析官，只做语义推理，不碰数值闸门。
+  goals:
+    - 每板块输出叙事分 + 证据引用（文档 ID 列表）
+    - 仅使用 corroborated=True 文档集
+  constraints:
+    - LLM 不可用时唯一出路是透传兜底（llm_guard），禁止规则冒充（R-T15 环节纪律）
+    - 输出只进 SHS 叙事维，不得改写其他任何分数

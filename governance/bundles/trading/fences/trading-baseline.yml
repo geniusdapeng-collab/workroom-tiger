@@ -1,0 +1,216 @@
+# 老虎交易基线围栏包（S5 · UPGRADE_PLAN_v3 §3.3 三层结构）
+# 本文件由 scripts/gen_fences.py 从 trading_system/config.py 生成——生成器产物为唯一发布物，
+# 禁止手改（内核零改写红线：阈值的 single source of truth 是 config.py，此处不得有第二套阈值）。
+# 单调守卫（F2.3）：is_baseline=true 的规则，任何上层 patch 只可收紧不可放宽。
+# DSL 求值语义（对齐 hotel 围栏）：match 命中后求值 when 表达式（沙箱，禁任意代码）；
+#   命中 → 按 level 判定；block 优先于 review 优先于 auto（deny 优先并集求值）；
+#   写类动作无任何规则命中 → 按 default_level 处理；求值异常 → 按 block（宁可错杀）。
+# 生成记录：config 哈希 b5fa70acd720ed1bcfbed6142939bc3a3cd0b7a2c40ebbf5226384262f35260b · 基线规则 15 条 · 生成时间 2026-08-29T14:02:24+00:00
+version: trading-baseline/v1
+default_level: review
+rules:
+  # ========== 第一层 · 基线层（block，不可改）：白皮书红线的机器翻译 ==========
+  # source: 白皮书§10 止损纪律（时间止损窗口 config.TIME_STOP_BY_ATR=[(0.04, 7), (0.07, 6), (9.9, 5)]）
+  - rule_id: R-T1
+    name: 结构/时间止损触及必执行
+    level: block
+    is_baseline: true
+    match:
+      object_types: [position, order]
+      actions: [position.stop_loss]
+    when: "params.stop_triggered == true && params.executed != true"
+    note: 止损触及不执行 = 白皮书最大违规；命中即拒绝+P0 告警
+
+  # source: config.RISK_R_PCT=0.008
+  - rule_id: R-T2
+    name: 单笔风险超 r 上限
+    level: block
+    is_baseline: true
+    match:
+      object_types: [position, order]
+      actions: [position.open, order.buy]
+    when: "params.risk_pct > 0.008"
+    note: 1R=账户净值 0.8%，Shares=(Account×r)/|Pin−Psl|
+
+  # source: config.OPEN_LONG={'mrs': 6.0, 'shs': 7.5, 'tss': 7.2}
+  - rule_id: R-T3
+    name: 标准开仓三分数联动不满足
+    level: block
+    is_baseline: true
+    match:
+      object_types: [signal, position]
+      actions: [position.open]
+    when: "params.channel == 'standard' && (params.mrs < 6.0 || params.shs < 7.5 || params.tss < 7.2)"
+    note: 标准做多 MRS*≥6 且 SHS≥7.5 且 TSS_final≥7.2（白皮书§9.2）
+
+  # source: config.LIGHT_PROBE={'mrs_lo': 5.5, 'tss': 7.8} + config.OPEN_LONG.mrs=6.0
+  - rule_id: R-T4
+    name: 轻仓通道门槛不满足
+    level: block
+    is_baseline: true
+    match:
+      object_types: [signal, position]
+      actions: [position.open]
+    when: "params.channel == 'light' && (params.mrs < 5.5 || params.mrs >= 6.0 || params.tss < 7.8)"
+    note: 轻仓通道 MRS*∈[5.5,6.0) 且 TSS_final≥7.8
+
+  # source: config.MAX_CHAIN_RISK_PCT=0.03
+  - rule_id: R-T5
+    name: 单条产业链累计风险超限
+    level: block
+    is_baseline: true
+    match:
+      object_types: [position, portfolio]
+      actions: [position.open]
+    when: "params.chain_risk_pct > 0.03"
+    note: 防「N 个独立 R 实为同一个 R」（白皮书§9/§10）
+
+  # source: config.MRS_POSITION_CAP=[(8.0, 10.01, 0.7, 0.9), (6.0, 8.0, 0.4, 0.7), (4.0, 6.0, 0.1, 0.25), (0.0, 4.0, 0.0, 0.1)] + config.ENFORCE_GROSS_CAP=True
+  - rule_id: R-T6
+    name: 总敞口超 MRS* 仓位上限
+    level: block
+    is_baseline: true
+    match:
+      object_types: [portfolio]
+      actions: [position.open]
+    when: "params.gross_pct > params.mrs_cap"
+    note: mrs_cap 由运行时 MRS* 档位表给出；截断多余 picks
+
+  # source: 交易所规则（markets/cn 规则包；无 config 数值参数）
+  - rule_id: R-T7
+    name: CN T+1 当日回转
+    level: block
+    is_baseline: true
+    match:
+      object_types: [order]
+      actions: [order.sell]
+    when: "context.market == 'cn' && params.same_day_buy == true"
+    note: A股当日买入不得当日卖出
+
+  # source: config.CN_LIMIT_MAIN=0.1 / config.CN_LIMIT_STAR_CHINEXT=0.2 / config.CN_LIMIT_ST=0.05 + config.HK_VCM_SYMBOLS（80 只）
+  - rule_id: R-T8
+    name: 涨跌停/VCM 冷静期追单
+    level: block
+    is_baseline: true
+    match:
+      object_types: [order]
+      actions: [order.buy]
+    when: "(context.market == 'cn' && abs(params.change_pct) >= params.limit_pct) || (context.market == 'hk' && params.vcm_cooling == true)"
+    note: 涨跌停追单与 VCM 冷静期买入一律拒绝
+
+  # source: config.MAX_SINGLE_POSITION_PCT=0.2
+  - rule_id: R-T9
+    name: 单票仓位超 20% 净值
+    level: block
+    is_baseline: true
+    match:
+      object_types: [position]
+      actions: [position.open, position.adjust]
+    when: "after.position_pct > 0.2"
+    note: 行为风控硬上限（白皮书§10）
+
+  # source: config.MRS_GATE_BLOCK=4.0
+  - rule_id: R-T10
+    name: MRS*<4 开新仓
+    level: block
+    is_baseline: true
+    match:
+      object_types: [signal, position]
+      actions: [position.open]
+    when: "params.mrs < 4.0"
+    note: MRS*<4.0 禁止新开波段仓（除对冲白名单）——刻意不赚的钱
+
+  # source: config.MRS_GATE_LIGHT=6.0
+  - rule_id: R-T11
+    name: MRS*<6 未按轻仓通道放行
+    level: block
+    is_baseline: true
+    match:
+      object_types: [signal, position]
+      actions: [position.open]
+    when: "params.mrs < 6.0 && params.channel == 'standard'"
+    note: MRS*<6.0 只许轻仓试探，按标准仓放行即越线
+
+  # source: config.LIGHT_PROBE.size_ratio=(0.3, 0.4)
+  - rule_id: R-T12
+    name: 轻仓通道仓位未×0.30–0.40
+    level: block
+    is_baseline: true
+    match:
+      object_types: [position]
+      actions: [position.open]
+    when: "params.channel == 'light' && (params.size_ratio < 0.3 || params.size_ratio > 0.4)"
+    note: 轻仓试错仓位系数区间（取中值执行）
+
+  # source: config.PROFIT_PROTECT_R=2.0
+  - rule_id: R-T13
+    name: 浮盈≥2R 未做盈利保护
+    level: block
+    is_baseline: true
+    match:
+      object_types: [position]
+      actions: [position.hold, position.adjust]
+    when: "params.profit_r >= 2.0 && params.protect_active != true"
+    note: 浮盈 ≥2R 启动盈利保护（止损上移 +0.5R，白皮书§10）
+
+  # source: 白皮书§12 诚实失败纪律（新鲜度闸门；无 config 数值参数）
+  - rule_id: R-T14
+    name: 数据硬依赖全断仍产出报告
+    level: block
+    is_baseline: true
+    match:
+      object_types: [report]
+      actions: [report.emit]
+    when: "context.data_all_down == true"
+    note: 地基不牢评分皆是沙上之塔；带病产出 = 数据造假
+
+  # source: redline.STEP_REGISTRY（20 环节注册表）
+  - rule_id: R-T15
+    name: 全链路环节缺失
+    level: block
+    is_baseline: true
+    match:
+      object_types: [report]
+      actions: [report.emit]
+    when: "context.steps_missing > 0"
+    note: 环节点名缺一即系统性事故（红线 1）
+
+
+  # ========== 第二层 · 客户 patch 层（review 可改，只许收紧；以下为示例）==========
+  # source: 白皮书§14 迭代诚实纪律（D7：不显著保持默认）
+  - rule_id: R-P1
+    name: 参数变更必审（WFA 提案）
+    level: review
+    is_baseline: false
+    match:
+      object_types: [report]
+      actions: [param.change]
+    when: "true"
+    note: 策略优化师只提案不生效；DSR 不显著自动驳回，生效次日披露
+
+  # source: config.MAX_SINGLE_POSITION_PCT=0.2（示例收紧 -5pp，单调守卫：只可加严）
+  - rule_id: R-P2
+    name: 单票上限收紧示例（20%→15%）
+    level: review
+    is_baseline: false
+    match:
+      object_types: [position]
+      actions: [position.open, position.adjust]
+    when: "after.position_pct > 0.15000000000000002"
+    note: patch 层示例：客户可在基线之下收紧，不可放宽
+
+  # source: 审批纪律示例（无 config 对应参数；patch 层自定，只可加严）
+  - rule_id: R-P3
+    name: 每日新开仓笔数上限示例
+    level: review
+    is_baseline: false
+    match:
+      object_types: [order]
+      actions: [position.open]
+    when: "params.daily_new_opens > 5"
+    note: 防过度交易的行为围栏示例
+
+  # ========== 第三层 · 策略快照层（说明，非规则）==========
+  # 每张交易卡片的 Pin/Psl/分批/时间止损快照（白皮书附录C 模板），随信号审批绑定，
+  # 盘中触发器严格执行；快照随五元事件留痕（decision.before/after），
+  # 盘中任何偏离快照的动作由 R-T1/R-T13 等基线规则接管判定。

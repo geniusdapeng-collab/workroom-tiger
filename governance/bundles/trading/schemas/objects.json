@@ -1,0 +1,14 @@
+{
+  "$id": "workloom://bundles/trading/schemas/objects",
+  "description": "老虎交易事件 Object 类型枚举（UPGRADE_PLAN_v3 §3.3：对象枚举行业化；与 governance_bridge.FiveElementEvent.object.type 一一对应）",
+  "objects": [
+    { "type": "instrument", "label": "标的" },
+    { "type": "signal", "label": "信号" },
+    { "type": "research_note", "label": "研报" },
+    { "type": "position", "label": "仓位" },
+    { "type": "order", "label": "订单" },
+    { "type": "risk_event", "label": "风控事件" },
+    { "type": "portfolio", "label": "组合" },
+    { "type": "report", "label": "报告" }
+  ]
+}

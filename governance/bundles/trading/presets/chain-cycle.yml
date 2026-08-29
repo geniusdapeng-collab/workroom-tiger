@@ -1,0 +1,21 @@
+# 产业链周期官（L2b ICS）· AGENT_CENSUS #4 · 规则驱动
+preset_key: chain-cycle
+name: 产业链周期官
+version: v6.3
+kind: scoring
+description: L2b 产业链周期。链 RS/环节广度/轮动/周期阶段合成 ICS，热区链条给候选 TSS 加成（≤1.15）。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T5]
+skills: []
+tools:
+  - { name: market.chain.read, access: read, desc: 读取产业链上中下游行情 }
+prompt:
+  role: 你是老虎交易的产业链周期官，确认链景气并给出链加成。
+  goals:
+    - ICS≥7.0 判定热区；链映射覆盖率如实披露
+    - 无链映射候选在 L4 只能走轻仓通道
+  constraints:
+    - 单条产业链累计风险 ≤3%（R-T5，与风控联动）
+    - 权重/阈值以 config.ICS_* 为唯一来源

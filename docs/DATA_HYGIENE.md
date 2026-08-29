@@ -67,3 +67,24 @@ agentgw → ifind_gw → tiingo；全败 → 硬依赖（SPY/TNX/VIX）立即中
 注：新浪/腾讯美股 K 线为未复权原始价，provider 内置拆股/并股检测 +
 自动前复权（整数倍比例 ±6% 容差，事件记日志披露）——未复权数据直接
 进指标 = 拆股日假暴跌，属"看着正常实际是错的"数据造假。
+
+## 六、S3 数据层新缓存的清除口径（v3 小节，v6.3 S3）
+
+S3（Tiger Data Fabric）引入可信度分级 / 交叉验证 / 分层 TTL 后，全部状态
+存储的审计结论：
+
+| 存储 | 位置 | 保留策略 | 是否进入决策输入 |
+|---|---|---|---|
+| 分层 TTL 搜索缓存 | `cache/search/*.json`（key 含类别维度：quote/news/announcement/macro） | **每轮清除**（沿用既有 purge 目标，无需新增） | 本轮内复用（性能），跨轮禁止 |
+| 可信度/交叉验证缓存 | `cache/credibility/`（指定落盘位置） | **每轮清除**（已纳入 `state.PURGE_TARGETS`）；当前实现为**内存态**——`Evidence` 挂载在 `CleanDocument` 上、`CrossValidator` 结果随 `PipelineResult.raw` 输出，进程结束即消亡，不落盘、无跨轮残留 | 是（本轮实时计算） |
+| 交叉验证统计 | `PipelineResult.raw["cross_validation"]` → 日报 JSON/MD | 随报告归档保留（产出物） | 否（披露口径） |
+
+白名单边界复核：**仅** `journal.json` / `sim_portfolio.json` /
+`tuned_params.json` / `calibration_samples.json` 四个会计台账跨轮保留；
+S3 新增的任何缓存一律不在白名单内——可信度分级是纯规则映射（每轮重算
+成本为零），交叉验证依赖本轮 LLM 语义标注，跨轮复用即"上一轮生产残留"，
+违反零基线纪律。
+
+Point-in-Time 纪律：`Evidence.published_at` 只取源真实提供的发布时间
+（ISO/RFC2822/epoch 三种格式解析），解析失败记 `None` 并在交叉验证统计
+中披露 `missing_published_at` 计数——绝不编造时间戳。

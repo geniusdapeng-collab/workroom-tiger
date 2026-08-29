@@ -1,0 +1,21 @@
+# 链风险预警官（科技链子集群）· AGENT_CENSUS #9 · LLM 驱动
+preset_key: chain-risk
+name: 链风险预警官
+version: v6.3
+kind: llm_semantic
+description: 产业链风险识别。8-K/公报/专利/新闻的事件抽取与传导推断，输出分级预警。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T15]
+skills: []
+tools:
+  - { name: docs.cleaned.read, access: read, desc: 读取清洗后文档全集 }
+  - { name: llm.invoke, access: read, desc: LLM 推理（逐事件计量） }
+prompt:
+  role: 你是老虎交易的链风险预警官，识别供应链扰动/政策/诉讼并推断传导路径。
+  goals:
+    - 分级预警（高/中/低）+ 传导路径 + 证据引用
+  constraints:
+    - LLM 失败只许透传兜底（llm_guard），无规则回退（R-T15）
+    - 预警只进链融合与报告披露，不改闸门分数

@@ -58,7 +58,15 @@ class DemoProvider(DataProvider):
         fixed = {"SPY": "up", "QQQ": "up", "XLK": "strong", "SMH": "strong",
                  "XLF": "up", "XLE": "range", "XLV": "range", "XLP": "range",
                  "XLY": "up", "XLI": "range", "XLU": "down", "XLRE": "down",
-                 "IBB": "up", "IWM": "range"}
+                 "IBB": "up", "IWM": "range",
+                 # S4 多市场基准/板块代理（demo 剧情：与 US 同向的健康趋势）
+                 "000300.SS": "up", "HSI.HK": "up",
+                 "000928.SS": "range", "000929.SS": "up", "000930.SS": "up",
+                 "000931.SS": "range", "000932.SS": "up", "000933.SS": "range",
+                 "000934.SS": "up", "000935.SS": "strong", "000936.SS": "range",
+                 "000937.SS": "down",
+                 "HSTECH.HK": "strong", "HSF.HK": "up", "HSP.HK": "range",
+                 "HSU.HK": "down", "HSC.HK": "up"}
         if ticker in fixed:
             return _PERSONALITIES[fixed[ticker]]
         return _PERSONALITIES[_P_KEYS[_seed(ticker) % len(_P_KEYS)]]
@@ -125,7 +133,7 @@ class DemoProvider(DataProvider):
 
         # 固定 N_REF 长度生成完整路径，再取尾部 n 根、以全路径首根为定价锚
         # —— 任何 days 请求下同一日期的价格完全一致（v5.4 一致性修复）。
-        if ticker in ("SPY", "QQQ"):
+        if ticker in ("SPY", "QQQ", "000300.SS", "HSI.HK"):
             full = self._spy_path(self.N_REF)
         else:
             full = 100 * self._gen_path(ticker, self.N_REF, p["drift"], p["vol"])
@@ -144,16 +152,29 @@ class DemoProvider(DataProvider):
                            "Close": close, "Volume": volume}, index=idx)
         return self._normalize_ohlcv(df)
 
-    def tnx_yield(self, days: int = 400) -> pd.Series:
-        rng = np.random.default_rng(_seed("TNX"))
+    def _yield_series(self, symbol: str, days: int) -> pd.Series:
+        # US 回归纪律：TNX 种子保持 _seed("TNX") 不变（序列与改造前逐点一致）
+        rng = np.random.default_rng(_seed("TNX") if symbol == "TNX"
+                                    else _seed(f"TNX:{symbol}"))
         idx = _bday_index(days)
         # 从 4.6% 缓慢下行到 4.25%（利率顺风场景）；riskoff 剧本转为上行施压
         drift = 0.002 if self.scenario == "riskoff" else -0.001
         series = 4.6 + np.cumsum(rng.normal(drift, 0.02, days))
-        return pd.Series(series, index=idx, name="TNX")
+        return pd.Series(series, index=idx, name=symbol)
 
-    def vix(self, days: int = 400) -> pd.Series:
-        rng = np.random.default_rng(_seed("VIX"))
+    def tnx_yield(self, days: int = 400) -> pd.Series:
+        return self._yield_series("TNX", days)
+
+    def rate_yield_for(self, symbol: str, days: int = 400) -> pd.Series:
+        # S4：CN10Y/US10Y 等市场利率基准走同一合成生成器（符号级确定性）
+        if symbol.upper() in ("TNX", "CN10Y", "US10Y"):
+            return self._yield_series(symbol.upper(), days)
+        return super().rate_yield_for(symbol, days)
+
+    def _vol_series(self, symbol: str, days: int) -> pd.Series:
+        # US 回归纪律：VIX 种子保持 _seed("VIX") 不变
+        rng = np.random.default_rng(_seed("VIX") if symbol == "VIX"
+                                    else _seed(f"VIX:{symbol}"))
         idx = _bday_index(days)
         # OU 均值回归：围绕 15.5 波动，间或冲上 20+（情绪分有真实起伏）
         center = 28.0 if self.scenario == "riskoff" else 15.5
@@ -161,7 +182,21 @@ class DemoProvider(DataProvider):
         series[0] = center
         for i in range(1, days):
             series[i] = series[i - 1] + 0.06 * (center - series[i - 1]) + rng.normal(0, 0.55)
-        return pd.Series(np.clip(series, 10, 45), index=idx, name="VIX")
+        return pd.Series(np.clip(series, 10, 45), index=idx, name=symbol)
+
+    def vix(self, days: int = 400) -> pd.Series:
+        return self._vol_series("VIX", days)
+
+    def vol_index_for(self, symbol: str, days: int = 400) -> pd.Series | None:
+        # S4：IVIX50/VHSI 等市场波指基准走同一合成生成器
+        s = symbol.upper()
+        if s == "VIX":
+            return self.vix(days)
+        if s == "VIX9D":
+            return self.vix9d(days)
+        if s in ("IVIX50", "VHSI"):
+            return self._vol_series(s, days)
+        return super().vol_index_for(symbol, days)
 
     def vix9d(self, days: int = 400) -> pd.Series | None:
         vix = self.vix(days)

@@ -1,0 +1,22 @@
+# 板块主线官（L2 SHS）· AGENT_CENSUS #3 · 混合驱动
+preset_key: sector
+name: 板块主线官
+version: v6.3
+kind: scoring
+description: L2 板块主线。宏观查表/资金动量为规则；叙事兑现维度由 narrative（LLM）注入，缺失剔除再归一化。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T3]
+skills: []
+tools:
+  - { name: market.sector.read, access: read, desc: 读取板块 ETF/指数行情 }
+  - { name: narrative.score.read, access: read, desc: 读取叙事维度 LLM 注入分 }
+prompt:
+  role: 你是老虎交易的板块主线官，判定主线池/次主线池并披露板块广度。
+  goals:
+    - 主线入池 SHS≥7.5 且广度≥60%；主线池最多 2 条（强制聚焦）
+    - 板块覆盖率不足按市场规格披露或诚实失败
+  constraints:
+    - 标准开仓须 SHS≥7.5（R-T3 联动闸门之一）
+    - 权重/阈值以 config.SHS_* 为唯一来源；叙事维缺失再归一化，不编造

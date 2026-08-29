@@ -15,24 +15,30 @@
 │ 五元事件库(哈希链留痕) · 围栏引擎(白皮书阈值→block级基线) · Quest 编排    │
 │ night-shift 夜间守夜 · 审批卡片 · 组织记忆 · site 官网(责任界面)          │
 │ ┌────────── 财神爷交易内核（仓库根目录，Python，完整保留）──────────────┐ │
-│ │ 17 环节管线 · 六层决策栈(L0扫描/L1 MRS/L2 SHS/L2b ICS/L3 TSS/L4风控) │ │
+│ │ 21 环节管线 · 六层决策栈(L0扫描/L1 MRS/L2 SHS/L2b ICS/L3 TSS/L4风控) │ │
 │ │ SearchHub 6源 · 七环行情降级链 · 零基线纪律 · journal→WFA→DSR        │ │
-│ │ 小G模拟盘 · 双页签HTML日报 · 工程红线(LLM不可逆/透传留痕/环节点名)    │ │
+│ │ 小G模拟盘 · 双页签HTML日报 · 复盘闭环(诸葛:归因/体检/提案审批)        │ │
+│ │ 工程红线(LLM不可逆/透传留痕/环节点名)                                │ │
 │ └──────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **交易内核**：仓库根目录即财神爷系统，[原 README 见此](docs/CAISHEN_README.md)。决策栈、阈值、风控公式以 `trading_system/config.py` 为 single source of truth。
 - **治理外壳**：`governance/` 为 WorkLoom IM 底座，只做治理不做决策——把每个交易动作变成可追责事件，把白皮书红线变成机器级保险的第二道锁。接入设计见 [docs/GOVERNANCE.md](docs/GOVERNANCE.md)。
-- **行业角色包**：`bundles/trading/`（规划中）——AI 基金经理班组 presets、三层围栏包、投资 skills。
+- **行业角色包**：`governance/bundles/trading/`——AI 基金经理班组 presets、三层围栏包、投资 skills（根目录 `bundles/trading/` 为指向性说明）。
 
 ## 快速开始（交易内核）
 
 ```bash
 pip install -r requirements.txt
-python3 -m pytest tests/ -q          # 148 项测试
-python3 main.py --demo               # 离线演示（合成数据，端到端 17 环节）
+python3 -m pytest tests/ -q          # 252 项测试
+python3 main.py --demo               # 离线演示（合成数据，端到端 21 环节）
 python3 main.py --universe full --top 30 --picks 8   # 生产模式（每日全市场）
+
+# S6 复盘闭环与审批流
+python3 main.py --review-list                            # 查看 WFA 参数提案
+python3 main.py --review-approve <id>                    # 批准 → 次日生效并披露
+python3 main.py --review-reject <id> --reason "..."      # 驳回（原因必填）
 ```
 
 ## 白皮书十条铁律（全系统最高纪律，任何升级不得违反）
@@ -42,7 +48,7 @@ python3 main.py --universe full --top 30 --picks 8   # 生产模式（每日全�
 3. **开仓硬逻辑**：标准做多 MRS*≥6 且 SHS≥7.5 且 TSS_final≥7.2；轻仓通道仓位 ×0.30–0.40；MRS*<4.0 禁开仓
 4. **风控机械化**：1R=净值 0.8%；单票≤20%；结构/时间止损；≥2R 盈利保护；Kill Switch
 5. **数据工程**：多源降级链绝不回退合成数据；零基线纪律每轮从零开始
-6. **工程红线**：17 环节点名缺一即事故；LLM 不可逆（无规则回退分支）；异常透传留痕
+6. **工程红线**：21 环节点名缺一即事故；LLM 不可逆（无规则回退分支）；异常透传留痕
 7. **迭代诚实**：WFA+DSR 校正，不显著保持默认参数
 8. **模拟盘公开验证**：全 AI 掌控、赚亏如实、禁止粉饰
 9. **AI 分工**：语义归 LLM，数值归规则，闸门必须确定
@@ -55,6 +61,8 @@ python3 main.py --universe full --top 30 --picks 8   # 生产模式（每日全�
 | [docs/CAISHEN_README.md](docs/CAISHEN_README.md) | 财神爷交易内核完整文档（v6.3） |
 | [reports/AI短线美股交易白皮书_20260730.pdf](reports/AI短线美股交易白皮书_20260730.pdf) | 交易理念白皮书（最高纪律） |
 | [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | WorkLoom 治理外壳接入设计 |
+| [docs/PROJECT_INTRO.md](docs/PROJECT_INTRO.md) / [docs/PROJECT_INTRO_EN.md](docs/PROJECT_INTRO_EN.md) | 项目介绍（中文详细版 / English） |
+| [README_EN.md](README_EN.md) | English README |
 | [research/UPGRADE_PLAN_v3.md](research/UPGRADE_PLAN_v3.md) | 升级方案 v3（财神爷主体版，已确认） |
 | [research/01_benchmark.html](research/01_benchmark.html) | 调研一：行业标杆竞品深度调研（桥水 AIA 等 9 家） |
 | [research/02_frontline.html](research/02_frontline.html) | 调研二：投资团队一线作业与 know-how 调研 |

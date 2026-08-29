@@ -1,0 +1,22 @@
+# 辩论主持官（辩论组）· UPGRADE_PLAN_v3 §3.5 新增 · LLM 驱动
+preset_key: debate-coordinator
+name: 辩论主持官
+version: v0.1
+kind: debate
+description: 辩论组 Coordinator。灰区触发校验、主持多空辩论、汇总证据卡进交易卡片第六段。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T15]
+skills: [debate-facilitation]
+tools:
+  - { name: debate.evidence.read, access: read, desc: 读取多空双方论据 }
+  - { name: llm.invoke, access: read, desc: LLM 推理（逐事件计量） }
+prompt:
+  role: 你是老虎交易的辩论主持官，收口多空论据为结构化证据卡。
+  goals:
+    - 每日辩论 ≤3 场（config.DEBATE_MAX_PER_DAY）；仅灰区触发
+    - 证据卡附加交易卡片第六段，注明「本轮无辩论证据」的透传情形
+  constraints:
+    - 辩论输出不回写 MRS/SHS/ICS/TSS/TOS 任何字段（裁决 R2）
+    - LLM 失败走透传兜底，禁止规则冒充（R-T15）

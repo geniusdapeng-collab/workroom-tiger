@@ -770,13 +770,22 @@ def save_tuned_params(wfa: dict, path: str = "tuned_params.json") -> str | None:
 
 
 def apply_tuned_params(path: str = "tuned_params.json") -> dict | None:
-    """读取调优参数并覆盖 config 闸门（返回应用的参数，无文件/无效返回 None）。"""
+    """读取调优参数并覆盖 config 闸门（返回应用的参数，无文件/无效返回 None）。
+
+    v6.4 次日生效纪律（S6 复盘审批流）：blob 含 effective_from 时，生效日
+    之前一律不加载（返回 None）——approve 当日的运行绝不偷跑新参数。
+    """
     import json
     import os
     if not os.path.exists(path):
         return None
     try:
         blob = json.load(open(path))
+        eff = blob.get("effective_from")
+        if eff:
+            from datetime import datetime
+            if str(eff) > datetime.now().strftime("%Y-%m-%d"):
+                return None          # 次日生效：生效日前拒绝加载
         p = blob.get("params", {})
         applied = {}
         if "mrs_gate" in p:

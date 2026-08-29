@@ -1,0 +1,19 @@
+# 清洗员·规则底座（信息层）· AGENT_CENSUS #13 · 规则驱动
+preset_key: clean-rule-base
+name: 清洗员·规则底座
+version: v6.3
+kind: cleaning
+description: 文档去重 + 格式校验（用户指令划定的规则保留区），为 LLM 语义清洗供料。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: []
+skills: []
+tools:
+  - { name: docs.raw.read, access: read, desc: 读取搜索原始文档 }
+prompt:
+  role: 你是老虎交易的规则清洗员，只做去重与格式校验。
+  goals:
+    - 去重/格式校验数量留痕（raw→base）
+  constraints:
+    - 不做任何语义加工（语义归 LLM）

@@ -31,13 +31,20 @@ class SectorAgent(BaseAgent):
 
     def execute(self, context: dict) -> list[SectorScore]:
         p = self.provider
-        tnx: pd.Series = context["market_data"]["tnx"]
+        tnx: pd.Series | None = context["market_data"].get("tnx")
         spy: pd.DataFrame = context["market_data"]["spy"]
         sector_data: dict[str, pd.DataFrame] = context["market_data"]["sector_etfs"]
         universe_closes: dict[str, pd.Series] = context["market_data"]["universe_closes"]
 
-        tnx_chg_bp = (tnx.iloc[-1] - tnx.iloc[-21]) * 100 if len(tnx) > 21 else 0.0
-        label = tnx_trend_label(tnx_chg_bp)
+        # S4：利率基准缺失（CN/HK 免费源不可得）→ 宏观适配维整体缺失，
+        # 逐板块剔除再归一化（D2：宁可缺失不可编造，不钉中性分）
+        if tnx is None or len(tnx.dropna()) == 0:
+            label = None
+        else:
+            tnx_clean = tnx.dropna()
+            tnx_chg_bp = (tnx_clean.iloc[-1] - tnx_clean.iloc[-21]) * 100 \
+                if len(tnx_clean) > 21 else 0.0
+            label = tnx_trend_label(tnx_chg_bp)
 
         results: list[SectorScore] = []
         for etf, df in sector_data.items():
@@ -72,14 +79,18 @@ class SectorAgent(BaseAgent):
         return results
 
     def _score_sector(self, etf: str, df: pd.DataFrame, spy_close: pd.Series,
-                      tnx_label: str, universe_closes: dict[str, pd.Series],
+                      tnx_label: str | None, universe_closes: dict[str, pd.Series],
                       context: dict) -> SectorScore:
         close = df["Close"]
         evidence: list[str] = []
 
-        # 1) 宏观适配（固定查表）
-        s_macro = score_sector_macro(etf, tnx_label)
-        evidence.append(f"{etf} 宏观适配: TNX趋势={tnx_label}→{s_macro}分")
+        # 1) 宏观适配（固定查表；利率基准缺失 → 该维剔除再归一化）
+        if tnx_label is None:
+            s_macro = None
+            evidence.append(f"{etf} 宏观适配: 利率基准缺失 → 该维剔除再归一化（D2）")
+        else:
+            s_macro = score_sector_macro(etf, tnx_label)
+            evidence.append(f"{etf} 宏观适配: TNX趋势={tnx_label}→{s_macro}分")
 
         # 2) 资金动量（最关键）
         rs = rs_line(close, spy_close)
@@ -136,7 +147,7 @@ class SectorAgent(BaseAgent):
             config.SHS_WEIGHTS,
         )
         evidence.append(
-            f"{etf} SHS = {shs}（macro {s_macro}/flow {s_flow}/"
+            f"{etf} SHS = {shs}（macro {s_macro if s_macro is not None else '缺失'}/flow {s_flow}/"
             f"narr {s_narr if s_narr is not None else '缺失'}/micro 缺失，再归一化）")
 
         return SectorScore(

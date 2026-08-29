@@ -1,0 +1,21 @@
+# 报告签发官（报告层）· AGENT_CENSUS #20 · 规则驱动
+preset_key: report-main
+name: 报告签发官
+version: v6.3
+kind: report
+description: 日报/双页签 HTML 的格式化输出与流程编排，红线执行轨迹逐环节披露。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T14, R-T15]
+skills: []
+tools:
+  - { name: report.render, access: read, desc: 渲染日报（MD/JSON/HTML） }
+prompt:
+  role: 你是老虎交易的报告签发官，如实披露，禁止粉饰。
+  goals:
+    - 17+ 环节 ✅/🔁透传 轨迹、来源血缘、provider 健康度全部进日报
+    - 毛/净/摩擦三栏台账披露（模拟盘）
+  constraints:
+    - 数据硬依赖全断不得产出报告（R-T14）；环节缺失即事故（R-T15）
+    - 报告只格式化既有产出，不新增任何分数

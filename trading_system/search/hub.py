@@ -23,13 +23,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
 
+from .. import config
 from .models import RawDocument, SearchBatch
 from .sources import SearchSource, default_sources
 
 log = logging.getLogger("search.hub")
 
 CACHE_DIR = os.path.join("cache", "search")
-TTL_SECONDS = 6 * 3600          # 内存/磁盘缓存 6 小时
+TTL_SECONDS = 6 * 3600          # 内存/磁盘缓存 6 小时（未分类查询回退，见 config.TTL_DEFAULT）
 WALL_CLOCK_BUDGET = 45.0        # 单批搜索总墙钟（秒）
 BREAKER_FAILS = 3               # 连续失败熔断阈值
 BREAKER_COOLDOWN = 900.0        # 熔断冷却（秒）
@@ -65,29 +66,81 @@ class SearchHub:
     def __init__(self, sources: Iterable[SearchSource] | None = None,
                  *, demo: bool = False, ttl: int = TTL_SECONDS,
                  budget: float = WALL_CLOCK_BUDGET, max_workers: int = 6,
-                 use_disk_cache: bool = True):
+                 use_disk_cache: bool = True,
+                 ttl_tiers: dict[str, int] | None = None):
         self.sources = list(sources) if sources is not None else default_sources(demo)
         self.ttl = ttl
         self.budget = budget
         self.max_workers = max_workers
         self.use_disk_cache = use_disk_cache
+        # S3 分层 TTL：缓存按类别取 TTL（config.TTL_TIERS，可注入覆盖便于测试）
+        self.ttl_tiers = dict(config.TTL_TIERS if ttl_tiers is None else ttl_tiers)
         self._mem: dict[str, tuple[float, list[RawDocument]]] = {}
         self._breaker = _Breaker()
+        # 主题集注册表（CHAIN_TOPICS/SECTOR_TOPICS 同款模式）：
+        # name -> {"topics": {id: query}, "enabled": bool,
+        #          "routing": {id: [源名...] | None}}
+        self._topic_sets: dict[str, dict] = {}
         if use_disk_cache:
             os.makedirs(CACHE_DIR, exist_ok=True)
 
-    # ---------------------------------------------------------- 缓存
-    def _cache_key(self, query: str, limit: int) -> str:
-        import hashlib
-        return hashlib.sha1(f"{query}|{limit}".encode()).hexdigest()[:20]
+    # ---------------------------------------------------------- 主题集注册
+    def register_topic_set(self, name: str, topics: dict, *, enabled: bool = True) -> None:
+        """注册一个主题集。topics 支持两种形态：
+          - {id: query_str}（CHAIN_TOPICS/SECTOR_TOPICS 同款，无源路由）；
+          - {id: {"query": str, "sources": [源名...]}}（AH_TOPICS 同款，带源路由）。
+        enabled=False 的主题集在 active_topics() 中整体缺席（不产生任何调用）。"""
+        normalized: dict[str, str] = {}
+        routing: dict[str, list[str] | None] = {}
+        for tid, spec in topics.items():
+            if isinstance(spec, dict):
+                normalized[tid] = str(spec.get("query") or "")
+                srcs = spec.get("sources")
+                routing[tid] = [str(s) for s in srcs] if srcs else None
+            else:
+                normalized[tid] = str(spec)
+                routing[tid] = None
+        self._topic_sets[name] = {"topics": normalized, "enabled": bool(enabled),
+                                  "routing": routing}
 
-    def _cache_get(self, key: str) -> list[RawDocument] | None:
+    def active_topics(self) -> dict[str, tuple[str, list[str] | None]]:
+        """当前启用的主题全集：{topic_id: (query, sources|None)}。"""
+        out: dict[str, tuple[str, list[str] | None]] = {}
+        for ts in self._topic_sets.values():
+            if not ts["enabled"]:
+                continue
+            for tid, q in ts["topics"].items():
+                if q:
+                    out[tid] = (q, ts["routing"].get(tid))
+        return out
+
+    def gather_topic_sets(self, limit_per_query: int = 4, deep: bool = True
+                          ) -> list[RawDocument]:
+        """按注册主题集采集（未去重——去重是清洗环节职责）。"""
+        out: list[RawDocument] = []
+        for _tid, (query, srcs) in self.active_topics().items():
+            out.extend(self.gather(query, limit_per_query=limit_per_query,
+                                   deep=deep, sources=srcs))
+        return out
+
+    # ---------------------------------------------------------- 缓存
+    def _ttl_for(self, category: str) -> float:
+        """分层 TTL：按类别取 config.TTL_TIERS，未分类回退默认。"""
+        return float(self.ttl_tiers.get(category, self.ttl))
+
+    def _cache_key(self, query: str, limit: int, category: str = "news") -> str:
+        import hashlib
+        # S3：缓存 key 增加类别维度——同一句查询在不同类别下 TTL 不同、互不污染
+        return hashlib.sha1(f"{category}|{query}|{limit}".encode()).hexdigest()[:20]
+
+    def _cache_get(self, key: str, category: str = "news") -> list[RawDocument] | None:
+        ttl = self._ttl_for(category)
         hit = self._mem.get(key)
-        if hit and time.time() - hit[0] < self.ttl:
+        if hit and time.time() - hit[0] < ttl:
             return hit[1]
         if self.use_disk_cache:
             path = os.path.join(CACHE_DIR, f"{key}.json")
-            if os.path.exists(path) and time.time() - os.path.getmtime(path) < self.ttl:
+            if os.path.exists(path) and time.time() - os.path.getmtime(path) < ttl:
                 try:
                     raw = json.load(open(path, encoding="utf-8"))
                     docs = [RawDocument(**d) for d in raw]
@@ -130,10 +183,12 @@ class SearchHub:
 
     # ---------------------------------------------------------- 主入口
     def search(self, query: str, limit: int = 8,
-               sources: list[str] | None = None) -> SearchBatch:
-        """跨源并发搜索。任何单源失败不阻塞整体；返回源级统计供审计。"""
-        key = self._cache_key(query, limit)
-        cached = self._cache_get(key)
+               sources: list[str] | None = None,
+               category: str = "news") -> SearchBatch:
+        """跨源并发搜索。任何单源失败不阻塞整体；返回源级统计供审计。
+        category：缓存分层类别（quote/news/announcement/macro），决定 TTL。"""
+        key = self._cache_key(query, limit, category)
+        cached = self._cache_get(key, category)
         if cached is not None:
             return SearchBatch(query=query, docs=cached,
                                source_stats={"cache": {"ok": True, "n": len(cached), "ms": 0}})
@@ -175,16 +230,21 @@ class SearchHub:
         return SearchBatch(query=query, docs=docs, source_stats=stats)
 
     def gather(self, topic: str, tickers: list[str] | None = None,
-               limit_per_query: int = 8, deep: bool = True) -> list[RawDocument]:
+               limit_per_query: int = 8, deep: bool = True,
+               sources: list[str] | None = None) -> list[RawDocument]:
         """一次主题采集 = 横向查询计划 + 纵向穿透探针，结果汇总（未去重，
-        去重是清洗环节的职责——红线：各环节职责不串位）。"""
+        去重是清洗环节的职责——红线：各环节职责不串位）。
+        sources：主题级源路由（如 AH 主题只走全网/中文新闻源）；None=全源。"""
         queries = self.query_plan(topic, tickers)
         probes = self.deep_probes(topic) if deep else []
         out: list[RawDocument] = []
         for q in queries:
-            out.extend(self.search(q, limit_per_query).docs)
+            out.extend(self.search(q, limit_per_query, sources=sources,
+                                   category="news").docs)
         for p in probes:
+            # 纵向穿透固定走披露/监管源，属公告类缓存分层
             out.extend(self.search(p, limit_per_query,
                                    sources=["edgar", "patentsview", "federal_register",
-                                            "kimi_search", "demo"]).docs)
+                                            "kimi_search", "demo"],
+                                   category="announcement").docs)
         return out

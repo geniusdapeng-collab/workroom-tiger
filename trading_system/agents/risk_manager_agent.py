@@ -42,6 +42,19 @@ class RiskManagerAgent(BaseAgent):
         sub_sectors = [s for s in sectors if s.in_sub_pool]
         notes: list[str] = []
 
+        # ---- S4 多市场：市场规格 / 合规围栏前置 / 轻仓通道毕业门槛（D7）----
+        spec = context.get("market_spec")                # MarketSpec | None
+        grad = context.get("market_grad") or {"graduated": True, "settled": 0,
+                                              "required": config.MARKET_GRAD_MIN_SETTLED}
+        grad_forced = not grad.get("graduated", True)
+        compliance: list[dict] = []                      # 校验记录（日报披露）
+        if grad_forced:
+            light_size = round(sum(config.MARKET_LIGHT_SIZE) / 2, 4)
+            notes.append(
+                f"新市场验证期（{grad.get('settled', 0)}/{grad.get('required')}，"
+                f"DSR 未过关）：本市场全部放行标的强制轻仓 ×{light_size}"
+                f"（D7：满 {grad.get('required')} 笔结算且 DSR 过关才开放标准通道）")
+
         # ---- 闸门（MRS*<4.0 或 Kill Switch 触发 → 禁新开仓）----
         if not mrs.allow_new_positions:
             context["action"] = "AVOID"
@@ -95,7 +108,26 @@ class RiskManagerAgent(BaseAgent):
                 continue
             standard = decision.standard
 
+            # ---- S4 合规围栏前置（D2）：市场规则校验先于仓位计算 ----
+            entry = c.price
+            verdict = None
+            if spec is not None:
+                sdf = context["market_data"].get("stock_ohlcv", {}).get(c.ticker)
+                prev_close = (float(sdf["Close"].iloc[-2])
+                              if sdf is not None and len(sdf) >= 2 else entry)
+                verdict = spec.check_order("buy", c.ticker, entry, prev_close,
+                                           context.get("trade_date"))
+                compliance.append({"ticker": c.ticker, "side": "buy",
+                                   **verdict.to_dict()})
+                if not verdict.allowed:
+                    notes.append(f"合规拒绝：{c.ticker} {verdict.reason}"
+                                 f"（{verdict.rule_id}，围栏前置）")
+                    continue
+
             size_ratio = 1.0 if standard else sum(light_probe["size_ratio"]) / 2
+            # D7 轻仓通道：未达标市场强制轻仓 ×0.3-0.4（覆盖标准/轻仓通道）
+            if grad_forced:
+                size_ratio = round(sum(config.MARKET_LIGHT_SIZE) / 2, 4)
 
             # v6.0 个股事件折扣：财报 1-2 天内 → 仓位 ×0.5（白皮书§11.1）
             event_note = ""
@@ -107,7 +139,6 @@ class RiskManagerAgent(BaseAgent):
             c.tos = round(mrs.mrs_star * shs * c.tss_final * c.c_liq / 100, 2)
 
             # R 仓位反推（v6.0：结构化止损价优先，正则仅作历史数据兜底）
-            entry = c.price
             stop = c.stop_price if c.stop_price > 0 else self._stop_price(c)
             risk_per_share = abs(entry - stop)
             if risk_per_share <= 0:
@@ -130,6 +161,9 @@ class RiskManagerAgent(BaseAgent):
                               if c.atr_pct <= cap_atr), config.TIME_STOP_DAYS[1])
 
             mode = "标准做多" if standard else "轻仓试错"
+            if grad_forced:
+                mode += (f"·新市场轻仓（验证期 {grad.get('settled', 0)}"
+                         f"/{grad.get('required')}）")
             rationale[c.ticker] = {
                 "mode": mode, "standard": bool(standard),
                 "in_main": bool(in_main), "in_sub": bool(in_sub),
@@ -147,6 +181,9 @@ class RiskManagerAgent(BaseAgent):
                 "max_single_pct": config.MAX_SINGLE_POSITION_PCT,
                 "time_stop_days": time_stop,
                 "tos": c.tos,
+                # S4：市场合规与轻仓通道毕业状态（全透传，报告层直接消费）
+                "market_grad": dict(grad),
+                "compliance_rule": verdict.rule_id if verdict is not None else "",
                 # 三门 ok 口径必须与放行判定严格一致（理论§5，可审计性红线）：
                 # 轻仓试错通道下，MRS 轻仓区（5.5-6.0）或次主线池（SHS 7.0-7.5）
                 # 即为对应门的合法通过路径，否则会出现"被放行但门未过"的记录矛盾。
@@ -230,6 +267,7 @@ class RiskManagerAgent(BaseAgent):
         context["notes"] = notes
         context["pick_rationale"] = rationale
         context["gross_cap"] = gross_cap
+        context["compliance"] = compliance
         self.log.info("风控放行: action=%s picks=%s", action, [p.ticker for p in picks])
         return picks
 

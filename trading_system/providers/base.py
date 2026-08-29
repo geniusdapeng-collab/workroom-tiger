@@ -41,6 +41,30 @@ class DataProvider(ABC):
     def vix(self, days: int = 400) -> pd.Series:
         """VIX 收盘序列。"""
 
+    # ---- S4 多市场基准组通用接口（市场规格 benchmarks 的消费口）----
+    # 默认实现：US 符号（TNX/VIX/VIX9D）走既有专用方法（行为零变化）；
+    # 其他市场符号尝试按 OHLCV 收盘价序列取（免费源不可得时抛错/None，
+    # 由调用方按市场策略记缺失走"剔除再归一化"）。
+    def rate_yield_for(self, symbol: str, days: int = 400) -> pd.Series:
+        """10Y 利率序列（百分数）。symbol="TNX" 等同 tnx_yield()。"""
+        if symbol.upper() == "TNX":
+            return self.tnx_yield(days)
+        df = self.ohlcv(symbol, days=days)
+        if df is None or not len(df):
+            raise RuntimeError(f"{self.name} 无法提供利率序列 {symbol}")
+        return df["Close"]
+
+    def vol_index_for(self, symbol: str, days: int = 400) -> pd.Series | None:
+        """波动率指数序列。symbol="VIX"/"VIX9D" 等同 vix()/vix9d()。"""
+        if symbol.upper() == "VIX":
+            return self.vix(days)
+        if symbol.upper() == "VIX9D":
+            return self.vix9d(days)
+        df = self.ohlcv(symbol, days=days)
+        if df is None or not len(df):
+            raise RuntimeError(f"{self.name} 无法提供波动率序列 {symbol}")
+        return df["Close"]
+
     def vix9d(self, days: int = 400) -> pd.Series | None:
         """VIX9D（可选，缺失时返回 None → 期限结构子项中性 5 分）。"""
         return None

@@ -26,6 +26,24 @@ class RawDocument:
 
 
 @dataclass
+class Evidence:
+    """证据元数据（S3 数据层）：清洗管线输出的每条文档必须携带。
+
+    - tier：来源可信度分级（"T0".."T3"，规则映射，见 search/credibility.py）；
+    - published_at：Point-in-Time 时间戳（epoch 秒，"当时可知"纪律）；
+      源未提供发布时间时为 None，并在交叉验证统计中披露计数；
+    - content_hash：正文 sha256 前 16 位（同内容同哈希，用于审计与对账）；
+    - fetched_at：抓取时刻（epoch 秒）。
+    """
+    content: str
+    source: str
+    tier: str = ""
+    published_at: float | None = None
+    content_hash: str = ""
+    fetched_at: float = 0.0
+
+
+@dataclass
 class CleanDocument:
     """清洗后的文档：规则字段 + LLM 语义标注（degraded=True 表示语义标注缺失）。"""
     raw: RawDocument
@@ -36,6 +54,9 @@ class CleanDocument:
     summary_zh: str | None = None
     relevance: float | None = None
     degraded: bool = False                  # True = LLM 语义标注缺失（透传）
+    # S3 数据层：证据元数据 + 交叉验证结论（规则层调度，见 search/credibility.py）
+    evidence: Evidence | None = None
+    corroborated: bool = True               # False = 未通过交叉验证，决策侧仅作背景参考
 
 
 @dataclass

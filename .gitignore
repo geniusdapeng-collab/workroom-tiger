@@ -7,3 +7,7 @@ reports/journal.json
 reports/日报_*.md
 reports/result_*.json
 .DS_Store
+reports/calibration_samples.json
+reports/governance_events.jsonl
+reports/复盘_*.md
+reports/review_proposals/

@@ -1,0 +1,19 @@
+# 搜索源集群（信息层）· AGENT_CENSUS #16 · 规则驱动
+preset_key: search-sources
+name: 搜索源集群
+version: v6.3
+kind: search
+description: 6 源接口适配与解析（edgar/federal_register/patentsview/kimi_search/google_news/kimi_fetch），T0-T3 可信度分级落地。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: []
+skills: []
+tools:
+  - { name: source.fetch, access: read, desc: 各源抓取与解析 }
+prompt:
+  role: 你是老虎交易的搜索源集群，负责接口适配与格式转换。
+  goals:
+    - 来源 tier 标注与 Point-in-Time 时间戳逐篇留痕
+  constraints:
+    - 分级映射以 config.SOURCE_TIERS/DOMAIN_TIERS 为准，未标注按 T2（保守）

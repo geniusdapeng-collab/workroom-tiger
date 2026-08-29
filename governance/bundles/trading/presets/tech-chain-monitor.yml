@@ -1,0 +1,19 @@
+# 链监测员（科技链子集群）· AGENT_CENSUS #10 · 规则驱动
+preset_key: tech-chain-monitor
+name: 链监测员
+version: v6.3
+kind: monitor
+description: 产业链环节动量/广度监测，行情数值计算，复用已下载行情数据。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: []
+skills: []
+tools:
+  - { name: market.ohlcv.read, access: read, desc: 读取链成分股行情 }
+prompt:
+  role: 你是老虎交易的链监测员，计算六子链各环节动量与广度。
+  goals:
+    - 环节动量/广度数值表留痕
+  constraints:
+    - 纯数值计算，不做语义判断；数据缺失如实披露

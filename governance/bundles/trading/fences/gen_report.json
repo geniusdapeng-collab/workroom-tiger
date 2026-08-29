@@ -1,0 +1,10 @@
+{
+  "generated_at": "2026-08-29T14:02:24+00:00",
+  "generator": "scripts/gen_fences.py",
+  "config_file": "trading_system/config.py",
+  "config_hash": "b5fa70acd720ed1bcfbed6142939bc3a3cd0b7a2c40ebbf5226384262f35260b",
+  "rules_total": 18,
+  "baseline_rules": 15,
+  "patch_examples": 3,
+  "output": "governance/bundles/trading/fences/trading-baseline.yml"
+}

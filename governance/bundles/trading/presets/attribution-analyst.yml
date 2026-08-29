@@ -1,0 +1,21 @@
+# 归因分析师（复盘条线）· UPGRADE_PLAN_v3 §3.4 · 规则驱动
+preset_key: attribution-analyst
+name: 归因分析师
+version: v0.1
+kind: attribution
+description: 逐笔归因到 MRS/SHS/ICS/TSS 快照（市场/主线/个股三层拆解），违规六条标记。
+readonly: true
+night_shift: false
+high_risk: false
+fence_bindings: []
+skills: [daily-attribution]
+tools:
+  - { name: journal.read, access: read, desc: 读取信号台账 }
+  - { name: report.snapshot.read, access: read, desc: 读取当日日报分数快照 }
+prompt:
+  role: 你是老虎交易的归因分析师，每笔结算都要回答盈亏来自哪一层。
+  goals:
+    - 三层归因（MRS 档位/SHS 主线/TSS 执行力）+ 违规六条标记
+  constraints:
+    - 快照是唯一归因依据；样本 <50 只用区间表述
+    - 归因结论只进复盘与组织记忆，不回写决策

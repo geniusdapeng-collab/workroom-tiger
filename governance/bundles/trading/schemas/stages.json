@@ -1,0 +1,11 @@
+{
+  "$id": "workloom://bundles/trading/schemas/stages",
+  "description": "老虎交易资金阶段枚举（UPGRADE_PLAN_v3 §5：模拟盘公开验证→实盘的分阶段纪律；阶段判定走确定性代码框架）",
+  "stages": [
+    { "id": "observation", "label": "观察期", "hint": "只观察不出手：信号落账但模拟盘不建仓，验证数据地基与闸门稳定性" },
+    { "id": "paper", "label": "模拟盘", "hint": "小G 全 AI 掌控模拟盘（当前阶段）：review 级规则只推送不阻塞（裁决 R1）" },
+    { "id": "pilot", "label": "小额实盘", "hint": "满 100 笔结算且 DSR 通过后开放；review 级启用阻塞式审批" },
+    { "id": "scale", "label": "扩量期", "hint": "连续达标后按风险预算阶梯扩量，扩量本身走 review 审批" },
+    { "id": "drawdown_control", "label": "回撤管制期", "hint": "回撤触线即降级：强制轻仓通道 + Kill Switch 敏感度收紧，恢复需复盘审批" }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "@workloom/trading",
+  "version": "0.1.0",
+  "workloom": {
+    "industry": "trading",
+    "displayName": "WorkLoom for Trading · 老虎交易（AI 基金经理班组）",
+    "description": "老虎交易行业角色包：33 个 Agent preset（内核 20 + 辩论/校准/数据/合规 6 + 复盘条线 4 + 执行类 3）+ 白皮书阈值三层围栏包（从 config.py 生成，单一口径）+ 投资技能套件 + 对象/阶段枚举（UPGRADE_PLAN_v3 §3.3/§3.5）",
+    "provides": {
+      "presets": [
+        "presets/universe-scanner.yml",
+        "presets/mrs.yml",
+        "presets/sector.yml",
+        "presets/chain-cycle.yml",
+        "presets/tss.yml",
+        "presets/risk-manager.yml",
+        "presets/narrative.yml",
+        "presets/chain-sentiment.yml",
+        "presets/chain-risk.yml",
+        "presets/tech-chain-monitor.yml",
+        "presets/cycle-linkage.yml",
+        "presets/tech-chain-fusion.yml",
+        "presets/clean-rule-base.yml",
+        "presets/clean-llm-semantic.yml",
+        "presets/search-hub.yml",
+        "presets/search-sources.yml",
+        "presets/backtest-wfa.yml",
+        "presets/journal-triggers.yml",
+        "presets/options-metrics.yml",
+        "presets/report-main.yml",
+        "presets/bull-researcher.yml",
+        "presets/bear-researcher.yml",
+        "presets/debate-coordinator.yml",
+        "presets/calibration-officer.yml",
+        "presets/data-steward.yml",
+        "presets/compliance-officer.yml",
+        "presets/review-chief.yml",
+        "presets/attribution-analyst.yml",
+        "presets/statistician.yml",
+        "presets/strategy-optimizer.yml",
+        "presets/premarket-trader.yml",
+        "presets/intraday-trader.yml",
+        "presets/portfolio-ops.yml"
+      ],
+      "fences": ["fences/trading-baseline.yml"],
+      "skills": [
+        "skills/premarket-plan/SKILL.md",
+        "skills/daily-attribution/SKILL.md",
+        "skills/wfa-tuning/SKILL.md",
+        "skills/regulatory-watch/SKILL.md",
+        "skills/debate-facilitation/SKILL.md",
+        "skills/data-hygiene-audit/SKILL.md"
+      ],
+      "schemas": [
+        "schemas/objects.json",
+        "schemas/stages.json"
+      ],
+      "ui": ["ui/cases.json"]
+    }
+  }
+}

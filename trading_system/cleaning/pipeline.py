@@ -18,6 +18,7 @@ import unicodedata
 from ..llm.client import LLMClient
 from ..llm.prompts import CLEAN_SCHEMA, CLEAN_USER_TMPL, SYSTEM_ANALYST
 from ..redline import ExecutionTracer, Passthrough, llm_guard
+from ..search.credibility import evidence_for
 from ..search.models import CleanDocument, RawDocument
 
 log = logging.getLogger("cleaning")
@@ -77,9 +78,9 @@ def _apply_llm_annotations(docs: list[RawDocument],
     for d in docs:
         ann = by_id.get(d.doc_id)
         if not ann:
-            cleaned.append(CleanDocument(raw=d, degraded=True))
+            cleaned.append(_with_evidence(CleanDocument(raw=d, degraded=True)))
             continue
-        cleaned.append(CleanDocument(
+        cleaned.append(_with_evidence(CleanDocument(
             raw=d,
             tickers=[str(t).upper() for t in (ann.get("tickers") or [])][:8],
             sentiment=ann.get("sentiment"),
@@ -88,8 +89,15 @@ def _apply_llm_annotations(docs: list[RawDocument],
             summary_zh=ann.get("summary_zh"),
             relevance=_safe_float(ann.get("relevance")),
             degraded=False,
-        ))
+        )))
     return cleaned
+
+
+def _with_evidence(doc: CleanDocument) -> CleanDocument:
+    """S3 数据层：清洗管线输出的每条文档必须携带证据元数据
+    （tier/Point-in-Time 时间戳/content_hash/fetched_at，规则映射非语义）。"""
+    doc.evidence = evidence_for(doc.raw)
+    return doc
 
 
 def _safe_float(v) -> float | None:
@@ -126,5 +134,5 @@ def unwrap_cleaned(result: list[CleanDocument] | Passthrough) -> list[CleanDocum
     透传时逐篇标注 degraded=True（语义标注缺失），供下游维度按
     '缺失因子再归一化'处理。"""
     if isinstance(result, Passthrough):
-        return [CleanDocument(raw=d, degraded=True) for d in result.payload]
+        return [_with_evidence(CleanDocument(raw=d, degraded=True)) for d in result.payload]
     return result

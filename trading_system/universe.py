@@ -221,3 +221,147 @@ def load_universe(mode: str = "extended", file_path: str | None = None) -> list[
         tickers, _src = load_full_universe()
         return tickers
     return list(dict.fromkeys(EXTENDED_UNIVERSE))
+
+
+# ============================================================
+# v6.3 S4 多市场股票池（CN 沪深 A 股 / HK 港股主板）
+# ============================================================
+# 内嵌演示/兜底池（demo 与 full 拉取失败时使用；yahoo 风格代码后缀，
+# provider 侧符号映射由各自 provider 负责）
+CN_UNIVERSE = [
+    # 沪市主板
+    "600519.SS", "601318.SS", "600036.SS", "601166.SS", "600030.SS", "600276.SS",
+    "601888.SS", "600585.SS", "601012.SS", "600900.SS", "601398.SS", "600028.SS",
+    "601857.SS", "600050.SS", "601988.SS", "600104.SS", "601668.SS", "600048.SS",
+    "601288.SS", "600009.SS", "601899.SS", "600309.SS", "601088.SS", "600690.SS",
+    "601766.SS", "600031.SS", "601985.SS", "600406.SS", "601100.SS", "600887.SS",
+    "601633.SS", "600745.SS", "601877.SS", "600196.SS", "601689.SS", "600346.SS",
+    "601225.SS", "600660.SS", "601138.SS", "600438.SS", "601919.SS", "600570.SS",
+    "601601.SS", "600741.SS", "601336.SS", "600989.SS", "601658.SS", "600111.SS",
+    "601066.SS", "600837.SS", "601211.SS",
+    # 深市主板/创业板/科创板代表
+    "000001.SZ", "000858.SZ", "000333.SZ", "000651.SZ", "000725.SZ", "000063.SZ",
+    "000100.SZ", "000157.SZ", "000166.SZ", "000338.SZ", "000423.SZ", "000538.SZ",
+    "000568.SZ", "000596.SZ", "000625.SZ", "000661.SZ", "000776.SZ", "000792.SZ",
+    "000895.SZ", "000963.SZ", "002001.SZ", "002007.SZ", "002027.SZ", "002032.SZ",
+    "002049.SZ", "002050.SZ", "002120.SZ", "002142.SZ", "002179.SZ", "002230.SZ",
+    "002236.SZ", "002241.SZ", "002252.SZ", "002271.SZ", "002304.SZ", "002311.SZ",
+    "002352.SZ", "002371.SZ", "002410.SZ", "002415.SZ", "002460.SZ", "002466.SZ",
+    "002475.SZ", "002493.SZ", "002555.SZ", "002594.SZ", "002601.SZ", "002648.SZ",
+    "002714.SZ", "002812.SZ", "002841.SZ", "002916.SZ", "002920.SZ", "300014.SZ",
+    "300015.SZ", "300033.SZ", "300059.SZ", "300122.SZ", "300124.SZ", "300142.SZ",
+    "300274.SZ", "300308.SZ", "300316.SZ", "300347.SZ", "300408.SZ", "300413.SZ",
+    "300433.SZ", "300450.SZ", "300498.SZ", "300529.SZ", "300558.SZ", "300595.SZ",
+    "300601.SZ", "300628.SZ", "300661.SZ", "300750.SZ", "300760.SZ", "300782.SZ",
+    "300896.SZ", "300919.SZ", "300957.SZ", "300999.SZ", "688981.SS", "688012.SS",
+    "688008.SS", "688036.SS", "688111.SS", "688169.SS", "688187.SS", "688256.SS",
+    "688271.SS", "688303.SS", "688363.SS", "688396.SS", "688599.SS", "688777.SS",
+    "688041.SS", "688126.SS", "688223.SS", "688561.SS", "688766.SS", "688819.SS",
+]
+HK_UNIVERSE = [
+    "0700.HK", "0005.HK", "0941.HK", "1299.HK", "0388.HK", "0939.HK", "1398.HK",
+    "3988.HK", "2318.HK", "9988.HK", "3690.HK", "9618.HK", "1810.HK", "9888.HK",
+    "9999.HK", "0883.HK", "0857.HK", "0386.HK", "0001.HK", "0016.HK", "0011.HK",
+    "0012.HK", "0017.HK", "0002.HK", "0003.HK", "0006.HK", "0027.HK", "0066.HK",
+    "0101.HK", "0151.HK", "0175.HK", "0267.HK", "0288.HK", "0291.HK", "0322.HK",
+    "0669.HK", "0688.HK", "0762.HK", "0823.HK", "0868.HK", "0881.HK", "0960.HK",
+    "0968.HK", "0981.HK", "1038.HK", "1044.HK", "1088.HK", "1093.HK", "1109.HK",
+    "1113.HK", "1177.HK", "1211.HK", "1928.HK", "1997.HK", "2015.HK", "2020.HK",
+    "2269.HK", "2313.HK", "2319.HK", "2331.HK", "2382.HK", "2388.HK", "2628.HK",
+    "2688.HK", "2899.HK", "3692.HK", "6618.HK", "6690.HK", "6862.HK", "9633.HK",
+    "9961.HK", "1929.HK", "1099.HK", "0144.HK", "0135.HK", "0083.HK", "0241.HK",
+    "0293.HK", "0836.HK",
+]
+
+_CN_CACHE = Path(config.CACHE_DIR) / "universe_cn.json"
+_HK_CACHE = Path(config.CACHE_DIR) / "universe_hk.json"
+
+# 东财 clist 免费接口（无需 key）：沪深 A 股 / 港股主板清单
+_EM_CLIST = ("https://push2.eastmoney.com/api/qt/clist/get"
+             "?pn=1&pz={pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs={fs}&fields=f12")
+_EM_FS_CN = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"   # 深A(主板+创业板)+沪A(主板+科创板)
+_EM_FS_HK = "m:128+t:3,m:128+t:4,m:128+t:1,m:128+t:2"  # 港股主板
+
+
+def _fetch_em_clist(fs: str, code2ticker, min_n: int, timeout: int = 25) -> list[str]:
+    """东财 clist 全量清单拉取（分页 pz=5000 单页覆盖）。"""
+    url = _EM_CLIST.format(fs=fs, pz=6000)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        blob = json.loads(resp.read().decode("utf-8", errors="replace"))
+    diff = ((blob.get("data") or {}).get("diff")) or []
+    tickers = [code2ticker(str(d.get("f12", ""))) for d in diff]
+    out = sorted({t for t in tickers if t})
+    if len(out) < min_n:
+        raise RuntimeError(f"东财清单数量异常（{len(out)} < {min_n}）")
+    return out
+
+
+def fetch_cn_universe(timeout: int = 25) -> list[str]:
+    """沪深 A 股全量清单（东财免费源，约 5000+ 只；yahoo 风格后缀）。"""
+    def c2t(code: str) -> str | None:
+        if not code:
+            return None
+        if code.startswith(("60", "68", "11", "5")):
+            return f"{code}.SS"
+        if code.startswith(("00", "30", "12", "15")):
+            return f"{code}.SZ"
+        return None
+    return _fetch_em_clist(_EM_FS_CN, c2t, 4000, timeout)
+
+
+def fetch_hk_universe(timeout: int = 25) -> list[str]:
+    """港股主板全量清单（东财免费源；代码补零至 4 位 + .HK）。"""
+    def c2t(code: str) -> str | None:
+        if not code or not code.isdigit():
+            return None
+        return f"{int(code):04d}.HK"
+    return _fetch_em_clist(_EM_FS_HK, c2t, 1500, timeout)
+
+
+def _load_market_full(market_id: str, fetch, cache: Path,
+                      fallback: list[str], min_n: int) -> tuple[list[str], str]:
+    """全量清单：在线 → 缓存（7天） → 内嵌兜底（复刻 US 两级模式）。"""
+    try:
+        tickers = fetch()
+        if len(tickers) >= min_n:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps({"ts": time.time(), "tickers": tickers}))
+            logger.info("%s 全量清单下载成功: %d 只（已缓存）", market_id, len(tickers))
+            return tickers, "eastmoney"
+    except Exception as exc:
+        logger.warning("%s 全量清单下载失败: %s", market_id, exc)
+    if cache.exists():
+        try:
+            blob = json.loads(cache.read_text())
+            age = time.time() - blob.get("ts", 0)
+            if age < _FULL_TTL_S and len(blob.get("tickers", [])) >= min_n:
+                logger.info("使用缓存 %s 清单: %d 只（缓存 %.1f 天）",
+                            market_id, len(blob["tickers"]), age / 86400)
+                return blob["tickers"], "cache"
+        except Exception:
+            pass
+    logger.warning("%s 清单不可用，回退内嵌池（%d 只）", market_id, len(fallback))
+    return list(dict.fromkeys(fallback)), "fallback"
+
+
+def load_market_universe(market_id: str, mode: str = "extended",
+                         file_path: str | None = None) -> tuple[list[str], str]:
+    """CN/HK 股票池加载。返回 (tickers, source)。
+
+    full → 东财全量清单（两级拉取模式复刻 US：清单缓存 + 内嵌兜底）；
+    其他模式 → 内嵌演示池（demo/冒烟默认）。
+    """
+    mid = (market_id or "").lower()
+    if mid not in ("cn", "hk"):
+        raise ValueError(f"load_market_universe 仅支持 cn/hk: {market_id}")
+    if file_path:
+        return load_universe("file", file_path), "file"
+    embedded = CN_UNIVERSE if mid == "cn" else HK_UNIVERSE
+    if mode == "full":
+        if mid == "cn":
+            return _load_market_full(mid, fetch_cn_universe, _CN_CACHE,
+                                     embedded, 4000)
+        return _load_market_full(mid, fetch_hk_universe, _HK_CACHE,
+                                 embedded, 1500)
+    return list(dict.fromkeys(embedded)), "embedded"

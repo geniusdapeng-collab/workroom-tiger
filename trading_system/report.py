@@ -27,13 +27,48 @@ def to_markdown(result: PipelineResult, out_dir: str = config.REPORTS_DIR) -> st
     return str(path)
 
 
+def _debate_card_section(ticker: str, debate: dict) -> str:
+    """交易卡片"第六段：多空辩论证据"（v6.3 S2）。
+
+    三种状态：有证据 → 渲染证据；触发但 LLM 透传 → 标注"本轮无辩论证据"；
+    未触发（灰区外）→ 空串（不渲染）。
+    """
+    ev = (debate.get("evidence") or {}).get(ticker)
+    if ev:
+        bull = "；".join(ev.get("bull_points") or []) or "—"
+        bear = "；".join(ev.get("bear_points") or []) or "—"
+        fals = "；".join(ev.get("falsification_conditions") or []) or "—"
+        return (
+            f"  多空辩论证据（第六段，仅供复核，不影响评分与闸门）:\n"
+            f"    多头论据: {bull}\n"
+            f"    空头论据: {bear}\n"
+            f"    裁决: {ev.get('coordinator_verdict', '存疑')}"
+            f"（{ev.get('verdict_reason', '')}）\n"
+            f"    证伪条件: {fals}"
+        )
+    if ticker in (debate.get("triggered") or []):
+        if debate.get("status") == "passthrough":
+            return "  多空辩论证据（第六段）: 本轮无辩论证据（LLM 不可用，红线透传兜底）"
+        return "  多空辩论证据（第六段）: 本轮无有效辩论产出（已如实记录）"
+    return ""
+
+
 def render_markdown(r: PipelineResult) -> str:
     m = r.mrs
+    mk = r.raw.get("market") or {}
+    mk_grad = r.raw.get("market_grad") or {}
     lines: list[str] = []
-    lines.append(f"# AI 短线美股交易日报 — {r.trade_date}")
+    lines.append(f"# AI 短线{mk.get('short_name', '美股')}交易日报 — {r.trade_date}")
     lines.append("")
     lines.append(f"> 数据源: {r.provider} ｜ 股票池: {r.raw.get('universe_mode')} "
                  f"（覆盖 {r.raw.get('data_coverage')}）｜ 耗时 {r.raw.get('elapsed_s')}s")
+    if mk:
+        grad_txt = ("标准通道已开放" if mk_grad.get("graduated", True)
+                    else f"新市场验证期（{mk_grad.get('settled', 0)}"
+                         f"/{mk_grad.get('required', 50)}）·强制轻仓")
+        lines.append(f"> 市场: **{mk.get('name')}**（{mk.get('market_id')} ｜ "
+                     f"{mk.get('timezone')} ｜ 结算 {mk.get('settlement')} ｜ "
+                     f"{mk.get('limit_note')}）｜ 通道状态: {grad_txt}")
     lines.append("")
 
     # ---- 老板版四行看板（白皮书 §2.7）----
@@ -128,14 +163,25 @@ def render_markdown(r: PipelineResult) -> str:
     # ---- 交易卡片 ----
     lines.append("## 七、风控放行与交易卡片")
     lines.append("")
+    debate = r.raw.get("debate", {}) or {}
     if r.picks:
         for p in r.picks:
             lines.append("```")
             lines.append(p.card)
+            # v6.3 S2：交易卡片"第六段：多空辩论证据"（只读证据附加，
+            # 辩论绝不修改任何分数与闸门输出；LLM 透传时如实标注）
+            sec = _debate_card_section(p.ticker, debate)
+            if sec:
+                lines.append(sec)
             lines.append("```")
             lines.append("")
     else:
         lines.append("无放行标的。")
+        lines.append("")
+    if debate.get("status") == "passthrough" and debate.get("triggered"):
+        lines.append("> 本轮触发多空辩论的标的（"
+                     + "、".join(debate["triggered"])
+                     + "）因 LLM 不可用走红线透传：本轮无辩论证据。")
         lines.append("")
 
     # ---- 备注与缺失披露 ----
@@ -147,7 +193,96 @@ def render_markdown(r: PipelineResult) -> str:
                  "LLM 不可用时按红线透传并剔除再归一化，绝不用规则估算。")
     lines.append("- 微观（GEX/0DTE/Skew）免费源缺失：缺失因子在聚合时【剔除并再归一化】，"
                  "期权维度（PCR/IV 分位）随信号日记逐日积累满 10 个样本后自动启用真实评分。")
+    lines.append(f"- 多空辩论证据层（v6.3 S2）：仅灰区标的触发（每日上限 "
+                 f"{config.DEBATE_MAX_PER_DAY} 场，HOLD 区高分线 "
+                 f"{config.DEBATE_HOLD_TSS_MIN}），辩论结论只作交易卡片第六段证据，"
+                 "不修改任何分数与闸门输出；回测路径禁用。")
+    # ---- S4 多市场披露：市场标识 / 基准缺失 / 板块广度缺失 / 合规校验 / 链覆盖率 ----
+    if mk:
+        lines.append("")
+        lines.append("### 多市场披露（S4：框架不变、输入替换）")
+        lines.append("")
+        bmk = mk.get("benchmarks", {})
+        lines.append(f"- 基准组：指数 {bmk.get('index_label', bmk.get('index'))}"
+                     f"（{bmk.get('index')}）｜ 利率 {bmk.get('rate_label', bmk.get('rate'))}"
+                     f"（{bmk.get('rate')}）｜ 波动率 {bmk.get('vol_label', bmk.get('vol'))}"
+                     f"（{bmk.get('vol')}）")
+        fresh = r.raw.get("freshness") or {}
+        if fresh.get("benchmark_missing"):
+            lines.append(f"- ⚠️ 基准缺失（剔除再归一化，不钉中性分）: "
+                         f"{'、'.join(fresh['benchmark_missing'])}")
+        if fresh.get("sector_breadth_missing"):
+            lines.append(f"- ⚠️ {fresh['sector_breadth_missing']}")
+        sf = mk.get("scan_filters", {})
+        lines.append(f"- 扫描硬过滤：价格 ≥ {sf.get('min_price')} {sf.get('currency')} ｜ "
+                     f"20 日成交额 ≥ {sf.get('min_adv'):,} {sf.get('currency')}")
+        lines.append(f"- 产业链映射覆盖率（本市场）: {r.raw.get('chain_coverage', '—')}")
+        comp = r.raw.get("compliance") or []
+        violations = [c for c in comp if not c.get("allowed")]
+        rules = "、".join(mk.get("compliance_rules", []))
+        lines.append(f"- 合规规则（围栏前置）: {rules}")
+        if violations:
+            for v in violations:
+                lines.append(f"  - ❌ {v.get('ticker')} {v.get('side')}: "
+                             f"{v.get('reason')}（{v.get('rule_id')}）")
+        else:
+            lines.append(f"  - 本轮校验 {len(comp)} 笔买入请求，全部放行（无违反项）")
+        if not mk_grad.get("graduated", True):
+            lines.append(f"- D7 轻仓通道：新市场验证期（{mk_grad.get('settled', 0)}"
+                         f"/{mk_grad.get('required', 50)}），全部放行标的强制轻仓 "
+                         f"×{sum(config.MARKET_LIGHT_SIZE) / 2:.2f}"
+                         "（满 50 笔结算且 DSR 过关才开放标准通道，门槛见 "
+                         "config.MARKET_GRADUATION）")
     lines.append("")
+
+    # ---- 数据可信度与交叉验证（v6.3 S3 数据层披露：规则层调度，不引入 LLM）----
+    cv = r.raw.get("cross_validation") or {}
+    if cv:
+        lines.append("### 数据可信度与交叉验证（S3 Tiger Data Fabric）")
+        lines.append("")
+        lines.append(f"- 交叉验证统计：总文档 **{cv.get('total', 0)}** 篇 ｜ "
+                     f"关键事件类 {cv.get('key_event_docs', 0)} 篇 ｜ "
+                     f"通过（≥2源且至少一个≤T2）**{cv.get('corroborated', 0)}** 篇 ｜ "
+                     f"被降级 **{cv.get('downgraded', 0)}** 篇")
+        lines.append(f"- 其中 LLM 语义标注缺失记未验证 {cv.get('llm_missing', 0)} 篇（红线透传，不阻塞管线）；"
+                     f"缺发布时间（Point-in-Time）{cv.get('missing_published_at', 0)} 篇")
+        lines.append("- 口径：来源可信度 T0 监管原文 > T1 主流媒体 > T2 聚合门户 > T3 社媒"
+                     "（config.SOURCE_TIERS/DOMAIN_TIERS 可覆盖）；被降级文档不删除，"
+                     "决策侧仅作背景参考，叙事/舆情打分只使用 corroborated=True 集合。")
+        ah = r.raw.get("ah_topics_enabled", False)
+        lines.append(f"- A/H 市场情报主题（S4 铺路）：**{'已启用' if ah else '默认关闭'}**"
+                     f"（config.AH_TOPICS_ENABLED={'True' if ah else 'False'}，"
+                     "关闭时不产生任何抓取调用）。")
+        lines.append("")
+
+    # ---- 统计校准（v6.3 S2 迭代层披露：只进报告，不改任何闸门）----
+    cal = r.raw.get("calibration", {}) or {}
+    if cal:
+        lines.append("### 统计校准（迭代层 · 只进报告不改闸门）")
+        lines.append("")
+        if cal.get("status") == "skipped":
+            lines.append(f"- 本轮校准环节失败，跳过披露并记录：{cal.get('reason', '')}")
+        else:
+            lines.append(f"- {cal.get('disclosure', '')}")
+            lines.append("")
+            lines.append("| TSS 分桶 | 样本数 | 实际胜率 | Wilson 95% 区间 | 期望R |")
+            lines.append("|---|---|---|---|---|")
+            for b in cal.get("buckets", []):
+                wr = f"{b['win_rate']:.1%}" if b.get("win_rate") is not None else "—"
+                interval = (f"[{b['wilson'][0]:.1%}, {b['wilson'][1]:.1%}]"
+                            if b.get("n") else "—")
+                ar = b["avg_r"] if b.get("avg_r") is not None else "—"
+                lines.append(f"| {b['bucket']} | {b['n']} | {wr} | {interval} | {ar} |")
+            if cal.get("monotonic") is not None:
+                lines.append("")
+                lines.append(f"- 分数-结果单调性：{'✅ 成立' if cal['monotonic'] else '⚠️ 不成立（需复盘）'}"
+                             f"（样本 {cal.get('n')} ≥ {cal.get('min_samples')}，输出校准曲线点）")
+        lines.append("")
+        lines.append(f"> 口径披露：样本门槛 {config.CALIBRATION_MIN_SAMPLES} 条"
+                     f"（config.CALIBRATION_MIN_SAMPLES），样本库 "
+                     f"{config.CALIBRATION_SAMPLES_PATH} 属会计账白名单，"
+                     "与 journal 同级，禁止进入决策输入。")
+        lines.append("")
 
     # ---- 科技产业链专项子集群（标准化汇入信号）----
     tech = r.raw.get("tech_signals", [])

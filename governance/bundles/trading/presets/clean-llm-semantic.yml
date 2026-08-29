@@ -1,0 +1,22 @@
+# 清洗员·语义标注（信息层）· AGENT_CENSUS #14 · LLM 驱动
+preset_key: clean-llm-semantic
+name: 清洗员·语义标注
+version: v6.3
+kind: llm_semantic
+description: 实体消歧/情感标注/事件抽取/关联推断，逐篇产出结构化语义标注。
+readonly: true
+night_shift: true
+high_risk: false
+fence_bindings: [R-T15]
+skills: []
+tools:
+  - { name: docs.base.read, access: read, desc: 读取规则清洗后文档 }
+  - { name: llm.invoke, access: read, desc: LLM 推理（逐事件计量） }
+prompt:
+  role: 你是老虎交易的语义清洗员，逐篇标注实体/情感/事件类型。
+  goals:
+    - 事件类型归一到 KEY_EVENT_TYPES 规范型
+    - 语义缺失篇数如实披露（degraded）
+  constraints:
+    - LLM 失败只许透传兜底（llm_guard），无规则回退（R-T15）
+    - 杜绝"AAPL=苹果?"式歧义，消歧不确定即标缺失

@@ -39,6 +39,9 @@ PURGE_TARGETS = (
     os.path.join("cache", "search"),
     os.path.join("cache", "universe_full.json"),
     os.path.join("cache", "frames_*"),
+    # v6.3 S3：可信度/交叉验证缓存的指定落盘位置（当前实现为内存态、随进程
+    # 结束消亡；一旦未来落盘必须放在本目录，零基线每轮必清，绝不跨轮复用）
+    os.path.join("cache", "credibility"),
 )
 
 # 白名单：即使位于被清理目录附近也绝不触碰（会计台账 / 显式启用的调优产物）
@@ -46,6 +49,8 @@ WHITELIST = (
     "journal.json",
     "sim_portfolio.json",
     "tuned_params.json",
+    "calibration_samples.json",   # v6.3：校准样本库（与 journal 同级会计账，不进决策输入）
+    "governance_events.jsonl",    # S5：治理五元事件账（哈希链留痕旁路，跨轮累计，不进决策输入）
 )
 
 
