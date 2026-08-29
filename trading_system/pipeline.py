@@ -62,12 +62,14 @@ def _health_score(name: str) -> float:
 
 
 def _channel_chain() -> list:
-    """降级通道群（v6.2 七环制），按本轮健康分自适应排序：
-    tencent(腾讯) / sina(新浪) / eastmoney(东财) 中国免费源（无需 key）
+    """降级通道群（v6.2 七环制 + v3 官方宏观源），按本轮健康分自适应排序：
+    official(FRED/CBOE 官方宏观基准：利率/波动率)
+    → tencent(腾讯) / sina(新浪) / eastmoney(东财) 中国免费源（无需 key）
     → agentgw(yahoo_finance 服务端) → ifind_gw(同花顺服务端) → tiingo(key)。
     完整降级链：yahoo → stooq → 本通道群。"""
     chain: list = []
-    for cls_path in (("tencent", "TencentProvider"),
+    for cls_path in (("official", "OfficialMacroProvider"),
+                     ("tencent", "TencentProvider"),
                      ("sina", "SinaProvider"),
                      ("eastmoney", "EastMoneyProvider"),
                      ("agentgw", "AgentGwProvider"),
