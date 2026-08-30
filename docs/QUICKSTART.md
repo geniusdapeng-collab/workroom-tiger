@@ -32,14 +32,31 @@ python3 main.py --mode daily --universe extended \
 
 系统对你的网络环境自适应：`doctor.sh` 会给出源可达性画像；不可达源自动降级/熔断，**拿不到真数据的环节诚实透传，绝不编造**。
 
-### LLM 配置（点亮全部能力）
+### LLM 配置（双模驱动，点亮全部能力）
 
-无 LLM 也能跑（语义环节透传），但板块叙事、多空辩论、舆情/风险推断会缺失。配置任一：
+无 LLM 也能跑（语义环节透传），但板块叙事、多空辩论、舆情/风险推断会缺失。支持两种方式：
+
+**方式 a：自有 API（任何 OpenAI 兼容端点）**
 
 ```bash
-export KIMI_API_KEY=sk-...          # Kimi（默认网关 kimi-k2.5）
-# 或放置 ~/.kimi/agent-gw.json      # agent-gw SDK 凭据
+export LLM_BACKEND=api
+export LLM_BASE_URL=https://api.deepseek.com/v1   # DeepSeek/Kimi/Qwen/GLM/自部署 vLLM 均可
+export LLM_API_KEY=sk-...
+export LLM_MODEL=deepseek-chat
+# 或 Kimi 原通道：export KIMI_API_KEY=sk-...（或 ~/.kimi/agent-gw.json）
 ```
+
+**方式 b：本地 AI Coding Agent 主力模型（开发者本地零配置）**
+
+开发者在本地用 AI Coding Agent 运行时，系统自动探测本地模型端点：
+
+```bash
+export LLM_BACKEND=local      # 或 auto（默认，自动探测）
+# 探测顺序：LLM_LOCAL_URL（显式指定）→ Ollama localhost:11434 → LM Studio localhost:1234 → OPENAI_BASE_URL
+# 例：显式指定：export LLM_LOCAL_URL=http://localhost:11434/v1 LLM_LOCAL_MODEL=qwen3:32b
+```
+
+默认 `LLM_BACKEND=auto`：kimi → api → local 依次探测；全部不可用时按红线透传（报告如实标注），**系统绝不用规则伪造语义分**。
 
 ### 每日自动运行（cron）
 
@@ -57,20 +74,29 @@ python3 main.py --market cn --mode daily --html     # A股（轻仓验证期 0/5
 python3 main.py --market hk --mode daily --html     # 港股（轻仓验证期 0/50）
 ```
 
-## B. 全栈（内核 + WorkLoom 治理底座）
+## B. 全栈（内核 + WorkLoom 治理底座）✅ 已落地
 
-> 现状诚实说明：治理底座（governance/，TypeScript）代码随仓库分发，内核已把每个动作写成五元事件流（`reports/governance_events.jsonl`，SHA-256 哈希链），`site/governance.html` 可直接读取展示。**TS 底座的完整接线（事件入库、审批卡片、夜班编排）是下一阶段工作**，当前请勿在生产依赖它。
-
-全栈路径（预览）：需要 Node ≥24、pnpm 10、PostgreSQL 17（docker-compose 已带）：
+一条命令起全栈（需要 Node ≥24、pnpm 10、Docker）：
 
 ```bash
-cd governance
-docker compose up -d          # PostgreSQL 17 + pgvector
-pnpm install && pnpm db:migrate && pnpm db:seed
-pnpm dev                      # server :8787 + web :5173
+bash scripts/stack_setup.sh
 ```
 
-行业角色包在 `governance/bundles/trading/`（33 个数字员工 presets、三层围栏包、6 个 skills）。
+脚本完成：依赖安装 → PostgreSQL 17 容器 → 迁移 → 演示种子 + **trading bundle 种子**（33 数字员工 presets、18 条三层围栏、6 个官方技能、7 个三市/夜班/WFA 触发器）→ 内核事件入库 → 启动指引。
+
+落地核验（2026-08-30 实测）：
+
+| 项 | 结果 |
+|---|---|
+| 底座测试套件 | 全绿（Node 24 + pnpm 10） |
+| 内核事件入库 | `governance/scripts/ingest-tiger-events.ts`：30 条五元事件幂等入库（重复执行全量去重） |
+| 哈希链 | `verify-chain.ts`：130 条事件逐条重算一致（双链：内核 JSONL 链 + 底座 DB 链，事件内 `decision.kernel_hash` 互验） |
+| trading bundle | 33 agents / 18 fence_rules / 6 skills / 7 triggers 落库可查 |
+| 服务 | server :8787（/health ✓）+ web :5173 |
+
+日常衔接：内核每次运行后执行 `cd governance && pnpm tsx --env-file=.env scripts/ingest-tiger-events.ts` 增量入库（幂等，可入 cron）。
+
+> 诚实边界：内核 → 底座的事件流已双向可验；底座的审批卡片/夜班自治执行**编排**（Quest 驱动内核 pipeline）是下一阶段，当前三市日程由 cron 触发器登记 + `scripts/install_cron.sh` 驱动。
 
 ## 合规声明
 

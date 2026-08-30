@@ -30,16 +30,20 @@
 ## 快速开始（交易内核）
 
 ```bash
-pip install -r requirements.txt
-python3 -m pytest tests/ -q          # 252 项测试
+bash scripts/setup.sh                # 一键安装+自检（或 pip install -r requirements.txt）
+python3 -m pytest tests/ -q          # 272 项测试
 python3 main.py --demo               # 离线演示（合成数据，端到端 21 环节）
 python3 main.py --universe full --top 30 --picks 8   # 生产模式（每日全市场）
+bash scripts/stack_setup.sh          # 全栈：+ WorkLoom 治理底座（Node≥24/Docker）
 
 # S6 复盘闭环与审批流
 python3 main.py --review-list                            # 查看 WFA 参数提案
 python3 main.py --review-approve <id>                    # 批准 → 次日生效并披露
 python3 main.py --review-reject <id> --reason "..."      # 驳回（原因必填）
 ```
+
+
+LLM 双模驱动：自有 API（`LLM_BACKEND=api`，任何 OpenAI 兼容端点）或本地 Agent 模型（`LLM_BACKEND=local`，自动探测 Ollama/LM Studio）；不配则红线透传、绝不伪造语义分。详见 [docs/QUICKSTART.md](docs/QUICKSTART.md)。
 
 ## 白皮书十条铁律（全系统最高纪律，任何升级不得违反）
 
