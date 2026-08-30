@@ -34,8 +34,25 @@ export interface QuestStep {
   label: string;
 }
 
+/** 老虎交易夜班编排模板：自检 → 内核全链路 → 事件入库 → 官网发布（围栏 R-T0 自治窗口） */
+function tradingNightlySteps(): QuestStep[] {
+  return [
+    { stepId: "t1", action: "kernel.doctor", objectType: "report", tool: "kernel.doctor",
+      params: {}, context: { stage: "paper" }, label: "数据源可达性自检" },
+    { stepId: "t2", action: "pipeline.daily", objectType: "report", tool: "pipeline.daily",
+      params: {}, context: { stage: "paper" }, label: "内核全链路（扫描→六层决策→模拟盘→日报）" },
+    { stepId: "t3", action: "events.ingest", objectType: "report", tool: "events.ingest",
+      params: {}, context: { stage: "paper" }, label: "内核五元事件幂等入库" },
+    { stepId: "t4", action: "site.publish", objectType: "report", tool: "site.publish",
+      params: {}, context: { stage: "paper" }, label: "官网发布最新日报" },
+  ];
+}
+
 /** 演示计划模板（按目标关键词匹配；真实 LLM 规划在 dsh agent loop 融合期接入） */
 export function planQuest(goal: string, preset: AssembledPreset): QuestStep[] {
+  if (/老虎|交易|pipeline|夜班|trading/.test(goal)) {
+    return tradingNightlySteps();
+  }
   if (/调价|房价|价格/.test(goal)) {
     return [
       { stepId: "s1", action: "competitor.fetch", objectType: "channel", tool: "competitor.fetch", params: {}, label: "采集竞对价格卡" },

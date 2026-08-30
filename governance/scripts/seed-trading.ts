@@ -52,9 +52,11 @@ async function main() {
     `INSERT INTO tenants (id, name) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`,
     [TENANT_ID, TENANT_NAME]);
   await q(
-    `INSERT INTO workspaces (id, tenant_id, slug, name, industry)
-     VALUES ($1,$2,$3,$4,'trading') ON CONFLICT (id) DO NOTHING`,
+    `INSERT INTO workspaces (id, tenant_id, slug, name, industry, stage)
+     VALUES ($1,$2,$3,$4,'trading','paper') ON CONFLICT (id) DO NOTHING`,
     [WS_ID, TENANT_ID, WS_SLUG, WS_NAME]);
+  // 阶段三要素之一（装配 L3.7）：已存在工作区也确保 stage 就位
+  await q(`UPDATE workspaces SET stage='paper' WHERE id=$1 AND (stage IS NULL OR stage='')`, [WS_ID]);
   console.log("✓ 租户与工作区：tiger / 老虎交易工作台");
 
   // 人类成员（投资者 owner）

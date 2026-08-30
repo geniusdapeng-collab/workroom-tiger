@@ -55,5 +55,8 @@
 - [x] bundles/trading 角色包（S5：`governance/bundles/trading/` 六装配槽；根目录 `bundles/trading/` 保留指向性说明）
 - [x] 复盘闭环（S6：`trading_system/review/` 诸葛团队——日度归因+违规六条（附录D）/周度体检三档/月度 WFA 提案（DSR 不显著自动 reject）；`review.daily` 注册进 STEP_REGISTRY 延迟环节；审批流 `--review-list/--review-approve/--review-reject`（驳回原因必填），approve 次日生效并披露（复用 --use-tuned 纪律）；纪要 `reports/复盘_<日期>.md` 进治理事件）
 - [x] 双语文档（S6：`README_EN.md`、`docs/PROJECT_INTRO.md` / `docs/PROJECT_INTRO_EN.md`）
-- [ ] Quest 三市编排（后续阶段）
-- [ ] site 责任界面（后续阶段）
+- [x] site 责任界面（S5：`site/governance.html`——决策包/回放验真/围栏日志）
+- [x] 全栈落地（2026-08-30）：`governance/scripts/seed-trading.ts`（33 Agent/18 围栏/6 技能/7 触发器落库）+ `scripts/stack_setup.sh` 一键全栈
+- [x] 事件入库适配器（2026-08-30）：`governance/scripts/ingest-tiger-events.ts`（幂等，`decision.kernel_hash` 双链互验；全库 130 事件验链一致）
+- [x] **Quest 夜班编排**（2026-08-30）：`governance/scripts/quest-trading-nightly.ts`——自检→内核全链路→事件入库→官网发布，走 runQuest 围栏瀑布（R-T0 模拟盘自治窗口）+ 回执实证（无产物=未核实不得转完成）+ replay 幂等续跑；E2E：completed 4/4、replay 0.0 分钟全跳过、全库 173 事件验链一致；cron 已登记（scripts/install_cron.sh，22:00）
+- [ ] Quest 驱动实盘券商下单（实盘阶段，审批流阻塞式启用）

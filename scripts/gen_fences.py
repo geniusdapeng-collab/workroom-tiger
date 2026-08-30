@@ -49,6 +49,16 @@ def build_rules() -> list[dict]:
     lp = config.LIGHT_PROBE
     sr = lp["size_ratio"]
     rules: list[dict] = [
+        # ---- 自治层（auto）：夜班/盘前盘后编排动作，模拟盘阶段自治；
+        # 实盘阶段由客户 patch 升级为 review（基线单调守卫只可加严）----
+        dict(rule_id="R-T0", name="编排自治动作（模拟盘阶段）", level="auto",
+             is_baseline=True,
+             match={"object_types": ["report", "portfolio"],
+                    "actions": ["kernel.doctor", "pipeline.daily",
+                                "events.ingest", "site.publish"]},
+             when="context.stage == 'paper'",
+             source="UPGRADE_PLAN_v3 §8 裁决 R1（模拟盘全 AI 掌控，review 不阻塞）",
+             note="夜班 Quest 编排内核管线的自治窗口；stage!=paper 时落 default_level=review"),
         # ---- 基线层（block，不可改）----
         dict(rule_id="R-T1", name="结构/时间止损触及必执行", level="block",
              is_baseline=True,

@@ -5,11 +5,22 @@
 # DSL 求值语义（对齐 hotel 围栏）：match 命中后求值 when 表达式（沙箱，禁任意代码）；
 #   命中 → 按 level 判定；block 优先于 review 优先于 auto（deny 优先并集求值）；
 #   写类动作无任何规则命中 → 按 default_level 处理；求值异常 → 按 block（宁可错杀）。
-# 生成记录：config 哈希 b5fa70acd720ed1bcfbed6142939bc3a3cd0b7a2c40ebbf5226384262f35260b · 基线规则 15 条 · 生成时间 2026-08-29T14:02:24+00:00
+# 生成记录：config 哈希 217a73bd6195dc6f0dc67ae20d054a9c0c0a447c16da0c7b396d7126bcf774f6 · 基线规则 15 条 · 生成时间 2026-08-30T03:36:21+00:00
 version: trading-baseline/v1
 default_level: review
 rules:
   # ========== 第一层 · 基线层（block，不可改）：白皮书红线的机器翻译 ==========
+  # source: UPGRADE_PLAN_v3 §8 裁决 R1（模拟盘全 AI 掌控，review 不阻塞）
+  - rule_id: R-T0
+    name: 编排自治动作（模拟盘阶段）
+    level: auto
+    is_baseline: true
+    match:
+      object_types: [report, portfolio]
+      actions: [kernel.doctor, pipeline.daily, events.ingest, site.publish]
+    when: "context.stage == 'paper'"
+    note: 夜班 Quest 编排内核管线的自治窗口；stage!=paper 时落 default_level=review
+
   # source: 白皮书§10 止损纪律（时间止损窗口 config.TIME_STOP_BY_ATR=[(0.04, 7), (0.07, 6), (9.9, 5)]）
   - rule_id: R-T1
     name: 结构/时间止损触及必执行
@@ -164,7 +175,7 @@ rules:
     when: "context.data_all_down == true"
     note: 地基不牢评分皆是沙上之塔；带病产出 = 数据造假
 
-  # source: redline.STEP_REGISTRY（20 环节注册表）
+  # source: redline.STEP_REGISTRY（21 环节注册表）
   - rule_id: R-T15
     name: 全链路环节缺失
     level: block

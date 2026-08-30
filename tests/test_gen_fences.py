@@ -2,7 +2,7 @@
 
 ① 生成确定性：同 config 同 YAML（规则语义逐条一致）；
 ② config 改动 → --check 报漂移；
-③ 15 条基线规则全覆盖且 level=block，且每条带 config 来源注释（无手写阈值）。
+③ 16 条基线规则全覆盖且 level=block，且每条带 config 来源注释（无手写阈值）。
 """
 
 import importlib.util
@@ -36,13 +36,16 @@ def test_generation_deterministic():
 
 
 def test_baseline_rules_full_coverage_block():
-    """15 条基线规则全覆盖、全部 level=block、每条带 source 注释。"""
+    """16 条基线规则全覆盖、全部 level=block、每条带 source 注释。"""
     gen = _load_gen()
     rules = gen.build_rules()
     baseline = [r for r in rules if r["is_baseline"]]
-    assert len(baseline) == 15
-    assert [r["rule_id"] for r in baseline] == [f"R-T{i}" for i in range(1, 16)]
-    assert all(r["level"] == "block" for r in baseline)
+    assert len(baseline) == 16  # R-T0 自治层(auto) + R-T1~R-T15(block)
+    ids = [r["rule_id"] for r in baseline]
+    assert ids[0] == "R-T0" and ids[1:] == [f"R-T{i}" for i in range(1, 16)]
+    by_id = {r["rule_id"]: r for r in baseline}
+    assert by_id["R-T0"]["level"] == "auto"  # 夜班编排自治窗口（模拟盘）
+    assert all(r["level"] == "block" for r in baseline if r["rule_id"] != "R-T0")
     text = gen.render_yaml(rules, "H", "T")
     # 每条规则上方必须带 "# source:" 注释（config→fence 映射留痕，无手写阈值）
     lines = text.splitlines()

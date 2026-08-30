@@ -51,8 +51,92 @@ export const DEMO_TOOLS: Record<string, ToolFn> = {
   "content.publish": async (p) => maybeUnverified({ title: p.title, published: true }),
 };
 
+/* ================= 老虎交易 · 真实内核工具（L2 确定性适配器层） =================
+ * 与 demo 剧本不同：这些工具真实 spawn 交易内核（Python）与运维脚本，
+ * 回执位 receipt.synced 由「产物实证」决定——日报/结果 JSON/官网文件实际存在
+ * 且新鲜才标 synced:true（E3.7：无实证不得宣称完成）。
+ * 内核命令可用环境变量覆盖（验证/演示用）：
+ *   TIGER_KERNEL_CMD  默认 "python3 main.py --mode daily --universe extended --top 30 --picks 8 --html --out reports"
+ */
+import { execFile } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { promisify } from "node:util";
+import { join } from "node:path";
+
+const execFileP = promisify(execFile);
+const KERNEL_ROOT = process.env.TIGER_KERNEL_ROOT ?? join(process.cwd(), "..");
+const MAX_BUFFER = 16 * 1024 * 1024;
+
+function freshFile(path: string, maxAgeMin = 30): boolean {
+  try {
+    const st = statSync(path);
+    return Date.now() - st.mtimeMs < maxAgeMin * 60_000;
+  } catch { return false; }
+}
+
+async function sh(cmd: string, args: string[], cwd: string, timeoutMs: number) {
+  const { stdout, stderr } = await execFileP(cmd, args, {
+    cwd, timeout: timeoutMs, maxBuffer: MAX_BUFFER,
+    env: { ...process.env },
+  });
+  return { stdout: String(stdout), stderr: String(stderr) };
+}
+
+const KERNEL_CMD = (process.env.TIGER_KERNEL_CMD
+  ?? "python3 main.py --mode daily --universe extended --top 30 --picks 8 --html --out reports").split(" ");
+
+export const TRADING_TOOLS: Record<string, ToolFn> = {
+  /** 源可达性自检（doctor.sh 退出码即回执） */
+  "kernel.doctor": async () => {
+    const r = await sh("bash", ["scripts/doctor.sh"], KERNEL_ROOT, 180_000).catch((e) => ({ stdout: String(e), stderr: "" }));
+    const pass = !r.stdout.startsWith("Error") && !r.stdout.includes("存在硬阻断项");
+    return {
+      result: { pass, tail: r.stdout.split("\n").slice(-4) },
+      receipt: { synced: pass, verified_at: new Date().toISOString() },
+    };
+  },
+
+  /** 内核全链路（daily/premarket/intraday/demo，由 TIGER_KERNEL_CMD 决定） */
+  "pipeline.daily": async (p) => {
+    const outDir = String(p.out_dir ?? "reports");
+    const r = await sh(KERNEL_CMD[0]!, KERNEL_CMD.slice(1), KERNEL_ROOT, 3_600_000);
+    const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    const resultJson = join(KERNEL_ROOT, outDir, `result_${today}.json`);
+    const reportHtml = join(KERNEL_ROOT, outDir, `日报_${today}.html`);
+    const synced = freshFile(resultJson, 24 * 60) && freshFile(reportHtml, 24 * 60);
+    return {
+      result: { exit_ok: true, result_json: existsSync(resultJson), report_html: existsSync(reportHtml),
+                tail: r.stdout.split("\n").slice(-6) },
+      receipt: { synced, snapshot_uri: reportHtml, verified_at: new Date().toISOString() },
+    };
+  },
+
+  /** 内核事件幂等入库（ingest adapter 输出即回执） */
+  "events.ingest": async () => {
+    const r = await sh("pnpm", ["tsx", "--env-file=.env", "scripts/ingest-tiger-events.ts"],
+                       join(KERNEL_ROOT, "governance"), 300_000);
+    const m = /新增 (\d+)，幂等跳过 (\d+)，失败 (\d+)/.exec(r.stdout);
+    const synced = !!m && m[3] === "0";
+    return {
+      result: { ingested: m?.[1] ?? "0", deduped: m?.[2] ?? "0", failed: m?.[3] ?? "?" },
+      receipt: { synced, verified_at: new Date().toISOString() },
+    };
+  },
+
+  /** 官网发布（site/index.html 新鲜度即回执） */
+  "site.publish": async () => {
+    const r = await sh("bash", ["scripts/publish_site.sh"], KERNEL_ROOT, 60_000);
+    const site = join(KERNEL_ROOT, "site/index.html");
+    const synced = freshFile(site, 10) || r.stdout.includes("已发布");
+    return {
+      result: { published: synced, tail: r.stdout.trim().split("\n")[0] },
+      receipt: { synced, snapshot_uri: "site/index.html", verified_at: new Date().toISOString() },
+    };
+  },
+};
+
 export async function executeTool(name: string, params: Record<string, unknown>): Promise<ToolResult> {
-  const fn = DEMO_TOOLS[name];
-  if (!fn) throw new Error(`工具 ${name} 未注册（演示面只含 L3 确定性剧本工具）`);
+  const fn = TRADING_TOOLS[name] ?? DEMO_TOOLS[name];
+  if (!fn) throw new Error(`工具 ${name} 未注册（演示面只含 L3 确定性剧本工具 + 老虎交易内核工具）`);
   return fn(params);
 }

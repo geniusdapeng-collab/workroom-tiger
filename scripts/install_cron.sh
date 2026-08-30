@@ -14,8 +14,14 @@ CMD="cd $ROOT && /usr/bin/env python3 main.py --universe full --top 30 --picks 8
 >> $LOG_DIR/cron.log 2>&1"
 
 LINE="$MIN $HOUR * * 1-5 $CMD"
-( crontab -l 2>/dev/null | grep -v "ai-stock-trading-system\|main.py --universe full" ; \
-  echo "# ai-stock-trading-system 每日扫描（$(date +%F) 安装）" ; echo "$LINE" ) | crontab -
+# 夜班 Quest 编排（22:00，WorkLoom 围栏自治驱动：自检→全链路→事件入库→官网发布）
+NODE_BIN=$(dirname "$(command -v node)")
+QCMD="cd $ROOT/governance && /usr/bin/env PATH=$NODE_BIN:/usr/local/bin:\$PATH TIGER_KERNEL_CMD='python3 main.py --mode daily --universe extended --top 30 --picks 8 --html --out reports' pnpm tsx --env-file=.env scripts/quest-trading-nightly.ts >> $LOG_DIR/quest.log 2>&1"
+QLINE="0 22 * * * $QCMD"
+
+( crontab -l 2>/dev/null | grep -v "ai-stock-trading-system\|main.py --universe full\|quest-trading-nightly" ; \
+  echo "# ai-stock-trading-system 每日扫描（$(date +%F) 安装）" ; echo "$LINE" ; \
+  echo "# tiger-trading 夜班 Quest 编排（22:00）" ; echo "$QLINE" ) | crontab -
 
 echo "已安装每日调度：周一至周五 $RUN_AT 执行"
 echo "命令: $CMD"

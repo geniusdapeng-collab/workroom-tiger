@@ -96,7 +96,7 @@ bash scripts/stack_setup.sh
 
 日常衔接：内核每次运行后执行 `cd governance && pnpm tsx --env-file=.env scripts/ingest-tiger-events.ts` 增量入库（幂等，可入 cron）。
 
-> 诚实边界：内核 → 底座的事件流已双向可验；底座的审批卡片/夜班自治执行**编排**（Quest 驱动内核 pipeline）是下一阶段，当前三市日程由 cron 触发器登记 + `scripts/install_cron.sh` 驱动。
+> Quest 夜班编排已落地（2026-08-30）：`governance/scripts/quest-trading-nightly.ts` 每晚 22:00 由 cron 触发，走围栏瀑布自治执行「自检→内核全链路→事件入库→官网发布」，逐步回执实证、断点幂等续跑。剩余边界：Quest 驱动**实盘券商下单**（实盘阶段，审批流阻塞式启用）。
 
 ## 合规声明
 
