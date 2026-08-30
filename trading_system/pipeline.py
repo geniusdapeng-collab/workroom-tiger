@@ -87,12 +87,51 @@ def _channel_chain() -> list:
     return chain
 
 
+def _series_stale(out, max_lag_days: int = 5) -> bool:
+    """宏观序列陈旧判定（v3 修复：tencent VIX 曾返回 4 个月前的陈旧序列）。
+    仅对带 DatetimeIndex 的 pd.Series 生效；末根距今 >max_lag_days 个自然日
+    视为陈旧（容忍官方源自然滞后：FRED ~1 个交易日、周末/假期顺延，
+    5 个自然日足以覆盖，远小于"陈旧数月"的故障模式）。"""
+    try:
+        import pandas as pd
+        if not isinstance(out, pd.Series) or out.empty:
+            return False
+        idx = out.index
+        if not isinstance(idx, pd.DatetimeIndex):
+            return False
+        last = idx.max().to_pydatetime().date()
+        return (datetime.now().date() - last).days > max_lag_days
+    except Exception:
+        return False
+
+
+def _supports(provider, method: str) -> bool:
+    """能力感知（v3 修复）：provider 声明 CAPABILITIES 时，不含该方法直接跳过，
+    避免"必然失败的调用"污染健康分与降级时延（如 official 不承接个股 OHLCV）。"""
+    caps = getattr(provider, "CAPABILITIES", None)
+    if caps is None:
+        # 未声明时按基类接口推断：rate_yield_for/vol_index_for 等非 OHLCV 方法
+        # 对所有 provider 视为支持（基类有默认实现）；未声明者不做裁剪。
+        return True
+    return method in caps
+
+
 def _single_with_fallback(provider, method: str, *args, **kwargs):
-    """单只/单序列拉取：yahoo → stooq → 服务端通道群（agentgw/ifind/tiingo）。"""
+    """单只/单序列拉取：yahoo → stooq → 服务端通道群（agentgw/ifind/tiingo）。
+
+    v3 修复两条降级协议缺陷（2026-08-30 真实运行暴露）：
+      1) None 视同失败：可选序列（如 vix9d）失败时部分 provider 返回 None
+         而不抛异常，旧协议把 None 当成功 → 后续真实可用源永不被尝试；
+      2) 序列级陈旧检测：返回的宏观序列末根过旧时视同失败继续降级。
+    """
     what = f"{method}({args[0] if args else ''})"
     t0 = time.time()
     try:
         out = getattr(provider, method)(*args, **kwargs)
+        if out is None:
+            raise RuntimeError(f"{provider.name}.{method} 返回 None（视同失败，继续降级）")
+        if _series_stale(out):
+            raise RuntimeError(f"{provider.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
         _LINEAGE.append((what, provider.name))
         _health_record(provider.name, True, time.time() - t0)
         return out
@@ -102,13 +141,18 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
         if provider.name == "yahoo":
             from .providers.stooq import StooqProvider
             chain.append(StooqProvider())
-        chain.extend(p for p in _channel_chain() if p.name != provider.name)
+        chain.extend(p for p in _channel_chain()
+                     if p.name != provider.name and _supports(p, method))
         last = e
         for alt in chain:
             t1 = time.time()
             try:
                 logger.warning("%s.%s 失败（%s），降级 %s", provider.name, method, last, alt.name)
                 out = getattr(alt, method)(*args, **kwargs)
+                if out is None:
+                    raise RuntimeError(f"{alt.name}.{method} 返回 None（视同失败，继续降级）")
+                if _series_stale(out):
+                    raise RuntimeError(f"{alt.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
                 _LINEAGE.append((what, alt.name))
                 _health_record(alt.name, True, time.time() - t1)
                 return out

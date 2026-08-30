@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""财神爷AI炒股系统（Caishen AI）— 主入口。
+"""老虎交易系统（Tiger Trading）— 主入口。
 
 运行模式（--mode）：
   daily      日频全流程：扫描 → 三道门+ICS → 风控 → 日报 + 信号落账/结算（默认）

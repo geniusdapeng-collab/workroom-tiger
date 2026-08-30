@@ -204,11 +204,21 @@ SIM_COMMISSION_BPS = 10.0      # 单边佣金 10bp（与 v6.0 回测净口径一
 # ============================================================
 # ---- 来源可信度分级（T0–T3，纯规则映射，D9：调度逻辑不引入 LLM）----
 # T0 交易所/监管原文 > T1 主流财经媒体 > T2 聚合门户 > T3 社媒
+# v3 FRED 宏观补充包（证据展示专用，**不参与评分**——评分输入的任何变更
+# 都必须走 WFA/DSR 诚实迭代通道，不得直接并入闸门）。
+FRED_MACRO_SERIES = {
+    "DGS2": "美债 2 年期收益率",
+    "T10Y2Y": "10Y-2Y 利差（倒挂预警）",
+    "DFF": "联邦基金有效利率",
+}
+
 SOURCE_TIERS = {
     "edgar": "T0",              # SEC EDGAR 官方披露原文
     "federal_register": "T0",   # 美国联邦公报原文
     "patentsview": "T0",        # USPTO 官方专利库
     "kimi_search": "T1",        # agent-gw 全网搜索（白名单域内按 T1，其他域由 DOMAIN_TIERS 覆盖）
+    "eastmoney_news": "T2",     # v3 东财中文资讯搜索（聚合门户）
+    "sina_flash": "T2",         # v3 新浪 7×24 快讯（聚合门户）
     "google_news": "T1",        # Google News 主流媒体聚合入口（域名级再判定）
     "kimi_fetch": "T2",         # 按 URL 抓正文，默认聚合门户级（域名级再判定）
     "reddit": "T3",             # 社媒

@@ -20,7 +20,7 @@ import re as _re
 from . import config
 from .data_models import PipelineResult
 
-try:  # AI 生成美术资源（财神爷头图 / 产业链主题产品图，内嵌 base64，零外链）
+try:  # AI 生成美术资源（老虎交易头图 / 产业链主题产品图，内嵌 base64，零外链）
     from .hero_art import HERO_ART_B64, THEME_ART_B64
 except Exception:  # 资源缺失时降级为纯 SVG 视觉，报告照常生成
     HERO_ART_B64, THEME_ART_B64 = "", {}
@@ -666,7 +666,7 @@ def _decision_card(r: "PipelineResult", pick) -> str:
     return "".join(P)
 
 
-# ---------------------------------------------------------------- 小G模拟盘
+# ---------------------------------------------------------------- 小虎模拟盘
 _GITHUB_URL = "https://github.com/geniusdapeng-collab/ai-stock-trading-system"
 # 公开验证首个统计显著性检查点（机制见 docs/PUBLIC_VERIFICATION.md）：
 # 以累计真实样本重跑 WFA，用 DSR 判定策略有效性，结论照实公开
@@ -717,7 +717,7 @@ def _equity_svg(curve: list[dict], initial: float, width: int = 720,
 
 
 def _avatar_svg(size: int = 64) -> str:
-    """小G 化身（内嵌 SVG 简笔，无外链）。"""
+    """小虎 化身（内嵌 SVG 简笔，无外链）。"""
     return (f'<svg viewBox="0 0 64 64" width="{size}" height="{size}">'
             f'<circle cx="32" cy="32" r="30" fill="#e8f5c8" stroke="{GOLD}" stroke-width="2"/>'
             f'<circle cx="32" cy="26" r="10" fill="{GOLD}"/>'
@@ -728,9 +728,9 @@ def _avatar_svg(size: int = 64) -> str:
 
 
 def _hero_svg(overlay: bool = False) -> str:
-    """Hero 背景装饰。overlay=True 时透明底（叠在整站财神大背景之上），只画网格/光线/金粉。"""
+    """Hero 背景装饰。overlay=True 时透明底（叠在整站猛虎大背景之上），只画网格/光线/金粉。"""
     grid = []
-    # 金色透视网格：竖线自远方消失点发散（仅完整模式；叠图模式会扫过财神面部，禁用）
+    # 金色透视网格：竖线自远方消失点发散（仅完整模式；叠图模式会扫过猛虎面部，禁用）
     vp_x, vp_y = 620, 128
     for bx in range(-200, 1500, 120):
         grid.append(f"<line x1='{vp_x}' y1='{vp_y}' x2='{bx}' y2='360' "
@@ -789,7 +789,7 @@ def _hero_svg(overlay: bool = False) -> str:
                    f"r='{_r.uniform(0.8, 2.2):.1f}' fill='#ffd700' "
                    f"fill-opacity='{_r.uniform(0.25, 0.7):.2f}'/>" for _ in range(46))
     if overlay:  # 叠图模式：透明底，仅横向网格线 + 金粉
-        # （发散竖线与数据流光线会扫过财神面部，按设计要求移除）
+        # （发散竖线与数据流光线会扫过猛虎面部，按设计要求移除）
         return ("<svg class='hero-bg' viewBox='0 0 1200 340' "
                 "preserveAspectRatio='xMidYMid slice' aria-hidden='true'>"
                 f"<g>{''.join(grid_h)}</g>{dust}</svg>")
@@ -972,11 +972,11 @@ def _coin_rain_svg(width: int = 1200, height: int = 92) -> str:
             + "".join(coins) +
             f"<text x='{width / 2}' y='{height / 2 + 7}' text-anchor='middle' "
             f"font-size='18' font-weight='800' fill='#ffd700' letter-spacing='5'>"
-            f"小G纯AI模拟盘 · 虚拟资金 · 全程留痕</text></svg>")
+            f"小虎纯AI模拟盘 · 虚拟资金 · 全程留痕</text></svg>")
 
 
 def _topology_svg() -> str:
-    """首页底部·财神爷系统拓扑图（六源情报 → 语义清洗 → 四层共振核心 → 风控闸门 → 三账输出）。
+    """首页底部·老虎交易系统拓扑图（六源情报 → 语义清洗 → 四层共振核心 → 风控闸门 → 三账输出）。
 
     黑金面板 + 中枢光环 + 贝塞尔金链 + 漂浮金粉，仅展示流程结构（不含任何公式参数）。
     """
@@ -1017,7 +1017,7 @@ def _topology_svg() -> str:
              f"<circle cx='{cx}' cy='{cy}' r='64' fill='none' stroke='#ffd700' "
              f"stroke-opacity='0.4' stroke-width='1'/>"
              f"<text x='{cx}' y='{cy - 12}' text-anchor='middle' font-size='19' "
-             f"font-weight='800' fill='#ffd700'>财神爷 AI</text>"
+             f"font-weight='800' fill='#ffd700'>老虎交易</text>"
              f"<text x='{cx}' y='{cy + 12}' text-anchor='middle' font-size='15' "
              f"font-weight='700' fill='#ffe27a'>决策核心</text>"
              f"<text x='{cx}' y='{cy + 34}' text-anchor='middle' font-size='11' "
@@ -1045,7 +1045,7 @@ def _topology_svg() -> str:
              "<text x='952' y='328' text-anchor='middle' font-size='11.5' "
              "fill='#cbb26a'>五态行动 · R 反推</text>")
     # —— 右侧：三账输出 ——
-    outs = [("📈 决策日报", 100), ("🤖 小G模拟盘", 310), ("🗂 历史回溯", 520)]
+    outs = [("📈 决策日报", 100), ("🤖 小虎模拟盘", 310), ("🗂 历史回溯", 520)]
     for name, y in outs:
         P.append(f"<path d='M1022 310 C 1056 310, 1042 {y + 26}, 1064 {y + 26}' "
                  f"fill='none' stroke='#d4af37' stroke-opacity='0.6' stroke-width='1.8'/>"
@@ -1224,7 +1224,7 @@ def _sim_tab(sim: dict) -> str:
     P.append(f"<div style='background:#fdeaea;border:2px solid {RED};border-radius:12px;"
              f"padding:14px 18px;margin-bottom:14px'>"
              f"<b style='color:{RED}'>⚠️ 全 AI 掌控的模拟盘（Paper Trading）</b>"
-             f"<div style='margin-top:4px'>本页所有交易均由<b>财神爷AI炒股系统（Caishen AI）</b>"
+             f"<div style='margin-top:4px'>本页所有交易均由<b>老虎交易系统（Tiger Trading）</b>"
              f"自动决策与记账，初始资金 $100,000 为虚拟资金，目的是验证 AI 的投资能力。"
              f"<b>不构成任何投资建议或决策参考</b>，据此操作风险自负。"
              f"<div style='margin-top:4px'><b>口径披露：含保守摩擦成本口径"
@@ -1236,14 +1236,14 @@ def _sim_tab(sim: dict) -> str:
              "接受全世界审计。赚亏都挂在这儿，不删账、不粉饰。</div>")
     # —— 美金金币雨横幅（虚拟资金属性一眼即知）——
     P.append(f"<div style='margin-bottom:14px'>{_coin_rain_svg()}</div>")
-    # —— 小G 人设卡 + 资金看板 ——
+    # —— 小虎 人设卡 + 资金看板 ——
     ret = stats["cum_return"]
     ret_color = GREEN if ret >= 0 else RED
     P.append(f"<div class='card' style='border-color:{GOLD}66'><div style='display:flex;"
              f"gap:16px;align-items:center;flex-wrap:wrap'>"
              f"<div>{_avatar_svg()}</div>"
              f"<div style='flex:1;min-width:220px'>"
-             f"<div style='font-size:18px'><b>小G</b> <span class='sub'>财神爷 AI 的人间化身"
+             f"<div style='font-size:18px'><b>小虎</b> <span class='sub'>老虎交易 AI 的人间化身"
              f"（全 AI 决策，零人工干预）</span>"
              f"<span class='tag' style='border-color:{GOLD};color:{GOLD}'>公开验证期</span></div>"
              f"<div class='sub'>初始资金 $100,000 ｜ 已运行 {stats['days']} 个交易日 ｜ "
@@ -1386,7 +1386,7 @@ def _sim_tab(sim: dict) -> str:
     P.append("</div>")
     # —— 开源预告 ——
     P.append(f"<div class='card' style='margin-top:12px;text-align:center'>"
-             f"<b>财神爷AI炒股系统（Caishen AI Trading System）</b>"
+             f"<b>老虎交易系统（Tiger Trading System）</b>"
              f"<div class='sub' style='margin-top:4px'>系统主页："
              f"<a href='{_GITHUB_URL}' style='color:{BLUE}'>{_GITHUB_URL}</a><br>"
              f"适时将会开源，敬请关注 ｜ 商业化合作敬请期待</div></div>")
@@ -1596,19 +1596,19 @@ def _verify_curve_svg(sim: dict | None, bench: dict | None,
     series: dict[str, dict[str, float]] = {}
     if curve:
         base = float(curve[0].get("equity") or initial)
-        series["小G模拟盘"] = {p["date"]: float(p["equity"]) / base - 1.0
+        series["小虎模拟盘"] = {p["date"]: float(p["equity"]) / base - 1.0
                               for p in curve if p.get("date")}
     for name in ("QQQ", "SPY"):
         pts = (bench or {}).get(name) or []
         if pts:
             base = float(pts[0][1])
             series[name] = {d: float(c) / base - 1.0 for d, c in pts}
-    strat = series.get("小G模拟盘") or {}
+    strat = series.get("小虎模拟盘") or {}
     if len(strat) < 2:
         return _empty_panel_svg(
-            "净值 vs 基准对比曲线", "首个信号成交结算后自动绘制（小G vs QQQ vs SPY）")
+            "净值 vs 基准对比曲线", "首个信号成交结算后自动绘制（小虎 vs QQQ vs SPY）")
     start = min(strat)
-    # 统一窗口（自小G起步日起）+ 前向填充 + 起点归一
+    # 统一窗口（自小虎起步日起）+ 前向填充 + 起点归一
     all_dates = sorted({d for s in series.values() for d in s if d >= start})
     filled: dict[str, dict[str, float]] = {}
     for name, s in series.items():
@@ -1643,7 +1643,7 @@ def _verify_curve_svg(sim: dict | None, bench: dict | None,
         y = y0 + (y1 - y0) * (1 - (v - lo) / (hi - lo))
         return x, y
 
-    colors = {"小G模拟盘": ("#ffd700", 3.2, ""), "QQQ": ("#7ea6ff", 2, ""),
+    colors = {"小虎模拟盘": ("#ffd700", 3.2, ""), "QQQ": ("#7ea6ff", 2, ""),
               "SPY": ("#9ca3af", 2, "stroke-dasharray='5 4'")}
     parts = [f"<svg viewBox='0 0 {width} {height}' style='width:100%;height:auto'>",
              f"<rect width='{width}' height='{height}' rx='16' fill='#0e0e11' "
@@ -2161,9 +2161,9 @@ def _philosophy_tab() -> str:
                    "相同的规则真实结算（策略验证中心）；滚动前推调参必须通过 DSR 多重检验校正，"
                    "不显著就保持理论默认参数：折内夏普 3.92 的「最优参数」折外期望转负，"
                    "系统正确地拒绝了它——这是量化系统最稀缺的美德。"))
-    P.append(_idea("④", "双账公开验证：信号日记 + 小G纯AI模拟盘",
+    P.append(_idea("④", "双账公开验证：信号日记 + 小虎纯AI模拟盘",
                    "「策略验证中心」记录每一天的推荐信号及其结算结果（信号口径胜率）；"
-                   "「小G纯AI模拟盘」以 10 万美元虚拟资金按 T+1 开盘价规则完整模拟交易"
+                   "「小虎纯AI模拟盘」以 10 万美元虚拟资金按 T+1 开盘价规则完整模拟交易"
                    "（账户口径净值），两者互为镜像、交叉验证。亏损交易日同样公示——"
                    "公开、可回溯，是我们对自身方法论的信心。"))
 
@@ -2333,9 +2333,9 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     P: list[str] = []
     P.append(f"<html><head><meta charset='utf-8'><meta name='viewport' "
              f"content='width=device-width,initial-scale=1'><title>"
-             f"财神爷AI炒股系统 · {r.trade_date}</title><style>{_CSS}</style></head>")
+             f"老虎交易 Tiger Trading · {r.trade_date}</title><style>{_CSS}</style></head>")
     if HERO_ART_B64:
-        # —— 一整张无缝大背景：财神图自页头贯穿向下，渐变融入嫩芽白正文（移动端加高取图）——
+        # —— 一整张无缝大背景：猛虎图自页头贯穿向下，渐变融入嫩芽白正文（移动端加高取图）——
         P.append(f"<style>"
                  f"body {{ background:"
                  f"linear-gradient(to bottom, #f4fae400 0px, #f4fae400 330px, "
@@ -2356,12 +2356,12 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     if HERO_ART_B64:
         P.append("<div class='hero-veil'></div>")
     P.append("<div class='hero-inner'>")
-    P.append("<div class='eyebrow'>CAISHEN AI · EVIDENCE, NOT OPINIONS.</div>")
-    P.append(f"<h1>财神爷AI炒股系统 <span class='sub'>v6.9 · {r.trade_date}</span></h1>")
+    P.append("<div class='eyebrow'>TIGER TRADING · EVIDENCE, NOT OPINIONS.</div>")
+    P.append(f"<h1>老虎交易 Tiger Trading <span class='sub'>v3.1 · {r.trade_date}</span></h1>")
     P.append("<div class='bigline'>别人预测市场，我们执行纪律。</div>")
-    P.append("<div class='sub' style='margin:2px 0'>汇聚顶级基金经理思想 × AI 能力的美股交易系统"
-             " ｜ 投资标的：<b style='color:#ffd700'>美股</b>（纽交所 + 纳斯达克 · 全市场全行业）</div>")
-    # —— 战绩条：亮剑三数（今日状态 / 小G净值 / 逐笔留痕）——
+    P.append("<div class='sub' style='margin:2px 0'>AI 基金经理统筹的全自动化交易系统（美股 · A股 · 港股）"
+             " ｜ 本报告市场：<b style='color:#ffd700'>美股</b>（纽交所 + 纳斯达克 · 全市场全行业）</div>")
+    # —— 战绩条：亮剑三数（今日状态 / 小虎净值 / 逐笔留痕）——
     sim_stats = (sim or {}).get("stats") or {}
     eq = sim_stats.get("equity")
     n_closed = (journal_stats or {}).get("closed", 0)
@@ -2369,7 +2369,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     chips = [f"<div class='hchip'><div class='sub'>今日状态</div>"
              f"<div class='v' style='color:{color}'>{r.action} · {_esc(action_zh)}</div></div>"]
     if eq:
-        chips.append(f"<div class='hchip'><div class='sub'>小G模拟盘净值</div>"
+        chips.append(f"<div class='hchip'><div class='sub'>小虎模拟盘净值</div>"
                      f"<div class='v'>${eq:,.0f}</div></div>")
     chips.append(f"<div class='hchip'><div class='sub'>逐笔留痕</div>"
                  f"<div class='v'>{n_closed} 笔已结算"
@@ -2379,12 +2379,12 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                  f"<div class='v' style='font-size:15px'>{_DSR_CHECKPOINT}</div></div>")
     P.append(f"<div class='hero-chips'>{''.join(chips)}</div>")
 
-    # ---- 一级页签导航（决策日报 / 小G纯AI模拟盘 / 核心交易理念）----
+    # ---- 一级页签导航（决策日报 / 小虎纯AI模拟盘 / 核心交易理念）----
     P.append("<div style='display:flex;gap:12px;margin:20px 0 4px;flex-wrap:wrap'>"
              "<button class='tabbtn active' id='btn-daily' "
              "onclick='showTab(\"daily\")'>📈 决策日报</button>"
              "<button class='tabbtn' id='btn-sim' "
-             "onclick='showTab(\"sim\")'>🤖 小G纯AI模拟盘</button>"
+             "onclick='showTab(\"sim\")'>🤖 小虎纯AI模拟盘</button>"
              "<button class='tabbtn' id='btn-philosophy' "
              "onclick='showTab(\"philosophy\")'>🎓 核心交易理念</button></div>")
     # ---- 跑马灯：最新结算逐笔滚动（亏赚如实，翻倍重复以无缝循环）----
@@ -2828,12 +2828,12 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
 
     P.append("</div>")  # /tab-daily
 
-    # ---- 一级页签：小G纯AI模拟盘（全 AI 掌控模拟盘，公开验证）----
+    # ---- 一级页签：小虎纯AI模拟盘（全 AI 掌控模拟盘，公开验证）----
     P.append("<div id='tab-sim' style='display:none'>")
     if sim:
         P.append(_sim_tab(sim))
     else:
-        P.append("<div class='card sub'>小G 账本初始化中——"
+        P.append("<div class='card sub'>小虎 账本初始化中——"
                  "首个交易日后开始记账，初始资金 $100,000。</div>")
     P.append("</div>")  # /tab-sim
 
@@ -2842,7 +2842,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     P.append(_philosophy_tab())
     P.append("</div>")
 
-    P.append(f"<div class='footer'>财神爷AI炒股系统（Caishen AI）v6.9 · 生成于 {_esc(r.trade_date)}"
+    P.append(f"<div class='footer'>老虎交易系统（Tiger Trading）v3.1 · 生成于 {_esc(r.trade_date)}"
              " · 汇聚顶级基金经理思想 × AI 能力的美股交易系统</div>")
     P.append("</div>")
     P.append(f"<script>{_TAB_JS}</script>")

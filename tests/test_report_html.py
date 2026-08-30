@@ -38,7 +38,7 @@ def test_html_contains_all_sections(tmp_path):
         assert tab in html_text, f"缺页签 {tab}"
     for must in ["汇聚顶级基金经理思想 × AI 能力的美股交易系统",
                  "投资标的：<b", "美股", "决策日报", "今日决策报告",
-                 "个股深度报告", "策略验证", "小G纯AI模拟盘",
+                 "个股深度报告", "策略验证", "小虎纯AI模拟盘",
                  "核心交易理念", "showStock", "深度数据档案"]:
         assert must in html_text, f"缺要素 {must}"
     assert "<svg" in html_text                      # 雷达/传导图在

@@ -1,11 +1,13 @@
-"""小G模拟盘记账引擎（财神爷AI炒股系统 · 全AI掌控模拟盘）。
+"""小虎模拟盘记账引擎（老虎交易系统 · 全AI掌控模拟盘）。
 
 定位：公开验证 AI 投资能力的 Paper Trading 台账。每日跟随系统全链路产出记账：
   - 信号节拍：T 日收盘后产生信号 → **T+1 日开盘价成交**（无未来函数，
     公开战绩抗质疑）；
   - 出场纪律：止损（盘中触及按止损价，跳空低开按开盘价）/ 时间止损
     （7 个交易日未推进）/ 盈利保护（浮盈 ≥2R 止损上移至成本线）；
-  - AVOID/HOLD 日：禁止新开仓（pending 不落），现持仓继续按出场纪律管理；
+  - AVOID 日：禁止新开仓（pending 不落），现持仓继续按出场纪律管理；
+    HOLD（轻仓试探区）日出战的轻仓信号照常登记——与 journal 落账口径互为镜像
+    （白皮书 §9.1：HOLD=轻仓试探区"只做最高质量结构"；§15.2：小G 与 journal 镜像）；
   - 零基线兼容：台账 sim_portfolio.json 属会计账（白名单保留），
     行情一律当日实时拉取，绝不复用历史缓存。
 
@@ -212,7 +214,12 @@ class SimEngine:
             s["equity_curve"][-1]["equity"] = equity
 
         # ---------- 4. 登记今日新信号（明日开盘价成交） ----------
-        if result.action in ("BUY", "LIGHT") and result.picks:
+        # v3 镜像修复（2026-08-30 真实运行暴露）：旧口径仅 BUY/LIGHT 日登记，
+        # 导致 HOLD（轻仓试探区）日 journal 落账 4 笔而 sim 按兵不动——两本账
+        # 不再镜像（白皮书 §15.2）。L4 闸门已把五态语义编码进 picks 本身，
+        # 故 HOLD/BUY/LIGHT 日只要存在放行 picks 即与 journal 同口径登记；
+        # 唯独 AVOID 是白皮书绝对禁止项（MRS*<4 不开新仓），防御性拒绝登记。
+        if result.picks and result.action != "AVOID":
             held = ({p["ticker"] for p in s["positions"]}
                     | {p["ticker"] for p in s["pending"]})
             added = 0

@@ -333,4 +333,86 @@ def default_sources(demo: bool = False) -> list[SearchSource]:
         EDGARSource(),               # 纵向：SEC 披露
         PatentsViewSource(),         # 纵向：专利
         FederalRegisterSource(),     # 纵向：政策微调
+        EastmoneyNewsSource(),       # v3：东财中文资讯（可达性强化）
+        SinaFlashSource(),           # v3：新浪 7×24 快讯（可达性强化）
     ]
+
+
+# ---------------------------------------------------------------- v3 可达性强化
+class EastmoneyNewsSource:
+    """东方财富资讯搜索（免费，T2 聚合门户）：中文财经新闻检索，
+    覆盖美股/宏观/A股/港股——在 google_news/reddit 不可达的网络环境下
+    提供真实新闻流（v3 数据层强化，实测 2026-08-30 可达且新鲜）。"""
+    name = "eastmoney_news"
+
+    def __init__(self, timeout: float = 12.0):
+        self.timeout = timeout
+
+    def search(self, query: str, limit: int = 8) -> list[RawDocument]:
+        param = json.dumps({
+            "uid": "", "keyword": query, "type": ["cmsArticleWebOld"],
+            "client": "web", "clientType": "web", "clientVersion": "curr",
+            "param": {"cmsArticleWebOld": {"searchScope": "default",
+                                           "sort": "time", "pageIndex": 1,
+                                           "pageSize": limit}},
+        }, ensure_ascii=False)
+        url = ("https://search-api-web.eastmoney.com/search/jsonp?cb=cb&param="
+               + urllib.parse.quote(param))
+        req = urllib.request.Request(url, headers=_UA)
+        with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            raw = r.read().decode("utf-8", "ignore")
+        m = re.search(r"cb\((.*)\)\s*$", raw, re.S)
+        if not m:
+            raise RuntimeError("eastmoney_news 返回非 JSONP 内容（疑似被封禁）")
+        data = json.loads(m.group(1))
+        items = ((data.get("result") or {}).get("cmsArticleWebOld")) or []
+        docs = []
+        for it in items[:limit]:
+            title = re.sub(r"</?em>", "", str(it.get("title") or ""))
+            content = re.sub(r"</?em>", "", str(it.get("content") or ""))[:500]
+            art_url = str(it.get("url") or
+                           f"https://so.eastmoney.com/news/s?keyword={urllib.parse.quote(query)}")
+            published = str(it.get("date") or "")
+            if not title:
+                continue
+            docs.append(RawDocument(
+                doc_id=RawDocument.make_id(self.name, art_url, title, content),
+                source=self.name, title=title, url=art_url, content=content,
+                published=published, meta={"code": it.get("code")}))
+        return docs
+
+
+class SinaFlashSource:
+    """新浪财经 7×24 快讯（免费，T2）：zhibo 实时快讯流，按查询词过滤。
+    快讯为中文，英文主题词命中少时如实返回空集（不编造、不凑数）。"""
+    name = "sina_flash"
+
+    def __init__(self, timeout: float = 12.0, zhibo_id: int = 152):
+        self.timeout = timeout
+        self.zhibo_id = zhibo_id
+
+    def search(self, query: str, limit: int = 8) -> list[RawDocument]:
+        url = (f"https://zhibo.sina.com.cn/api/zhibo/feed?zhibo_id={self.zhibo_id}"
+               f"&page=1&page_size=50")
+        data = _http_json(url, self.timeout,
+                          headers={"Referer": "https://finance.sina.com.cn"})
+        items = (((data.get("result") or {}).get("data") or {})
+                 .get("feed") or {}).get("list") or []
+        q = query.lower()
+        docs = []
+        for it in items:
+            text = str(it.get("rich_text") or "")
+            if not text:
+                continue
+            if q and q not in text.lower():
+                continue
+            title = re.sub(r"【|】", "", text)[:60]
+            art_url = str(it.get("docurl") or "https://zhibo.sina.com.cn/")
+            published = str(it.get("create_time") or "")
+            docs.append(RawDocument(
+                doc_id=RawDocument.make_id(self.name, art_url, title, text[:500]),
+                source=self.name, title=title, url=art_url, content=text[:500],
+                published=published, meta={"id": it.get("id")}))
+            if len(docs) >= limit:
+                break
+        return docs
