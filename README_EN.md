@@ -1,10 +1,10 @@
-# Tiger Trading
+# Tiger Global Asset Management (TGAM)
 
 > A fully automated trading system orchestrated by an AI fund manager — covering US / CN / HK markets, running 24 hours.
 >
 > **No prediction. Process, discipline, audit.**
 
-Tiger Trading uses the [Caishen AI trading system](docs/CAISHEN_README.md) (v6.3) as its trading kernel and [WorkLoom IM](governance/README.md) as its governance shell, strictly following every trading discipline in the [White Paper: AI Short-Term US Equity Trading (1–15 Day Swing Edition)](reports/AI短线美股交易白皮书_20260730.pdf).
+Tiger Global Asset Management (TGAM) uses the [Caishen AI trading system](docs/CAISHEN_README.md) (v6.3) as its trading kernel and [WorkLoom IM](governance/README.md) as its governance shell, strictly following every trading discipline in the [White Paper: AI Short-Term US Equity Trading (1–15 Day Swing Edition)](reports/AI短线美股交易白皮书_20260730.pdf).
 
 **This system currently runs in paper trading only. It is not investment advice and promises no returns.**
 

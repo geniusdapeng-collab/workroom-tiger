@@ -174,6 +174,19 @@ export const TRADING_TOOLS: Record<string, ToolFn> = {
     };
   },
 
+  /** 资产管理团队日度任务（配置官+哨兵+风险官+稳定官一轮协作） */
+  "portfolio.manage": async () => {
+    const cmd = ("python3 scripts/portfolio_daily.py --us reports --cn reports/cn "
+      + "--hk reports/hk --out reports/portfolio --events reports/governance_events.jsonl").split(" ");
+    const r = await sh(cmd[0]!, cmd.slice(1), KERNEL_ROOT, 600_000);
+    const day = join(KERNEL_ROOT, "reports/portfolio/portfolio_day.json");
+    const synced = freshFile(day, 24 * 60) && r.stdout.includes("日度任务完成");
+    return {
+      result: { day_json: existsSync(day), tail: r.stdout.split("\n").slice(-4) },
+      receipt: { synced, snapshot_uri: day, verified_at: new Date().toISOString() },
+    };
+  },
+
   /** 官网发布（site/index.html 新鲜度即回执） */
   "site.publish": async () => {
     const r = await sh("bash", ["scripts/publish_site.sh"], KERNEL_ROOT, 60_000);

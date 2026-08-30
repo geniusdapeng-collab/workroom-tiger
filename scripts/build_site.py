@@ -99,9 +99,62 @@ def _card(m: dict, meta: dict) -> str:
     <a class="go" href="{meta['id']}.html">进入{meta['name']}完整日报 →</a></div>"""
 
 
-def render(market_infos: dict[str, dict], out_index: Path) -> None:
+def _portfolio_sections(pday: dict | None) -> str:
+    """资产管理团队三区：配置方案 / 全球动态 / 收益稳定（缺产出时不渲染，不编造）。"""
+    if not pday:
+        return ""
+    names = {"us": "美股", "cn": "A股", "hk": "港股"}
+    alloc = pday.get("allocation") or {}
+    rows = "".join(
+        f"<div class='kv'><span>{names.get(m.get('market'), m.get('market', ''))}"
+        f"{'' if m.get('available') else '（无有效数据）'}</span>"
+        f"<b>{(m.get('weight') or 0):.1%}</b></div>"
+        for m in (alloc.get("markets") or []))
+    trunc = "".join(f"<div class='sub'>· {escape(t)}</div>"
+                    for t in (alloc.get("truncated") or []))
+    snap = pday.get("snapshot") or {}
+    bmk = "".join(
+        f"<div class='kv'><span>{escape(b.get('label', ''))}</span>"
+        f"<b>{b.get('last')} <span class='sub'>"
+        f"{('%+.1f%%' % ((b.get('mom20') or 0) * 100)) if b.get('mom20') is not None else ''}"
+        f" 20日</span></b></div>"
+        for b in (snap.get("benchmarks") or {}).values())
+    fred = " · ".join(f"{v.get('label')} {v.get('last')}"
+                      for v in (snap.get("fred") or {}).values())
+    stab = pday.get("stability") or {}
+    verdict = stab.get("verdict", "—")
+    vcolor = {"稳定": "#16a34a", "关注": "#ca8a04",
+              "告警": "#dc2626"}.get(verdict, "#6b7280")
+    stab_notes = "".join(f"<div class='sub'>· {escape(n)}</div>"
+                         for n in (stab.get("notes") or []))
+    sharpe = stab.get("sharpe_rolling")
+    return f"""
+<div class="total">
+  <h3 style="margin:0 0 8px;color:#d4af37">全球资产配置官 · 配置方案（预算口径）</h3>
+  {rows}
+  <div class="sub">{escape(alloc.get('note', ''))}</div>
+  {trunc}
+</div>
+<div class="total">
+  <h3 style="margin:0 0 8px;color:#d4af37">全球宏观哨兵 · 全球动态（{escape(str(snap.get('session', '—')))} 窗口）</h3>
+  {bmk if bmk else "<div class='sub'>基准快照缺失（如实披露）</div>"}
+  <div class="sub" style="margin-top:6px">FRED：{escape(fred) if fred else '缺失'}</div>
+</div>
+<div class="total">
+  <h3 style="margin:0 0 8px;color:#d4af37">收益稳定官 · 组合稳定性
+    <span style="color:{vcolor};font-size:15px">【{verdict}】</span></h3>
+  <div class="kv"><span>最大回撤</span><b>{stab.get('max_drawdown', 0):.1%}</b></div>
+  <div class="kv"><span>滚动夏普</span><b>{sharpe if sharpe is not None else '样本不足'}</b></div>
+  <div class="kv"><span>连续未创新高</span><b>{stab.get('days_below_high', 0)} 日</b></div>
+  {stab_notes}
+</div>"""
+
+
+def render(market_infos: dict[str, dict], out_index: Path,
+           pday: dict | None = None) -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     cards = "".join(_card(market_infos[m["id"]], m) for m in MARKETS)
+    portfolio_sections = _portfolio_sections(pday)
     eqs = [(m, market_infos[m["id"]].get("equity")) for m in MARKETS]
     eqs = [(m, e) for m, e in eqs if isinstance(e, (int, float))]
     total = sum(e for _, e in eqs) if eqs else None
@@ -117,7 +170,7 @@ def render(market_infos: dict[str, dict], out_index: Path) -> None:
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>老虎交易 · 组合总览（美/A/港 三市）</title>
+<title>老虎全球资产管理 · 组合总览（美/A/港 三市）</title>
 <style>
 body{{margin:0;background:#0e0f0c;color:#e8e6d8;font:14px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}}
 .wrap{{max-width:1080px;margin:0 auto;padding:32px 20px}}
@@ -141,8 +194,8 @@ h1{{font-size:26px;margin:0}}h1 .t{{color:#d4af37}}
 .tabs a.on{{background:#d4af37;color:#171812;font-weight:700}}
 .footer{{margin-top:28px;color:#6f6e63;font-size:12px;border-top:1px solid #2a2b20;padding-top:12px}}
 </style></head><body><div class="wrap">
-<div class="eyebrow sub">TIGER TRADING · MULTI-MARKET PORTFOLIO · EVIDENCE, NOT OPINIONS.</div>
-<h1>老虎交易 · <span class="t">组合总览</span> <span class="sub">v3.4 · {now}</span></h1>
+<div class="eyebrow sub">TIGER GLOBAL ASSET MANAGEMENT · MULTI-MARKET PORTFOLIO · EVIDENCE, NOT OPINIONS.</div>
+<h1>老虎全球资产管理 · <span class="t">组合总览</span> <span class="sub">v3.5 · {now}</span></h1>
 <div class="sub">美股 · A股 · 港股 三市统一视图 ｜ 组合层只做预算与披露，不做分数与预测（docs/MULTI_MARKET.md）</div>
 <div class="tabs"><a class="on" href="index.html">组合总览</a><a href="us.html">美股</a><a href="cn.html">A股</a><a href="hk.html">港股</a></div>
 
@@ -155,6 +208,7 @@ h1{{font-size:26px;margin:0}}h1 .t{{color:#d4af37}}
   <div class="sub" style="margin-top:8px">统一风险预算（v1 口径）：组合 Gross Cap ≤ 90%（客户 patch 只可加严）；
   三市共振日按各市场 TOS 排序从高到低截断放行；验证期市场轻仓额度独立计算。</div>
 </div>
+{portfolio_sections}
 
 <div class="note"><b>跨市场注记（披露口径）</b><br>
 · 三市低相关持仓本身是自然对冲——组合回撤通常小于任一单市场回撤；对冲价值的量化归因在 M3 阶段落地。<br>
@@ -162,7 +216,7 @@ h1{{font-size:26px;margin:0}}h1 .t{{color:#d4af37}}
 · 主动对冲（指数 ETF/期货）与中央簿记权重调节为设计储备（M4），当前组合层不产生任何跨市场交易动作。<br>
 · 各市场独立诚实失败：单市场数据全断只影响本市场页签，组合总览如实标注，绝不编造。</div>
 
-<div class="footer">老虎交易系统（Tiger Trading）· 全 AI 掌控模拟盘 · 虚拟资金 · 不构成投资建议 · 赚亏如实，禁止粉饰</div>
+<div class="footer">老虎全球资产管理（Tiger Global Asset Management）· 全 AI 掌控模拟盘 · 虚拟资金 · 不构成投资建议 · 赚亏如实，禁止粉饰</div>
 </div></body></html>"""
     out_index.write_text(html, encoding="utf-8")
 
@@ -173,6 +227,8 @@ def main() -> None:
     ap.add_argument("--cn", default="reports/cn")
     ap.add_argument("--hk", default="reports/hk")
     ap.add_argument("--out", default="site")
+    ap.add_argument("--portfolio", default="reports/portfolio",
+                    help="资产管理团队产出目录（portfolio_day.json，可选）")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -190,7 +246,14 @@ def main() -> None:
                 f"<h2>{mid.upper()} 当日无有效日报</h2><p>该市场当日未运行或独立诚实失败（D2），"
                 f"详见 <a href='index.html'>组合总览</a>。</p></body>", encoding="utf-8")
 
-    render(infos, out / "index.html")
+    pday = None
+    pday_path = Path(args.portfolio) / "portfolio_day.json"
+    if pday_path.exists():
+        try:
+            pday = json.loads(pday_path.read_text(encoding="utf-8"))
+        except Exception:
+            pday = None
+    render(infos, out / "index.html", pday)
     for mid in ("us", "cn", "hk"):
         st = "OK" if infos[mid].get("ok") else "无数据"
         print(f"  {mid}: {st}（action={infos[mid].get('action', '—')}）")

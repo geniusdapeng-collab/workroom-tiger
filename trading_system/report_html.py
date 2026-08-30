@@ -20,7 +20,7 @@ import re as _re
 from . import config
 from .data_models import PipelineResult
 
-try:  # AI 生成美术资源（老虎交易头图 / 产业链主题产品图，内嵌 base64，零外链）
+try:  # AI 生成美术资源（老虎全球资产管理头图 / 产业链主题产品图，内嵌 base64，零外链）
     from .hero_art import HERO_ART_B64, THEME_ART_B64
 except Exception:  # 资源缺失时降级为纯 SVG 视觉，报告照常生成
     HERO_ART_B64, THEME_ART_B64 = "", {}
@@ -976,7 +976,7 @@ def _coin_rain_svg(width: int = 1200, height: int = 92) -> str:
 
 
 def _topology_svg() -> str:
-    """首页底部·老虎交易系统拓扑图（六源情报 → 语义清洗 → 四层共振核心 → 风控闸门 → 三账输出）。
+    """首页底部·老虎全球资产管理拓扑图（六源情报 → 语义清洗 → 四层共振核心 → 风控闸门 → 三账输出）。
 
     黑金面板 + 中枢光环 + 贝塞尔金链 + 漂浮金粉，仅展示流程结构（不含任何公式参数）。
     """
@@ -1017,7 +1017,7 @@ def _topology_svg() -> str:
              f"<circle cx='{cx}' cy='{cy}' r='64' fill='none' stroke='#ffd700' "
              f"stroke-opacity='0.4' stroke-width='1'/>"
              f"<text x='{cx}' y='{cy - 12}' text-anchor='middle' font-size='19' "
-             f"font-weight='800' fill='#ffd700'>老虎交易</text>"
+             f"font-weight='800' fill='#ffd700'>老虎全球资产管理</text>"
              f"<text x='{cx}' y='{cy + 12}' text-anchor='middle' font-size='15' "
              f"font-weight='700' fill='#ffe27a'>决策核心</text>"
              f"<text x='{cx}' y='{cy + 34}' text-anchor='middle' font-size='11' "
@@ -1224,7 +1224,7 @@ def _sim_tab(sim: dict) -> str:
     P.append(f"<div style='background:#fdeaea;border:2px solid {RED};border-radius:12px;"
              f"padding:14px 18px;margin-bottom:14px'>"
              f"<b style='color:{RED}'>⚠️ 全 AI 掌控的模拟盘（Paper Trading）</b>"
-             f"<div style='margin-top:4px'>本页所有交易均由<b>老虎交易系统（Tiger Trading）</b>"
+             f"<div style='margin-top:4px'>本页所有交易均由<b>老虎全球资产管理（Tiger Global Asset Management）</b>"
              f"自动决策与记账，初始资金 $100,000 为虚拟资金，目的是验证 AI 的投资能力。"
              f"<b>不构成任何投资建议或决策参考</b>，据此操作风险自负。"
              f"<div style='margin-top:4px'><b>口径披露：含保守摩擦成本口径"
@@ -1243,7 +1243,7 @@ def _sim_tab(sim: dict) -> str:
              f"gap:16px;align-items:center;flex-wrap:wrap'>"
              f"<div>{_avatar_svg()}</div>"
              f"<div style='flex:1;min-width:220px'>"
-             f"<div style='font-size:18px'><b>小虎</b> <span class='sub'>老虎交易 AI 的人间化身"
+             f"<div style='font-size:18px'><b>小虎</b> <span class='sub'>老虎全球资产管理 AI 的人间化身"
              f"（全 AI 决策，零人工干预）</span>"
              f"<span class='tag' style='border-color:{GOLD};color:{GOLD}'>公开验证期</span></div>"
              f"<div class='sub'>初始资金 $100,000 ｜ 已运行 {stats['days']} 个交易日 ｜ "
@@ -1386,7 +1386,7 @@ def _sim_tab(sim: dict) -> str:
     P.append("</div>")
     # —— 开源预告 ——
     P.append(f"<div class='card' style='margin-top:12px;text-align:center'>"
-             f"<b>老虎交易系统（Tiger Trading System）</b>"
+             f"<b>老虎全球资产管理（Tiger Global Asset Management）</b>"
              f"<div class='sub' style='margin-top:4px'>系统主页："
              f"<a href='{_GITHUB_URL}' style='color:{BLUE}'>{_GITHUB_URL}</a><br>"
              f"适时将会开源，敬请关注 ｜ 商业化合作敬请期待</div></div>")
@@ -2333,7 +2333,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     P: list[str] = []
     P.append(f"<html><head><meta charset='utf-8'><meta name='viewport' "
              f"content='width=device-width,initial-scale=1'><title>"
-             f"老虎交易 Tiger Trading · {r.trade_date}</title><style>{_CSS}</style></head>")
+             f"老虎全球资产管理 TGAM · {r.trade_date}</title><style>{_CSS}</style></head>")
     if HERO_ART_B64:
         # —— 一整张无缝大背景：猛虎图自页头贯穿向下，渐变融入嫩芽白正文（移动端加高取图）——
         P.append(f"<style>"
@@ -2356,8 +2356,8 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     if HERO_ART_B64:
         P.append("<div class='hero-veil'></div>")
     P.append("<div class='hero-inner'>")
-    P.append("<div class='eyebrow'>TIGER TRADING · EVIDENCE, NOT OPINIONS.</div>")
-    P.append(f"<h1>老虎交易 Tiger Trading <span class='sub'>v3.1 · {r.trade_date}</span></h1>")
+    P.append("<div class='eyebrow'>TIGER GLOBAL ASSET MANAGEMENT · EVIDENCE, NOT OPINIONS.</div>")
+    P.append(f"<h1>老虎全球资产管理 TGAM <span class='sub'>v3.1 · {r.trade_date}</span></h1>")
     P.append("<div class='bigline'>别人预测市场，我们执行纪律。</div>")
     P.append("<div class='sub' style='margin:2px 0'>AI 基金经理统筹的全自动化交易系统（美股 · A股 · 港股）"
              " ｜ 本报告市场：<b style='color:#ffd700'>美股</b>（纽交所 + 纳斯达克 · 全市场全行业）</div>")
@@ -2842,7 +2842,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     P.append(_philosophy_tab())
     P.append("</div>")
 
-    P.append(f"<div class='footer'>老虎交易系统（Tiger Trading）v3.1 · 生成于 {_esc(r.trade_date)}"
+    P.append(f"<div class='footer'>老虎全球资产管理（Tiger Global Asset Management）v3.1 · 生成于 {_esc(r.trade_date)}"
              " · 汇聚顶级基金经理思想 × AI 能力的美股交易系统</div>")
     P.append("</div>")
     P.append(f"<script>{_TAB_JS}</script>")

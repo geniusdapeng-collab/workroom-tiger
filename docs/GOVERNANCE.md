@@ -12,7 +12,7 @@
 
 ## 二、底座能力复用清单（WorkLoom 代码快照 2026-08-21 main，已核验）
 
-| 能力 | 代码位置 | 在老虎交易中的用途 |
+| 能力 | 代码位置 | 在老虎全球资产管理中的用途 |
 |---|---|---|
 | 五元事件库（哈希链） | `governance/packages/base/workdata/` | 交易动作/审批/围栏命中的 append-only 留痕 |
 | 围栏引擎 auto/review/block | `governance/packages/base/fence-engine/` | 白皮书阈值 → R-T1~R-T15 block 级基线（从 config 生成） |

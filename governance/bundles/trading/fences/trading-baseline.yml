@@ -5,7 +5,7 @@
 # DSL 求值语义（对齐 hotel 围栏）：match 命中后求值 when 表达式（沙箱，禁任意代码）；
 #   命中 → 按 level 判定；block 优先于 review 优先于 auto（deny 优先并集求值）；
 #   写类动作无任何规则命中 → 按 default_level 处理；求值异常 → 按 block（宁可错杀）。
-# 生成记录：config 哈希 217a73bd6195dc6f0dc67ae20d054a9c0c0a447c16da0c7b396d7126bcf774f6 · 基线规则 15 条 · 生成时间 2026-08-30T03:36:21+00:00
+# 生成记录：config 哈希 8aa83046b3da924a118ad96c76dd06dfde90db35334dd885acdbf6ad8c498040 · 基线规则 15 条 · 生成时间 2026-08-30T09:03:29+00:00
 version: trading-baseline/v1
 default_level: review
 rules:
@@ -17,7 +17,7 @@ rules:
     is_baseline: true
     match:
       object_types: [report, portfolio]
-      actions: [kernel.doctor, pipeline.daily, events.ingest, site.publish]
+      actions: [kernel.doctor, pipeline.daily, events.ingest, site.publish, portfolio.allocate, portfolio.watch, portfolio.review]
     when: "context.stage == 'paper'"
     note: 夜班 Quest 编排内核管线的自治窗口；stage!=paper 时落 default_level=review
 

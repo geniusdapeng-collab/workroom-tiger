@@ -74,8 +74,26 @@ function intradaySteps(market: string, label: string): QuestStep[] {
   ];
 }
 
+/** 组合资产管理编排（资产管理团队：配置官 → 哨兵 → 稳定官/风险官 → 官网门户） */
+function portfolioManagementSteps(): QuestStep[] {
+  return [
+    { stepId: "t1", action: "portfolio.allocate", objectType: "portfolio", tool: "portfolio.manage",
+      params: {}, context: { stage: "paper" },
+      label: "全球资产配置官：三市配置方案（组合闸门截断审计）" },
+    { stepId: "t2", action: "portfolio.watch", objectType: "portfolio", tool: "portfolio.manage",
+      params: {}, context: { stage: "paper" },
+      label: "全球宏观哨兵：全球动态快照（三市基准+FRED）" },
+    { stepId: "t3", action: "portfolio.review", objectType: "portfolio", tool: "portfolio.manage",
+      params: {}, context: { stage: "paper" },
+      label: "收益稳定官+组合风险官：稳定性三档评估与敞口校验" },
+    { stepId: "t4", action: "site.publish", objectType: "report", tool: "site.publish",
+      params: {}, context: { stage: "paper" }, label: "多市场官网门户发布" },
+  ];
+}
+
 /** 演示计划模板（按目标关键词匹配；真实 LLM 规划在 dsh agent loop 融合期接入） */
 export function planQuest(goal: string, preset: AssembledPreset): QuestStep[] {
+  if (/资产管理|组合管理|portfolio/.test(goal)) return portfolioManagementSteps();
   if (/A股盘后|cn-settle|沪深/.test(goal)) return marketSettleSteps("cn", "A股");
   if (/港股盘后|hk-settle/.test(goal)) return marketSettleSteps("hk", "港股");
   if (/A股盘中|cn-intraday/.test(goal)) return intradaySteps("cn", "A股");

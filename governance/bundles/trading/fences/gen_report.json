@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-30T03:36:21+00:00",
+  "generated_at": "2026-08-30T09:03:29+00:00",
   "generator": "scripts/gen_fences.py",
   "config_file": "trading_system/config.py",
-  "config_hash": "217a73bd6195dc6f0dc67ae20d054a9c0c0a447c16da0c7b396d7126bcf774f6",
+  "config_hash": "8aa83046b3da924a118ad96c76dd06dfde90db35334dd885acdbf6ad8c498040",
   "rules_total": 19,
   "baseline_rules": 16,
   "patch_examples": 3,

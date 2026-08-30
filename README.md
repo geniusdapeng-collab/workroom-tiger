@@ -1,4 +1,4 @@
-# 老虎交易（Tiger Trading）
+# 老虎全球资产管理（Tiger Global Asset Management）
 
 > 由 AI 基金经理统筹的全自动化交易系统 —— 覆盖美股 / A股 / 港股，24 小时运行。
 >

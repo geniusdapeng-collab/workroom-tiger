@@ -1,4 +1,4 @@
-# Tiger Trading — Project Introduction
+# Tiger Global Asset Management — Project Introduction
 
 > In one sentence: a fully automated paper-trading system with the Caishen AI
 > trading system as its kernel and WorkLoom IM as its governance shell —
@@ -7,7 +7,7 @@
 
 **Current stage: paper trading only. Not investment advice; no returns promised.**
 
-## 1. Origin: From Caishen to Tiger Trading
+## 1. Origin: From Caishen to Tiger Global Asset Management
 
 The project started as the [Caishen AI trading system](CAISHEN_README.md): a
 multi-agent trading system that strictly follows the
