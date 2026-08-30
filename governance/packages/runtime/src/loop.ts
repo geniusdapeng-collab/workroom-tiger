@@ -48,8 +48,39 @@ function tradingNightlySteps(): QuestStep[] {
   ];
 }
 
+/** A股/港股盘后结算编排（多市场页签官网化为后续；当前产出在各市场 out 目录） */
+function marketSettleSteps(market: "cn" | "hk", label: string): QuestStep[] {
+  return [
+    { stepId: "t1", action: "kernel.doctor", objectType: "report", tool: "kernel.doctor",
+      params: {}, context: { stage: "paper" }, label: "数据源可达性自检" },
+    { stepId: "t2", action: "pipeline.daily", objectType: "report", tool: "pipeline.daily",
+      params: { market }, context: { stage: "paper" },
+      label: `${label}全链路（轻仓验证期通道）` },
+    { stepId: "t3", action: "events.ingest", objectType: "report", tool: "events.ingest",
+      params: {}, context: { stage: "paper" }, label: "内核五元事件幂等入库" },
+  ];
+}
+
+/** 盘中触发器编排（盘前计划 → 盘中 ENTRY/STOP/PROTECT 轮询 → 事件入库） */
+function intradaySteps(market: string, label: string): QuestStep[] {
+  return [
+    { stepId: "t1", action: "kernel.premarket", objectType: "portfolio", tool: "kernel.premarket",
+      params: { market }, context: { stage: "paper" }, label: `${label}盘前作战计划` },
+    { stepId: "t2", action: "kernel.intraday", objectType: "portfolio", tool: "kernel.intraday",
+      params: { market }, context: { stage: "paper" },
+      label: `${label}盘中触发器轮询（ENTRY/STOP/PROTECT）` },
+    { stepId: "t3", action: "events.ingest", objectType: "report", tool: "events.ingest",
+      params: {}, context: { stage: "paper" }, label: "内核五元事件幂等入库" },
+  ];
+}
+
 /** 演示计划模板（按目标关键词匹配；真实 LLM 规划在 dsh agent loop 融合期接入） */
 export function planQuest(goal: string, preset: AssembledPreset): QuestStep[] {
+  if (/A股盘后|cn-settle|沪深/.test(goal)) return marketSettleSteps("cn", "A股");
+  if (/港股盘后|hk-settle/.test(goal)) return marketSettleSteps("hk", "港股");
+  if (/A股盘中|cn-intraday/.test(goal)) return intradaySteps("cn", "A股");
+  if (/港股盘中|hk-intraday/.test(goal)) return intradaySteps("hk", "港股");
+  if (/美股盘中|us-intraday/.test(goal)) return intradaySteps("us", "美股");
   if (/老虎|交易|pipeline|夜班|trading/.test(goal)) {
     return tradingNightlySteps();
   }

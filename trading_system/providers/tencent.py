@@ -24,12 +24,17 @@ import urllib.request
 import pandas as pd
 
 from .base import DataProvider
+from .cn_native import cn_native, hk_native
 
 logger = logging.getLogger(__name__)
 
-_KLINE = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-          "?param=us{sym},day,,,{n},qfq")
-_QUOTE = "https://qt.gtimg.cn/q=us{ticker}"
+# v3.3：新端点为主（proxy.finance.qq.com 全符号可达，含 HK/CN）；
+# 旧端点（web.ifzq.gtimg.cn）保留兜底——2026-08-30 实测旧端点对 HK 符号整体 501。
+_KLINE_NEW = ("https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
+              "?param={native},day,,,{n},qfq")
+_KLINE_OLD = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+              "?param={native},day,,,{n},qfq")
+_QUOTE = "https://qt.gtimg.cn/q={native}"
 _UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
 _SUFFIXES = (".OQ", ".N", ".AM", "")   # 探测：纳斯达克 → 纽交所 → 美交所/ARCA(ETF) → 无后缀
 _TS_RE = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
@@ -47,20 +52,33 @@ class TencentProvider(DataProvider):
         return True            # 无需 key；调用失败由降级链处理
 
     # ---------------------------------------------------------------- 内部
-    def _get(self, url: str, encoding: str = "utf-8") -> str:
-        req = urllib.request.Request(url, headers=_UA)
+    def _get(self, url: str, encoding: str = "utf-8", referer: str | None = None) -> str:
+        headers = dict(_UA)
+        if referer:
+            headers["Referer"] = referer
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return resp.read().decode(encoding, errors="replace")
 
-    def _fetch_kline(self, sym: str, days: int) -> pd.DataFrame:
-        text = self._get(_KLINE.format(sym=sym, n=min(days + 20, 800)))
+    def _fetch_kline(self, sym: str, days: int, native: str | None = None) -> pd.DataFrame:
+        """native 为完整源符号（usSPY.OQ / sh000300 / hk00700）；
+        CN/HK 必须带 Referer（gu.qq.com），否则反爬跳转（v3.3 实测）。"""
+        native = native or f"us{sym}"
+        referer = f"https://gu.qq.com/{native}"
+        try:
+            text = self._get(_KLINE_NEW.format(native=native, n=min(days + 20, 800)),
+                             referer=referer)
+        except Exception as e:
+            logger.warning("腾讯新端点失败（%s），尝试旧端点: %s", native, e)
+            text = self._get(_KLINE_OLD.format(native=native, n=min(days + 20, 800)),
+                             referer=referer)
         blob = json.loads(text)
         if blob.get("code") != 0:
             raise RuntimeError(f"腾讯 K 线错误: {blob.get('msg', '')[:80]}")
         data = blob.get("data") or {}
-        node = data.get(f"us{sym}") or (list(data.values())[0] if data else None)
+        node = data.get(native) or (list(data.values())[0] if data else None)
         if not node:
-            raise RuntimeError(f"腾讯无数据: us{sym}")
+            raise RuntimeError(f"腾讯无数据: {native}")
         bars = node.get("qfqday") or node.get("day") or []
         if not bars:
             raise RuntimeError(f"腾讯 K 线为空: us{sym}")
@@ -81,6 +99,13 @@ class TencentProvider(DataProvider):
         return self._normalize_ohlcv(df).tail(days)
 
     def _fetch(self, ticker: str, days: int) -> pd.DataFrame:
+        # CN/HK 原生符号直达（v3.3）：不做美股后缀探测
+        native = cn_native(ticker) or hk_native(ticker)
+        if native:
+            df = self._fetch_kline(ticker, days, native=native)
+            if len(df) < min(days, 50):
+                raise RuntimeError(f"腾讯 {native} 数据不足（{len(df)} 行）")
+            return df
         cands = ([self._suffix[ticker]] if ticker in self._suffix
                  else [f"{ticker}{s}" for s in _SUFFIXES])
         last_err: Exception | None = None
@@ -107,9 +132,10 @@ class TencentProvider(DataProvider):
         return df
 
     def quote(self, ticker: str) -> dict | None:
-        """腾讯实时行情（美股交易时段实时，kind=realtime）。"""
+        """腾讯实时行情（美股/沪深/港股，kind=realtime）。"""
         try:
-            text = self._get(_QUOTE.format(ticker=ticker), encoding="gbk")
+            native = cn_native(ticker) or hk_native(ticker) or f"us{ticker}"
+            text = self._get(_QUOTE.format(native=native), encoding="gbk")
             m = re.search(r'="(.*)"', text)
             if not m:
                 raise ValueError("empty")

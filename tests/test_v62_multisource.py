@@ -72,7 +72,8 @@ _TENCENT_KLINE = (
 
 
 class _TencentFake(TencentProvider):
-    def _get(self, url: str, encoding: str = "utf-8") -> str:
+    def _get(self, url: str, encoding: str = "utf-8",
+             referer: str | None = None) -> str:  # v3.3：签名跟随生产（Referer 可选）
         if "fqkline" in url:
             return _TENCENT_KLINE
         return 'v_usAAPL="200~苹果~AAPL.OQ~319.70~314.58~316.85~38614037~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~~2026-08-28 16:00:01~5.12~1.63~"'

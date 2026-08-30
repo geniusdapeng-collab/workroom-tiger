@@ -85,6 +85,21 @@ async function sh(cmd: string, args: string[], cwd: string, timeoutMs: number) {
 const KERNEL_CMD = (process.env.TIGER_KERNEL_CMD
   ?? "python3 main.py --mode daily --universe extended --top 30 --picks 8 --html --out reports").split(" ");
 
+/** 分市场内核命令（env 可覆盖；out 目录分市场隔离，回执按各自目录实证） */
+const MARKET_CMDS: Record<string, { cmd: string[]; outDir: string }> = {
+  us: { cmd: KERNEL_CMD, outDir: "reports" },
+  cn: {
+    cmd: (process.env.TIGER_KERNEL_CMD_CN
+      ?? "python3 main.py --market cn --mode daily --universe core --top 30 --picks 8 --html --out reports/cn").split(" "),
+    outDir: "reports/cn",
+  },
+  hk: {
+    cmd: (process.env.TIGER_KERNEL_CMD_HK
+      ?? "python3 main.py --market hk --mode daily --universe core --top 30 --picks 8 --html --out reports/hk").split(" "),
+    outDir: "reports/hk",
+  },
+};
+
 export const TRADING_TOOLS: Record<string, ToolFn> = {
   /** 源可达性自检（doctor.sh 退出码即回执） */
   "kernel.doctor": async () => {
@@ -96,10 +111,12 @@ export const TRADING_TOOLS: Record<string, ToolFn> = {
     };
   },
 
-  /** 内核全链路（daily/premarket/intraday/demo，由 TIGER_KERNEL_CMD 决定） */
+  /** 内核全链路（daily/premarket/intraday/demo；params.market=us|cn|hk 分市场） */
   "pipeline.daily": async (p) => {
-    const outDir = String(p.out_dir ?? "reports");
-    const r = await sh(KERNEL_CMD[0]!, KERNEL_CMD.slice(1), KERNEL_ROOT, 3_600_000);
+    const market = String(p.market ?? "us");
+    const spec = MARKET_CMDS[market] ?? MARKET_CMDS.us!;
+    const outDir = String(p.out_dir ?? spec.outDir);
+    const r = await sh(spec.cmd[0]!, spec.cmd.slice(1), KERNEL_ROOT, 3_600_000);
     const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
     const resultJson = join(KERNEL_ROOT, outDir, `result_${today}.json`);
     const reportHtml = join(KERNEL_ROOT, outDir, `日报_${today}.html`);
@@ -119,6 +136,40 @@ export const TRADING_TOOLS: Record<string, ToolFn> = {
     const synced = !!m && m[3] === "0";
     return {
       result: { ingested: m?.[1] ?? "0", deduped: m?.[2] ?? "0", failed: m?.[3] ?? "?" },
+      receipt: { synced, verified_at: new Date().toISOString() },
+    };
+  },
+
+  /** 盘前作战计划（premarket：ENTRY/STOP/PROTECT 触发器生成） */
+  "kernel.premarket": async (p) => {
+    const market = String(p.market ?? "us");
+    const outDir = market === "us" ? "reports" : `reports/${market}`;
+    const cmd = (`python3 main.py --market ${market} --mode premarket `
+      + `--universe core --top 30 --picks 8 --html --out ${outDir}`).split(" ");
+    const r = await sh(cmd[0]!, cmd.slice(1), KERNEL_ROOT, 3_600_000);
+    const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    const plan = join(KERNEL_ROOT, outDir, `盘前计划_${today}.md`);
+    const synced = freshFile(plan, 24 * 60) || r.stdout.includes("盘前");
+    return {
+      result: { market, plan_exists: existsSync(plan), tail: r.stdout.split("\n").slice(-4) },
+      receipt: { synced, snapshot_uri: plan, verified_at: new Date().toISOString() },
+    };
+  },
+
+  /** 盘中触发器轮询（intraday：ENTRY/STOP/PROTECT 命中即模拟成交） */
+  "kernel.intraday": async (p) => {
+    const market = String(p.market ?? "us");
+    const outDir = market === "us" ? "reports" : `reports/${market}`;
+    const cycles = String(p.cycles ?? "3");
+    const interval = String(p.interval ?? "60");
+    const cmd = (`python3 main.py --market ${market} --mode intraday `
+      + `--interval ${interval} --cycles ${cycles} --out ${outDir}`).split(" ");
+    const r = await sh(cmd[0]!, cmd.slice(1), KERNEL_ROOT, 3_600_000);
+    // 回执：进程正常结束 + 日报新鲜（盘中模式校验日报新鲜度，过期即拒绝运行——v6.1）
+    const synced = !r.stdout.includes("拒绝") && !r.stdout.includes("过期日报");
+    return {
+      result: { market, cycles, hits: (r.stdout.match(/ENTRY|STOP|PROTECT/g) ?? []).length,
+                tail: r.stdout.split("\n").slice(-4) },
       receipt: { synced, verified_at: new Date().toISOString() },
     };
   },

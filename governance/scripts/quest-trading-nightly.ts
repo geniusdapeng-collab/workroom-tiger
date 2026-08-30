@@ -25,7 +25,9 @@ const GW_URL = process.env.DATABASE_GATEWAY_URL
   ?? "postgres://workloom_gateway:workloom_dev_gateway@localhost:5432/workloom";
 
 const SCOPE = { tenantId: "tiger", workspaceId: "trading" };
-const GOAL = "老虎交易夜班：全链路日报与复盘编排";
+/** 目标决定编排模板（planQuest 关键词路由）：
+ *  默认夜班（美股 daily 全链路）；A股盘后/港股盘后/A股盘中/港股盘中/美股盘中 见 loop.ts planQuest */
+const GOAL = process.env.TIGER_QUEST_GOAL ?? "老虎交易夜班：全链路日报与复盘编排";
 
 async function main() {
   const threadId = process.argv[2] ?? `quest-tiger-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
