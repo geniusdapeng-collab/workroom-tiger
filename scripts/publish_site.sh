@@ -13,7 +13,9 @@ if [ -z "$SRC" ] || [ ! -f "$SRC" ]; then
   exit 1
 fi
 
-cp "$SRC" site/index.html
-echo "已发布 $SRC → site/index.html"
+cp "$SRC" site/us.html
+# 多市场门户（v3.4）：组合总览 + 三市页签（缺数据市场如实标注）
+python3 scripts/build_site.py --us reports --cn reports/cn --hk reports/hk --out site
+echo "已发布 $SRC → site/us.html；组合总览 → site/index.html（多市场门户）"
 echo "提示：复盘纪要（reports/复盘_*.md）与治理事件（reports/governance_events.jsonl）"
 echo "      可由 site/governance.html 责任界面直接读取（同目录部署时）。"
