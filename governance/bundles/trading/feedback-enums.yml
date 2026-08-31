@@ -1,0 +1,43 @@
+# AI 统筹自主股票交易 Bundle · 第⑧装配槽：反馈枚举表（D24 自我进化飞轮 M1）
+# 口径：交易反馈主锚是风控与合规红线（客观纪律 → 围栏收紧只紧不松）；
+# 策略审美类（进出场时机偏好）走组织记忆，不编码进围栏 DSL（D24 修订 1）。
+version: trading-feedback-enums/v1
+enums:
+  # ---- 风控类（客观纪律）----
+  - code: risk.over_limit
+    label: 超风控阈值（仓位/回撤/杠杆）
+    appliesTo: [reject]
+  - code: risk.concentration
+    label: 集中度风险（单标的/单行业超限）
+    appliesTo: [reject]
+  - code: amount.too_high
+    label: 单笔金额过高
+    appliesTo: [reject]
+  # ---- 合规类 ----
+  - code: compliance.restricted
+    label: 合规限制标的（禁买名单/监管限制）
+    appliesTo: [reject]
+  - code: compliance.window
+    label: 敏感窗口（财报静默期/重大事件未披露）
+    appliesTo: [reject]
+  # ---- 策略类（主观偏好 → 偏好池）----
+  - code: timing.too_early
+    label: 进场时机过早
+    appliesTo: [reject, edit]
+  - code: timing.too_late
+    label: 离场时机过晚
+    appliesTo: [reject, edit]
+  - code: style.over_trade
+    label: 交易过于频繁
+    appliesTo: [reject]
+  # ---- 数据类 ----
+  - code: data.stale
+    label: 行情/财报数据陈旧
+    appliesTo: [reject]
+  - code: data.insufficient
+    label: 依据不足（缺关键因子）
+    appliesTo: [reject]
+  # ---- 通用 ----
+  - code: other
+    label: 其他（须附自由文本说明）
+    appliesTo: [reject, edit]

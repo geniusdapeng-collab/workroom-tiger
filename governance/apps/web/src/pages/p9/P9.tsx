@@ -1,5 +1,5 @@
 /**
- * P9 守夜战队频道（F5：夜班班组群 · AI–AI 协作现场；PRD P9-①②③④ 逐条对账）
+ * P9 夜班中心频道（F5：夜班班组群 · AI–AI 协作现场；PRD P9-①②③④ 逐条对账）
  *  - 班组消息流（P9E1）：夜班频道事件流按时间排列，每条带 #E 编号+回执位；
  *    越围栏项标「未生效·待审批」（L4.1 夜班动作 100% 过围栏，无例外通道）
  *  - 一键暂停（P9E2）：二次确认 → nightShift.pause（pauseAll，G5 端到端计时留痕；
@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
+import { actionText, actorText, payloadText } from "../../lib/display";
 import { Bridge } from "../../shell/Bridge";
 import {
   AgentActionMessage,
@@ -126,13 +127,13 @@ export default function P9() {
   /* ---------- 左栏：班组导航 ---------- */
   const left = (
     <>
-      <div className="mb-2 px-1 text-[11px] tracking-[.2em] text-ink3">守夜战队 · NIGHT SQUAD</div>
+      <div className="mb-2 px-1 text-[11px] tracking-[.2em] text-ink3">夜班中心 · 班组频道</div>
       <div className="mb-1.5 rounded-lg border border-gline bg-gold/6 px-3 py-2.5">
         <div className="text-caption text-gold">📌 班组群（本页）</div>
         <div className="mt-0.5 text-body text-ink2">{run ? `班次 ${run.id}` : "—"}</div>
       </div>
       <a href="/" className="mb-1.5 block rounded-lg border border-line bg-card px-3 py-2.5 text-body text-ink2 no-underline hover:border-gline">
-        ← 返回主甲板（P1）
+        ← 返回工作台
       </a>
       <div className="mt-3 rounded-lg border border-line bg-card p-3">
         <div className="mb-1.5 text-caption font-bold text-holo">交接班预告（P9E5）</div>
@@ -152,7 +153,7 @@ export default function P9() {
   /* ---------- 右栏：班组信息 ---------- */
   const right = (
     <>
-      <div className="mb-2 px-1 text-[11px] tracking-[.2em] text-ink3">班组信息 · SQUAD</div>
+      <div className="mb-2 px-1 text-[11px] tracking-[.2em] text-ink3">班组信息 · 概览</div>
       <div className="mb-3 rounded-lg border border-line bg-card p-3">
         <div className="mb-1.5 text-caption font-bold text-holo">班组状态（F4.8 状态机）</div>
         <NightStatusPill state={pillState} window="22:00–08:00" />
@@ -164,7 +165,7 @@ export default function P9() {
         <div className="mb-1.5 text-caption font-bold text-holo">峰谷计量（NightMeter）</div>
         <div className="font-orb text-h2 font-bold text-ink">{run?.stats?.credits_used ?? meter.credits} <span className="text-caption text-ink3">积分</span></div>
         <div className="mt-0.5 font-mono text-micro text-ink3">
-          {meter.offPeak ? "窗口 off-peak（谷时费率 F6.3/G9）" : "窗口 peak"} · 需介入 {run?.stats?.need_human ?? meter.needHuman} 项
+          {meter.offPeak ? "谷时窗口（峰谷费率 F6.3/G9）" : "峰时窗口"} · 需介入 {run?.stats?.need_human ?? meter.needHuman} 项
         </div>
       </div>
       <div className="mb-3 rounded-lg border border-line bg-card p-3">
@@ -193,8 +194,8 @@ export default function P9() {
       <div className="flex min-h-full flex-col">
         {/* GroupHeader */}
         <div className="mb-3 flex items-center gap-3">
-          <h2 className="text-h1 font-black tracking-wider">守夜战队频道</h2>
-          <span className="text-[11px] tracking-[.2em] text-ink3">P9 · NIGHT SQUAD</span>
+          <h2 className="text-h1 font-black tracking-wider">夜班中心频道</h2>
+          <span className="text-[11px] tracking-[.2em] text-ink3">P9 · 夜班班组</span>
           <span className="flex-1" />
           {!readonly && configured && run?.status === "running" && <EmergencyBrake onConfirm={() => void doPause()} />}
           {!readonly && configured && run?.status === "paused" && (
@@ -221,7 +222,7 @@ export default function P9() {
           {!ready ? (
             <><SkeletonBlock lines={2} h={44} /><SkeletonBlock lines={4} /></>
           ) : !configured ? (
-            <EmptyState icon="🌙" title="夜班未配置" hint="去航道管制台（P5）配置守夜战队（F4.8）" actionLabel="去配置 →" />
+            <EmptyState icon="🌙" title="夜班未配置" hint="去规则与权限（P5）配置夜班中心（F4.8）" actionLabel="去配置 →" />
           ) : (
             <>
               <SystemDivider time="22:00" summary={`夜班开始 · 围栏快照 ${run?.fenceSnapshot ?? "—"} 已写入事件 · 候选清单 ${run?.candidateCount ?? 0} 项已确认（F4.1/F2.6）`} />
@@ -230,7 +231,7 @@ export default function P9() {
                   return <HumanBubble key={ev.event_id} time={new Date(ev.context.time).toTimeString().slice(0, 5)}>{String((ev.decision.after as { text?: string })?.text ?? "")}</HumanBubble>;
                 }
                 if (ev.who.type === "system") {
-                  return <SystemDivider key={ev.event_id} time={new Date(ev.context.time).toTimeString().slice(0, 5)} summary={`${ev.who.id} · ${ev.decision.action}（已落库）`} />;
+                  return <SystemDivider key={ev.event_id} time={new Date(ev.context.time).toTimeString().slice(0, 5)} summary={`${actorText(ev.who.id)} · ${actionText(ev.decision.action)}（已落库）`} />;
                 }
                 // 需介入卡（红框，L4.2 夜间不确定不执行）+ 一键派单（P9E3）
                 const blocked = ev.rule_impact?.some((r) => r.result === "blocked");
@@ -240,12 +241,12 @@ export default function P9() {
                       key={ev.event_id}
                       severity="p0"
                       eventId={ev.event_id}
-                      title={`需介入：${ev.who.id} · ${ev.decision.action}${ev.object.id ? `（${ev.object.id}）` : ""}`}
+                      title={`需介入：${actorText(ev.who.id)} · ${actionText(ev.decision.action)}${ev.object.id ? `（${ev.object.id}）` : ""}`}
                       source={ev.object.type}
                       onDispatch={() => {
                         void trpc.inspection.dispatch.mutate({ anomalyEventId: ev.event_id, presetKey: "reconcile-agent" })
                           .then(() => setBanner({ level: "info", text: "已派单：以异常事件唤起业务 Agent，处理结果回链（F9.3）" }))
-                          .catch(() => setBanner({ level: "warn", text: "该事件非巡检异常类，转 P4 决断队列处理" }));
+                          .catch(() => setBanner({ level: "warn", text: "该事件非巡检异常类，转 P4 审批中心处理" }));
                       }}
                     />
                   );
@@ -253,21 +254,20 @@ export default function P9() {
                 return (
                   <AgentActionMessage
                     key={ev.event_id}
-                    sender={ev.who.id}
+                    sender={actorText(ev.who.id)}
                     version={ev.who.version ?? ""}
-                    action={ev.decision.action}
+                    action={actionText(ev.decision.action)}
                     eventId={ev.event_id}
                     receipt={receiptOf(ev)}
                     rules={(ev.rule_impact ?? []).map((r) => `${r.rule_id} ${r.version}${r.result === "review" ? " · 未生效待审批" : ""}`)}
                     credits={ev.model_trace?.credits}
                   >
-                    {typeof ev.decision.after === "object" && ev.decision.after !== null
-                      ? JSON.stringify(ev.decision.after).slice(0, 160) : ""}
+                    {payloadText(ev.decision.after)}
                   </AgentActionMessage>
                 );
               })}
               {events.length === 0 && (
-                <EmptyState icon="🌌" title="班组尚未开张" hint="今夜 22:00 守夜战队出征后，这里将滚动各 Agent 的行动消息" />
+                <EmptyState icon="🌌" title="班组尚未开张" hint="今夜 22:00 夜班中心出征后，这里将滚动各 Agent 的行动消息" />
               )}
             </>
           )}

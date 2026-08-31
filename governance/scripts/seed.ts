@@ -8,8 +8,13 @@
  *
  * 纪律：
  *  - 事件只经 workloom_gateway 角色写入（F1.2），其余表走 owner 种子连接（D10）；
- *  - 每条事件写入前过 safeParseBusinessEvent（附录 E 校验）；
- *  - 幂等：组织模型 ON CONFLICT DO NOTHING；事件 UNIQUE(tenant_id,event_id) 冲突丢弃（L1.4）；
+ *  - 事件一律走 append_event_insert 特权函数（P0-3：不再裸 INSERT biz_events）；
+ *    种子 event_id 用 E-SEED- 前缀（回放/种子独立命名空间，与序列分配的 E-<digits> 硬隔离）；
+ *  - 每条事件写入前过 zod（safeParseReplayAwareEvent：E-SEED- 前缀经占位缝过同一附录 E schema）；
+ *  - 幂等：组织模型 ON CONFLICT DO NOTHING；事件先查存在再写（L1.4 确定性幂等——
+ *    演示时间轴含实时时钟，重跑 payload 必然不同，直撞 append_event_insert 会按
+ *    P0-3 抢占攻击拒写，故存在即跳过、不触发 md5 冲突比对）；
+ *  - GUC 一律 set_config(..., is_local=true) 且包在显式事务内（L2：不留会话级残留）；
  *  - 验收：写入后回读 100 条事件逐条过 zod，五元字段完整率必须 100%（附录 H-1）。
  */
 import { readFileSync, readdirSync } from "node:fs";
@@ -17,11 +22,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import YAML from "yaml";
-import { safeParseBusinessEvent } from "@workloom/shared";
 // #32 修复：哈希链统一生产口径（events.ts 的 canonicalJson/eventHash）——
 // 此前种子用 JSON.stringify 键序算哈希，与生产 canonicalJson 口径不一致，
 // 种子 100 条事件用生产验证器重算全部不符（链上两种算法混杂）
-import { eventHash } from "@workloom/base/workdata";
+// P0-3 续：种子 ID 走 E-SEED- 前缀，zod 经 safeParseReplayAwareEvent 占位缝校验
+import { eventHash, safeParseReplayAwareEvent } from "@workloom/base/workdata";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..");
@@ -48,7 +53,7 @@ const MEMBERS = [
   { id: "MEM-003", name: "李前台", role: "readonly" },
 ] as const;
 
-const EVENT_BASE = 8800; // 事件编号 E-8801 起（PRD 展示口径）
+const EVENT_BASE = 8800; // 事件编号 E-SEED-8801 起（PRD 展示口径 + P0-3 种子前缀空间）
 const EVENT_COUNT = 100;
 const GENESIS_HASH = "GENESIS";
 
@@ -170,6 +175,26 @@ function loadSkills(): SkillDoc[] {
 function yunqiArchive(): Record<string, unknown> {
   return {
     property: { name: WS_NAME, city: "杭州", rooms: 86, star: "四钻" },
+    // 数字CEO 宪章（D21，演示：董事长已完成深度授权 → 试用期第 2 天）
+    charter: {
+      version: 1,
+      mode: "trial",
+      identity: { name: "公司CEO", persona: "稳健经营型" },
+      autonomy: { price_band: [0.85, 1.15], procurement_cap: 5000, campaign_cap: 2000 },
+      escalate: ["修改保底价/安全禁区相关", "单月累计让利超上限", "围栏规则放宽（任何放宽）", "新渠道/新平台上线", "对外公开承诺（赔偿/免费/声明）", "宪章变更"],
+      briefing: { daily: "08:30", weekly: "Mon 09:00", monthly: "1st 10:00", channel: "both" },
+      circuit_breaker: { window_days: 14, kpi_floor: { occ: 0.7 }, tightened: false },
+      grant: {
+        event_id: "E-GRANT-DEMO01", granted_by: "MEM-001",
+        granted_at: new Date(Date.now() - 9 * 86400e3).toISOString(),
+        disclosure_version: "risk-v1",
+        clauses: ["自主调价", "自主采购", "自主对外回复", "试用降档规则", "AI 非法律责任主体·授权人承担经营决策责任"],
+        shadow_days: 3, trial_days: 7,
+        trial_ends_at: new Date(Date.now() + 5 * 86400e3).toISOString(),
+        retain_until: null,
+      },
+      updated_at: new Date().toISOString(),
+    },
     brand_guideline: {
       tone: "真诚克制，不夸大、不承诺档案外补偿",
       banned_words: ["最低价全网保证", "百分百满意"],
@@ -194,10 +219,10 @@ function yunqiArchive(): Record<string, unknown> {
         { channel: "携程", price: 458, parity: true, status: "online" },
         { channel: "飞猪", price: 438, parity: false, status: "online" },
       ],
-      roomStates: [
-        { roomType: "大床房", synced: true },
-        { roomType: "双床房", synced: true },
-        { roomType: "亲子房", synced: false },
+      stateUnits: [
+        { unit: "大床房", synced: true },
+        { unit: "双床房", synced: true },
+        { unit: "亲子房", synced: false },
       ],
       reviews: [
         { id: "rv-ctrip-9901", channel: "携程", score: 5 },
@@ -251,7 +276,7 @@ const CHANNELS = ["美团", "携程", "飞猪"] as const;
 
 /** 生成一条剧本事件（按序号轮转场景，保证 R1–R6 均有命中样本） */
 function makeEvent(i: number, time: Date, presets: Preset[]): SeedEvent {
-  const id = `E-${EVENT_BASE + i}`;
+  const id = `E-SEED-${EVENT_BASE + i}`;
   const scene = i % 10;
   const baseCtx = {
     tenant_id: TENANT_ID,
@@ -530,7 +555,8 @@ async function main(): Promise<void> {
   console.log(`✓ Agent 实例 ×${presets.length}（含只读 preset：巡检/竞对，L9.1）`);
 
   // 一店一档（槽①；forbidden 双写：archive 内 + 独立列，L1.6）
-  const archive = yunqiArchive();
+  // dataMode=simulated：落地向导（D24）横幅事实源——种子库即「全模拟运行态」，向导启用真实模式后翻转
+  const archive = { ...yunqiArchive(), dataMode: "simulated" };
   await q(
     `INSERT INTO profiles (workspace_id, tenant_id, industry, archive, forbidden, pii_vault)
      VALUES ($1,$2,'hotel',$3,$4,NULL)
@@ -563,19 +589,26 @@ async function main(): Promise<void> {
   // 官方技能 + 安装绑定（F8.1/F8.2）
   for (const s of skillsDocs) {
     const skillId = `skill-${s.name}`;
+    // 技能装载幂等升级：ON CONFLICT 版本比对——版本变化才升级 body/fence_bindings，
+    // 同版本重跑不覆盖（避免无谓行 churn；#17 纪律下运行时读安装快照，此更新不影响已装并集）
     await q(
       `INSERT INTO skills (id, level, bundle, name, version, description, fence_bindings, body, desensitized)
        VALUES ($1,'official','hotel',$2,'1.0.0',$3,$4,$5,false)
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body, version = EXCLUDED.version,
+                                      fence_bindings = EXCLUDED.fence_bindings
+       WHERE skills.version IS DISTINCT FROM EXCLUDED.version`,
       [skillId, s.name, s.description, JSON.stringify(s.fenceBindings), s.body],
     );
+    // 安装行与运行时 installSkill 同口径（#17 安装时快照 + D15-⑤ installed_version）：
+    // 快照/版本从 skills 表取，保证 seed 与运行时两条路径的围栏并集计算一致
     await q(
-      `INSERT INTO skill_installs (skill_id, workspace_id, installed_by)
-       VALUES ($1,$2,'MEM-001') ON CONFLICT (skill_id, workspace_id) DO NOTHING`,
+      `INSERT INTO skill_installs (skill_id, workspace_id, installed_by, fence_bindings_snapshot, installed_version)
+       SELECT s.id, $2, 'MEM-001', s.fence_bindings, s.version FROM skills s WHERE s.id = $1
+       ON CONFLICT (skill_id, workspace_id) DO NOTHING`,
       [skillId, WS_ID],
     );
   }
-  console.log(`✓ 官方技能 ×${skillsDocs.length} 已安装（围栏绑定随安装生效）`);
+  console.log(`✓ 官方技能 ×${skillsDocs.length} 已安装（围栏绑定随安装生效，安装快照已落）`);
 
   // 团队技能 + 行业共享技能（P6 装备库三区演示数据；F8.1 三级体系；幂等 ON CONFLICT）
   await q(
@@ -587,9 +620,12 @@ async function main(): Promise<void> {
              false)
      ON CONFLICT (id) DO NOTHING`,
   );
+  // 团队技能安装行同样补快照/版本（与运行时 installSkill 同口径）
   await q(
-    `INSERT INTO skill_installs (skill_id, workspace_id, installed_by)
-     VALUES ('skill-t-ws-yunqi-weekly-ops-review',$1,'MEM-002') ON CONFLICT (skill_id, workspace_id) DO NOTHING`,
+    `INSERT INTO skill_installs (skill_id, workspace_id, installed_by, fence_bindings_snapshot, installed_version)
+     SELECT s.id, $1, 'MEM-002', s.fence_bindings, s.version FROM skills s
+     WHERE s.id = 'skill-t-ws-yunqi-weekly-ops-review'
+     ON CONFLICT (skill_id, workspace_id) DO NOTHING`,
     [WS_ID],
   );
   await q(
@@ -607,6 +643,11 @@ async function main(): Promise<void> {
   const triggers = [
     { id: "tg-inspection-0700", name: "每日 07:00 只读巡检", kind: "cron", schedule: "0 7 * * *", action: { dispatch: "inspection-agent", template: "inspection.daily" } },
     { id: "tg-night-2200", name: "夜班 22:00 战队出征", kind: "cron", schedule: "0 22 * * *", action: { dispatch: "night-shift", template: "night.run.start" } },
+    // 数字CEO 节拍（D21：CEO Loop；调度器消费前经治理守卫校验 charter.mode）
+    { id: "tg-ceo-brief-0830", name: "公司CEO 晨报 08:30", kind: "cron", schedule: "30 8 * * *", action: { beat: "daily" } },
+    { id: "tg-ceo-queue-2h", name: "公司CEO 裁决巡检 2h", kind: "cron", schedule: "7 */2 * * *", action: { beat: "queue" } },
+    { id: "tg-ceo-deviation", name: "公司CEO 目标偏差扫描", kind: "cron", schedule: "15 */4 * * *", action: { beat: "deviation" } },
+    { id: "tg-ceo-breaker", name: "公司CEO 自治熔断巡检", kind: "cron", schedule: "45 23 * * *", action: { beat: "breaker" } },
   ];
   for (const t of triggers) {
     await q(
@@ -615,7 +656,7 @@ async function main(): Promise<void> {
       [t.id, WS_ID, t.name, t.kind, t.schedule, JSON.stringify(t.action)],
     );
   }
-  console.log("✓ 触发器 ×2（巡检 07:00 / 夜班 22:00）");
+  console.log("✓ 触发器 ×6（巡检/夜班 + 公司CEO 节拍 ×4）");
 
   // 演示线程（P1/P2 有数据可投影）
   const threads = [
@@ -646,16 +687,20 @@ async function main(): Promise<void> {
   console.log("✓ 凭据引用 ×2（占位密文，事件只记引用 ID）");
 
   // —— 事件写入：切 gateway 角色（F1.2 唯一可 INSERT biz_events）
+  // L2：GUC 一律 is_local=true 且包在显式事务内（事务提交即失效，不留会话级残留）；
+  // 后续 approvals/night_runs/org_memory/C 端运行态等 gateway 段写入同在此事务内。
   await owner.end();
   const gw = new pg.Client({ connectionString: GATEWAY_URL });
   await gw.connect();
-  await gw.query("SELECT set_config('app.workspace_id', $1, false)", [WS_ID]);
-  await gw.query("SELECT set_config('app.tenant_id', $1, false)", [TENANT_ID]);
+  await gw.query("BEGIN");
+  await gw.query("SELECT set_config('app.workspace_id', $1, true)", [WS_ID]);
+  await gw.query("SELECT set_config('app.tenant_id', $1, true)", [TENANT_ID]);
 
-  // 哈希链续接（幂等重跑时接在已有链尾之后；链内已存在的事件靠 UNIQUE 丢弃）
+  // 哈希链续接（幂等重跑时接在已有链尾之后；链内已存在的事件按存在预检跳过）
+  // 链粒度 = tenant+workspace（P1-5 与 append_event_insert 同口径）
   const last = await gw.query(
-    `SELECT hash FROM biz_events WHERE tenant_id=$1 ORDER BY seq DESC LIMIT 1`,
-    [TENANT_ID],
+    `SELECT hash FROM biz_events WHERE tenant_id=$1 AND workspace_id=$2 ORDER BY seq DESC LIMIT 1`,
+    [TENANT_ID, WS_ID],
   );
   let prevHash = (last.rows[0]?.hash as string) ?? GENESIS_HASH;
 
@@ -664,32 +709,80 @@ async function main(): Promise<void> {
   const sessionOf = (scene: number): string | null =>
     scene === 0 || scene === 7 ? "T-101" : scene === 1 || scene === 4 ? "T-102" : scene === 8 ? "T-103" : null;
 
+  /** 幂等存在预检（L1.4 确定性口径）：同 (tenant_id,event_id) 已存在即跳过——
+   *  演示时间轴含实时时钟，重跑同 ID 事件 payload 必然不同，直撞 append_event_insert
+   *  会触发 P0-3 md5 冲突比对按抢占攻击拒写；种子语义是「已种即跳过」，故先查后写。 */
+  const eventExists = async (eventId: string): Promise<boolean> => {
+    const r = await gw.query(
+      `SELECT 1 FROM biz_events WHERE tenant_id=$1 AND event_id=$2`,
+      [TENANT_ID, eventId],
+    );
+    return (r.rowCount ?? 0) > 0;
+  };
+
   let inserted = 0;
   let dupSkipped = 0;
   for (let i = 1; i <= EVENT_COUNT; i++) {
     const ev = makeEvent(i, times[i - 1] as Date, presets);
-    const checked = safeParseBusinessEvent(ev);
+    // E-SEED- 前缀经回放占位缝过附录 E 校验（结构强度与 safeParseBusinessEvent 一致）
+    const checked = safeParseReplayAwareEvent(ev as never);
     if (!checked.success) {
       throw new Error(`种子事件 ${ev.event_id} 未过附录 E 校验：${checked.error.message}`);
+    }
+    if (await eventExists(ev.event_id)) {
+      dupSkipped += 1;
+      continue;
     }
     // #32：哈希输入与存库 payload 均为 zod parse 后的 checked.data（与 appendEvent 逐字节一致）
     const payload = JSON.stringify(checked.data);
     const hash = eventHash(prevHash, checked.data);
-    const res = await gw.query(
-      `INSERT INTO biz_events (event_id, tenant_id, workspace_id, session_id, payload, prev_hash, hash, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (tenant_id, event_id) DO NOTHING
-       RETURNING seq`,
+    // P0-3：走 append_event_insert 特权函数（不再裸 INSERT）——DB 层自校验
+    // GUC 上下文一致性与链式接龙（断链拒写），冲突按 md5 比对（此处有存在预检兜底不会触达）
+    const res = await gw.query<{ seq: string | null; inserted: boolean }>(
+      `SELECT * FROM append_event_insert($1,$2,$3,$4,$5,$6,$7,$8)`,
       [ev.event_id, TENANT_ID, WS_ID, sessionOf(i % 10), payload, prevHash, hash, ev.context.time],
     );
-    if (res.rowCount && res.rowCount > 0) {
+    if (res.rows[0]?.inserted) {
       prevHash = hash; // 只有真实落库的事件才进链
       inserted += 1;
     } else {
-      dupSkipped += 1;
+      dupSkipped += 1; // 并发下被同 payload 抢先落库（理论路径，按幂等丢弃计）
     }
   }
+
   console.log(`✓ 五元事件：新写入 ${inserted} 条，幂等丢弃 ${dupSkipped} 条（L1.4）`);
+
+  // CEO 晨报事件（剧场汇报气泡/董事长视图简报流的数据源；幂等键 E-SEED-8999）
+  {
+    const ev = {
+      event_id: "E-SEED-8999",
+      who: { type: "agent", id: "captain", version: "v1.0" },
+      context: { tenant_id: TENANT_ID, workspace_id: WS_ID, time: new Date().toISOString(), stage: "stable", store: WS_NAME },
+      object: { type: "workspace", id: WS_ID, label: WS_NAME },
+      decision: {
+        action: "ceo.briefing",
+        after: { text: "董事长，早报已备：昨夜班组完成 14 项作业（评论/巡检/对账各线正常），1 件差评处置请您拍板；本周 OCC 与 RevPAR 趋势见节拍控制台。试用期边界降一档执行中。" },
+        basis: ["CEO Loop 日频晨报 08:30"],
+      },
+      rule_impact: [],
+      receipt: { synced: true, snapshot_uri: "data/snapshots/e-seed-8999.png", verified_at: new Date().toISOString() },
+      model_trace: { model_id: "mock-hotel-001", tier: "standard", window: "peak", credits: 1 },
+    };
+    const checked = safeParseReplayAwareEvent(ev as never);
+    if (!checked.success) throw new Error(`晨报事件未过校验：${checked.error.message}`);
+    if (await eventExists(ev.event_id)) {
+      console.log("✓ CEO 晨报事件（已存在，幂等跳过）");
+    } else {
+      const payload = JSON.stringify(checked.data);
+      const hash = eventHash(prevHash, checked.data);
+      const res = await gw.query<{ seq: string | null; inserted: boolean }>(
+        `SELECT * FROM append_event_insert($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [ev.event_id, TENANT_ID, WS_ID, null, payload, prevHash, hash, ev.context.time],
+      );
+      if (res.rows[0]?.inserted) prevHash = hash;
+      console.log("✓ CEO 晨报事件（剧场汇报气泡数据源）");
+    }
+  }
 
   // 审批样例：取最近两条 review 结果事件挂审批（一 pending 一 approved）
   const reviewEvents = await gw.query(
@@ -718,6 +811,10 @@ async function main(): Promise<void> {
         JSON.stringify({
           before: p.decision.before ?? null,
           after: p.decision.after ?? null,
+          // D21：裁决判据字段（action/params/base_price）——公司CEO 可据此裁决而非保守全上浮
+          action: p.decision.action,
+          params: p.decision.params ?? {},
+          base_price: (p.decision.before as Record<string, unknown> | null)?.price ?? null,
           expires_at: iso(new Date(Date.now() + 24 * 3600 * 1000)), // G6：24h
         }),
         status === "approved" ? "MEM-001" : null,
@@ -731,27 +828,29 @@ async function main(): Promise<void> {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const runDate = yesterday.toISOString().slice(0, 10);
+  // 0013 口径：班次 id = nr-<workspaceId>-<runDate>（PK 已改 (workspace_id, run_date)，
+  // id 保留唯一约束，ON CONFLICT (id) 幂等不变）
   await gw.query(
     `INSERT INTO night_runs (id, workspace_id, run_date, status, fence_snapshot_version, candidate_count, stats, started_at, package_event_id)
      VALUES ($1,$2,$3,'package_generated',$4,$5,$6,$7,$8)
      ON CONFLICT (id) DO NOTHING`,
     [
-      `nr-${runDate}`,
+      `nr-${WS_ID}-${runDate}`,
       WS_ID,
       runDate,
       FENCE_VERSION,
       14,
       JSON.stringify({ done: 9, pending: 3, need_human: 2, credits_used: 96, credits_est: 118 }),
       new Date(yesterday.setHours(22, 0, 0, 0)).toISOString(),
-      `E-${EVENT_BASE + EVENT_COUNT}`,
+      `E-SEED-${EVENT_BASE + EVENT_COUNT}`,
     ],
   );
-  console.log(`✓ 夜班班次 nr-${runDate}（package_generated，围栏快照 ${FENCE_VERSION}）`);
+  console.log(`✓ 夜班班次 nr-${WS_ID}-${runDate}（package_generated，围栏快照 ${FENCE_VERSION}）`);
 
-  // 组织记忆 + 归因（F1.4）
+  // 组织记忆 + 归因（F1.4；来源事件为种子段 E-SEED- 前缀 ID）
   const memories = [
-    { id: "mem-occ-friday", kind: "pattern", content: "周五晚大床房需求弹性高，18:00 前提价转化损失最小", source: ["E-8801"] },
-    { id: "mem-review-sop", kind: "sop", content: "差评回复结构：致歉→核实→已采取措施→改进承诺，不承诺档案外补偿", source: ["E-8802"] },
+    { id: "mem-occ-friday", kind: "pattern", content: "周五晚大床房需求弹性高，18:00 前提价转化损失最小", source: ["E-SEED-8801"] },
+    { id: "mem-review-sop", kind: "sop", content: "差评回复结构：致歉→核实→已采取措施→改进承诺，不承诺档案外补偿", source: ["E-SEED-8802"] },
   ];
   for (const m of memories) {
     await gw.query(
@@ -761,9 +860,9 @@ async function main(): Promise<void> {
       [m.id, TENANT_ID, WS_ID, m.kind, m.content, m.source],
     );
     await gw.query(
-      `INSERT INTO memory_usage (memory_id, event_id) VALUES ($1,$2)
+      `INSERT INTO memory_usage (memory_id, event_id, workspace_id) VALUES ($1,$2,$3)
        ON CONFLICT (memory_id, event_id) DO NOTHING`,
-      [m.id, m.source[0]],
+      [m.id, m.source[0], WS_ID],
     );
   }
   console.log(`✓ 组织记忆 ×${memories.length}（含来源事件归因）`);
@@ -773,11 +872,12 @@ async function main(): Promise<void> {
     `SELECT payload FROM biz_events
      WHERE tenant_id=$1 AND workspace_id=$2 AND event_id >= $3 AND event_id <= $4
      ORDER BY seq`,
-    [TENANT_ID, WS_ID, `E-${EVENT_BASE + 1}`, `E-${EVENT_BASE + EVENT_COUNT}`],
+    [TENANT_ID, WS_ID, `E-SEED-${EVENT_BASE + 1}`, `E-SEED-${EVENT_BASE + EVENT_COUNT}`],
   );
   let valid = 0;
   for (const row of check.rows) {
-    if (safeParseBusinessEvent(row.payload).success) valid += 1;
+    // E-SEED- 前缀经回放占位缝过同一附录 E schema
+    if (safeParseReplayAwareEvent(row.payload as never).success) valid += 1;
   }
   const rate = check.rowCount ? valid / check.rowCount : 0;
   console.log(`✓ 验收（H-1）：回读 ${check.rowCount} 条，五元字段完整 ${valid} 条，完整率 ${(rate * 100).toFixed(1)}%`);
@@ -785,6 +885,390 @@ async function main(): Promise<void> {
     throw new Error(`验收失败：期望 ${EVENT_COUNT} 条且完整率 100%（实际 ${check.rowCount} 条 / ${(rate * 100).toFixed(1)}%）`);
   }
 
+  // ============ AI 服务前台 · 运行态剧本（ToBToC：C 端客服全域） ============
+  const svcQ = (text: string, params: unknown[]) => gw.query(text, params);
+
+  // C 端用户（会员绑定 + 纯游客各一）
+  await svcQ(
+    `INSERT INTO c_users (id, workspace_id, channel, openid, nickname, member_id, created_at)
+     VALUES
+       ('cu-zhangwei', $1, 'wechat-mini', 'openid-zhangwei', '张伟', 'M-GOLD-10086', $2),
+       ('cu-xiaoli', $1, 'h5', 'fp-xiaoli-8f3a', '住客小李', NULL, $3)
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID, new Date(Date.now() - 30 * 86400000).toISOString(), new Date(Date.now() - 2 * 86400000).toISOString()],
+  );
+
+  // 知识库第二集合：商品与服务目录（送物/餐饮/SPA）+ 官网来源登记
+  await svcQ(
+    `INSERT INTO kb_collections (id, workspace_id, name, description)
+     VALUES ('kbc-service-catalog', $1, '商品与服务目录', '送物清单、餐饮、康体 SPA 等服务与价格')
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID],
+  );
+  const catalogMd = `# 商品与服务目录\n\n## 免费送物清单\n矿泉水（每日 2 瓶免费）、牙刷套装、梳子、剃须刀、拖鞋、充电器借用。\n\n## 收费送物\n面膜 28 元/片、红酒 128 元/瓶、生日蛋糕 168 元/个（需提前 2 小时预约）。\n\n## 餐饮\n中西自助早餐 68 元/位（住店会员免费）；云栖轩中餐厅 11:00-21:00；客房送餐至 23:00。\n\n## 康体\n恒温泳池 07:00-22:00（住客免费）；SPA 60 分钟 398 元起，需预约。`;
+  await svcQ(
+    `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
+     VALUES ('kbd-service-catalog', $1, 'kbc-service-catalog', '商品与服务目录', 'manual', NULL, 1, 'active', $2, 'seed-hash-catalog', $3)
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID, catalogMd, new Date(Date.now() - 20 * 86400000).toISOString()],
+  );
+  const catChunks: [number, string, string][] = [
+    [0, '免费送物清单', '矿泉水（每日 2 瓶免费）、牙刷套装、梳子、剃须刀、拖鞋、充电器借用。'],
+    [1, '收费送物', '面膜 28 元/片、红酒 128 元/瓶、生日蛋糕 168 元/个（需提前 2 小时预约）。'],
+    [2, '餐饮', '中西自助早餐 68 元/位（住店会员免费）；云栖轩中餐厅 11:00-21:00；客房送餐至 23:00。'],
+    [3, '康体', '恒温泳池 07:00-22:00（住客免费）；SPA 60 分钟 398 元起，需预约。'],
+  ];
+  for (const [idx, heading, content] of catChunks) {
+    await svcQ(
+      `INSERT INTO kb_chunks (workspace_id, document_id, chunk_index, heading, content)
+       SELECT $1,'kbd-service-catalog',$2,$3,$4
+       WHERE NOT EXISTS (SELECT 1 FROM kb_chunks WHERE document_id='kbd-service-catalog' AND chunk_index=$2)`,
+      [WS_ID, idx, heading, content],
+    );
+  }
+  await svcQ(
+    `INSERT INTO kb_sources (id, workspace_id, url, fingerprint, last_crawled_at, schedule_cron, status)
+     VALUES ('kbs-official-site', $1, 'https://www.yunqi-hotel.example', 'fp-a91c', $2, '0 3 * * *', 'active')
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID, new Date(Date.now() - 86400000).toISOString()],
+  );
+
+  // 会话 1：会员张伟——退房时间问答（高置信带引用）
+  await svcQ(
+    `INSERT INTO c_conversations (id, workspace_id, c_user_id, channel, status, created_at, last_message_at)
+     VALUES ('cv-seed-001', $1, 'cu-zhangwei', 'wechat-mini', 'open', $2, $3)
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID, new Date(Date.now() - 26 * 3600000).toISOString(), new Date(Date.now() - 26 * 3600000 + 90000).toISOString()],
+  );
+  const conv1Msgs: [string, string, string, number, string, number][] = [
+    ['user', '退房时间是几点？会员能延迟吗？', '', 0, '[]', 0],
+    ['assistant', '【退房时间】本店标准退房时间为每日中午 12:00 前。您是金卡会员，可免费延迟至 14:00 退房。', 'kb_qa', 0.95, JSON.stringify([{ documentTitle: '云栖酒店住客服务须知', heading: '退房时间', content: '标准退房时间 12:00，会员可延迟至 14:00。' }]), 24],
+    ['user', '早餐几点开始？收费吗？', '', 0, '[]', 0],
+    ['assistant', '【早餐】中西自助早餐 07:00-10:30 供应，68 元/位；住店会员免费。地点：一层云栖餐厅。', 'kb_qa', 0.93, JSON.stringify([{ documentTitle: '云栖酒店住客服务须知', heading: '早餐', content: '早餐 07:00-10:30，会员免费。' }]), 21],
+  ];
+  for (let i = 0; i < conv1Msgs.length; i++) {
+    const m = conv1Msgs[i]!;
+    await svcQ(
+      `INSERT INTO c_messages (workspace_id, conversation_id, role, content, intent, confidence, citations, latency_ms, created_at)
+       SELECT $1,'cv-seed-001',$2,$3,$4,$5,$6::jsonb,$7,$8
+       WHERE NOT EXISTS (SELECT 1 FROM c_messages WHERE conversation_id='cv-seed-001' AND content=$3)`,
+      [WS_ID, m[0], m[1], m[2] || null, m[3] || null, m[4], m[5] || null, new Date(Date.now() - 26 * 3600000 + i * 30000).toISOString()],
+    );
+  }
+
+  // 会话 2：住客小李——送物请求转工单 + 投诉建单
+  await svcQ(
+    `INSERT INTO c_conversations (id, workspace_id, c_user_id, channel, status, created_at, last_message_at)
+     VALUES ('cv-seed-002', $1, 'cu-xiaoli', 'h5', 'open', $2, $3)
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID, new Date(Date.now() - 3 * 3600000).toISOString(), new Date(Date.now() - 3 * 3600000 + 120000).toISOString()],
+  );
+  const conv2Msgs: [string, string, string, number, string, number][] = [
+    ['user', '房间空调好像不制冷，能找人看看吗？8306', '', 0, '[]', 0],
+    ['assistant', '很抱歉给您带来不便。我已为您生成维修工单，工程部会尽快上门处理，进度会实时通知您。', 'service_request', 0.91, '[]', 28],
+  ];
+  for (let i = 0; i < conv2Msgs.length; i++) {
+    const m = conv2Msgs[i]!;
+    await svcQ(
+      `INSERT INTO c_messages (workspace_id, conversation_id, role, content, intent, confidence, citations, latency_ms, created_at)
+       SELECT $1,'cv-seed-002',$2,$3,$4,$5,$6::jsonb,$7,$8
+       WHERE NOT EXISTS (SELECT 1 FROM c_messages WHERE conversation_id='cv-seed-002' AND content=$3)`,
+      [WS_ID, m[0], m[1], m[2] || null, m[3] || null, m[4], m[5] || null, new Date(Date.now() - 3 * 3600000 + i * 40000).toISOString()],
+    );
+  }
+
+  // 工单 ×3（三种状态）+ 流转时间线
+  const tickets: [string, string, string | null, string, string, string, string, string | null, string | null, number][] = [
+    ['tck-seed-001', 'cu-xiaoli', 'cv-seed-002', 'repair', '8306 空调不制冷', 'processing', 'high', '工程部', '王师傅', 2],
+    ['tck-seed-002', 'cu-zhangwei', null, 'delivery', '送两瓶矿泉水到 1208', 'assigned', 'normal', '客房部', null, 1],
+    ['tck-seed-003', 'cu-xiaoli', null, 'complaint', '隔壁房间深夜噪音扰民', 'done', 'high', '值班经理', '刘经理', 20],
+  ];
+  for (const t of tickets) {
+    await svcQ(
+      `INSERT INTO c_tickets (id, workspace_id, c_user_id, conversation_id, kind, title, payload, status, priority, dept, assignee, sla_due_at, result, idempotency_key, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'{}',$7,$8,$9,$10,$11,$12,$13,$14,$14)
+       ON CONFLICT (id) DO NOTHING`,
+      [t[0], WS_ID, t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
+       new Date(Date.now() + 2 * 3600000).toISOString(),
+       t[5] === 'done' ? JSON.stringify({ text: '已与隔壁房客沟通并提醒静音，赠送您一份果盘致歉。', rating: { score: 5 } }) : null,
+       `seed-${t[0]}`, new Date(Date.now() - t[9] * 3600000 / 10).toISOString()],
+    );
+  }
+  const tl: [string, string, string, string, string, number][] = [
+    ['tck-seed-001', 'create', 'c_user', 'cu-xiaoli', '用户对话中建单', 180],
+    ['tck-seed-001', 'assign', 'agent', 'agt-service-desk', '智能分派 → 工程部', 179],
+    ['tck-seed-001', 'start', 'staff', '王师傅', '已接单，携带工具前往 8306', 95],
+    ['tck-seed-002', 'create', 'c_user', 'cu-zhangwei', '服务台自助提交', 60],
+    ['tck-seed-002', 'assign', 'agent', 'agt-service-desk', '智能分派 → 客房部', 59],
+    ['tck-seed-003', 'create', 'c_user', 'cu-xiaoli', '投诉类必建单', 480],
+    ['tck-seed-003', 'assign', 'agent', 'agt-service-desk', '智能分派 → 值班经理', 479],
+    ['tck-seed-003', 'start', 'staff', '刘经理', '现场处理中', 460],
+    ['tck-seed-003', 'complete', 'staff', '刘经理', '已沟通提醒并赠果盘致歉', 430],
+    ['tck-seed-003', 'rate', 'c_user', 'cu-xiaoli', '满意度 5 星', 400],
+  ];
+  for (const e of tl) {
+    await svcQ(
+      `INSERT INTO c_ticket_events (workspace_id, ticket_id, action, actor_type, actor_id, detail, created_at)
+       SELECT $1,$2,$3,$4,$5,$6::jsonb,$7
+       WHERE NOT EXISTS (SELECT 1 FROM c_ticket_events WHERE ticket_id=$2 AND action=$3 AND actor_id=$4)`,
+      [WS_ID, e[0], e[1], e[2], e[3], JSON.stringify({ note: e[4] }), new Date(Date.now() - e[5] * 60000).toISOString()],
+    );
+  }
+
+  // 推送箱：受理 + 办结通知（仿服务通知）
+  const notifs: [string, string, string, string, number][] = [
+    ['ntf-seed-001', 'cu-xiaoli', 'ticket.accepted', '您的维修工单「8306 空调不制冷」已受理，工程部王师傅处理中。', 170],
+    ['ntf-seed-002', 'cu-xiaoli', 'ticket.completed', '您的投诉工单「隔壁房间深夜噪音扰民」已办结：已与隔壁房客沟通提醒，并赠果盘致歉。欢迎评价。', 425],
+    ['ntf-seed-003', 'cu-zhangwei', 'ticket.accepted', '您的送物工单「送两瓶矿泉水到 1208」已受理，客房部将尽快送达。', 55],
+  ];
+  for (const n of notifs) {
+    await svcQ(
+      `INSERT INTO c_notifications (workspace_id, c_user_id, channel, kind, payload, driver, status, created_at)
+       SELECT $1,$2,'h5',$3,$4::jsonb,'mock','delivered',$5
+       WHERE NOT EXISTS (SELECT 1 FROM c_notifications WHERE c_user_id=$2 AND kind=$3 AND payload->>'text'=$6)`,
+      [WS_ID, n[1], n[2], JSON.stringify({ text: n[3], mock: true }), new Date(Date.now() - n[4] * 60000).toISOString(), n[3]],
+    );
+  }
+  console.log("✓ AI 服务前台运行态：C 端用户×2 / 知识库集合×2+官网源 / 会话×2 / 工单×3（全状态+时间线）/ 通知×3");
+
+  // ============ AI 服务前台 · 知识库全量预置（bundles/hotel/service-front） ============
+  // 数据源：faq.json（十大类 385 问）+ delivery-catalog.json（46 种送物）+ repair-catalog.json（56 项报修）
+  interface FaqFile { categories: Array<{ key: string; name: string; docTitle: string; items: Array<{ q: string; a: string }> }> }
+  interface CatalogItem { name: string; category: string; price: number; unit: string; note?: string; robot?: boolean }
+  interface CatalogFile { categories: Array<{ key: string; name: string }>; items: CatalogItem[] }
+  interface RepairItem { name: string; category: string; symptoms: string; urgency: string; slaMinutes: number; dept: string; tip?: string }
+  interface RepairFile { categories: Array<{ key: string; name: string }>; items: RepairItem[] }
+  const SF_DIR = join(BUNDLE_DIR, "service-front");
+  const faq = JSON.parse(readFileSync(join(SF_DIR, "faq.json"), "utf-8")) as FaqFile;
+  const deliveryCat = JSON.parse(readFileSync(join(SF_DIR, "delivery-catalog.json"), "utf-8")) as CatalogFile;
+  const repairCat = JSON.parse(readFileSync(join(SF_DIR, "repair-catalog.json"), "utf-8")) as RepairFile;
+
+  // ① 住客常见问答集合（10 文档 / 385 知识块：一问一答即一块）
+  await svcQ(
+    `INSERT INTO kb_collections (id, workspace_id, name, description)
+     VALUES ('kbc-guest-faq', $1, '住客常见问答', '十大类 385 条住客高频问题与标准答案（AI 服务前台核心知识源）')
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID],
+  );
+  let faqChunks = 0;
+  for (const cat of faq.categories) {
+    const docId = `kbd-faq-${cat.key}`;
+    const md = [`# ${cat.docTitle}`, ...cat.items.map((it) => `## ${it.q}\n${it.a}`)].join("\n\n");
+    await svcQ(
+      `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
+       VALUES ($1, $2, 'kbc-guest-faq', $3, 'manual', NULL, 1, 'active', $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [docId, WS_ID, cat.docTitle, md, `seed-hash-faq-${cat.key}`, new Date(Date.now() - 18 * 86400000).toISOString()],
+    );
+    for (let i = 0; i < cat.items.length; i++) {
+      const it = cat.items[i]!;
+      const r = await svcQ(
+        `INSERT INTO kb_chunks (workspace_id, document_id, chunk_index, heading, content)
+         SELECT $1, $2, $3, $4, $5
+         WHERE NOT EXISTS (SELECT 1 FROM kb_chunks WHERE document_id=$2 AND chunk_index=$3)`,
+        [WS_ID, docId, i, it.q, it.a],
+      );
+      faqChunks += (r as unknown as { rowCount: number }).rowCount ?? 0;
+    }
+  }
+
+  // ② 送物服务全目录（46 种，按分类切块；与 FAQ 送物类互证）
+  {
+    const catName = (k: string) => deliveryCat.categories.find((c) => c.key === k)?.name ?? k;
+    const groups = new Map<string, CatalogItem[]>();
+    for (const it of deliveryCat.items) {
+      const arr = groups.get(it.category) ?? [];
+      arr.push(it);
+      groups.set(it.category, arr);
+    }
+    const md = ["# 送物服务全目录", ...[...groups.entries()].map(([k, arr]) =>
+      `## ${catName(k)}\n${arr.map((i) => `- ${i.name}（${i.price === 0 ? "免费" : `${i.price} 元/${i.unit}`}${i.note ? `，${i.note}` : ""}${i.robot === false ? "，大件由服务员配送" : "，支持机器人配送"}）`).join("\n")}`,
+    )].join("\n\n");
+    await svcQ(
+      `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
+       VALUES ('kbd-delivery-catalog', $1, 'kbc-service-catalog', '送物服务全目录（46 种）', 'manual', NULL, 1, 'active', $2, 'seed-hash-delivery-catalog', $3)
+       ON CONFLICT (id) DO NOTHING`,
+      [WS_ID, md, new Date(Date.now() - 18 * 86400000).toISOString()],
+    );
+    let idx = 0;
+    for (const [k, arr] of groups) {
+      const content = arr.map((i) => `${i.name}：${i.price === 0 ? "免费" : `${i.price} 元/${i.unit}`}${i.note ? `；${i.note}` : ""}${i.robot === false ? "；大件服务员配送" : "；可机器人配送"}`).join("。");
+      await svcQ(
+        `INSERT INTO kb_chunks (workspace_id, document_id, chunk_index, heading, content)
+         SELECT $1, 'kbd-delivery-catalog', $2, $3, $4
+         WHERE NOT EXISTS (SELECT 1 FROM kb_chunks WHERE document_id='kbd-delivery-catalog' AND chunk_index=$2)`,
+        [WS_ID, idx++, catName(k), content],
+      );
+    }
+  }
+
+  // ③ 维修报修指引（56 项，按系统分类切块；含 SLA 与客人自救提示）
+  {
+    const catName = (k: string) => repairCat.categories.find((c) => c.key === k)?.name ?? k;
+    const groups = new Map<string, RepairItem[]>();
+    for (const it of repairCat.items) {
+      const arr = groups.get(it.category) ?? [];
+      arr.push(it);
+      groups.set(it.category, arr);
+    }
+    const md = ["# 客房设施维修报修指引", ...[...groups.entries()].map(([k, arr]) =>
+      `## ${catName(k)}\n${arr.map((i) => `- ${i.name}：${i.symptoms}（${i.urgency === "high" ? `加急 ${i.slaMinutes} 分钟内响应` : `常规 ${i.slaMinutes} 分钟内响应`}${i.tip ? `；${i.tip}` : ""}）`).join("\n")}`,
+    )].join("\n\n");
+    await svcQ(
+      `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
+       VALUES ('kbd-repair-catalog', $1, 'kbc-service-catalog', '维修报修指引（56 项）', 'manual', NULL, 1, 'active', $2, 'seed-hash-repair-catalog', $3)
+       ON CONFLICT (id) DO NOTHING`,
+      [WS_ID, md, new Date(Date.now() - 18 * 86400000).toISOString()],
+    );
+    let idx = 0;
+    for (const [k, arr] of groups) {
+      const content = arr.map((i) => `${i.name}：${i.symptoms}，${i.urgency === "high" ? `加急${i.slaMinutes}分钟响应` : `常规${i.slaMinutes}分钟响应`}${i.tip ? `；${i.tip}` : ""}`).join("。");
+      await svcQ(
+        `INSERT INTO kb_chunks (workspace_id, document_id, chunk_index, heading, content)
+         SELECT $1, 'kbd-repair-catalog', $2, $3, $4
+         WHERE NOT EXISTS (SELECT 1 FROM kb_chunks WHERE document_id='kbd-repair-catalog' AND chunk_index=$2)`,
+        [WS_ID, idx++, catName(k), content],
+      );
+    }
+  }
+  console.log(`✓ 知识库全量预置：FAQ ${faq.categories.length} 类 ${faq.categories.reduce((n, c) => n + c.items.length, 0)} 问（新入库 ${faqChunks} 块）+ 送物目录 ${deliveryCat.items.length} 种 + 报修指引 ${repairCat.items.length} 项`);
+
+  // ============ AI 服务前台 · 扩充运行态（多客群/会员/订单/会话/工单/SLA） ============
+  // 多客群 C 端用户（白金商务/家庭/长住/外籍）+ 会员档案 + 订单
+  await svcQ(
+    `INSERT INTO c_users (id, workspace_id, channel, openid, nickname, member_id, created_at)
+     VALUES
+       ('cu-wangzong', $1, 'wechat-mini', 'openid-wangzong', '王总', 'M-PLAT-20888', $2),
+       ('cu-linvshi', $1, 'wechat-mini', 'openid-linvshi', '李女士', 'M-GOLD-31520', $3),
+       ('cu-zhangxiansheng', $1, 'alipay', 'ali-zhang-xs', '张先生', NULL, $4),
+       ('cu-smith', $1, 'h5', 'fp-smith-7a21', 'Mr. Smith', NULL, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [WS_ID,
+      new Date(Date.now() - 60 * 86400000).toISOString(), new Date(Date.now() - 21 * 86400000).toISOString(),
+      new Date(Date.now() - 45 * 86400000).toISOString(), new Date(Date.now() - 86400000).toISOString()],
+  );
+  await svcQ(
+    `INSERT INTO demo_members (workspace_id, member_id, name, tier, points)
+     VALUES
+       ($1, 'M-PLAT-20888', '王总', '白金卡', 26800),
+       ($1, 'M-GOLD-31520', '李女士', '金卡', 9800)
+     ON CONFLICT (workspace_id, member_id) DO NOTHING`,
+    [WS_ID],
+  );
+  await svcQ(
+    `INSERT INTO demo_orders (workspace_id, order_id, member_id, room_type, check_in, check_out, amount_fen, status)
+     VALUES
+       ($1, 'YQ-20260824-108', 'M-PLAT-20888', '行政大床房', $2, $3, 326400, '在住'),
+       ($1, 'YQ-20260822-076', 'M-GOLD-31520', '亲子主题房', $4, $5, 197600, '在住'),
+       ($1, 'YQ-20260810-033', 'M-PLAT-20888', '行政大床房', $6, $7, 108800, '已退房')
+     ON CONFLICT (workspace_id, order_id) DO NOTHING`,
+    [WS_ID,
+      new Date(Date.now() - 86400000).toISOString(), new Date(Date.now() + 2 * 86400000).toISOString(),
+      new Date(Date.now() - 2 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString(),
+      new Date(Date.now() - 14 * 86400000).toISOString(), new Date(Date.now() - 13 * 86400000).toISOString()],
+  );
+
+  // 扩充会话 ×4（早餐/WiFi/送物建单/报修建单 全链路演示）
+  const convs: Array<[string, string, string, number, Array<[string, string, string, number, string, number]>]> = [
+    ["cv-seed-003", "cu-linvshi", "wechat-mini", 8, [
+      ["user", "明天早餐几点开始？带孩子三个人怎么收费？", "", 0, "[]", 0],
+      ["assistant", "【早餐】一层云栖餐厅中西自助 07:00-10:30（周末至 11:00），68 元/位；您是金卡会员本人免费，1.2 米以下儿童免费，超出儿童 34 元/位。", "kb_qa", 0.94, JSON.stringify([{ documentTitle: "住客常见问答·餐饮美食", heading: "早餐几点开始、到几点结束？", content: "早餐供应时间为每日07:00-10:30，周末及法定节假日延长至11:00收餐，位于酒店一层云栖餐厅。" }]), 26],
+      ["user", "房间里能连 WiFi 吗？密码呢？", "", 0, "[]", 0],
+      ["assistant", "【WiFi】全店无线网络 Yunqi-Hotel 免费使用，密码为您房间号的后四位数字。", "kb_qa", 0.96, JSON.stringify([{ documentTitle: "住客常见问答·网络与设施", heading: "WiFi密码是多少？", content: "WiFi密码为所住房间号的后四位数字，例如入住1208房，密码即为1208。" }]), 19],
+    ]],
+    ["cv-seed-004", "cu-wangzong", "wechat-mini", 5, [
+      ["user", "帮我送两瓶矿泉水和一套牙具到 2508", "", 0, "[]", 0],
+      ["assistant", "好的，已为您生成送物工单：矿泉水 2 瓶（免费额度内）+ 牙刷套装 1 套，将由配送机器人「小云」送达 2508，预计 10 分钟内到。", "service_request", 0.93, "[]", 24],
+    ]],
+    ["cv-seed-005", "cu-smith", "h5", 2, [
+      ["user", "The air conditioner in my room is not cooling. Room 1832.", "", 0, "[]", 0],
+      ["assistant", "抱歉给您带来不便。已为您生成维修工单：1832 房空调制冷异常，工程部加急 30 分钟内上门；处理进度会实时通知您。", "service_request", 0.9, "[]", 27],
+    ]],
+    ["cv-seed-006", "cu-zhangxiansheng", "alipay", 12, [
+      ["user", "你们这儿去萧山机场怎么走最方便？多少钱？", "", 0, "[]", 0],
+      ["assistant", "【机场交通】三种方式：①酒店接送机 7 座商务车 260 元/趟（提前 4 小时预约）；②机场大巴云栖线 35 元/人约 70 分钟，整点发车 07:00-21:00；③打车约 50 分钟约 130 元。早班机建议预约接送机。", "kb_qa", 0.92, JSON.stringify([{ documentTitle: "住客常见问答·交通位置", heading: "酒店离萧山机场多远？", content: "酒店距杭州萧山国际机场约42公里，打车正常路况约50分钟，车费约130元。" }]), 31],
+    ]],
+  ];
+  for (const [cvId, cuId, ch, hoursAgo, msgs] of convs) {
+    await svcQ(
+      `INSERT INTO c_conversations (id, workspace_id, c_user_id, channel, status, created_at, last_message_at)
+       VALUES ($1, $2, $3, $4, 'open', $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [cvId, WS_ID, cuId, ch, new Date(Date.now() - hoursAgo * 3600000).toISOString(), new Date(Date.now() - hoursAgo * 3600000 + 120000).toISOString()],
+    );
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i]!;
+      await svcQ(
+        `INSERT INTO c_messages (workspace_id, conversation_id, role, content, intent, confidence, citations, latency_ms, created_at)
+         SELECT $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9
+         WHERE NOT EXISTS (SELECT 1 FROM c_messages WHERE conversation_id=$2 AND content=$4)`,
+        [WS_ID, cvId, m[0], m[1], m[2] || null, m[3] || null, m[4], m[5] || null, new Date(Date.now() - hoursAgo * 3600000 + i * 40000).toISOString()],
+      );
+    }
+  }
+
+  // 扩充工单 ×5（含 1 张 SLA 超时加急单）+ 时间线 + 通知
+  const tickets2: Array<[string, string, string | null, string, string, string, string, string | null, number]> = [
+    ["tck-seed-004", "cu-wangzong", "cv-seed-004", "delivery", "送矿泉水×2 + 牙刷套装到 2508", "done", "normal", "客房部", "配送机器人·小云", 5],
+    ["tck-seed-005", "cu-smith", "cv-seed-005", "repair", "1832 房空调不制冷", "processing", "high", "工程部", "王师傅", 2],
+    ["tck-seed-006", "cu-linvshi", null, "delivery", "儿童餐椅 + 温奶器送到 1208", "assigned", "normal", "客房部", null, 1],
+    ["tck-seed-007", "cu-zhangxiansheng", null, "repair", "2021 房 WiFi 频繁掉线", "created", "normal", "工程部", null, 26], // SLA 超时样例（created 超 2h 未分派）
+    ["tck-seed-008", "cu-wangzong", null, "other", "预约 08-26 06:30 送机（萧山 T3，7 座商务）", "done", "high", "前厅部", "礼宾-小周", 30],
+  ];
+  for (const t of tickets2) {
+    await svcQ(
+      `INSERT INTO c_tickets (id, workspace_id, c_user_id, conversation_id, kind, title, payload, status, priority, dept, assignee, sla_due_at, result, idempotency_key, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'{}',$7,$8,$9,$10,$11,$12,$13,$14,$14)
+       ON CONFLICT (id) DO NOTHING`,
+      [t[0], WS_ID, t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
+       new Date(Date.now() + (t[5] === "created" ? -3600000 : 2 * 3600000)).toISOString(), // 超时样例 due_at 已过
+       t[5] === "done" ? JSON.stringify({ text: t[3] === "delivery" ? "已由机器人送达并电话确认。" : "送机车辆已准时出发，行程单已推送。", rating: { score: 5 } }) : null,
+       `seed-${t[0]}`, new Date(Date.now() - t[9] * 3600000).toISOString()],
+    );
+  }
+  const tl2: Array<[string, string, string, string, string, number]> = [
+    ["tck-seed-004", "create", "c_user", "cu-wangzong", "对话中确认送物", 300],
+    ["tck-seed-004", "assign", "agent", "agt-service-desk", "智能分派 → 客房部（机器人配送）", 299],
+    ["tck-seed-004", "complete", "staff", "配送机器人·小云", "已送达 2508 并电话确认", 290],
+    ["tck-seed-005", "create", "c_user", "cu-smith", "对话中建单（加急）", 120],
+    ["tck-seed-005", "assign", "agent", "agt-service-desk", "智能分派 → 工程部", 119],
+    ["tck-seed-005", "start", "staff", "王师傅", "已携检测设备前往 1832", 100],
+    ["tck-seed-006", "create", "c_user", "cu-linvshi", "服务台自助提交", 60],
+    ["tck-seed-006", "assign", "agent", "agt-service-desk", "智能分派 → 客房部", 59],
+    ["tck-seed-007", "create", "c_user", "cu-zhangxiansheng", "支付宝小程序提交", 1560],
+    ["tck-seed-008", "create", "c_user", "cu-wangzong", "电话登记转入", 1800],
+    ["tck-seed-008", "assign", "agent", "agt-service-desk", "智能分派 → 前厅部", 1799],
+    ["tck-seed-008", "complete", "staff", "礼宾-小周", "送机完成，行程单已推送", 1500],
+  ];
+  for (const e of tl2) {
+    await svcQ(
+      `INSERT INTO c_ticket_events (workspace_id, ticket_id, action, actor_type, actor_id, detail, created_at)
+       SELECT $1,$2,$3,$4,$5,$6::jsonb,$7
+       WHERE NOT EXISTS (SELECT 1 FROM c_ticket_events WHERE ticket_id=$2 AND action=$3 AND actor_id=$4)`,
+      [WS_ID, e[0], e[1], e[2], e[3], JSON.stringify({ note: e[4] }), new Date(Date.now() - e[5] * 60000).toISOString()],
+    );
+  }
+  const notifs2: Array<[string, string, string, string, number]> = [
+    ["ntf-seed-004", "cu-wangzong", "ticket.completed", "您的送物工单「送矿泉水×2 + 牙刷套装到 2508」已办结：已由机器人送达并电话确认。欢迎评价。", 285],
+    ["ntf-seed-005", "cu-smith", "ticket.accepted", "您的维修工单「1832 房空调不制冷」已受理（加急），工程部王师傅处理中。", 115],
+    ["ntf-seed-006", "cu-linvshi", "ticket.accepted", "您的送物工单「儿童餐椅 + 温奶器送到 1208」已受理，客房部将尽快送达。", 58],
+    ["ntf-seed-007", "cu-zhangxiansheng", "sla.escalated", "您的维修工单「2021 房 WiFi 频繁掉线」受理超时已升级为加急，值班经理已介入督办。", 60],
+    ["ntf-seed-008", "cu-wangzong", "ticket.completed", "您的送机预约已完成，行程单已推送至微信。期待再次为您服务。", 1495],
+  ];
+  for (const n of notifs2) {
+    await svcQ(
+      `INSERT INTO c_notifications (workspace_id, c_user_id, channel, kind, payload, driver, status, created_at)
+       SELECT $1,$2,'wechat-mini',$3,$4::jsonb,'mock','delivered',$5
+       WHERE NOT EXISTS (SELECT 1 FROM c_notifications WHERE c_user_id=$2 AND kind=$3 AND payload->>'text'=$6)`,
+      [WS_ID, n[1], n[2], JSON.stringify({ text: n[3], mock: true }), new Date(Date.now() - n[4] * 60000).toISOString(), n[3]],
+    );
+  }
+  console.log("✓ 服务前台扩充运行态：多客群用户×4 / 会员×2 / 订单×3 / 会话×4 / 工单×5（含 SLA 超时样例）/ 时间线×11 / 通知×5");
+
+
+  // L2 收口：显式 COMMIT——本事务内全部 gateway 段写入（事件/审批/夜班/记忆/C 端运行态）
+  // 同一提交；若中途抛错，main 捕获退出时连接关闭，PG 自动 ROLLBACK 不留半提交态
+  await gw.query("COMMIT");
   await gw.end();
   console.log("种子数据完成 ✅（云栖酒店演示数据集就绪）");
 }

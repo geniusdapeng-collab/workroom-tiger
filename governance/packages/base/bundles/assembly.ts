@@ -5,9 +5,12 @@
  * 数据来源口径（P7-⑤）：槽位状态 = bundle 注册表投影（磁盘 bundles/<slug>/ 实物扫描）；
  * 校验结果 = 装配校验器运行记录（recheck/activate 留痕 biz_events，不静默 L9.2）。
  *
- * 六装配槽（P7E1/§2.2）：① 档案 Schema ② 对象与阶段枚举 ③ 工具集 ④ 围栏包 ⑤ Agent 班组 ⑥ 工作台 UI
+ * 八装配槽（P7E1/§2.2 + v3.0 第⑦槽 + D24 第⑧槽）：① 档案 Schema ② 对象与阶段枚举 ③ 工具集 ④ 围栏包
+ *   ⑤ Agent 班组 ⑥ 工作台 UI ⑦ 模型路由策略 ⑧ 反馈枚举表（feedback-enums.yml，非阻断：
+ *   缺失 = decide 校验放行；存在即注册为工作区受控词表，D24 修订 3）
  * 起飞前检查单（P7E3/F2.10）：档案 forbidden 校验 / 枚举冲突检测 / 工具探针健康 /
  *   围栏绑定完整 / UI 用例同步 —— 任一失败拒绝激活；修复后重跑（数据活算，重查即重跑）。
+ *   第⑦槽 model-policy.yml 为非阻断校验：缺失 → 使用底座默认路由策略（L2.6）；存在但非法 → 标红拒绝激活。
  */
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync,
@@ -16,8 +19,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import YAML from "yaml";
-import { gatewayAppend } from "../workdata/gateway.js";
+import { gatewayAppend, gatewayAppendOnClient } from "../workdata/gateway.js";
 import { parseModelPolicy } from "../model-router/policy.js";
+import {
+  loadFeedbackEnumsFromBundle,
+  registerFeedbackEnums,
+  unregisterFeedbackEnums,
+} from "../evolve/feedback-enums.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** 仓库 bundles/ 根（packages/base/bundles → 上三级）；测试可用 BUNDLES_ROOT 指到临时目录 */
@@ -143,16 +151,67 @@ export function listProfileSlugs(root = bundlesRoot()): string[] {
 
 /* ================= 装配校验（F2.10 起飞前检查单） ================= */
 
+/** 磁盘资产（M4-装配：全部磁盘 I/O 的纯读结果，进 DB 事务前一次性读完） */
+interface BundleDiskAssets {
+  dir: string;
+  bj: BundleJson;
+  isDraft: boolean;
+  archiveSchema: { properties?: Record<string, unknown>; required?: string[] } | null;
+  objectsJson: { objects?: Array<{ type: string; label: string }> } | null;
+  stagesJson: { stages?: Array<{ id: string; label: string }> } | null;
+  presets: PresetYml[];
+  fenceFiles: string[];
+  fencePacks: FenceYml[];
+  uiCases: UiCasesJson | null;
+  /** 第⑦槽：模型路由策略原文（缺失=null → 底座默认；非法 → 校验标红） */
+  modelPolicyText: string | null;
+}
+
+/**
+ * 纯磁盘读取（M4-装配）：readdirSync/readFileSync/YAML.parse 全部在此完成——
+ * 磁盘 I/O 不进 DB 事务（事务内做慢 I/O 会拉长快照持有时间、放大锁与序列化冲突面；
+ * 且磁盘读不参与事务回滚语义，放事务内纯属占坑）。读完再开事务做 DB 侧校验。
+ */
+function loadBundleDiskAssets(dir: string, slug: string): BundleDiskAssets {
+  const bj = readJson<BundleJson>(join(dir, "bundle.json"));
+  if (!bj) throw new BundleError("NOT_FOUND", `行业 Bundle「${slug}」不存在（bundles/${slug}/bundle.json 缺失）`);
+  const presetsDir = join(dir, "presets");
+  const presetFiles = existsSync(presetsDir)
+    ? readdirSync(presetsDir).filter((f) => f.endsWith(".yml")).sort()
+    : [];
+  const fencesDir = join(dir, "fences");
+  const fenceFiles = existsSync(fencesDir)
+    ? readdirSync(fencesDir).filter((f) => f.endsWith(".yml")).sort()
+    : [];
+  return {
+    dir,
+    bj,
+    isDraft: bj.workloom?.status === "draft",
+    archiveSchema: readJson(join(dir, "schemas/archive.schema.json")),
+    objectsJson: readJson(join(dir, "schemas/objects.json")),
+    stagesJson: readJson(join(dir, "schemas/stages.json")),
+    presets: presetFiles
+      .map((f) => YAML.parse(readFileSync(join(presetsDir, f), "utf-8")) as PresetYml)
+      .filter((p) => p?.preset_key),
+    fenceFiles,
+    fencePacks: fenceFiles
+      .map((f) => YAML.parse(readFileSync(join(fencesDir, f), "utf-8")) as FenceYml)
+      .filter((f) => f?.version),
+    uiCases: readJson(join(dir, "ui/cases.json")),
+    modelPolicyText: existsSync(join(dir, "model-policy.yml"))
+      ? readFileSync(join(dir, "model-policy.yml"), "utf-8")
+      : null,
+  };
+}
+
 export async function computeAssembly(
   app: pg.Pool,
   scope: Scope,
   slug: string,
   root = bundlesRoot(),
 ): Promise<BundleProfile> {
-  const dir = join(root, slug);
-  const bj = readJson<BundleJson>(join(dir, "bundle.json"));
-  if (!bj) throw new BundleError("NOT_FOUND", `行业 Bundle「${slug}」不存在（bundles/${slug}/bundle.json 缺失）`);
-  const isDraft = bj.workloom?.status === "draft";
+  // M4-装配：先纯磁盘读（事务外），再开 DB 事务做库侧校验
+  const assets = loadBundleDiskAssets(join(root, slug), slug);
 
   // 每连接重设租户/工作区上下文（编码铁律：RLS 依赖 set_config）
   const client = await app.connect();
@@ -161,7 +220,7 @@ export async function computeAssembly(
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-    return await computeAssemblyScoped(client, scope, slug, dir, bj, isDraft);
+    return await computeAssemblyScoped(client, scope, slug, assets);
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;
@@ -175,10 +234,9 @@ async function computeAssemblyScoped(
   client: pg.PoolClient,
   scope: Scope,
   slug: string,
-  dir: string,
-  bj: BundleJson,
-  isDraft: boolean,
+  assets: BundleDiskAssets,
 ): Promise<BundleProfile> {
+  const { bj, isDraft } = assets;
   // 当前工作区是否已激活本 profile（激活态才复核档案/阶段与工作区实物的一致性）
   const ws = await client.query<{ industry: string; stage: string | null }>(
     `SELECT industry, stage FROM workspaces WHERE id=$1`, [scope.workspaceId],
@@ -186,9 +244,7 @@ async function computeAssemblyScoped(
   const isActive = ws.rows[0]?.industry === slug;
 
   /* ---------- 槽① 档案 Schema + 校验① 档案 forbidden ---------- */
-  const archiveSchema = readJson<{
-    properties?: Record<string, unknown>; required?: string[];
-  }>(join(dir, "schemas/archive.schema.json"));
+  const archiveSchema = assets.archiveSchema;
   const prof = isActive
     ? await client.query<{ archive: Record<string, unknown> | null }>(
         `SELECT archive FROM profiles WHERE workspace_id=$1`, [scope.workspaceId])
@@ -214,8 +270,8 @@ async function computeAssemblyScoped(
             detail: `一店一档 ${fieldGroups} 字段组 · forbidden 硬约束 ${isActive ? forbiddenCount : "激活时复核"} 条` };
 
   /* ---------- 槽② 枚举 + 校验② 枚举冲突检测 ---------- */
-  const objectsJson = readJson<{ objects?: Array<{ type: string; label: string }> }>(join(dir, "schemas/objects.json"));
-  const stagesJson = readJson<{ stages?: Array<{ id: string; label: string }> }>(join(dir, "schemas/stages.json"));
+  const objectsJson = assets.objectsJson;
+  const stagesJson = assets.stagesJson;
   const objTypes = (objectsJson?.objects ?? []).map((o) => o.type);
   const stageIds = (stagesJson?.stages ?? []).map((s) => s.id);
   const dupObj = objTypes.filter((t, i) => objTypes.indexOf(t) !== i);
@@ -238,13 +294,7 @@ async function computeAssemblyScoped(
           detail: `${objTypes.length} 对象 × 经营${stageIds.length}阶段，无冲突` };
 
   /* ---------- 槽③ 工具集 + 校验③ 工具探针健康 ---------- */
-  const presetsDir = join(dir, "presets");
-  const presetFiles = existsSync(presetsDir)
-    ? readdirSync(presetsDir).filter((f) => f.endsWith(".yml")).sort()
-    : [];
-  const presets = presetFiles
-    .map((f) => YAML.parse(readFileSync(join(presetsDir, f), "utf-8")) as PresetYml)
-    .filter((p) => p?.preset_key);
+  const presets = assets.presets;
   const toolNames = [...new Set(presets.flatMap((p) => (p.tools ?? []).map((t) => t.name)))];
   const agentRows = presets.length > 0
     ? (await client.query<{
@@ -272,13 +322,8 @@ async function computeAssemblyScoped(
           detail: `${presets.length} preset 探针全绿 · 工具 ${toolNames.length} 项` };
 
   /* ---------- 槽④ 围栏包 + 校验④ 围栏绑定完整 ---------- */
-  const fencesDir = join(dir, "fences");
-  const fenceFiles = existsSync(fencesDir)
-    ? readdirSync(fencesDir).filter((f) => f.endsWith(".yml")).sort()
-    : [];
-  const fencePacks = fenceFiles
-    .map((f) => YAML.parse(readFileSync(join(fencesDir, f), "utf-8")) as FenceYml)
-    .filter((f) => f?.version);
+  const fenceFiles = assets.fenceFiles;
+  const fencePacks = assets.fencePacks;
   const ruleCount = fencePacks.reduce((n, f) => n + (f.rules?.length ?? 0), 0);
   const baselineCount = fencePacks.reduce((n, f) => n + (f.rules?.filter((r) => r.is_baseline).length ?? 0), 0);
   // 每位班组成员：fence_bindings 非空且每条规则在围栏注册表 active（F2.10 未声明即禁写）
@@ -320,7 +365,7 @@ async function computeAssemblyScoped(
           detail: `基线 ${baselineCount} 条 🔒 单调守卫 · ${agentsOut.filter((a) => !a.readonly).length} 员绑定全合法` };
 
   /* ---------- 槽⑥ 工作台 UI + 校验⑤ UI 用例同步 ---------- */
-  const uiCases = readJson<UiCasesJson>(join(dir, "ui/cases.json"));
+  const uiCases = assets.uiCases;
   const cases = uiCases?.cases ?? [];
   const casePages = [...new Set(cases.map((c) => c.page))];
   const unregistered = casePages.filter((p) => !(REGISTERED_PAGES as readonly string[]).includes(p));
@@ -334,16 +379,13 @@ async function computeAssemblyScoped(
           detail: `${casePages.length} 页 · 状态用例 ${cases.length} 条同步` };
 
   /* ---------- 槽⑦ 模型路由策略（v3.0：非阻断——缺失用底座默认；存在但非法 → 标红拒绝激活） ---------- */
-  const modelPolicyText = existsSync(join(dir, "model-policy.yml"))
-    ? readFileSync(join(dir, "model-policy.yml"), "utf-8")
-    : null;
   let modelPolicyScenes = 0;
   let checkModelPolicy: CheckItem;
-  if (modelPolicyText === null) {
+  if (assets.modelPolicyText === null) {
     checkModelPolicy = { key: "model_policy", label: "模型路由策略", ok: true, slot: "model-policy",
       detail: "未提供 model-policy.yml，使用底座默认路由策略（L2.6 行业可覆盖）" };
   } else {
-    const parsed = parseModelPolicy(modelPolicyText);
+    const parsed = parseModelPolicy(assets.modelPolicyText);
     if (parsed.policy) {
       modelPolicyScenes = Object.keys(parsed.policy.scenes).length;
       checkModelPolicy = { key: "model_policy", label: "模型路由策略", ok: true, slot: "model-policy",
@@ -373,9 +415,9 @@ async function computeAssemblyScoped(
         : "待填充", go: "p8" },
     { id: "ui", label: "⑥ 工作台 UI / 皮肤", filled: !!uiCases, failed: failedSlots.has("ui"),
       summary: uiCases ? `${casePages.length} 页 · 状态用例 ${cases.length} 条同步` : "待填充" },
-    { id: "model-policy", label: "⑦ 模型路由策略", filled: modelPolicyText !== null,
+    { id: "model-policy", label: "⑦ 模型路由策略", filled: assets.modelPolicyText !== null,
       failed: failedSlots.has("model-policy"),
-      summary: modelPolicyText !== null
+      summary: assets.modelPolicyText !== null
         ? (checkModelPolicy.ok ? `model-policy.yml · ${modelPolicyScenes} 场景` : checkModelPolicy.detail)
         : "底座默认（可经 model-policy.yml 覆盖）" },
   ];
@@ -417,12 +459,33 @@ export async function activateBundle(
     );
   }
   const client = await app.connect();
+  let actEventId = "";
+  let prevIndustry: string | null = null;
   try {
     // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+    // M4-装配：先记激活前 industry（磁盘翻转失败时补偿回滚的还原点）
+    const cur = await client.query<{ industry: string | null }>(
+      `SELECT industry FROM workspaces WHERE id=$1`, [scope.workspaceId]);
+    prevIndustry = cur.rows[0]?.industry ?? null;
     await client.query(`UPDATE workspaces SET industry=$2 WHERE id=$1`, [scope.workspaceId, slug]);
+    // D16（#1/A）：profile 切换与激活事件同一事务同一 COMMIT
+    actEventId = (await gatewayAppendOnClient(client, {
+      tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      actor: { id: by, type: "human" },
+    }, {
+      who: { type: "human", id: by },
+      context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
+      object: { type: "bundle", id: slug },
+      decision: {
+        action: "bundle.activate",
+        after: { slug, version: profile.version, checks: profile.checks.map((c) => ({ key: c.key, ok: c.ok })) },
+        basis: ["F2.10 起飞前检查单五项全通过", "§2.3 profile 切换=整套皮肤+通讯录+群规生效"],
+      },
+      rule_impact: [],
+    })).eventId;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;
@@ -431,29 +494,73 @@ export async function activateBundle(
     client.release();
   }
   // 草稿激活即转正（§2.3：草稿不进分发；通过检查单激活后脱离草稿态，bundle.json 实物同步）
+  //
+  // M4-装配 · DB/磁盘非原子收口口径：DB 翻转已在上面事务内完成；磁盘 bundle.json
+  // status 翻转放在事务提交之后。磁盘写失败时**补偿回滚 DB**（industry 恢复激活前
+  // 原值 + 追加 bundle.activate_compensated 补偿事件；append-only 铁律下原激活事件
+  // 不删，以补偿事件收口）——选补偿回滚而非仅告警：草稿态 bundle.json 滞留会误导
+  // 后续分发判定（§2.3 草稿不进分发），半激活中间态比显式失败更危险。
   if (profile.status === "draft") {
     const bjPath = join(root, slug, "bundle.json");
-    const bj = readJson<BundleJson>(bjPath);
-    if (bj?.workloom) {
-      bj.workloom.status = "active";
-      writeFileSync(bjPath, `${JSON.stringify(bj, null, 2)}\n`, "utf-8");
+    try {
+      const bj = readJson<BundleJson>(bjPath);
+      if (bj?.workloom) {
+        bj.workloom.status = "active";
+        writeFileSync(bjPath, `${JSON.stringify(bj, null, 2)}\n`, "utf-8");
+      }
+    } catch (diskErr) {
+      try {
+        const c2 = await app.connect();
+        try {
+          await c2.query("BEGIN");
+          await c2.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
+          await c2.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+          await c2.query(`UPDATE workspaces SET industry=$2 WHERE id=$1`, [scope.workspaceId, prevIndustry]);
+          await gatewayAppendOnClient(c2, {
+            tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+            actor: { id: by, type: "human" },
+          }, {
+            who: { type: "human", id: by },
+            context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
+            object: { type: "bundle", id: slug },
+            decision: {
+              action: "bundle.activate_compensated",
+              after: { slug, restoredIndustry: prevIndustry, diskError: String(diskErr instanceof Error ? diskErr.message : diskErr) },
+              basis: ["磁盘 bundle.json 翻转失败 → 补偿回滚 DB 激活态（M4-装配 非原子收口）"],
+            },
+            rule_impact: [],
+            links: [actEventId],
+          });
+          await c2.query("COMMIT");
+        } catch (compErr) {
+          await c2.query("ROLLBACK").catch(() => undefined);
+          console.error(`❌ 激活补偿回滚失败（需人工介入）：${compErr instanceof Error ? compErr.message : compErr}`);
+        } finally {
+          c2.release();
+        }
+      } finally {
+        // 无论补偿成败，激活整体按失败抛出（调用方视为未激活）
+      }
+      throw new BundleError(
+        "ASSEMBLY_CHECK_FAILED",
+        `行业 Bundle「${slug}」磁盘 bundle.json 翻转失败，DB 激活已补偿回滚：${diskErr instanceof Error ? diskErr.message : diskErr}`,
+      );
     }
   }
-  const r = await gatewayAppend(gateway, {
-    tenantId: scope.tenantId, workspaceId: scope.workspaceId,
-    actor: { id: by, type: "human" },
-  }, {
-    who: { type: "human", id: by },
-    context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
-    object: { type: "bundle", id: slug },
-    decision: {
-      action: "bundle.activate",
-      after: { slug, version: profile.version, checks: profile.checks.map((c) => ({ key: c.key, ok: c.ok })) },
-      basis: ["F2.10 起飞前检查单五项全通过", "§2.3 profile 切换=整套皮肤+通讯录+群规生效"],
-    },
-    rule_impact: [],
-  });
-  return { eventId: r.eventId, profile: { ...profile, status: "active" } };
+  // D24 第⑧装配槽（反馈枚举表）：激活成功后即时注册到本工作区——
+  // decide 驳回原因自此按受控词表校验（未提供第⑧槽的 Bundle 注销旧表，按未装配放行）。
+  // 磁盘读取失败不阻断激活（激活主流程已收口；枚举缺失仅影响校验严格度，下次启动 bootstrap 兜底）。
+  try {
+    const defs = loadFeedbackEnumsFromBundle(join(root, slug));
+    if (defs && defs.length > 0) {
+      registerFeedbackEnums(scope.workspaceId, defs);
+    } else {
+      unregisterFeedbackEnums(scope.workspaceId);
+    }
+  } catch (enumErr) {
+    console.warn(`第⑧槽反馈枚举表注册失败（不阻断激活）：${enumErr instanceof Error ? enumErr.message : enumErr}`);
+  }
+  return { eventId: actEventId, profile: { ...profile, status: "active" } };
 }
 
 /** 重跑校验并留痕（P7E3：校验记录留痕可查；数据活算，重算即重跑） */
@@ -518,6 +625,21 @@ export function scaffoldDraft(input: DraftInput, root = bundlesRoot()): void {
       provides: { presets: [], fences: [], skills: [], schemas: [], ui: [] },
     },
   }, null, 2)}\n`, "utf-8");
+  // 第⑦槽骨架：新行业默认继承底座路由策略，按行业特点增量覆盖场景即可
+  writeFileSync(join(dir, "model-policy.yml"), [
+    `# ${input.displayName} 模型路由策略（bundle 第⑦装配槽，v3.0）`,
+    `# 场景未点名时继承底座 DEFAULT_MODEL_POLICY；tier: L1(0.2×)/L2(1×)/L3(3×)`,
+    `version: "v3.0"`,
+    `scenes:`,
+    `  # 示例：`,
+    `  # cs-answer: { tier: L1, escalateOn: [low-confidence, thumbs-down] }`,
+    `  # deep-report: { tier: L3, noDowngrade: true }`,
+    `plans:`,
+    `  lite:     { defaultShift: -1 }   # 智享版：整体压一档`,
+    `  standard: { defaultShift: 0 }    # 标准版：标准混合`,
+    `  smart:    { defaultShift: 1 }    # 智能版：整体抬一档`,
+    ``,
+  ].join("\n"), "utf-8");
 }
 
 export function removeDraft(slug: string, root = bundlesRoot()): void {

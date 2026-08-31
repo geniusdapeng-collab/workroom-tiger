@@ -1,10 +1,10 @@
 /**
- * P1 主甲板·舰桥（F3：真实 API 接线版；PRD P1-①②③ 逐条对账）
- *  - 左栏 ConversationList：📌 置顶（守夜战队频道/昨夜战报）+ 待办（审批请求 badge）+ 任务线程（状态点实时）+ 问答
- *  - 中栏 MessageFlow：系统分隔线 → 交接班卡（P1E3，三计数与 P3 强一致 F4.4）→ KPI 投影（一店一档 history_curve 真实数据）
+ * P1 工作台·工作台（F3：真实 API 接线版；PRD P1-①②③ 逐条对账）
+ *  - 左栏 ConversationList：📌 置顶（夜班中心频道/昨夜日报）+ 待办（审批请求 badge）+ 任务线程（状态点实时）+ 问答
+ *  - 中栏 MessageFlow：系统分隔线 → 交接班卡（P1E3，三计数与 P3 强一致 F4.4）→ KPI 投影（门店档案 history_curve 真实数据）
  *    → 巡检雷达推送（P1E4，一键派单接 inspection.dispatch；无异常显「昨夜一切正常」）
  *  - 右栏：档案 chips / 夜班班组状态卡 / 在线成员人机混编（P1E6）/ 渠道巡检状态
- *  - 底部：航线设定台（P1E1，Enter/启航→threads.dispatch；含糊→反问不建任务 F3.2）+ 快捷目标（P1E7，F3.5 酒店 6 条）
+ *  - 底部：航线设定台（P1E1，Enter/启航→threads.dispatch；含糊→反问不建任务 F3.2）+ 快捷目标（P1E7，F3.5 内置 6 条）
  * 状态变体：p1 默认 / p1_loading 骨架屏 / p1_empty 空态 / p1_community 社区版权限（隐藏夜班+Quest 快捷目标，F7.2/L2.2 隐藏非置灰）
  * 轮询：线程/夜班 5s，其余 10s（F3.4/D6）
  * 演示走查：?demo=p1_loading|p1_empty|p1_community 强制状态态（仅演示，数据接线不变）
@@ -27,6 +27,8 @@ import {
   SystemDivider,
   type NightPillState,
 } from "../../components/hud";
+import { THREAD_MODE_TEXT, dictText } from "../../lib/display";
+import { CreditsPanel } from "../../components/CreditsPanel";
 
 /* ---------- 类型（与 server router 对齐） ---------- */
 interface ThreadRow {
@@ -40,12 +42,12 @@ interface ArchiveShape {
 }
 interface ProfileResp { archive: ArchiveShape; stage: string | null; name: string }
 
-/** 酒店 6 快捷目标（F3.5 原文：调价建议/回复评价/经营复盘/更新首图/对账说明/差评审批；行业 Bundle 预置） */
+/** 内置 6 快捷目标（F3.5 原文：调价建议/回复评价/经营复盘/更新首图/对账说明/差评审批；行业 Bundle 预置可覆盖） */
 const QUICK_GOALS = [
-  { label: "调价建议", text: "给出明天大床房的调价建议", preset: "pricing-agent" },
+  { label: "调价建议", text: "给出明天主打品的价格建议", preset: "pricing-agent" },
   { label: "回复评价", text: "起草最新差评的回复", preset: "review-agent" },
-  { label: "经营复盘", text: "本周经营复盘（入住率/均价/RevPAR）", preset: "reconcile-agent" },
-  { label: "更新首图", text: "检查并更新飞猪渠道首图", preset: "content-agent" },
+  { label: "经营复盘", text: "本周经营复盘（客流/均价/营收）", preset: "reconcile-agent" },
+  { label: "更新首图", text: "检查并更新各渠道首图", preset: "content-agent" },
   { label: "对账说明", text: "昨夜对账差异说明", preset: "reconcile-agent" },
   { label: "差评审批", text: "汇总待审批的差评回复", preset: "review-agent" },
 ];
@@ -120,7 +122,7 @@ export default function P1() {
     : night?.run?.status === "running" ? "cruising"
       : night?.run?.status === "paused" ? "paused" : "ready";
 
-  // KPI 投影（一店一档 history_curve 真实数据；最新月 vs 上月；截至=档案口径月末）
+  // KPI 投影（门店档案 history_curve 真实数据；最新月 vs 上月；截至=档案口径月末）
   const kpis = useMemo(() => {
     const curve = profile?.archive?.history_curve;
     if (!curve) return [];
@@ -168,7 +170,7 @@ export default function P1() {
       {!isCommunity && nightConfigured && (
         <div className="mb-1.5 cursor-pointer rounded-lg border border-holo/35 bg-holo/5 px-3 py-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-caption text-holo">📌 守夜战队频道</span>
+            <span className="text-caption text-holo">📌 夜班中心频道</span>
             <span className={`inline-block h-1.5 w-1.5 rounded-full ${night?.run?.status === "running" ? "bg-holo animate-pulse-hud" : "bg-ink3"}`} />
           </div>
           <div className="mt-0.5 text-body text-ink2">夜班班组群 → P9</div>
@@ -176,7 +178,7 @@ export default function P1() {
       )}
       {nightConfigured && night?.run?.stats && (
         <div className="mb-1.5 cursor-pointer rounded-lg border border-gline bg-gold/5 px-3 py-2.5">
-          <div className="text-caption text-gold">📌 昨夜战报</div>
+          <div className="text-caption text-gold">📌 昨夜日报</div>
           <div className="mt-0.5 text-body text-ink2">
             ✓{night.run.stats.done} ◆{night.run.stats.pending} ▲{night.run.stats.need_human}
           </div>
@@ -188,7 +190,7 @@ export default function P1() {
             <span className="text-caption text-warn">待办 · 审批请求</span>
             <span className="rounded-full bg-warn/15 px-1.5 font-orb text-micro font-bold text-warn">{pendingCount}</span>
           </div>
-          <div className="mt-0.5 text-body text-ink2">决断队列 → P4</div>
+          <div className="mt-0.5 text-body text-ink2">审批中心 → P4</div>
         </div>
       )}
       <div className="mt-3 mb-2 px-1 text-[11px] tracking-[.2em] text-ink3">任务线程 · ≤10 并发（G11）</div>
@@ -218,7 +220,7 @@ export default function P1() {
       <div className="mb-2 px-1 text-[11px] tracking-[.2em] text-ink3">上下文 · CONTEXT</div>
       {/* 档案 chips */}
       <div className="mb-3 rounded-lg border border-line bg-card p-3">
-        <div className="mb-1.5 text-caption font-bold text-holo">一店一档</div>
+        <div className="mb-1.5 text-caption font-bold text-holo">门店档案</div>
         {profile?.archive?.property && (
           <div className="flex flex-wrap gap-1.5">
             {[
@@ -234,7 +236,7 @@ export default function P1() {
       {/* 夜班班组状态卡（社区版隐藏，F7.2） */}
       {!isCommunity && (
         <div className="mb-3 rounded-lg border border-line bg-card p-3">
-          <div className="mb-1.5 text-caption font-bold text-holo">守夜战队</div>
+          <div className="mb-1.5 text-caption font-bold text-holo">夜班中心</div>
           <NightStatusPill state={pillState} window="22:00–08:00" onClick={() => { window.location.href = "/p9"; }} />
           {night?.run?.fenceSnapshot && (
             <div className="mt-1.5 font-mono text-micro text-ink3">围栏快照 {night.run.fenceSnapshot}</div>
@@ -279,11 +281,17 @@ export default function P1() {
     <Bridge left={left} right={right}>
       <div className="flex min-h-full flex-col">
         <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-h1 font-black tracking-wider">主甲板 · 舰桥</h2>
+          <h2 className="text-h1 font-black tracking-wider">工作台 · 总览</h2>
           <span className="text-[11px] tracking-[.2em] text-ink3">
-            P1 · MAIN DECK{isCommunity ? " · 社区版" : ""}{demo ? ` · demo=${demo}` : ""}
+            P1 · OVERVIEW{isCommunity ? " · 社区版" : ""}{demo ? ` · demo=${demo}` : ""}
           </span>
         </div>
+
+        {/* v3.0 积分账本（三池余额 + 加油包；P1 商业化产品化） */}
+        <details className="mb-3 rounded-lg border border-line/60 bg-white/[0.02] px-3 py-2">
+          <summary className="cursor-pointer text-caption text-ink3">💎 积分账本与加油包（三池余额 / 消耗流水）</summary>
+          <div className="pt-2"><CreditsPanel /></div>
+        </details>
 
         {error && (
           <div className="mb-3">
@@ -303,7 +311,7 @@ export default function P1() {
           <div className="flex-1 space-y-3.5">
             <SystemDivider
               time={new Date().toTimeString().slice(0, 5)}
-              summary={`云栖酒店 · ${me?.identity.name ?? ""} 已上线（演示身份 MEM-001）`}
+              summary={`${profile?.name ?? "演示工作区"} · ${me?.identity.name ?? ""} 已上线（演示身份）`}
             />
 
             {/* P1E3 交接班卡（夜班未启用 → 空态「去配置」F4.8） */}
@@ -322,7 +330,7 @@ export default function P1() {
               )
             )}
 
-            {/* KPI 全息仪表（一店一档 history_curve 投影；截至时间必显 §5.7） */}
+            {/* KPI 全息仪表（门店档案 history_curve 投影；截至时间必显 §5.7） */}
             <div className="grid grid-cols-4 gap-2.5">
               {kpis.map((k) => (
                 <KpiGauge key={k.name} name={k.name} value={k.value} delta={k.delta} asOf="月末档案" stale={!!error} />
@@ -356,7 +364,7 @@ export default function P1() {
               <AgentActionMessage
                 sender={threads[0].agent_id ?? "值班 Agent"}
                 version=""
-                action={threads[0].mode}
+                action={dictText(THREAD_MODE_TEXT, threads[0].mode)}
                 eventId={threads[0].id}
                 receipt={threads[0].status === "completed" ? "synced" : threads[0].status === "failed" ? "failed" : "unverified"}
               >
@@ -368,7 +376,7 @@ export default function P1() {
               <EmptyState
                 icon="🌌"
                 title="今夜风平浪静"
-                hint="还没有会话、待办与异常——@ 一位 Agent 或说出第一句话，舰队即刻启航"
+                hint="还没有会话、待办与异常——@ 一位 Agent 或说出第一句话，团队即刻开工"
               />
             )}
           </div>
@@ -378,7 +386,7 @@ export default function P1() {
         {clarify && (
           <div className="mt-3">
             <BannerAlert level="info" actionLabel="知道了" onAction={() => setClarify(null)}>
-              航线待确认（未建任务）：{clarify}
+              任务待确认（未建任务）：{clarify}
             </BannerAlert>
           </div>
         )}
@@ -402,7 +410,7 @@ export default function P1() {
           <DispatchBar
             state={dispatchState}
             value={draft}
-            chips={[profile?.archive?.property?.name ?? "云栖酒店", `阶段：${profile?.stage ?? "—"}`]}
+            chips={[profile?.archive?.property?.name ?? profile?.name ?? "演示工作区", `阶段：${profile?.stage ?? "—"}`]}
             onCancelRoute={() => setDispatchState(draft ? "typing" : "empty")}
             onChange={(v) => { setDraft(v); setDispatchState(v ? "typing" : "empty"); }}
             onSubmit={() => void dispatch(draft)}

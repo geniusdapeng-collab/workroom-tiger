@@ -1,17 +1,19 @@
 /**
- * FenceLight 航道状态灯（设计规范 §5.5；围栏三级 + 需介入）
+ * FenceLight 围栏状态灯（设计规范 §5.5；围栏三级 + 需介入）
  * 结构：圆灯 + 名称 + 说明
  * 状态：auto 绿（常亮）/ review 琥珀（2s 呼吸）/ block 红（0.8s 急促）/ need 紫（需介入）
  * 铁律：基线规则带 🔒 金锁标（集团强制，只可加严——单调守卫 F2.3）
  * 双通道：灯 + 文字，不只依赖颜色（§10 可访问性）
  */
+import { FENCE_LEVEL_TEXT } from "../../lib/display";
+
 export type FenceLevel4 = "auto" | "review" | "block" | "need";
 
 const META: Record<FenceLevel4, { label: string; color: string; anim?: string; glow: string }> = {
-  auto: { label: "AUTO 自动放行", color: "bg-go", glow: "rgba(61,255,178,.6)" },
-  review: { label: "REVIEW 待审", color: "bg-warn", anim: "animate-pulse-warn", glow: "rgba(255,194,77,.6)" },
-  block: { label: "BLOCK 熔断", color: "bg-alert", anim: "animate-pulse-alert", glow: "rgba(255,84,112,.6)" },
-  need: { label: "需介入", color: "bg-need", anim: "animate-pulse-warn", glow: "rgba(180,92,255,.6)" },
+  auto: { label: FENCE_LEVEL_TEXT.auto!, color: "bg-go", glow: "rgba(34,200,138,.6)" },
+  review: { label: FENCE_LEVEL_TEXT.review!, color: "bg-warn", anim: "animate-pulse-warn", glow: "rgba(255,170,51,.6)" },
+  block: { label: FENCE_LEVEL_TEXT.block!, color: "bg-alert", anim: "animate-pulse-alert", glow: "rgba(255,77,109,.6)" },
+  need: { label: "需介入", color: "bg-need", anim: "animate-pulse-warn", glow: "rgba(182,120,255,.6)" },
 };
 
 export function FenceLight({

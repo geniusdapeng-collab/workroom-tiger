@@ -6,7 +6,7 @@
  * 幂等：同一 (channel, channel_msg_id) 重复投递只落首条（L1.4 同口径，通道重推是常态）
  */
 import type pg from "pg";
-import { gatewayAppend } from "../workdata/gateway.js";
+import { gatewayAppend, gatewayAppendOnClient } from "../workdata/gateway.js";
 import { ChannelError, getChannel, type ApprovalChannel } from "./registry.js";
 
 /** RLS 会话上下文封装（同 review-console 口径：每个 client 连接重设 set_config，池不共享会话级设置） */
@@ -73,6 +73,23 @@ export async function resolveMemberByOpenid(
     );
     const row = r.rows[0];
     return row ? { memberNo: row.member_no, role: row.role, name: row.name } : null;
+  });
+}
+
+/** 反向查询：会话成员在该通道绑定的 openid（P0-1 未验签降级用：仅允许本人操作） */
+export async function boundOpenidOfMember(
+  app: pg.Pool,
+  scope: { tenantId: string; workspaceId: string },
+  channel: ApprovalChannel,
+  memberNo: string,
+): Promise<string | null> {
+  return scoped(app, scope, async (c) => {
+    const r = await c.query<{ openid: string | null }>(
+      `SELECT im_openids->>$2 AS openid FROM members
+       WHERE workspace_id=$1 AND member_no=$3`,
+      [scope.workspaceId, channel, memberNo],
+    );
+    return r.rows[0]?.openid ?? null;
   });
 }
 
@@ -146,9 +163,10 @@ export async function ingestInbound(
 
   const member = await resolveMemberByOpenid(app, scope, msg.channel, msg.senderOpenId);
   const whoId = member ? member.memberNo : `ext:${msg.channel}:${msg.senderOpenId}`;
-  let r: Awaited<ReturnType<typeof gatewayAppend>>;
-  try {
-    r = await gatewayAppend(gateway, {
+  // D16（#1/A）：占位、事件、回填同一事务同一 COMMIT——#29 的「失败补偿删占位」
+  // 由原子性天然取代（事件写失败整事务滚回，占位随之消失，通道重推可安全重试）
+  const r = await scoped(app, scope, async (c) => {
+    const res = await gatewayAppendOnClient(c, {
       ...scope,
       actor: { id: whoId, type: "human" },
     }, {
@@ -172,23 +190,13 @@ export async function ingestInbound(
       },
       rule_impact: [],
     });
-  } catch (err) {
-    // 事件写入失败：补偿删除占位，允许通道重推再次尝试（不残留幽灵占位）
-    await scoped(app, scope, (c) =>
-      c.query(
-        `DELETE FROM im_inbound_dedupe WHERE workspace_id=$1 AND channel=$2 AND channel_msg_id=$3 AND event_id=''`,
-        [scope.workspaceId, msg.channel, msg.channelMsgId],
-      ),
-    ).catch(() => undefined);
-    throw err;
-  }
-  // ② 回填 event_id（重复投递时据此返回原编号）
-  await scoped(app, scope, (c) =>
-    c.query(
+    // ② 回填 event_id（重复投递时据此返回原编号）——与事件同一事务
+    await c.query(
       `UPDATE im_inbound_dedupe SET event_id=$4 WHERE workspace_id=$1 AND channel=$2 AND channel_msg_id=$3`,
-      [scope.workspaceId, msg.channel, msg.channelMsgId, r.eventId],
-    ),
-  );
+      [scope.workspaceId, msg.channel, msg.channelMsgId, res.eventId],
+    );
+    return res;
+  });
   return {
     eventId: r.eventId,
     deduped: false,

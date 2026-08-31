@@ -8,7 +8,7 @@
 import type pg from "pg";
 import { DRY_RUN_REPLAY_LIMIT, type BusinessEvent } from "@workloom/shared";
 import { replayRules, type RuntimeRule } from "../fence-engine/index.js";
-import { gatewayAppend } from "../workdata/gateway.js";
+import { gatewayAppend, gatewayAppendOnClient } from "../workdata/gateway.js";
 import { getSkill, SkillError, type SkillRow } from "./registry.js";
 
 interface Scope { tenantId: string; workspaceId: string }
@@ -70,8 +70,12 @@ export async function createSkillDraft(
   const skillId = teamSkillId(input.name, scope.workspaceId);
   const version = await nextVersion(app, skillId);
   const body = renderSkillMarkdown(input.name, input.description, input.triplet);
+  // D16（#1/A）：技能行与草稿事件同一事务同一 COMMIT
   const client = await app.connect();
   try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
     await client.query(
       `INSERT INTO skills (id, level, bundle, name, version, description, fence_bindings, body, desensitized)
        VALUES ($1,'team',NULL,$2,$3,$4,$5,$6,false)
@@ -79,23 +83,27 @@ export async function createSkillDraft(
          fence_bindings=EXCLUDED.fence_bindings, body=EXCLUDED.body`,
       [skillId, input.name, version, input.description, JSON.stringify(input.fenceBindings ?? []), body],
     );
+    await gatewayAppendOnClient(client, {
+      tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      actor: { id: input.by, type: "human" },
+    }, {
+      who: { type: "human", id: input.by },
+      context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
+      object: { type: "skill", id: skillId },
+      decision: {
+        action: "skill.draft.created",
+        after: { skillId, name: input.name, version, triplet: input.triplet, fenceBindings: input.fenceBindings ?? [] },
+        basis: ["自然语言三要素引导式生成技能草稿（F8.3）", "生成物进版本管理（F8.3）"],
+      },
+      rule_impact: [],
+    } as never);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
   } finally {
     client.release();
   }
-  await gatewayAppend(gateway, {
-    tenantId: scope.tenantId, workspaceId: scope.workspaceId,
-    actor: { id: input.by, type: "human" },
-  }, {
-    who: { type: "human", id: input.by },
-    context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
-    object: { type: "skill", id: skillId },
-    decision: {
-      action: "skill.draft.created",
-      after: { skillId, name: input.name, version, triplet: input.triplet, fenceBindings: input.fenceBindings ?? [] },
-      basis: ["自然语言三要素引导式生成技能草稿（F8.3）", "生成物进版本管理（F8.3）"],
-    },
-    rule_impact: [],
-  } as never);
   return { skillId, version };
 }
 

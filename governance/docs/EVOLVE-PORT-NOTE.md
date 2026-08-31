@@ -1,6 +1,6 @@
 # 自我进化飞轮（D24）移植说明 · workroom-tiger/governance
 
-> 日期：2026-08-31 · 状态：**暂缓移植，需先做底座版本升级专项**
+> 日期：2026-08-31 · 状态：**✅ 已完成（同日闭环）——底座整体升级至 workloom-im@28c2d91 并回灌飞轮 P0，门禁全绿**
 
 ## 结论
 
@@ -8,8 +8,10 @@ workloom-im 底座已于 v1.10.0 落地「自我进化飞轮 P0」（D24：偏�
 记忆提炼与生命周期 / 反馈枚举第⑧槽 / 组织记忆中心 P23 / 进化积分卡），
 并已移植到 workloom-hotel、hyperreality-system、workloom、panda-cineforge 四仓（全量门禁绿）。
 
-**本仓 governance/ 治理壳暂缓移植**——它不是四仓的同版本分叉，而是更老底座的快照，
-直接三方合并会产生编译/运行双重不兼容。
+**本仓 governance/ 治理壳原钉在 pre-D16 老底座**——三方合并不可行，改为整体替换升级
+（packages/{shared,db,base,runtime} + apps/{server,web,webc} + scripts + vendor + bundles/hotel
+以底座为准整体替换；trading bundle、交易脚本、本说明文档保留），随后回灌飞轮 P0 全部内容
+（evolve 包 / 偏好注入 / P23 组织记忆中心 / RejectDialog / 第⑧槽注册）。
 
 ## 版本差距实证（governance vs workloom-im@fb96ffb）
 

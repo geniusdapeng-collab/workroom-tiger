@@ -1,5 +1,5 @@
 /**
- * P5 航道管制台（F8：群权限管理 · 规则围栏；PRD P5-①②③④⑤ 逐条对账）
+ * P5 规则与权限（F8：群权限管理 · 规则围栏；PRD P5-①②③④⑤ 逐条对账）
  *  - 左栏版本历史（P5E1：active/rolled_back/出厂基线 🔒；单调守卫只可加严 L2.1）+ 生效范围统计
  *  - 中央规则列表（P5E2：级别 pill auto/review/block/需介入 + 来源 + 30 天触发数；基线 🔒 集团强制 F2.3）
  *  - 自然语言新增群规（P5E3：转写草稿 → 结构化预览 → dry-run → 审批；未确认不生效 L2.4）
@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
+import { COMMON_STATUS_TEXT, FENCE_LEVEL_TEXT, actionText, dictText } from "../../lib/display";
 import { Bridge } from "../../shell/Bridge";
 import { BannerAlert, EmptyState, FenceLight, SkeletonBlock, type FenceLevel4 } from "../../components/hud";
 
@@ -91,7 +92,7 @@ export default function P5() {
       return;
     }
     await trpc.fence.confirmDryRun.mutate({ dryRunId: report.dryRunId, rule: draft });
-    setBanner({ level: "info", text: `规则 ${draft.ruleId} 已进变更审批（pending_approval，F2.4）——请去 P4 决断队列完成审批后激活` });
+    setBanner({ level: "info", text: `规则 ${draft.ruleId} 已进变更审批（${COMMON_STATUS_TEXT.pending_approval}，F2.4）——请去 P4 审批中心完成审批后激活` });
     setDraft(null); setReport(null); setNlText("");
     await load();
   }, [draft, report, load]);
@@ -107,7 +108,7 @@ export default function P5() {
           <div className="flex items-center justify-between">
             <span className="font-mono text-body font-bold text-ink">{v.version}</span>
             <span className={`text-micro ${v.status === "active" ? "text-go" : v.status === "rolled_back" ? "text-ink3" : "text-warn"}`}>
-              {v.status}
+              {dictText(COMMON_STATUS_TEXT, v.status)}
             </span>
           </div>
           <div className="mt-0.5 text-micro text-ink3">{v.rules} 条规则</div>
@@ -155,8 +156,8 @@ export default function P5() {
               <div className="mb-1.5 text-caption font-bold text-gold">草稿预览（确认后走变更审批 F2.8）</div>
               <div className="space-y-0.5 font-mono text-caption text-ink2">
                 <div>{draft.ruleId} · {draft.name}</div>
-                <div>级别 <span className="text-warn">{draft.level}</span>（新规默认必审，只可加严 L2.1）</div>
-                <div>对象 {draft.objectTypes.join("/")} · 动作 {draft.actions.join("/")}</div>
+                <div>级别 <span className="text-warn">{dictText(FENCE_LEVEL_TEXT, draft.level)}</span>（新规默认必审，只可加严 L2.1）</div>
+                <div>对象 {draft.objectTypes.join("/")} · 动作 {draft.actions.map(actionText).join("/")}</div>
                 <div>条件 <span className="text-holo">{draft.when}</span></div>
               </div>
               <button
@@ -201,7 +202,7 @@ export default function P5() {
     <Bridge left={left} right={right}>
       <div className="flex min-h-full flex-col">
         <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-h1 font-black tracking-wider">航道管制台</h2>
+          <h2 className="text-h1 font-black tracking-wider">规则与权限</h2>
           <span className="text-[11px] tracking-[.2em] text-ink3">P5 · FENCE CONTROL</span>
         </div>
 
@@ -224,7 +225,7 @@ export default function P5() {
                   <FenceLight
                     level={levelOf(r)}
                     name={`${r.rule_id} ${r.name}`}
-                    desc={`${r.workspace_id === "*" ? "基线包" : "本店"} ${r.version} · ${(r.match_spec.actions ?? []).join("/")}`}
+                    desc={`${r.workspace_id === "*" ? "基线包" : "本店"} ${r.version} · ${(r.match_spec.actions ?? []).map(actionText).join("/")}`}
                     baseline={r.is_baseline}
                   />
                 </div>

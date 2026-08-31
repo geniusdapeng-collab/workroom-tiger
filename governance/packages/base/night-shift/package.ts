@@ -9,7 +9,7 @@
  */
 import type pg from "pg";
 import { APPROVAL_LIMITS, type BusinessEvent } from "@workloom/shared";
-import { gatewayAppend } from "../workdata/gateway.js";
+import { gatewayAppendOnClient } from "../workdata/gateway.js";
 
 /* ---------- 三段投影（纯函数，H-7 走查核心） ---------- */
 
@@ -107,11 +107,11 @@ export async function deliverPackage(
       [scope.tenantId, scope.workspaceId, window.from, window.to],
     );
     events = r.rows.map((x) => x.payload);
+    await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
-    await client.query("COMMIT").catch(() => undefined);
     client.release();
   }
 
@@ -120,35 +120,39 @@ export async function deliverPackage(
   // 状态机 → package_generated + 统计回写（F4.4/F4.8）
   const c2 = await app.connect();
   try {
-    // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
     await c2.query("BEGIN");
     await c2.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
-    await c2.query(
+    await c2.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+    const upd = await c2.query(
       `UPDATE night_runs SET status='package_generated', stats=$3 WHERE id=$1 AND workspace_id=$2 AND status IN ('running','paused','ready')`,
       [runId, scope.workspaceId, JSON.stringify(pkg.stats)],
     );
+    // 幂等：已 package_generated（或班次不存在）→ rowCount=0，直接返回不重写投递事件（G8 留痕唯一）
+    if (upd.rowCount === 0) {
+      await c2.query("COMMIT");
+      return pkg;
+    }
+    // D16（#1/A）：状态回写与投递事件同一事务同一 COMMIT（G8）
+    await gatewayAppendOnClient(c2, {
+      tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      actor: { id: "night-shift", type: "system" },
+    }, {
+      who: { type: "system", id: "night-shift" },
+      context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "夜班" },
+      object: { type: "store", id: scope.workspaceId },
+      decision: {
+        action: "night.package.deliver",
+        after: { runId, stats: pkg.stats, truncated: pkg.truncated, package: pkg },
+      },
+      rule_impact: [],
+    } as never);
+    await c2.query("COMMIT");
   } catch (err) {
     await c2.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
-    await c2.query("COMMIT").catch(() => undefined);
     c2.release();
   }
-
-  // 投递事件留痕（G8）
-  await gatewayAppend(gateway, {
-    tenantId: scope.tenantId, workspaceId: scope.workspaceId,
-    actor: { id: "night-shift", type: "system" },
-  }, {
-    who: { type: "system", id: "night-shift" },
-    context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "夜班" },
-    object: { type: "store", id: scope.workspaceId },
-    decision: {
-      action: "night.package.deliver",
-      after: { runId, stats: pkg.stats, truncated: pkg.truncated, package: pkg },
-    },
-    rule_impact: [],
-  } as never);
 
   return pkg;
 }

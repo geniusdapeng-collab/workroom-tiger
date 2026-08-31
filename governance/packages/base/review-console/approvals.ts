@@ -20,8 +20,9 @@ import {
   type Gesture,
   type MemberRole,
 } from "@workloom/shared";
-import { gatewayAppend } from "../workdata/gateway.js";
-import { upsertMemory, MockEmbedder, type Embedder } from "../workdata/memory.js";
+import { gatewayAppend, gatewayAppendOnClient } from "../workdata/gateway.js";
+import { upsertMemory, upsertMemoryInTx, MockEmbedder, type Embedder } from "../workdata/memory.js";
+import { assertEditKindValid, assertReasonEnumAllowed, type EditKind } from "../evolve/feedback-enums.js";
 
 /* ================= 类型 ================= */
 
@@ -30,7 +31,7 @@ export interface ApprovalRow {
   event_id: string;
   channel: string;
   status: ApprovalStatus;
-  gesture: { type: Gesture; weight: number; reason_enum?: string; reason_text?: string; edited_after?: unknown } | null;
+  gesture: { type: Gesture; weight: number; reason_enum?: string; reason_text?: string; edited_after?: unknown; edit_kind?: string } | null;
   snapshot: { before?: unknown; after?: unknown; expires_at?: string; high_risk?: boolean };
   decided_by: string | null;
   decided_at: string | null;
@@ -59,6 +60,8 @@ export interface GestureInput {
   reasonEnum?: string;
   reasonText?: string;
   editedAfter?: unknown;
+  /** M1.3 归因分流（D24 修订 3）：纠错→缺陷池 / 口味→偏好池；仅 edit 手势有意义 */
+  editKind?: EditKind;
 }
 
 export function validateGesture(g: GestureInput): void {
@@ -81,6 +84,8 @@ export function validateGesture(g: GestureInput): void {
   if (g.type === "edit" && g.editedAfter === undefined) {
     throw new ApprovalError("EDIT_REQUIRES_AFTER", "编辑后采纳必须携带 edited_after 新值（F5.2）");
   }
+  // M1.3（D24）：editKind 白名单校验（纠错/口味二分，非法值拒绝）
+  assertEditKindValid(g.editKind);
 }
 
 /** 审批人角色校验（L5.1/L5.5：服务端强制 403） */
@@ -155,6 +160,11 @@ export async function decide(
   // L5.1/L5.5 角色校验 + L5.2 手势校验（先校验，不碰库）
   assertApproverRole(actor.role);
   validateGesture(gesture);
+  // M1.2（D24 修订 3）：工作区已装配行业反馈枚举表（Bundle 第⑧槽）时，
+  // 驳回原因必须命中受控词表——自由文本无法聚类，校准信号的可信度前提是受控枚举
+  if (gesture.type === "reject" && gesture.reasonEnum) {
+    assertReasonEnumAllowed(scope.workspaceId, gesture.reasonEnum);
+  }
 
   // scoped 已包裹显式事务（BEGIN→set_config→COMMIT/ROLLBACK），本函数内不再自行开关事务；
   // 过期分支需要「标 expired 落库 + 抛 EXPIRED」——先提交事务再抛，避免 catch 回滚掉过期标记
@@ -169,6 +179,18 @@ export async function decide(
     // L5.3：非 pending 一律视为重复回调，只处理首次
     if (row.status !== "pending") {
       return { kind: "deduped" as const, row };
+    }
+
+    // #43 修复：同事件跨通道幂等——UNIQUE(event_id,channel) 允许 inapp/dingtalk 各一行，
+    // 此前两通道可各批一次（同一动作双批双留痕）。锁同事件全部审批行（FOR UPDATE
+    // 阻塞并发他通道 decide 至本事务提交），任一他行已终态即按重复回调处理
+    const siblings = await c.query<{ approval_id: string; status: ApprovalStatus }>(
+      `SELECT approval_id, status FROM approvals WHERE event_id=$1 AND workspace_id=$2 AND approval_id<>$3 FOR UPDATE`,
+      [row.event_id, scope.workspaceId, approvalId],
+    );
+    const decidedElsewhere = siblings.rows.find((x) => x.status !== "pending");
+    if (decidedElsewhere) {
+      return { kind: "deduped" as const, row: { ...row, status: decidedElsewhere.status } };
     }
 
     // F5.7/E5.3：快照过期检测（高危项不存在超时自动放行，L5.4）
@@ -196,24 +218,16 @@ export async function decide(
           reason_enum: gesture.reasonEnum,
           reason_text: gesture.reasonText,
           edited_after: gesture.editedAfter,
+          edit_kind: gesture.editKind,
         }),
         actor.memberNo,
       ],
     );
-    return { kind: "decided" as const, row, status };
-  });
 
-  if (txResult.kind === "deduped") {
-    return { approvalId, status: txResult.row.status, deduped: true };
-  }
-  if (txResult.kind === "expired") {
-    throw new ApprovalError("EXPIRED", `快照已过期（${txResult.expiresAt.toISOString()}），审批标记 expired（E5.3/F5.7）`);
-  }
-  const { row, status } = txResult;
-
-  {
+    // D16（#1/A）：状态变更、手势事件、校准记忆全部在同一事务同一 COMMIT——
+    // 不再存在「状态已改、事件/记忆未落」的崩溃孤儿窗口
     // F5.5 手势回写：事件库（经安全网关；人类手势动作）
-    const gres = await gatewayAppend(gateway, {
+    const gres = await gatewayAppendOnClient(c, {
       ...scope,
       actor: { id: actor.memberNo, type: "human" },
     }, {
@@ -228,6 +242,7 @@ export async function decide(
           weight: GESTURE_WEIGHT[gesture.type],
           reason_enum: gesture.reasonEnum,
           edited_after: gesture.editedAfter,
+          edit_kind: gesture.editKind,
         },
         basis: gesture.reasonText ? [gesture.reasonText] : undefined,
       },
@@ -237,7 +252,7 @@ export async function decide(
 
     // F1.7 校准闭环：驳回原因枚举 → 偏好模式记忆（机制位；权重衰减在数据大脑侧）
     if (gesture.type === "reject" && gesture.reasonEnum) {
-      await upsertMemory(app, scope, {
+      await upsertMemoryInTx(c, scope, {
         memoryId: `mem-reject-${gesture.reasonEnum}`,
         scope: "workspace",
         kind: "preference",
@@ -245,16 +260,23 @@ export async function decide(
         sourceEvents: [gres.eventId],
         confidence: 0.6,
       }, embedder);
-      await scoped(app, scope, (c) =>
-        c.query(
-          `INSERT INTO memory_usage (memory_id, event_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [`mem-reject-${gesture.reasonEnum}`, gres.eventId],
-        ),
+      // M3/M4：memory_usage 已入 RLS（workspace_id 列），必须带本工作区键落库——
+      // 缺列时 workspace_id 为 NULL，WITH CHECK 不通过（RLS 42501）
+      await c.query(
+        `INSERT INTO memory_usage (memory_id, event_id, workspace_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [`mem-reject-${gesture.reasonEnum}`, gres.eventId, scope.workspaceId],
       );
     }
+    return { kind: "decided" as const, row, status, gestureEventId: gres.eventId };
+  });
 
-    return { approvalId, status, deduped: false, gestureEventId: gres.eventId };
+  if (txResult.kind === "deduped") {
+    return { approvalId, status: txResult.row.status, deduped: true };
   }
+  if (txResult.kind === "expired") {
+    throw new ApprovalError("EXPIRED", `快照已过期（${txResult.expiresAt.toISOString()}），审批标记 expired（E5.3/F5.7）`);
+  }
+  return { approvalId, status: txResult.status, deduped: false, gestureEventId: txResult.gestureEventId };
 }
 
 /* ================= 批量采纳（F5.2；仅非高危，P4 原型口径） ================= */
@@ -310,23 +332,24 @@ export async function expireSweep(
       keptHighRisk.push(row.approval_id); // L5.4：高危项超时标提醒但不放行不expired跳过
       continue;
     }
+    // 铁律 1：状态变更必经网关写事件（#10 修复；此前 expireSweep 只改表不写事件，违反 F1.2）
+    // D16（#1/A）：expired 状态与过期事件同一事务提交——不再存在状态已变、事件未落的孤儿窗口
     await scoped(app, scope, async (c) => {
       await c.query(`UPDATE approvals SET status='expired' WHERE approval_id=$1`, [row.approval_id]);
-    });
-    // 铁律 1：状态变更必经网关写事件（#10 修复；此前 expireSweep 只改表不写事件，违反 F1.2）
-    await gatewayAppend(gateway, {
-      tenantId: scope.tenantId, workspaceId: scope.workspaceId,
-      actor: { id: "review-console", type: "system" },
-    }, {
-      who: { type: "system", id: "review-console" },
-      context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
-      object: { type: "approval", id: row.approval_id },
-      decision: {
-        action: "approval.expired",
-        after: { approval_id: row.approval_id, event_id: row.event_id, expires_at: row.snapshot?.expires_at },
-        basis: ["超时未审批，系统标记 expired（F5.7/E5.3；高危项不自动放行 L5.4）"],
-      },
-      rule_impact: [],
+      await gatewayAppendOnClient(c, {
+        tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+        actor: { id: "review-console", type: "system" },
+      }, {
+        who: { type: "system", id: "review-console" },
+        context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
+        object: { type: "approval", id: row.approval_id },
+        decision: {
+          action: "approval.expired",
+          after: { approval_id: row.approval_id, event_id: row.event_id, expires_at: row.snapshot?.expires_at },
+          basis: ["超时未审批，系统标记 expired（F5.7/E5.3；高危项不自动放行 L5.4）"],
+        },
+        rule_impact: [],
+      });
     });
     expired.push(row.approval_id);
   }

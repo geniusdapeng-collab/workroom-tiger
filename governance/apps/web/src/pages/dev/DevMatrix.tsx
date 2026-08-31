@@ -69,7 +69,7 @@ export default function DevMatrix() {
           <QuestCard eventId="E-8842" title="周五旺季调价" action="竞对采集中" done={2} total={3} status="running" />
         </Cell>
         <Cell label="review 待审查（琥珀呼吸）">
-          <QuestCard eventId="E-8843" title="差评应急回复" action="回复草稿待决断" done={2} total={3} status="review" />
+          <QuestCard eventId="E-8843" title="差评应急回复" action="回复草稿待审批" done={2} total={3} status="review" />
         </Cell>
         <Cell label="done 已完成 / queued 排队">
           <div className="space-y-2">
@@ -81,7 +81,7 @@ export default function DevMatrix() {
         </Cell>
       </Section>
 
-      <Section name="HandoffCard 昨夜战报卡" spec="§5.3 · 默认/空态（禁显 0）">
+      <Section name="HandoffCard 昨夜日报卡" spec="§5.3 · 默认/空态（禁显 0）">
         <Cell label="默认（三栏大数字强一致 F4.4）">
           <HandoffCard data={{ deliveredAt: "08:30", fenceSnapshot: "hotel-baseline/v1", done: 12, pending: 2, needHuman: 1, credits: 46 }} />
         </Cell>
@@ -90,7 +90,7 @@ export default function DevMatrix() {
         </Cell>
       </Section>
 
-      <Section name="TriGestureBar 决断三操纵杆" spec="§5.4 · 默认/过期禁用/权限隐藏">
+      <Section name="TriGestureBar 审批三操纵杆" spec="§5.4 · 默认/过期禁用/权限隐藏">
         <Cell label="默认三杆"><TriGestureBar /></Cell>
         <Cell label="expired 快照过期（E5.3 整组锁定+刷新）"><TriGestureBar expired /></Cell>
         <Cell label="无审批权（整组隐藏非置灰 L5.1）">
@@ -98,7 +98,7 @@ export default function DevMatrix() {
         </Cell>
       </Section>
 
-      <Section name="FenceLight 航道状态灯" spec="§5.5 · auto/review/block/need + 基线金锁">
+      <Section name="FenceLight 围栏状态灯" spec="§5.5 · auto/review/block/need + 基线金锁">
         <Cell label="auto 绿（常亮）/ review 琥珀（2s 呼吸）">
           <div className="space-y-2">
             <FenceLight level="auto" name="R1 涨幅 ≤8% 自动" baseline />
@@ -128,7 +128,7 @@ export default function DevMatrix() {
         <Cell label="SubCallMessage + SystemDivider">
           <div className="space-y-2.5">
             <SubCallMessage target="竞对采集" version="v1.3" receipt="synced">同商圈 3 家竞对均价 ¥512</SubCallMessage>
-            <SystemDivider time="22:00" summary="守夜战队出征（night.run.start 已落库）" />
+            <SystemDivider time="22:00" summary="夜班中心出征（night.run.start 已落库）" />
           </div>
         </Cell>
       </Section>
@@ -168,7 +168,7 @@ export default function DevMatrix() {
       <Section name="空态 / 骨架屏 / 告警条" spec="§5.10">
         <Cell label="EmptyState（星云晕染+副官语气）+ SkeletonBlock（流光 1.4s）">
           <div className="space-y-2">
-            <EmptyState icon="🌌" title="舷窗外一片平静" hint="派遣第一条主线任务，舰队即刻启航" actionLabel="设定航线 ▶" />
+            <EmptyState icon="🌌" title="一切平静" hint="派遣第一条主线任务，团队即刻开工" actionLabel="开始第一个任务 ▶" />
             <SkeletonBlock lines={3} />
           </div>
         </Cell>
@@ -176,7 +176,7 @@ export default function DevMatrix() {
           <div className="space-y-2">
             <BannerAlert level="alert" actionLabel="去处理">夜班暂停超时，已触发强制隔离（E4.1）</BannerAlert>
             <BannerAlert level="warn">LLM 降级链生效中：旗舰 → 标准（L6.1 已留痕）</BannerAlert>
-            <BannerAlert level="info">战报将于 08:30 送达（F4.4）</BannerAlert>
+            <BannerAlert level="info">日报将于 08:30 送达（F4.4）</BannerAlert>
           </div>
         </Cell>
       </Section>
@@ -198,7 +198,7 @@ export default function DevMatrix() {
               <EquipSlot label="空槽" />
               <EquipSlot label="装配失败" failed />
             </div>
-            <EquipCard name="收益管理专家" rarity="official" desc="调价方法论官方套件（R1/R2 绑定）" installs={3} />
+            <EquipCard name="收益管理专家" rarity="official" desc="调价方法论官方技能（R1/R2 绑定）" installs={3} />
           </div>
         </Cell>
       </Section>

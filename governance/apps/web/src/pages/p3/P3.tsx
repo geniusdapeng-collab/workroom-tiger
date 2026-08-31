@@ -1,6 +1,6 @@
 /**
- * P3 掌上战报（F6：夜班交接班消息 · 移动端监督者视角；PRD P3-①②③④⑤ 逐条对账）
- *  - 375px 内容区（§4.2 拇指化重排）：战报计数头置顶 → 审批卡逐条（单条 ≤2 步）→ 求援卡 → 底部双键
+ * P3 掌上日报（F6：夜班交接班消息 · 移动端监督者视角；PRD P3-①②③④⑤ 逐条对账）
+ *  - 375px 内容区（§4.2 拇指化重排）：日报计数头置顶 → 审批卡逐条（单条 ≤2 步）→ 求援卡 → 底部双键
  *  - P3E1 三栏计数头与 P1 交接班卡强一致（F4.4 同一 stats 数据源）；点击筛选消息列表
  *  - P3E2 三手势写回（采纳/编辑后采纳/驳回 = 权重 1/2/3，F5.3/F5.5；驳回必填原因 ≤200 字 L5.2）
  *  - P3E4 批量采纳仅低风险项（review/block 不进批量 G6；二次确认；接 approvals.batchApprove 高危跳过）
@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
+import { shortId } from "../../lib/display";
 import {
   BannerAlert,
   EmergencyBrake,
@@ -17,6 +18,7 @@ import {
   SkeletonBlock,
   type Gesture,
 } from "../../components/hud";
+import { RejectDialog } from "../../components/RejectDialog";
 
 interface NightRun {
   id: string; status: string; fenceSnapshot: string | null;
@@ -37,6 +39,7 @@ export default function P3() {
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [banner, setBanner] = useState<{ level: "alert" | "warn" | "info"; text: string } | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<ApprovalRow | null>(null);
   const [batchArmed, setBatchArmed] = useState(false);
 
   const load = useCallback(async () => {
@@ -77,15 +80,28 @@ export default function P3() {
 
   const gesture = useCallback(async (a: ApprovalRow, g: Gesture) => {
     if (g === "reject") {
-      const reason = window.prompt("驳回原因（必填 ≤200 字，L5.2）") ?? "";
-      if (!reason.trim()) { setBanner({ level: "warn", text: "驳回必须填写原因（L5.2），本次未提交" }); return; }
-      await trpc.approvals.decide.mutate({ approvalId: a.approval_id, gesture: "reject", reasonText: reason.slice(0, 200) });
-    } else {
-      await trpc.approvals.decide.mutate({ approvalId: a.approval_id, gesture: g });
+      // M1.2（D24）：驳回必须选择行业受控枚举（弹窗），自由文本只做补充
+      setRejectTarget(a);
+      return;
     }
-    setBanner({ level: "info", text: "决断已写回事件库并触发组织记忆校准（F4.5/F1.7）" });
+    await trpc.approvals.decide.mutate({ approvalId: a.approval_id, gesture: g });
+    setBanner({ level: "info", text: "审批已写回事件库并触发组织记忆校准（F4.5/F1.7）" });
     await load();
   }, [load]);
+
+  /** 驳回弹窗提交（M1.2 受控枚举 + L5.2 留痕） */
+  const submitReject = useCallback(async (r: { reasonEnum: string; reasonText?: string }) => {
+    if (!rejectTarget) return;
+    await trpc.approvals.decide.mutate({
+      approvalId: rejectTarget.approval_id,
+      gesture: "reject",
+      reasonEnum: r.reasonEnum,
+      reasonText: r.reasonText,
+    });
+    setRejectTarget(null);
+    setBanner({ level: "info", text: `已驳回（${r.reasonEnum}）并回流偏好校准（F5.5/F1.7/D24）` });
+    await load();
+  }, [rejectTarget, load]);
 
   const doBatch = useCallback(async () => {
     const r = await trpc.approvals.batchApprove.mutate({ approvalIds: batchable.map((a) => a.approval_id) }) as { approved: string[]; skipped: Array<{ id: string; reason: string }> };
@@ -115,8 +131,8 @@ export default function P3() {
         <div className="space-y-3 p-3.5">
           {/* 页头 */}
           <div className="flex items-center gap-2">
-            <a href="/" className="text-caption text-holo no-underline">← 主甲板</a>
-            <span className="text-h2 font-black text-ink">掌上战报</span>
+            <a href="/" className="text-caption text-holo no-underline">← 工作台</a>
+            <span className="text-h2 font-black text-ink">掌上日报</span>
             <span className="text-micro tracking-[.2em] text-ink3">P3 · HANDOFF</span>
           </div>
 
@@ -126,13 +142,13 @@ export default function P3() {
             <><SkeletonBlock lines={2} h={56} /><SkeletonBlock lines={4} /></>
           ) : !nightConfigured ? (
             /* p3_empty：夜班未启用（F4.8） */
-            <EmptyState icon="🌙" title="守夜战队尚未出征" hint="去航道管制台（P5）配置夜班，明早 08:30 战报送达" actionLabel="去配置 →" />
+            <EmptyState icon="🌙" title="夜班中心尚未出征" hint="去规则与权限（P5）配置夜班，明早 08:30 日报送达" actionLabel="去配置 →" />
           ) : (
             <>
               {/* P3E1 三栏计数头（与 P1 交接班卡强一致 F4.4；点击筛选） */}
               <div className="rounded-2xl border border-line bg-card p-3.5">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-body font-black text-goldhi">✦ 昨夜战报</span>
+                  <span className="text-body font-black text-goldhi">✦ 昨夜日报</span>
                   <span className="font-mono text-micro text-holo">{run?.fenceSnapshot ?? ""}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -163,11 +179,11 @@ export default function P3() {
               {expired.map((a) => (
                 <div key={a.approval_id} className="rounded-2xl border border-dashed border-warn/50 bg-warn/4 p-3.5">
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="text-body font-bold text-warn">◆ 已超时（expired 虚框）</span>
-                    <span className="font-mono text-micro text-ink3">{a.approval_id}</span>
+                    <span className="text-body font-bold text-warn">◆ 已超时（虚框标记）</span>
+                    <span className="font-mono text-micro text-ink3">{shortId(a.approval_id)}</span>
                   </div>
                   <div className="text-caption text-ink2">{a.snapshot.summary ?? "待审项超 24h 未处理（F5.7）"}</div>
-                  <div className="mt-1 text-micro text-ink3">高危项不存在超时自动放行（L5.4）· 请尽快决断</div>
+                  <div className="mt-1 text-micro text-ink3">高危项不存在超时自动放行（L5.4）· 请尽快审批</div>
                 </div>
               ))}
 
@@ -175,8 +191,8 @@ export default function P3() {
               {(filter === "all" || filter === "pending" ? pending : []).map((a) => (
                 <div key={a.approval_id} className="rounded-2xl border border-warn/40 bg-card p-3.5">
                   <div className="mb-1.5 flex items-center justify-between">
-                    <span className="text-body font-bold text-warn">◆ 待决断</span>
-                    <span className="font-mono text-micro text-ink3">{a.approval_id}</span>
+                    <span className="text-body font-bold text-warn">◆ 待审批</span>
+                    <span className="font-mono text-micro text-ink3">{shortId(a.approval_id)}</span>
                   </div>
                   {a.snapshot.rule_version && (
                     <div className="mb-1 font-mono text-micro text-holo">命中 {a.snapshot.rule_version}</div>
@@ -217,7 +233,7 @@ export default function P3() {
                 <div className="rounded-2xl border border-alert/50 bg-alert/6 p-3.5">
                   <div className="mb-1 text-body font-bold text-alert">▲ 求援 · 需介入 {stats.need_human} 项</div>
                   <div className="text-caption text-ink2">夜间未执行任何动作（不确定不猜测，L4.2）——请查看决策链路定位处理</div>
-                  <div className="mt-2 text-right"><a href="/p4" className="text-micro text-holo no-underline">去决断队列 →</a></div>
+                  <div className="mt-2 text-right"><a href="/p4" className="text-micro text-holo no-underline">去审批中心 →</a></div>
                 </div>
               )}
 
@@ -259,6 +275,12 @@ export default function P3() {
           )}
         </div>
       </div>
+      <RejectDialog
+        open={rejectTarget !== null}
+        mode="reject"
+        onCancel={() => setRejectTarget(null)}
+        onSubmit={(r) => void submitReject(r)}
+      />
     </div>
   );
 }

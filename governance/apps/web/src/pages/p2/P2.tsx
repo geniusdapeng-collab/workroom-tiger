@@ -1,5 +1,5 @@
 /**
- * P2 任务舱·主线执行（F4：Quest 会话页；PRD P2-①②③ 逐条对账）
+ * P2 任务页·主线执行（F4：Quest 会话页；PRD P2-①②③ 逐条对账）
  *  - 行动消息流（P2E2）= 该线程事件流子序列投影（P2-⑤：ts 升序；回执三态/命中规则/计量逐事件渲染）
  *  - 失败步红框 + 转人工/降级重试/回滚三入口（E3.1）；无回执标「未核实」不宣称完成（L3.6/E3.7）
  *  - ThreadInspector 右栏：进度 x/y · 参与成员 · 计量（档/窗口/积分/降级链）· 围栏判定，≤5s 轮询（F3.4）；
@@ -12,7 +12,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
+import { COMMON_STATUS_TEXT, THREAD_MODE_TEXT, actionText, actorText, dictText, payloadText, shortId } from "../../lib/display";
 import { Bridge } from "../../shell/Bridge";
+import { RejectDialog } from "../../components/RejectDialog";
 import {
   AgentActionMessage,
   BannerAlert,
@@ -72,6 +74,7 @@ export default function P2() {
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [composer, setComposer] = useState("");
   const [banner, setBanner] = useState<{ level: "alert" | "warn" | "info"; text: string } | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -129,15 +132,28 @@ export default function P2() {
   /* ---------- 手势写回（approvals.decide；驳回原因弹窗在 P4 落地完整枚举，此处驳回走默认原因） ---------- */
   const gesture = useCallback(async (approvalId: string, g: "approve" | "edit" | "reject") => {
     if (g === "reject") {
-      const reason = window.prompt("驳回原因（必填 ≤200 字，L5.2）") ?? "";
-      if (!reason.trim()) { setBanner({ level: "warn", text: "驳回必须填写原因（L5.2），本次未提交" }); return; }
-      await trpc.approvals.decide.mutate({ approvalId, gesture: "reject", reasonText: reason.slice(0, 200) });
-    } else {
-      await trpc.approvals.decide.mutate({ approvalId, gesture: g });
+      // M1.2（D24）：驳回必须选择行业受控枚举（弹窗），自由文本只做补充
+      setRejectTarget(approvalId);
+      return;
     }
-    setBanner({ level: "info", text: "决断已写回事件库并回流偏好记忆（F5.5/F1.7）" });
+    await trpc.approvals.decide.mutate({ approvalId, gesture: g });
+    setBanner({ level: "info", text: "审批已写回事件库并回流偏好记忆（F5.5/F1.7）" });
     await load();
   }, [load]);
+
+  /** 驳回弹窗提交（M1.2 受控枚举 + L5.2 留痕） */
+  const submitReject = useCallback(async (r: { reasonEnum: string; reasonText?: string }) => {
+    if (!rejectTarget) return;
+    await trpc.approvals.decide.mutate({
+      approvalId: rejectTarget,
+      gesture: "reject",
+      reasonEnum: r.reasonEnum,
+      reasonText: r.reasonText,
+    });
+    setRejectTarget(null);
+    setBanner({ level: "info", text: `已驳回（${r.reasonEnum}）并回流偏好校准（F5.5/F1.7/D24）` });
+    await load();
+  }, [rejectTarget, load]);
 
   /* ---------- 追问（P2E6：沿用线程上下文；threads.run 续跑，replay 幂等 H-5） ---------- */
   const followUp = useCallback(async () => {
@@ -191,7 +207,7 @@ export default function P2() {
             <div className="mb-1.5 text-caption font-bold text-holo">进度（≤5s 轮询 F3.4）</div>
             <XpBar done={thread.progress_done} total={thread.progress_total} />
             <div className="mt-1.5 text-micro text-ink3">
-              {offline ? "连接中断 · 重连中（保留最后已知进度）" : `状态 ${thread.status} · 预计剩余 —`}
+              {offline ? "连接中断 · 重连中（保留最后已知进度）" : `状态 ${dictText(COMMON_STATUS_TEXT, thread.status)} · 预计剩余 —`}
             </div>
           </div>
           <div className="rounded-lg border border-line bg-card p-3">
@@ -204,9 +220,9 @@ export default function P2() {
           <div className="rounded-lg border border-line bg-card p-3">
             <div className="mb-1.5 text-caption font-bold text-holo">围栏判定（rule_impact 渲染）</div>
             <div className="flex gap-2.5 font-mono text-caption">
-              <span className="text-go">pass {meter.pass}</span>
-              <span className="text-warn">review {meter.review}</span>
-              <span className="text-alert">block {meter.blocked}</span>
+              <span className="text-go">放行 {meter.pass}</span>
+              <span className="text-warn">复核 {meter.review}</span>
+              <span className="text-alert">阻断 {meter.blocked}</span>
             </div>
           </div>
           <div className="rounded-lg border border-line bg-card p-3">
@@ -225,12 +241,12 @@ export default function P2() {
       <div className="flex min-h-full flex-col">
         {/* ThreadHeader（P2-④：mode/路由置信度可见） */}
         <div className="mb-3 flex items-center gap-2.5">
-          <h2 className="text-h1 font-black tracking-wider">任务舱 · 主线执行</h2>
-          <span className="text-[11px] tracking-[.2em] text-ink3">P2 · QUEST CABIN</span>
+          <h2 className="text-h1 font-black tracking-wider">任务执行</h2>
+          <span className="text-[11px] tracking-[.2em] text-ink3">P2 · QUEST</span>
           {thread && (
             <>
               <span className="rounded border border-gold/60 bg-gold/10 px-1.5 py-0.5 text-micro font-black text-gold">
-                {thread.mode === "quest" ? "主线 QUEST" : thread.mode}
+                {dictText(THREAD_MODE_TEXT, thread.mode)}
               </span>
               <span className="font-mono text-micro text-ink3">{thread.id}</span>
               <span className="text-body text-ink2">{thread.title}</span>
@@ -279,7 +295,7 @@ export default function P2() {
             <EmptyState icon="🌌" title="还没有会话内容" hint="@ 一位 Agent 或说出第一句话（F3.1）" />
           ) : (
             <>
-              <SystemDivider time={new Date(thread.created_at).toTimeString().slice(0, 5)} summary={`线程 ${thread.id} 建立（thread.dispatch 已落库）`} />
+              <SystemDivider time={new Date(thread.created_at).toTimeString().slice(0, 5)} summary={`线程 ${thread.id} 建立（派遣事件已落库）`} />
               {events.map((ev) => {
                 if (ev.who.type === "human") {
                   // 人类消息文案化（§9.1 副官语气；动作码不直接上屏）
@@ -287,31 +303,46 @@ export default function P2() {
                   const text = ev.decision.action === "thread.dispatch"
                     ? (after?.title ?? thread.title)
                     : ev.decision.action === "approval.gesture"
-                      ? `舰长决断：${after?.gesture ?? "已处理"}`
-                      : ev.decision.action;
+                      ? `待我审批：${after?.gesture ?? "已处理"}`
+                      : actionText(ev.decision.action);
                   return <HumanBubble key={ev.event_id} time={new Date(ev.context.time).toTimeString().slice(0, 5)}>{text}</HumanBubble>;
                 }
                 if (ev.links && ev.links.length > 0 && ev.who.type === "agent" && ev.decision.action.includes("subcall")) {
                   return (
                     <SubCallMessage key={ev.event_id} target={ev.object.id ?? ev.object.type} version={ev.who.version ?? ""} receipt={receiptOf(ev)}>
-                      {ev.decision.action}
+                      {actionText(ev.decision.action)}
                     </SubCallMessage>
+                  );
+                }
+                if (ev.decision.action === "ask.answer") {
+                  // ask 问询应答（B8）：正文上屏（§9.1 动作码不直接上屏同口径）
+                  const ans = (ev.decision.after as { text?: string } | undefined)?.text ?? "";
+                  return (
+                    <AgentActionMessage
+                      key={ev.event_id}
+                      sender={actorText(ev.who.id)}
+                      version={ev.who.version ?? ""}
+                      action="经营参谋·应答"
+                      eventId={ev.event_id}
+                      receipt={receiptOf(ev)}
+                      credits={ev.model_trace?.credits}
+                    >
+                      {ans}
+                    </AgentActionMessage>
                   );
                 }
                 return (
                   <AgentActionMessage
                     key={ev.event_id}
-                    sender={ev.who.id}
+                    sender={actorText(ev.who.id)}
                     version={ev.who.version ?? ""}
-                    action={ev.decision.action}
+                    action={actionText(ev.decision.action)}
                     eventId={ev.event_id}
                     receipt={receiptOf(ev)}
                     rules={(ev.rule_impact ?? []).map((r) => `${r.rule_id} ${r.version}`)}
                     credits={ev.model_trace?.credits}
                   >
-                    {typeof ev.decision.after === "object" && ev.decision.after !== null
-                      ? JSON.stringify(ev.decision.after).slice(0, 160)
-                      : String(ev.decision.after ?? "")}
+                    {payloadText(ev.decision.after)}
                   </AgentActionMessage>
                 );
               })}
@@ -321,9 +352,9 @@ export default function P2() {
                 <div key={a.approval_id} className={`rounded-msg border p-4 ${a.status === "pending" ? "border-warn/40 bg-warn/4" : "border-line bg-card"}`}>
                   <div className="mb-2 flex items-center gap-2">
                     <span className={`text-h2 font-bold ${a.status === "pending" ? "text-warn" : "text-ink2"}`}>
-                      ◆ 舰长决断 · {a.status === "pending" ? "待审查" : a.status === "approved" ? "已采纳" : a.status === "edited" ? "编辑后采纳" : a.status === "rejected" ? "已驳回" : "已过期"}
+                      ◆ 待我审批 · {a.status === "pending" ? "待审查" : a.status === "approved" ? "已采纳" : a.status === "edited" ? "编辑后采纳" : a.status === "rejected" ? "已驳回" : "已过期"}
                     </span>
-                    <span className="font-mono text-micro text-ink3">{a.approval_id}</span>
+                    <span className="font-mono text-micro text-ink3">{shortId(a.approval_id)}</span>
                     {a.snapshot.rule_version && <span className="font-mono text-micro text-holo">命中 {a.snapshot.rule_version}</span>}
                   </div>
                   {(a.snapshot.before !== undefined || a.snapshot.after !== undefined) && (
@@ -350,7 +381,7 @@ export default function P2() {
                     {events.map((ev) => (
                       <div key={ev.event_id} className="flex items-center gap-2 font-mono text-micro text-ink3">
                         <span className="text-holo">#{ev.event_id}</span>
-                        <span>{ev.who.id} · {ev.decision.action}</span>
+                        <span>{ev.who.id} · {actionText(ev.decision.action)}</span>
                         <span className={receiptOf(ev) === "synced" ? "text-go" : receiptOf(ev) === "failed" ? "text-alert" : "text-warn"}>
                           {receiptOf(ev) === "synced" ? "✓" : receiptOf(ev) === "failed" ? "✗" : "⚠"}
                         </span>
@@ -376,6 +407,12 @@ export default function P2() {
           </div>
         )}
       </div>
+      <RejectDialog
+        open={rejectTarget !== null}
+        mode="reject"
+        onCancel={() => setRejectTarget(null)}
+        onSubmit={(r) => void submitReject(r)}
+      />
     </Bridge>
   );
 }

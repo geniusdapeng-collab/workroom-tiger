@@ -60,7 +60,39 @@ describe("计划模板（演示剧本）", async () => {
   const fakePreset = { fenceBindings: [], tools: [], essentials: { archive: {}, stage: "stable", goal: "g" }, agentId: "a", presetKey: "pricing-agent", version: "v2.3", prompt: null };
   it("调价目标 → 3 步（采集/读取/调价）", () => {
     const steps = planQuest("周五调价 5%", fakePreset);
-    expect(steps.map((s) => s.action)).toEqual(["competitor.fetch", "pms.price.read", "price.adjust"]);
+    expect(steps.map((s) => s.action)).toEqual(["competitor.fetch", "biz.price.read", "price.adjust"]);
+  });
+});
+
+describe("LLM 任务规划（B9 planQuestSmart）", async () => {
+  const { planQuestSmart } = await import("./loop.js");
+  const fakePreset = { fenceBindings: [], tools: [], essentials: { archive: {}, stage: "stable", goal: "g" }, agentId: "a", presetKey: "pricing-agent", version: "v2.3", prompt: null };
+
+  it("合法规划被采用，且价格类步骤自动数据水合（before/after/context 防 E2.1 误熔断）", async () => {
+    const llm = async () => JSON.stringify([
+      { action: "biz.price.read", objectType: "room_price", tool: "biz.price.read", params: {}, label: "读价" },
+      { action: "price.adjust", objectType: "room_price", tool: "biz.price.write", params: { price: 468 }, label: "调价" },
+    ]);
+    const steps = await planQuestSmart("调价", fakePreset as never, llm);
+    expect(steps).toHaveLength(2);
+    expect(steps[1]).toMatchObject({ before: { price: 458 }, after: { price: 468 } });
+    expect(steps[1]?.context).toMatchObject({ night_shift: false });
+  });
+
+  it("垃圾 JSON / 越白名单工具 / 步数越界 → 一律回退确定性模板（D4）", async () => {
+    const garbage = await planQuestSmart("周五调价 5%", fakePreset as never, async () => "not json");
+    expect(garbage.map((s) => s.action)).toEqual(["competitor.fetch", "biz.price.read", "price.adjust"]);
+    const evil = await planQuestSmart("周五调价 5%", fakePreset as never, async () =>
+      JSON.stringify([{ action: "x", objectType: "room", tool: "shell.exec", params: {}, label: "越权" }]));
+    expect(evil.map((s) => s.action)).toEqual(["competitor.fetch", "biz.price.read", "price.adjust"]);
+    const tooMany = await planQuestSmart("周五调价 5%", fakePreset as never, async () =>
+      JSON.stringify(Array.from({ length: 9 }, (_, i) => ({ action: "a" + i, objectType: "room", tool: "order.list", params: {}, label: "s" }))));
+    expect(tooMany).toHaveLength(3);
+  });
+
+  it("未配置 llmCall → 直接走模板（mock 默认口径）", async () => {
+    const steps = await planQuestSmart("周五调价 5%", fakePreset as never, undefined);
+    expect(steps.map((s) => s.action)).toEqual(["competitor.fetch", "biz.price.read", "price.adjust"]);
   });
 });
 
@@ -126,7 +158,7 @@ d("PG 集成 Quest 循环（种子库）", async () => {
   });
 
   it("差评 Quest：R6 越围栏挂起 → pending_review + 审批行", async () => {
-    const tid = await newThread("回复携程差评");
+    const tid = await newThread("回复差评");
     const r = await runQuest(app, gw, scope, { threadId: tid, goal: "回复差评", presetKey: "review-agent" });
     expect(r.status).toBe("pending_review");
     expect(r.pendingApprovalId).toBeDefined();
@@ -187,14 +219,16 @@ d("PG 集成 Quest 循环（种子库）", async () => {
     // 从「未安装」态开始（重跑安全）
     await uninstallSkill(app, gw, scope, { skillId: revenue.id, by: "MEM-001" }).catch(() => undefined);
     const before = await assemblePreset(app, scope, { workspaceId: scope.workspaceId, presetKey: "content-agent", goal: "装配并集探针" });
-    expect(before.fenceBindings).toEqual(["R3"]); // preset 自身声明（content-agent 仅 R3）
+    // 0013 契约：seed 安装行落真实快照——review-crisis(R6)、channel-reconciler(R4/R5) 在装，
+    // 并集 = content-agent 自身声明 R3 ∪ 全部在装技能快照
+    expect(before.fenceBindings).toEqual(["R3", "R4", "R5", "R6"]);
     // 安装即绑定：装配声明并入技能 fence_bindings 快照
     await installSkill(app, gw, scope, { skillId: revenue.id, by: "MEM-001" });
     const after = await assemblePreset(app, scope, { workspaceId: scope.workspaceId, presetKey: "content-agent", goal: "装配并集探针" });
-    expect(after.fenceBindings).toEqual(["R1", "R2", "R3"]); // preset 声明 ∪ 技能快照
+    expect(after.fenceBindings).toEqual(["R1", "R2", "R3", "R4", "R5", "R6"]); // preset 声明 ∪ 技能快照
     // 卸载即撤销：并集收缩
     await uninstallSkill(app, gw, scope, { skillId: revenue.id, by: "MEM-001" });
     const revoked = await assemblePreset(app, scope, { workspaceId: scope.workspaceId, presetKey: "content-agent", goal: "装配并集探针" });
-    expect(revoked.fenceBindings).toEqual(["R3"]);
+    expect(revoked.fenceBindings).toEqual(["R3", "R4", "R5", "R6"]);
   });
 });

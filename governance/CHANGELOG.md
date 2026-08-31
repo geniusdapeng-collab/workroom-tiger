@@ -166,3 +166,10 @@
 ### 未纳入本批次
 
 - **#1/A 双池事务一致性（Outbox 方案）**：架构性大改造，影响面贯穿全栈，需单独评估，留待下个版本。
+
+## [治理壳 2.0.0] - 2026-08-31 · 底座整体升级 + 自我进化飞轮 P0（D24）
+
+- **底座升级**：governance 由 pre-D16 老底座整体升级至 workloom-im@28c2d91——packages/{shared,db,base,runtime}、apps/{server,web,webc}、scripts、vendor、bundles/hotel 以底座为准整体替换；迁移 0001–0017 全新重放（双角色 + append_event_insert + memory_usage RLS + org_memory.subject_id）。
+- **飞轮 P0（D24）**：evolve 全域（偏好注入主链路 / 记忆提炼与生命周期 / 反馈枚举第⑧槽 / 进化积分卡）+ P23 组织记忆中心 + RejectDialog 五页接线。
+- **行业实物**：bundles/trading/feedback-enums.yml（11 条：risk.over_limit/risk.concentration/compliance.restricted/compliance.window/timing.too_early/timing.too_late/style.over_trade…）；交易专属脚本（seed-trading / quest-trading-nightly / ingest-tiger-events / proposal-bridge）保留并登记 package.json。
+- **门禁**：typecheck 全绿 · vitest 全量（apps/server 120/120 修正默认库指向 workroom_tiger）· suite 445/445 · verify-chain 一致 · trading 种子与三市触发器装载正常。

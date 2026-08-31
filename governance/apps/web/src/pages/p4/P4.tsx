@@ -1,5 +1,5 @@
 /**
- * P4 决断队列（F7：待办收件箱 · 统一审查面板；PRD P4-①②③④⑤ 逐条对账）
+ * P4 审批中心（F7：待办收件箱 · 统一审查面板；PRD P4-①②③④⑤ 逐条对账）
  *  - 队列=approvals 表统一投影（F5.1 全来源）；分级：高危→双人（F5.4/L2.6）、越围栏 review→必审、其余→逐步审
  *  - 选中展开原生审批卡：diff 对照表（前删线/后高亮，P4E1）+ 命中规则随行 + 影响面 + 执行回执位说明 + 三手势（P4E2）
  *  - 为什么这样改（P4E3）：依据事件 #E / 引用记忆 / 模型档与积分全展示（事件库投影 F1.12，关键数字来自回执 L3.6）
@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
+import { APPROVAL_STATUS_TEXT, actionText, dictText, shortId , payloadText } from "../../lib/display";
 import { Bridge } from "../../shell/Bridge";
 import {
   BannerAlert,
@@ -18,6 +19,7 @@ import {
   TriGestureBar,
   type Gesture,
 } from "../../components/hud";
+import { RejectDialog } from "../../components/RejectDialog";
 
 interface BizEvent {
   event_id: string;
@@ -53,6 +55,7 @@ export default function P4() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ level: "alert" | "warn" | "info"; text: string } | null>(null);
   const [batchArmed, setBatchArmed] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<ApprovalRow | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,15 +92,28 @@ export default function P4() {
 
   const gesture = useCallback(async (a: ApprovalRow, g: Gesture) => {
     if (g === "reject") {
-      const reason = window.prompt("驳回原因（枚举+自由文本 ≤200 字，空理由拒绝 L5.2）") ?? "";
-      if (!reason.trim()) { setBanner({ level: "warn", text: "驳回必须填写原因（L5.2），空理由拒绝提交" }); return; }
-      await trpc.approvals.decide.mutate({ approvalId: a.approval_id, gesture: "reject", reasonText: reason.slice(0, 200) });
-    } else {
-      await trpc.approvals.decide.mutate({ approvalId: a.approval_id, gesture: g });
+      // M1.2（D24）：驳回必须选择行业受控枚举（弹窗），自由文本只做补充——结构化原因是校准信号的前提
+      setRejectTarget(a);
+      return;
     }
-    setBanner({ level: "info", text: "决断已写回事件库 + 记忆校准（F5.5/F1.7）；采纳后执行回执位待外部确认（F1.1/E3.7 不宣称完成）" });
+    await trpc.approvals.decide.mutate({ approvalId: a.approval_id, gesture: g });
+    setBanner({ level: "info", text: "审批已写回事件库 + 记忆校准（F5.5/F1.7）；采纳后执行回执位待外部确认（F1.1/E3.7 不宣称完成）" });
     await load();
   }, [load]);
+
+  /** 驳回弹窗提交（M1.2 受控枚举 + L5.2 留痕） */
+  const submitReject = useCallback(async (r: { reasonEnum: string; reasonText?: string }) => {
+    if (!rejectTarget) return;
+    await trpc.approvals.decide.mutate({
+      approvalId: rejectTarget.approval_id,
+      gesture: "reject",
+      reasonEnum: r.reasonEnum,
+      reasonText: r.reasonText,
+    });
+    setRejectTarget(null);
+    setBanner({ level: "info", text: `已驳回（${r.reasonEnum}）并回流偏好校准（F5.5/F1.7/D24）` });
+    await load();
+  }, [rejectTarget, load]);
 
   const doBatch = useCallback(async () => {
     const r = await trpc.approvals.batchApprove.mutate({ approvalIds: batchable.map((a) => a.approval_id) }) as { approved: string[]; skipped: unknown[] };
@@ -133,13 +149,13 @@ export default function P4() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-[11px] text-ink3">{a.approval_id}</span>
+                  <span className="font-mono text-[11px] text-ink3">{shortId(a.approval_id)}</span>
                   <span className={`rounded border px-1 py-0.5 text-micro ${
                     tier === "双人" ? "border-need/50 text-need" : tier === "必审" ? "border-warn/50 text-warn" : "border-line text-ink3"
                   }`}>{tier}</span>
                 </div>
                 <div className="mt-1 text-body text-ink2">
-                  {a.event ? `${a.event.who.id} · ${a.event.decision.action}` : a.event_id}
+                  {a.event ? `${a.event.who.id} · ${actionText(a.event.decision.action)}` : shortId(a.event_id)}
                 </div>
                 {isConflict(a) && <div className="mt-0.5 text-micro text-alert">⚠ 快照冲突（E5.3）</div>}
               </button>
@@ -188,7 +204,7 @@ export default function P4() {
             <div className="mb-1.5 text-caption font-bold text-holo">IM 卡片同步（P4E4）</div>
             <div className="text-caption text-ink2">渠道 inapp（本地回环 D7）· 审批人映射 {role}</div>
             <div className="mt-1 font-mono text-micro text-ink3">
-              幂等键 {selected.approval_id} · 同事件同渠道不重复推送（L5.3）· 回调签名校验（E5.2）
+              幂等键 {shortId(selected.approval_id)} · 同事件同渠道不重复推送（L5.3）· 回调签名校验（E5.2）
             </div>
             <div className="mt-1 text-micro text-go">✓ {selected.status === "pending" ? "已推送" : "已原地更新"}</div>
           </div>
@@ -203,7 +219,7 @@ export default function P4() {
     <Bridge left={left} right={right}>
       <div className="flex min-h-full flex-col">
         <div className="mb-3 flex items-center gap-3">
-          <h2 className="text-h1 font-black tracking-wider">决断队列</h2>
+          <h2 className="text-h1 font-black tracking-wider">审批中心</h2>
           <span className="text-[11px] tracking-[.2em] text-ink3">P4 · DECISION INBOX</span>
           <span className="flex-1" />
           {canApprove && batchable.length > 0 && (
@@ -248,14 +264,14 @@ export default function P4() {
             {/* 原生审批卡（桌面详情版） */}
             <div className="rounded-msg border border-warn/40 bg-card p-4">
               <div className="mb-2.5 flex items-center gap-2">
-                <span className="text-h2 font-bold text-warn">◆ 舰长决断 · {selected.status === "pending" ? "待审" : selected.status}</span>
+                <span className="text-h2 font-bold text-warn">◆ 待我审批 · {dictText(APPROVAL_STATUS_TEXT, selected.status)}</span>
                 <EventIdChip id={selected.event_id} />
                 <span className={`rounded border px-1.5 py-0.5 text-micro ${
                   tierOf(selected) === "双人" ? "border-need/50 text-need" : tierOf(selected) === "必审" ? "border-warn/50 text-warn" : "border-line text-ink3"
                 }`}>{tierOf(selected)}</span>
                 {selected.event && (
                   <span className="font-mono text-micro text-ink3">
-                    来源 {selected.event.who.id} · {selected.event.decision.action}
+                    来源 {selected.event.who.id} · {actionText(selected.event.decision.action)}
                   </span>
                 )}
               </div>
@@ -264,11 +280,11 @@ export default function P4() {
               <div className="mb-3 grid grid-cols-2 gap-2.5">
                 <div className="rounded-lg border border-line bg-bg800/60 p-3">
                   <div className="mb-1 text-micro tracking-wider text-ink3">调整前</div>
-                  <div className="font-mono text-body text-ink3 line-through">{JSON.stringify(selected.snapshot.before ?? selected.event?.decision.before ?? null)}</div>
+                  <div className="font-mono text-body text-ink3 line-through">{payloadText(selected.snapshot.before ?? selected.event?.decision.before ?? null, 120) || "—"}</div>
                 </div>
                 <div className="rounded-lg border border-holo/35 bg-holo/5 p-3">
                   <div className="mb-1 text-micro tracking-wider text-holo">调整后（高亮）</div>
-                  <div className="font-mono text-body text-holo">{JSON.stringify(selected.snapshot.after ?? selected.event?.decision.after ?? null)}</div>
+                  <div className="font-mono text-body text-holo">{payloadText(selected.snapshot.after ?? selected.event?.decision.after ?? null, 120) || "—"}</div>
                 </div>
               </div>
               {selected.event && selected.event.rule_impact.length > 0 && (
@@ -300,6 +316,12 @@ export default function P4() {
           </div>
         )}
       </div>
+      <RejectDialog
+        open={rejectTarget !== null}
+        mode="reject"
+        onCancel={() => setRejectTarget(null)}
+        onSubmit={(r) => void submitReject(r)}
+      />
     </Bridge>
   );
 }
