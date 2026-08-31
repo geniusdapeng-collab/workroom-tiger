@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { getAppPool, getGatewayPool, getOwnerPool } from "@workloom/db";
+import { creditsRouter, modelFeedbackRouter } from "./credits-router.js";
 import {
   getCapabilities,
   getMember,
@@ -1571,6 +1572,8 @@ export const appRouter = router({
   roster: rosterRouter,
   im: imRouter,
   bundles: bundlesRouter,
+  credits: creditsRouter,
+  modelFeedback: modelFeedbackRouter,
 });
 
 export type AppRouter = typeof appRouter;
