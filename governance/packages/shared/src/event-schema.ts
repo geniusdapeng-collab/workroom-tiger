@@ -66,7 +66,7 @@ export type Receipt = z.infer<typeof ReceiptSchema>;
 /** ModelTrace：模型计量位（M6 逐事件计量，账单=事件投影 L6.3） */
 export const ModelTraceSchema = z.looseObject({
   model_id: z.string().min(1),
-  tier: z.enum(["standard", "flagship"]).optional(),
+  tier: z.enum(["standard", "flagship", "L1", "L2", "L3"]).optional(), // v3.0：兼容两代（旧两档 + 三档）
   window: z.enum(["peak", "off-peak"]).optional(),
   credits: z.number().optional(),
 });
