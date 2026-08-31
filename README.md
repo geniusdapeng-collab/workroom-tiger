@@ -27,6 +27,15 @@
 - **治理外壳**：`governance/` 为 WorkLoom IM 底座，只做治理不做决策——把每个交易动作变成可追责事件，把白皮书红线变成机器级保险的第二道锁。接入设计见 [docs/GOVERNANCE.md](docs/GOVERNANCE.md)。
 - **行业角色包**：`governance/bundles/trading/`——AI 基金经理班组 presets、三层围栏包、投资 skills（根目录 `bundles/trading/` 为指向性说明）。
 
+## 🖥 治理外壳实机截图（最新模拟运行态）
+
+<p align="center">
+  <img src="governance/apps/site/shots/p1.jpg" alt="WorkLoom 治理外壳 · 主甲板舰桥（昨夜战报/能量计量/KPI）" width="46%"/>
+  <img src="governance/apps/site/shots/p9.jpg" alt="WorkLoom 治理外壳 · 守夜战队频道（夜班班组协作流）" width="46%"/>
+</p>
+
+---
+
 ## 🧠 通用模型路由系统（v3.0 · 金融版接入）
 
 金融版接入底座 v3.0 通用模型路由，并落地金融特有的降级铁律：**语义归 LLM，数值归规则；LLM 失败唯一出路是透传披露，禁止降档重答（宁可不答，不可错答）。**
