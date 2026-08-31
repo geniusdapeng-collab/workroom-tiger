@@ -27,6 +27,17 @@
 - **治理外壳**：`governance/` 为 WorkLoom IM 底座，只做治理不做决策——把每个交易动作变成可追责事件，把白皮书红线变成机器级保险的第二道锁。接入设计见 [docs/GOVERNANCE.md](docs/GOVERNANCE.md)。
 - **行业角色包**：`governance/bundles/trading/`——AI 基金经理班组 presets、三层围栏包、投资 skills（根目录 `bundles/trading/` 为指向性说明）。
 
+## 🧠 通用模型路由系统（v3.0 · 金融版接入）
+
+金融版接入底座 v3.0 通用模型路由，并落地金融特有的降级铁律：**语义归 LLM，数值归规则；LLM 失败唯一出路是透传披露，禁止降档重答（宁可不答，不可错答）。**
+
+- **金融场景路由表**（`governance/bundles/trading/model-policy.yml`）：新闻标注 / 科技舆情 L2 盘前谷时批量；板块叙事评分 / 多空辩论 L3 旗舰档（`noDowngrade` + `fallback: passthrough-disclose`）
+- **内核场景策略桥**（`trading_system/llm/scene_policy.py`）：交易内核 5 个 LLM 环节（clean.llm_semantic / tech.sentiment / tech.risk / sector.narrative / decision.debate）一一登记映射到路由场景表；`validate_coverage()` 启动期守卫——环节未登记即配置事故，不进运行期；与红线 2（LLMUnavailable 唯一出路）语义对齐
+- **治理壳积分体系**：credits 三池账本与模型反馈路由已挂载（credits/modelFeedback tRPC 路由）；`model_trace.tier` 枚举兼容两代（standard|flagship + L1|L2|L3）
+- **盘中零 LLM 不变**：全部秒级交易决策保持纯规则确定性，LLM 负载全部在盘前/盘后批量窗口（天然谷时 ×0.2）
+
+---
+
 ## 快速开始（交易内核）
 
 ```bash
