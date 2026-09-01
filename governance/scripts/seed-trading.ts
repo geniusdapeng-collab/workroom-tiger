@@ -172,7 +172,7 @@ async function main() {
       action: { dispatch: "premarket-trader", template: "market.premarket", market: "us" } },
     { id: "tg-us-daily", name: "美股日报 06:00（收盘后全链路+复盘）", kind: "cron", schedule: "0 6 * * 2-6",
       action: { dispatch: "review-chief", template: "pipeline.daily", market: "us" } },
-    { id: "tg-tiger-night-2200", name: "老虎夜班 22:00 守夜出征（美股时段值守）", kind: "cron", schedule: "0 22 * * *",
+    { id: "tg-tiger-night-2200", name: "老虎夜班 22:00 夜班出征（美股时段值守）", kind: "cron", schedule: "0 22 * * *",
       action: { dispatch: "night-shift", template: "night.run.start" } },
     { id: "tg-wfa-monthly", name: "月度 WFA 提案（每月首个交易日 10:00）", kind: "cron", schedule: "0 10 1 * *",
       action: { dispatch: "strategy-optimizer", template: "review.wfa.propose" } },
@@ -184,7 +184,7 @@ async function main() {
        ON CONFLICT (id) DO NOTHING`,
       [t.id, WS_ID, t.name, t.kind, t.schedule, JSON.stringify(t.action)]);
   }
-  console.log(`✓ 触发器 ×${triggers.length}（三市时段 + 夜班守夜 + 月度 WFA）`);
+  console.log(`✓ 触发器 ×${triggers.length}（三市时段 + 夜班值守 + 月度 WFA）`);
 
   console.log("\n老虎交易种子完成 ✅（trading bundle 全量就绪）");
   await pool.end();

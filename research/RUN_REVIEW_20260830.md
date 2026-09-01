@@ -31,7 +31,7 @@
 |---|---|---|---|
 | B1 | **官网发布环** | 日报每日产出，但 site/index.html 从不更新——公开验证的"公开"二字不成立 | 本次修复：daily 运行尾部自动发布 site/index.html（脚本 scripts/publish_site.sh） |
 | B2 | **治理事件单向桥** | 内核 → governance_events.jsonl 有产出，但 WorkLoom TS 底座无消费者——清晨决策包/审批卡片/围栏命中页都是空壳 | 需要 ingestion adapter（TS 侧 Quest 工具读 JSONL 入五元事件库）。本期 site/governance.html 直接读 JSONL 作为过渡 |
-| B3 | **夜班班组未编排交易** | night-shift 是治理层能力，pipeline 仍由 crontab 驱动——"夜班守夜"目前只是设计，不是事实 | Quest 化编排：把 main.py 三市日程注册为 night-shift 候选清单（S5 之后的下一阶段） |
+| B3 | **夜班班组未编排交易** | night-shift 是治理层能力，pipeline 仍由 crontab 驱动——"夜班值守"目前只是设计，不是事实 | Quest 化编排：把 main.py 三市日程注册为 night-shift 候选清单（S5 之后的下一阶段） |
 | B4 | **月度 WFA 无自动触发** | 复盘闭环的日/周频由 daily 驱动，月度 WFA 提案需人工 `--tune` | cron 登记每月首个交易日 `--tune` + 提案自动入审批队列（机制已在，缺一行日程） |
 | B5 | **CN/HK 真实数据未实测** | 三市 demo 全通，但 CN/HK 的 universe 拉取、板块广度、基准序列在真实网络下未跑过 | 下个工作日实测 `--market cn/hk`（东财/新浪源可达性已验证） |
 | B6 | **校准层 0/50 冷启动** | 正常设计（样本门槛），无动作 | 随模拟盘结算自然积累 |

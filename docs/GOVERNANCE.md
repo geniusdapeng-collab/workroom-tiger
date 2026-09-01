@@ -17,7 +17,7 @@
 | 五元事件库（哈希链） | `governance/packages/base/workdata/` | 交易动作/审批/围栏命中的 append-only 留痕 |
 | 围栏引擎 auto/review/block | `governance/packages/base/fence-engine/` | 白皮书阈值 → R-T1~R-T15 block 级基线（从 config 生成） |
 | Quest 任务循环 | `governance/packages/runtime/src/loop.ts` | 盘前/盘中/盘后/周末工作流编排，断点重放幂等 |
-| night-shift 夜班班组 | `governance/packages/base/night-shift/` | 美股时段（北京夜间）无人值守守夜 + 清晨决策包 |
+| night-shift 夜班班组 | `governance/packages/base/night-shift/` | 美股时段（北京夜间）无人夜班值守 + 清晨决策包 |
 | 审批卡片 | `governance/packages/base/review-console/` | review 级动作（实盘阶段启用阻塞式） |
 | 组织记忆 | `governance/packages/base/workdata/`（pgvector） | 复盘结论/驳回样本的沉淀与检索 |
 | model-router | `governance/packages/base/model-router/` | LLM 调用谷时调度与逐事件计量 |

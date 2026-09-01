@@ -38,7 +38,7 @@ WorkLoom 织元是一台**企业级 Agent IM（Enterprise Agent IM）**——以
 WorkLoom 的答案是：**大模型是蒸汽机，企业 Agent IM 是织机。** 蒸汽机本身不织布——织机才把动力变成布匹。同样，大模型本身不产生经营结果，Agent IM 才把模型能力变成可度量、可治理、可沉淀的经营产出。
 
 <p align="center">
-  <img src="apps/site/shots/p1.jpg" alt="WorkLoom 舰桥主界面" width="46%"/>
+  <img src="apps/site/shots/p1.jpg" alt="WorkLoom 工作台主界面" width="46%"/>
   <img src="apps/site/shots/p9.jpg" alt="WorkLoom 夜班战报" width="46%"/>
 </p>
 
@@ -83,7 +83,7 @@ WorkLoom 的答案是：**大模型是蒸汽机，企业 Agent IM 是织机。**
 | M1 消息即事件 | 每条消息都是五元事件（主体/动作/对象/上下文/结果），天然 append-only、可审计 |
 | M2 围栏即行动权限 | 「群公告」式围栏：Agent 能做什么动作，由权限三级（自动/审批/禁止）精确控制 |
 | M3 三态会话 | 会话即工单：进行中 / 待裁决 / 已归档，业务状态一目了然 |
-| M4 夜班永不下线 | Agent 数码员工 7×24 值守，守夜战队自动巡检，人类下班业务不下班 |
+| M4 夜班永不下线 | Agent 数码员工 7×24 值守，夜班班组自动巡检，人类下班业务不下班 |
 | M5 审批原生消息 | 审批不是跳转外链，是 IM 里的一张卡片：同意 / 驳回 / 改派，一键完成 |
 | M6 人机混编通讯录 | 人类员工与 Agent 数码员工同册并列，按部门、技能、可调度性编排 |
 | M7 组织记忆 | 会话沉淀为可检索的组织知识，pgvector 语义召回 |
@@ -92,13 +92,13 @@ WorkLoom 的答案是：**大模型是蒸汽机，企业 Agent IM 是织机。**
 
 ### 1.4 人机共存的新形态：人只做三件事
 
-在 WorkLoom 组织的协作里，人类从「操作者」升格为「舰长」，只做三件机器替代不了的事：
+在 WorkLoom 组织的协作里，人类从「操作者」升格为「主理人」，只做三件机器替代不了的事：
 
 - **供给**：提供目标、素材、预算与业务判断（设定航线）
 - **裁决**：在围栏审批点上拍板（同意 / 驳回 / 改派）
 - **沉淀**：把一次好的协作固化成班组 SOP 与技能，下次自动复用
 
-其余一切——执行、巡检、对账、守夜、写战报——交给 Agent 班组。
+其余一切——执行、巡检、对账、夜班值守、写战报——交给 Agent 班组。
 
 ---
 
@@ -137,11 +137,11 @@ WorkLoom 就是来解这个问题的。`bundles/hotel` 是服务业的首个落�
 
 | 维度 | 通用 AI 办公助手（WorkBuddy / 千问办公 / QoderWork） | WorkLoom 织元 |
 |---|---|---|
-| **服务对象** | 服务「人」：个人/员工的桌面提效助手 | **服务「AI 与组织」**：AI 是组织成员，人升格为舰长 |
+| **服务对象** | 服务「人」：个人/员工的桌面提效助手 | **服务「AI 与组织」**：AI 是组织成员，人升格为主理人 |
 | **数字化对象** | 个人办公任务：文档、表格、纪要、资料整理 | 组织经营动作：每一个动作可追责、可审计、可回放 |
 | **产品形态** | 桌面客户端 / 个人工作台，一人一助手 | 企业级 IM 底座：人机混编班组在同一个 workspace 协作 |
 | **与 IM 的关系** | IM 是远程遥控入口（手机发指令指挥电脑） | IM 是本体：消息=事件、审批=原生消息类型 |
-| **协作粒度** | 单人任务拆解执行 | 目标 → 步骤 → 技能装配的组织级流水线，守夜战队 7×24 |
+| **协作粒度** | 单人任务拆解执行 | 目标 → 步骤 → 技能装配的组织级流水线，夜班班组 7×24 |
 | **数据归属** | 个人账号 / 云端为主 | 企业本机：数据主权 + RLS 多租户隔离 |
 | **产出口径** | 交付文档、表格等个人产物 | 经营口径：RevPAR、差评响应时长、挽回的订单 |
 
@@ -151,7 +151,7 @@ WorkLoom 就是来解这个问题的。`bundles/hotel` 是服务业的首个落�
 
 ## 四、WorkData 数据大脑：核心底座
 
-**WorkData（`packages/base/workdata`）是 WorkLoom 的核心底座**——企业的「数据大脑」与「黑匣子」。九域能力、DeepSeek Harness 运行时、舰桥前端的所有读写，都经由 WorkData 唯一收口。
+**WorkData（`packages/base/workdata`）是 WorkLoom 的核心底座**——企业的「数据大脑」与「黑匣子」。九域能力、DeepSeek Harness 运行时、工作台前端的所有读写，都经由 WorkData 唯一收口。
 
 <p align="center"><img src="docs/images/workdata.png" alt="WorkData 数据大脑 · 核心底座架构" width="88%"/></p>
 
@@ -189,12 +189,12 @@ WorkLoom 的**装备库（skills）**就是技能市场：技能分三级——*
    ▼ 自动拆解为任务卡步骤
    │
    ├─ 步骤 1 差评监测  ── 装配技能 review-crisis（official，酒店 Bundle 自带）
-   │        └─ 守夜战队 7×24 巡检 OTA 渠道，新差评 5 分钟内检出
+   │        └─ 夜班班组 7×24 巡检 OTA 渠道，新差评 5 分钟内检出
    │
    ├─ 步骤 2 安抚草稿  ── Agent 基于组织记忆（该客人历史入住记录）起草回复
    │        └─ 调用 WorkData recall 检索相似历史差评的处置经验
    │
-   ├─ 步骤 3 舰长审批  ── 围栏判定：对外发送 = review 级 → 审批卡片发给店长
+   ├─ 步骤 3 主理人审批  ── 围栏判定：对外发送 = review 级 → 审批卡片发给店长
    │        └─ 店长点「同意」，手势写回事件库（校准样本 +1）
    │
    ├─ 步骤 4 回复发布  ── 批准后自动执行，全程留痕进五元事件链
@@ -261,13 +261,13 @@ WorkLoom 把 IM 通道适配层抽成了独立的 dsh 插件 [`vendor/dsh-im`](v
 
 <p align="center"><img src="docs/images/architecture.png" alt="WorkLoom 系统架构" width="88%"/></p>
 
-五层结构自上而下：**体验层**（舰桥 Web 端 / IM 通道 / Mac 桌面包）→ **服务层**（Hono + tRPC v11，PG 行级安全）→ **能力层**（自研九域护城河，WorkData 数据大脑为核心底座）→ **运行时地基**（DeepSeek Harness seam 适配）→ **数据层**（PostgreSQL 17 + pgvector，五元事件 append-only + hash chain）。
+五层结构自上而下：**体验层**（工作台 Web 端 / IM 通道 / Mac 桌面包）→ **服务层**（Hono + tRPC v11，PG 行级安全）→ **能力层**（自研九域护城河，WorkData 数据大脑为核心底座）→ **运行时地基**（DeepSeek Harness seam 适配）→ **数据层**（PostgreSQL 17 + pgvector，五元事件 append-only + hash chain）。
 
 ## 业务闭环
 
 <p align="center"><img src="docs/images/business-loop.png" alt="WorkLoom 业务核心闭环" width="88%"/></p>
 
-**设定航线 → 护栏判定 → 班组执行 → 守夜战队 → 08:30 战报 → 舰长拍板**，六节点闭环；「校准写回」与「沉淀」两条回路让每一次协作都让系统更懂这家企业。底部安全底线带（紧急制动 / 黑匣子 / 失败转人工）兜住一切异常。
+**设定航线 → 护栏判定 → 班组执行 → 夜班班组 → 08:30 战报 → 主理人拍板**，六节点闭环；「校准写回」与「沉淀」两条回路让每一次协作都让系统更懂这家企业。底部安全底线带（紧急制动 / 黑匣子 / 失败转人工）兜住一切异常。
 
 ---
 
@@ -275,7 +275,7 @@ WorkLoom 把 IM 通道适配层抽成了独立的 dsh 插件 [`vendor/dsh-im`](v
 
 1. **下载**：到 [Releases](https://github.com/geniusdapeng-collab/workloom-im/releases) 下载 `WorkLoom-macOS.zip`（约 208 MB，sha256 随附可校验）。
 2. **解压拖入应用程序**：首次打开如遇 Gatekeeper 提示，在「系统设置 → 隐私与安全性」点一次「仍要打开」即可——这是唯一一次需要手动授权。
-3. **双击 WorkLoom.app**：启动器自动完成一切——内嵌 PostgreSQL 17 + pgvector 初始化、数据库迁移、服务拉起、舰桥打开。无需安装任何依赖，无需命令行。
+3. **双击 WorkLoom.app**：启动器自动完成一切——内嵌 PostgreSQL 17 + pgvector 初始化、数据库迁移、服务拉起、工作台打开。无需安装任何依赖，无需命令行。
 
 > 系统要求：macOS 13 Ventura +，Apple Silicon（M 系列）。Intel 版后续推出。
 
