@@ -892,31 +892,31 @@ async function main(): Promise<void> {
   await svcQ(
     `INSERT INTO c_users (id, workspace_id, channel, openid, nickname, member_id, created_at)
      VALUES
-       ('cu-zhangwei', $1, 'wechat-mini', 'openid-zhangwei', '张伟', 'M-GOLD-10086', $2),
-       ('cu-xiaoli', $1, 'h5', 'fp-xiaoli-8f3a', '住客小李', NULL, $3)
+       ('cu-zhangwei', $1, 'wechat-mini', 'openid-zhangwei', '投资者老周', 'M-PRO-10086', $2),
+       ('cu-xiaoli', $1, 'h5', 'fp-xiaoli-8f3a', '观察者小林', NULL, $3)
      ON CONFLICT (id) DO NOTHING`,
     [WS_ID, new Date(Date.now() - 30 * 86400000).toISOString(), new Date(Date.now() - 2 * 86400000).toISOString()],
   );
 
-  // 知识库第二集合：商品与服务目录（送物/餐饮/SPA）+ 官网来源登记
+  // 知识库第二集合：数据与研报服务目录（公开内容/增值订阅/专业版）+ 官网来源登记
   await svcQ(
     `INSERT INTO kb_collections (id, workspace_id, name, description)
-     VALUES ('kbc-service-catalog', $1, '商品与服务目录', '送物清单、餐饮、康体 SPA 等服务与价格')
+     VALUES ('kbc-service-catalog', $1, '数据与研报服务目录', '决策日报、复盘周报、个股深度、产业链监测等服务与价格')
      ON CONFLICT (id) DO NOTHING`,
     [WS_ID],
   );
-  const catalogMd = `# 商品与服务目录\n\n## 免费送物清单\n矿泉水（每日 2 瓶免费）、牙刷套装、梳子、剃须刀、拖鞋、充电器借用。\n\n## 收费送物\n面膜 28 元/片、红酒 128 元/瓶、生日蛋糕 168 元/个（需提前 2 小时预约）。\n\n## 餐饮\n中西自助早餐 68 元/位（住店会员免费）；云栖轩中餐厅 11:00-21:00；客房送餐至 23:00。\n\n## 康体\n恒温泳池 07:00-22:00（住客免费）；SPA 60 分钟 398 元起，需预约。`;
+  const catalogMd = `# 数据与研报服务目录\n\n## 免费公开内容\n决策日报（双页签，每日）、复盘周报（每周一）、模拟盘净值播报（每日收盘后）。\n\n## 免费订阅推送\n放行清单变动提醒、夜班决策包（08:30 三段式送达）。\n\n## 增值数据服务\n研报速递 18 元/月（盘前 5 分钟）；个股深度报告 30 元/份；产业链景气监测 68 元/月；自选股池监测（≤50 只）128 元/月。\n\n## 专业版服务\nAPI 推送标准版 199 元/月（60 次/分钟）、专业版 599 元/月（300 次/分钟）；事件库验链报告免费（人工交付）。`;
   await svcQ(
     `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
-     VALUES ('kbd-service-catalog', $1, 'kbc-service-catalog', '商品与服务目录', 'manual', NULL, 1, 'active', $2, 'seed-hash-catalog', $3)
+     VALUES ('kbd-service-catalog', $1, 'kbc-service-catalog', '数据与研报服务目录', 'manual', NULL, 1, 'active', $2, 'seed-hash-catalog', $3)
      ON CONFLICT (id) DO NOTHING`,
     [WS_ID, catalogMd, new Date(Date.now() - 20 * 86400000).toISOString()],
   );
   const catChunks: [number, string, string][] = [
-    [0, '免费送物清单', '矿泉水（每日 2 瓶免费）、牙刷套装、梳子、剃须刀、拖鞋、充电器借用。'],
-    [1, '收费送物', '面膜 28 元/片、红酒 128 元/瓶、生日蛋糕 168 元/个（需提前 2 小时预约）。'],
-    [2, '餐饮', '中西自助早餐 68 元/位（住店会员免费）；云栖轩中餐厅 11:00-21:00；客房送餐至 23:00。'],
-    [3, '康体', '恒温泳池 07:00-22:00（住客免费）；SPA 60 分钟 398 元起，需预约。'],
+    [0, '免费公开内容', '决策日报（双页签，每日）、复盘周报（每周一）、模拟盘净值播报（每日收盘后）。'],
+    [1, '免费订阅推送', '放行清单变动提醒、夜班决策包（08:30 三段式送达）。'],
+    [2, '增值数据服务', '研报速递 18 元/月（盘前 5 分钟）；个股深度报告 30 元/份；产业链景气监测 68 元/月；自选股池监测（≤50 只）128 元/月。'],
+    [3, '专业版服务', 'API 推送标准版 199 元/月（60 次/分钟）、专业版 599 元/月（300 次/分钟）；事件库验链报告免费（人工交付）。'],
   ];
   for (const [idx, heading, content] of catChunks) {
     await svcQ(
@@ -928,12 +928,12 @@ async function main(): Promise<void> {
   }
   await svcQ(
     `INSERT INTO kb_sources (id, workspace_id, url, fingerprint, last_crawled_at, schedule_cron, status)
-     VALUES ('kbs-official-site', $1, 'https://www.yunqi-hotel.example', 'fp-a91c', $2, '0 3 * * *', 'active')
+     VALUES ('kbs-official-site', $1, 'https://www.tiger-global.example', 'fp-a91c', $2, '0 3 * * *', 'active')
      ON CONFLICT (id) DO NOTHING`,
     [WS_ID, new Date(Date.now() - 86400000).toISOString()],
   );
 
-  // 会话 1：会员张伟——退房时间问答（高置信带引用）
+  // 会话 1：专业版投资者老周——净值与纪律问答（高置信带引用）
   await svcQ(
     `INSERT INTO c_conversations (id, workspace_id, c_user_id, channel, status, created_at, last_message_at)
      VALUES ('cv-seed-001', $1, 'cu-zhangwei', 'wechat-mini', 'open', $2, $3)
@@ -941,10 +941,10 @@ async function main(): Promise<void> {
     [WS_ID, new Date(Date.now() - 26 * 3600000).toISOString(), new Date(Date.now() - 26 * 3600000 + 90000).toISOString()],
   );
   const conv1Msgs: [string, string, string, number, string, number][] = [
-    ['user', '退房时间是几点？会员能延迟吗？', '', 0, '[]', 0],
-    ['assistant', '【退房时间】本店标准退房时间为每日中午 12:00 前。您是金卡会员，可免费延迟至 14:00 退房。', 'kb_qa', 0.95, JSON.stringify([{ documentTitle: '云栖酒店住客服务须知', heading: '退房时间', content: '标准退房时间 12:00，会员可延迟至 14:00。' }]), 24],
-    ['user', '早餐几点开始？收费吗？', '', 0, '[]', 0],
-    ['assistant', '【早餐】中西自助早餐 07:00-10:30 供应，68 元/位；住店会员免费。地点：一层云栖餐厅。', 'kb_qa', 0.93, JSON.stringify([{ documentTitle: '云栖酒店住客服务须知', heading: '早餐', content: '早餐 07:00-10:30，会员免费。' }]), 21],
+    ['user', '现在模拟盘净值多少？在哪里看持仓？', '', 0, '[]', 0],
+    ['assistant', '【净值查询】小虎模拟盘以 100,000 美元虚拟资金起步，逐笔留痕。服务台「查持仓 / 查净值」可实时查询；每日《决策日报》含净值曲线与持仓变动。', 'kb_qa', 0.95, JSON.stringify([{ documentTitle: '投资者常见问答·模拟盘与净值', heading: '在哪里看模拟盘净值和持仓？', content: '服务台「查持仓 / 查净值」可实时查询；每日《决策日报》双页签含净值曲线、当日放行与持仓变动。' }]), 24],
+    ['user', '系统什么情况下会开仓？会凭感觉加仓吗？', '', 0, '[]', 0],
+    ['assistant', '【开仓纪律】标准做多须同时满足 MRS*≥6、SHS≥7.5、TSS_final≥7.2，缺一不开；MRS*<4.0 禁开仓。语义归 LLM、数值归规则——系统不会因「感觉要涨」加仓。', 'kb_qa', 0.93, JSON.stringify([{ documentTitle: '投资者常见问答·交易纪律与白皮书', heading: '什么情况下系统会开仓？', content: '标准做多开仓须同时满足 MRS*≥6、SHS≥7.5、TSS_final≥7.2；轻仓通道仓位 ×0.30–0.40；MRS*<4.0 禁止开仓。' }]), 21],
   ];
   for (let i = 0; i < conv1Msgs.length; i++) {
     const m = conv1Msgs[i]!;
@@ -956,7 +956,7 @@ async function main(): Promise<void> {
     );
   }
 
-  // 会话 2：住客小李——送物请求转工单 + 投诉建单
+  // 会话 2：观察者小林——行情异常申报转工单 + 投诉建单
   await svcQ(
     `INSERT INTO c_conversations (id, workspace_id, c_user_id, channel, status, created_at, last_message_at)
      VALUES ('cv-seed-002', $1, 'cu-xiaoli', 'h5', 'open', $2, $3)
@@ -964,8 +964,8 @@ async function main(): Promise<void> {
     [WS_ID, new Date(Date.now() - 3 * 3600000).toISOString(), new Date(Date.now() - 3 * 3600000 + 120000).toISOString()],
   );
   const conv2Msgs: [string, string, string, number, string, number][] = [
-    ['user', '房间空调好像不制冷，能找人看看吗？8306', '', 0, '[]', 0],
-    ['assistant', '很抱歉给您带来不便。我已为您生成维修工单，工程部会尽快上门处理，进度会实时通知您。', 'service_request', 0.91, '[]', 28],
+    ['user', '纳斯达克行情快照好像延迟很严重，能找人看看吗？', '', 0, '[]', 0],
+    ['assistant', '收到。已为您生成「行情与数据」异常申报工单（加急），数据质量组 15 分钟内响应，核实后出具修正说明并回放影响范围。', 'service_request', 0.91, '[]', 28],
   ];
   for (let i = 0; i < conv2Msgs.length; i++) {
     const m = conv2Msgs[i]!;
@@ -979,9 +979,9 @@ async function main(): Promise<void> {
 
   // 工单 ×3（三种状态）+ 流转时间线
   const tickets: [string, string, string | null, string, string, string, string, string | null, string | null, number][] = [
-    ['tck-seed-001', 'cu-xiaoli', 'cv-seed-002', 'repair', '8306 空调不制冷', 'processing', 'high', '工程部', '王师傅', 2],
-    ['tck-seed-002', 'cu-zhangwei', null, 'delivery', '送两瓶矿泉水到 1208', 'assigned', 'normal', '客房部', null, 1],
-    ['tck-seed-003', 'cu-xiaoli', null, 'complaint', '隔壁房间深夜噪音扰民', 'done', 'high', '值班经理', '刘经理', 20],
+    ['tck-seed-001', 'cu-xiaoli', 'cv-seed-002', 'repair', '纳斯达克行情快照延时异常', 'processing', 'high', '数据质量组', '数据质量官', 2],
+    ['tck-seed-002', 'cu-zhangwei', null, 'delivery', '开通研报速递订阅（盘前 5 分钟）', 'assigned', 'normal', '复盘组', null, 1],
+    ['tck-seed-003', 'cu-xiaoli', null, 'complaint', '决策日报推送延迟 40 分钟投诉', 'done', 'high', '值班负责人', '刘值班', 20],
   ];
   for (const t of tickets) {
     await svcQ(
@@ -990,20 +990,20 @@ async function main(): Promise<void> {
        ON CONFLICT (id) DO NOTHING`,
       [t[0], WS_ID, t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
        new Date(Date.now() + 2 * 3600000).toISOString(),
-       t[5] === 'done' ? JSON.stringify({ text: '已与隔壁房客沟通并提醒静音，赠送您一份果盘致歉。', rating: { score: 5 } }) : null,
+       t[5] === 'done' ? JSON.stringify({ text: '已定位为推送通道抖动，日报已补发并顺延订阅服务 3 天致歉。', rating: { score: 5 } }) : null,
        `seed-${t[0]}`, new Date(Date.now() - t[9] * 3600000 / 10).toISOString()],
     );
   }
   const tl: [string, string, string, string, string, number][] = [
-    ['tck-seed-001', 'create', 'c_user', 'cu-xiaoli', '用户对话中建单', 180],
-    ['tck-seed-001', 'assign', 'agent', 'agt-service-desk', '智能分派 → 工程部', 179],
-    ['tck-seed-001', 'start', 'staff', '王师傅', '已接单，携带工具前往 8306', 95],
+    ['tck-seed-001', 'create', 'c_user', 'cu-xiaoli', '用户对话中建单（加急）', 180],
+    ['tck-seed-001', 'assign', 'agent', 'agt-service-desk', '智能分派 → 数据质量组', 179],
+    ['tck-seed-001', 'start', 'staff', '数据质量官', '已介入核对降级链留痕', 95],
     ['tck-seed-002', 'create', 'c_user', 'cu-zhangwei', '服务台自助提交', 60],
-    ['tck-seed-002', 'assign', 'agent', 'agt-service-desk', '智能分派 → 客房部', 59],
+    ['tck-seed-002', 'assign', 'agent', 'agt-service-desk', '智能分派 → 复盘组', 59],
     ['tck-seed-003', 'create', 'c_user', 'cu-xiaoli', '投诉类必建单', 480],
-    ['tck-seed-003', 'assign', 'agent', 'agt-service-desk', '智能分派 → 值班经理', 479],
-    ['tck-seed-003', 'start', 'staff', '刘经理', '现场处理中', 460],
-    ['tck-seed-003', 'complete', 'staff', '刘经理', '已沟通提醒并赠果盘致歉', 430],
+    ['tck-seed-003', 'assign', 'agent', 'agt-service-desk', '智能分派 → 值班负责人', 479],
+    ['tck-seed-003', 'start', 'staff', '刘值班', '排查推送通道中', 460],
+    ['tck-seed-003', 'complete', 'staff', '刘值班', '已补发日报并顺延订阅 3 天', 430],
     ['tck-seed-003', 'rate', 'c_user', 'cu-xiaoli', '满意度 5 星', 400],
   ];
   for (const e of tl) {
@@ -1017,9 +1017,9 @@ async function main(): Promise<void> {
 
   // 推送箱：受理 + 办结通知（仿服务通知）
   const notifs: [string, string, string, string, number][] = [
-    ['ntf-seed-001', 'cu-xiaoli', 'ticket.accepted', '您的维修工单「8306 空调不制冷」已受理，工程部王师傅处理中。', 170],
-    ['ntf-seed-002', 'cu-xiaoli', 'ticket.completed', '您的投诉工单「隔壁房间深夜噪音扰民」已办结：已与隔壁房客沟通提醒，并赠果盘致歉。欢迎评价。', 425],
-    ['ntf-seed-003', 'cu-zhangwei', 'ticket.accepted', '您的送物工单「送两瓶矿泉水到 1208」已受理，客房部将尽快送达。', 55],
+    ['ntf-seed-001', 'cu-xiaoli', 'ticket.accepted', '您的异常申报「纳斯达克行情快照延时异常」已受理（加急），数据质量组处理中。', 170],
+    ['ntf-seed-002', 'cu-xiaoli', 'ticket.completed', '您的投诉工单「决策日报推送延迟 40 分钟投诉」已办结：日报已补发并顺延订阅 3 天。欢迎评价。', 425],
+    ['ntf-seed-003', 'cu-zhangwei', 'ticket.accepted', '您的订阅工单「开通研报速递订阅（盘前 5 分钟）」已受理，复盘组将尽快开通。', 55],
   ];
   for (const n of notifs) {
     await svcQ(
@@ -1031,22 +1031,22 @@ async function main(): Promise<void> {
   }
   console.log("✓ AI 服务前台运行态：C 端用户×2 / 知识库集合×2+官网源 / 会话×2 / 工单×3（全状态+时间线）/ 通知×3");
 
-  // ============ AI 服务前台 · 知识库全量预置（bundles/hotel/service-front） ============
-  // 数据源：faq.json（十大类 385 问）+ delivery-catalog.json（46 种送物）+ repair-catalog.json（56 项报修）
+  // ============ AI 服务前台 · 知识库全量预置（bundles/trading/service-front） ============
+  // 数据源：faq.json（十大类投资者问答）+ delivery-catalog.json（数据与研报服务目录）+ repair-catalog.json（异常申报指引）
   interface FaqFile { categories: Array<{ key: string; name: string; docTitle: string; items: Array<{ q: string; a: string }> }> }
   interface CatalogItem { name: string; category: string; price: number; unit: string; note?: string; robot?: boolean }
   interface CatalogFile { categories: Array<{ key: string; name: string }>; items: CatalogItem[] }
   interface RepairItem { name: string; category: string; symptoms: string; urgency: string; slaMinutes: number; dept: string; tip?: string }
   interface RepairFile { categories: Array<{ key: string; name: string }>; items: RepairItem[] }
-  const SF_DIR = join(BUNDLE_DIR, "service-front");
+  const SF_DIR = join(REPO_ROOT, "bundles/trading/service-front");
   const faq = JSON.parse(readFileSync(join(SF_DIR, "faq.json"), "utf-8")) as FaqFile;
   const deliveryCat = JSON.parse(readFileSync(join(SF_DIR, "delivery-catalog.json"), "utf-8")) as CatalogFile;
   const repairCat = JSON.parse(readFileSync(join(SF_DIR, "repair-catalog.json"), "utf-8")) as RepairFile;
 
-  // ① 住客常见问答集合（10 文档 / 385 知识块：一问一答即一块）
+  // ① 投资者常见问答集合（10 文档：一问一答即一块）
   await svcQ(
     `INSERT INTO kb_collections (id, workspace_id, name, description)
-     VALUES ('kbc-guest-faq', $1, '住客常见问答', '十大类 385 条住客高频问题与标准答案（AI 服务前台核心知识源）')
+     VALUES ('kbc-guest-faq', $1, '投资者常见问答', '十大类投资者高频问题与标准答案（AI 服务前台核心知识源）')
      ON CONFLICT (id) DO NOTHING`,
     [WS_ID],
   );
@@ -1072,7 +1072,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ② 送物服务全目录（46 种，按分类切块；与 FAQ 送物类互证）
+  // ② 数据与研报服务全目录（按分类切块；与 FAQ 数据服务类互证）
   {
     const catName = (k: string) => deliveryCat.categories.find((c) => c.key === k)?.name ?? k;
     const groups = new Map<string, CatalogItem[]>();
@@ -1081,18 +1081,18 @@ async function main(): Promise<void> {
       arr.push(it);
       groups.set(it.category, arr);
     }
-    const md = ["# 送物服务全目录", ...[...groups.entries()].map(([k, arr]) =>
-      `## ${catName(k)}\n${arr.map((i) => `- ${i.name}（${i.price === 0 ? "免费" : `${i.price} 元/${i.unit}`}${i.note ? `，${i.note}` : ""}${i.robot === false ? "，大件由服务员配送" : "，支持机器人配送"}）`).join("\n")}`,
+    const md = ["# 数据与研报服务全目录", ...[...groups.entries()].map(([k, arr]) =>
+      `## ${catName(k)}\n${arr.map((i) => `- ${i.name}（${i.price === 0 ? "免费" : `${i.price} 元/${i.unit}`}${i.note ? `，${i.note}` : ""}${i.robot === false ? "，人工交付" : "，自动推送"}）`).join("\n")}`,
     )].join("\n\n");
     await svcQ(
       `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
-       VALUES ('kbd-delivery-catalog', $1, 'kbc-service-catalog', '送物服务全目录（46 种）', 'manual', NULL, 1, 'active', $2, 'seed-hash-delivery-catalog', $3)
+       VALUES ('kbd-delivery-catalog', $1, 'kbc-service-catalog', '数据与研报服务全目录', 'manual', NULL, 1, 'active', $2, 'seed-hash-delivery-catalog', $3)
        ON CONFLICT (id) DO NOTHING`,
       [WS_ID, md, new Date(Date.now() - 18 * 86400000).toISOString()],
     );
     let idx = 0;
     for (const [k, arr] of groups) {
-      const content = arr.map((i) => `${i.name}：${i.price === 0 ? "免费" : `${i.price} 元/${i.unit}`}${i.note ? `；${i.note}` : ""}${i.robot === false ? "；大件服务员配送" : "；可机器人配送"}`).join("。");
+      const content = arr.map((i) => `${i.name}：${i.price === 0 ? "免费" : `${i.price} 元/${i.unit}`}${i.note ? `；${i.note}` : ""}${i.robot === false ? "；人工交付" : "；自动推送"}`).join("。");
       await svcQ(
         `INSERT INTO kb_chunks (workspace_id, document_id, chunk_index, heading, content)
          SELECT $1, 'kbd-delivery-catalog', $2, $3, $4
@@ -1102,7 +1102,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ③ 维修报修指引（56 项，按系统分类切块；含 SLA 与客人自救提示）
+  // ③ 异常申报与处理指引（按分类切块；含 SLA 与自救提示）
   {
     const catName = (k: string) => repairCat.categories.find((c) => c.key === k)?.name ?? k;
     const groups = new Map<string, RepairItem[]>();
@@ -1111,12 +1111,12 @@ async function main(): Promise<void> {
       arr.push(it);
       groups.set(it.category, arr);
     }
-    const md = ["# 客房设施维修报修指引", ...[...groups.entries()].map(([k, arr]) =>
+    const md = ["# 异常申报与处理指引", ...[...groups.entries()].map(([k, arr]) =>
       `## ${catName(k)}\n${arr.map((i) => `- ${i.name}：${i.symptoms}（${i.urgency === "high" ? `加急 ${i.slaMinutes} 分钟内响应` : `常规 ${i.slaMinutes} 分钟内响应`}${i.tip ? `；${i.tip}` : ""}）`).join("\n")}`,
     )].join("\n\n");
     await svcQ(
       `INSERT INTO kb_documents (id, workspace_id, collection_id, title, source_kind, source_url, version, status, content_md, hash, created_at)
-       VALUES ('kbd-repair-catalog', $1, 'kbc-service-catalog', '维修报修指引（56 项）', 'manual', NULL, 1, 'active', $2, 'seed-hash-repair-catalog', $3)
+       VALUES ('kbd-repair-catalog', $1, 'kbc-service-catalog', '异常申报与处理指引', 'manual', NULL, 1, 'active', $2, 'seed-hash-repair-catalog', $3)
        ON CONFLICT (id) DO NOTHING`,
       [WS_ID, md, new Date(Date.now() - 18 * 86400000).toISOString()],
     );
@@ -1131,16 +1131,16 @@ async function main(): Promise<void> {
       );
     }
   }
-  console.log(`✓ 知识库全量预置：FAQ ${faq.categories.length} 类 ${faq.categories.reduce((n, c) => n + c.items.length, 0)} 问（新入库 ${faqChunks} 块）+ 送物目录 ${deliveryCat.items.length} 种 + 报修指引 ${repairCat.items.length} 项`);
+  console.log(`✓ 知识库全量预置：FAQ ${faq.categories.length} 类 ${faq.categories.reduce((n, c) => n + c.items.length, 0)} 问（新入库 ${faqChunks} 块）+ 数据服务目录 ${deliveryCat.items.length} 种 + 异常申报指引 ${repairCat.items.length} 项`);
 
-  // ============ AI 服务前台 · 扩充运行态（多客群/会员/订单/会话/工单/SLA） ============
-  // 多客群 C 端用户（白金商务/家庭/长住/外籍）+ 会员档案 + 订单
+  // ============ AI 服务前台 · 扩充运行态（多客群/会员/订阅订单/会话/工单/SLA） ============
+  // 多客群 C 端用户（专业版投资者/标准版投资者/跨境观察者/机构研究员）+ 会员档案 + 订阅订单
   await svcQ(
     `INSERT INTO c_users (id, workspace_id, channel, openid, nickname, member_id, created_at)
      VALUES
-       ('cu-wangzong', $1, 'wechat-mini', 'openid-wangzong', '王总', 'M-PLAT-20888', $2),
-       ('cu-linvshi', $1, 'wechat-mini', 'openid-linvshi', '李女士', 'M-GOLD-31520', $3),
-       ('cu-zhangxiansheng', $1, 'alipay', 'ali-zhang-xs', '张先生', NULL, $4),
+       ('cu-wangzong', $1, 'wechat-mini', 'openid-wangzong', '周总', 'M-PLAT-20888', $2),
+       ('cu-linvshi', $1, 'wechat-mini', 'openid-linvshi', '陈女士', 'M-GOLD-31520', $3),
+       ('cu-zhangxiansheng', $1, 'alipay', 'ali-zhang-xs', '陈先生', NULL, $4),
        ('cu-smith', $1, 'h5', 'fp-smith-7a21', 'Mr. Smith', NULL, $5)
      ON CONFLICT (id) DO NOTHING`,
     [WS_ID,
@@ -1150,17 +1150,17 @@ async function main(): Promise<void> {
   await svcQ(
     `INSERT INTO demo_members (workspace_id, member_id, name, tier, points)
      VALUES
-       ($1, 'M-PLAT-20888', '王总', '白金卡', 26800),
-       ($1, 'M-GOLD-31520', '李女士', '金卡', 9800)
+       ($1, 'M-PLAT-20888', '周总', '专业版', 26800),
+       ($1, 'M-GOLD-31520', '陈女士', '标准版', 9800)
      ON CONFLICT (workspace_id, member_id) DO NOTHING`,
     [WS_ID],
   );
   await svcQ(
     `INSERT INTO demo_orders (workspace_id, order_id, member_id, room_type, check_in, check_out, amount_fen, status)
      VALUES
-       ($1, 'YQ-20260824-108', 'M-PLAT-20888', '行政大床房', $2, $3, 326400, '在住'),
-       ($1, 'YQ-20260822-076', 'M-GOLD-31520', '亲子主题房', $4, $5, 197600, '在住'),
-       ($1, 'YQ-20260810-033', 'M-PLAT-20888', '行政大床房', $6, $7, 108800, '已退房')
+       ($1, 'YQ-20260824-108', 'M-PLAT-20888', 'API 推送·专业版（年付）', $2, $3, 326400, '服务中'),
+       ($1, 'YQ-20260822-076', 'M-GOLD-31520', '自选股池监测（≤50 只·月付）', $4, $5, 197600, '服务中'),
+       ($1, 'YQ-20260810-033', 'M-PLAT-20888', '产业链景气监测（季付）', $6, $7, 108800, '已到期')
      ON CONFLICT (workspace_id, order_id) DO NOTHING`,
     [WS_ID,
       new Date(Date.now() - 86400000).toISOString(), new Date(Date.now() + 2 * 86400000).toISOString(),
@@ -1168,25 +1168,25 @@ async function main(): Promise<void> {
       new Date(Date.now() - 14 * 86400000).toISOString(), new Date(Date.now() - 13 * 86400000).toISOString()],
   );
 
-  // 扩充会话 ×4（早餐/WiFi/送物建单/报修建单 全链路演示）
+  // 扩充会话 ×4（净值/纪律问答 + 订阅建单 + 异常申报建单 全链路演示）
   const convs: Array<[string, string, string, number, Array<[string, string, string, number, string, number]>]> = [
     ["cv-seed-003", "cu-linvshi", "wechat-mini", 8, [
-      ["user", "明天早餐几点开始？带孩子三个人怎么收费？", "", 0, "[]", 0],
-      ["assistant", "【早餐】一层云栖餐厅中西自助 07:00-10:30（周末至 11:00），68 元/位；您是金卡会员本人免费，1.2 米以下儿童免费，超出儿童 34 元/位。", "kb_qa", 0.94, JSON.stringify([{ documentTitle: "住客常见问答·餐饮美食", heading: "早餐几点开始、到几点结束？", content: "早餐供应时间为每日07:00-10:30，周末及法定节假日延长至11:00收餐，位于酒店一层云栖餐厅。" }]), 26],
-      ["user", "房间里能连 WiFi 吗？密码呢？", "", 0, "[]", 0],
-      ["assistant", "【WiFi】全店无线网络 Yunqi-Hotel 免费使用，密码为您房间号的后四位数字。", "kb_qa", 0.96, JSON.stringify([{ documentTitle: "住客常见问答·网络与设施", heading: "WiFi密码是多少？", content: "WiFi密码为所住房间号的后四位数字，例如入住1208房，密码即为1208。" }]), 19],
+      ["user", "决策日报几点发？标准版能看个股深度报告吗？", "", 0, "[]", 0],
+      ["assistant", "【日报服务】决策日报为免费公开内容，盘前批量窗口生成推送；个股深度报告属增值数据服务（30 元/份），含放行标的的逐层评分卡，标准版可按份订阅。", "kb_qa", 0.94, JSON.stringify([{ documentTitle: "投资者常见问答·日报与复盘", heading: "每天的决策日报包含什么？", content: "双页签 HTML 日报：「决策日报」页含市场环境综合评分、主线板块、最热赛道、今日放行清单与仓位建议、数据源与降级留痕；「个股深度报告」页含每只放行标的的逐层评分卡。" }]), 26],
+      ["user", "LLM 挂了你们会编一个分数顶上吗？", "", 0, "[]", 0],
+      ["assistant", "【降级铁律】不会。LLM 失败唯一出路是透传披露（🔁透传 + 原因留痕），禁止降档重答、禁止用规则伪造语义分——宁可不答，不可错答。", "kb_qa", 0.96, JSON.stringify([{ documentTitle: "投资者常见问答·AI 分工与模型", heading: "LLM 不可用时系统怎么办？", content: "金融降级铁律：LLM 失败唯一出路是透传披露（🔁透传 + 原因留痕），禁止降档重答、禁止用规则伪造语义分——宁可不答，不可错答。" }]), 19],
     ]],
     ["cv-seed-004", "cu-wangzong", "wechat-mini", 5, [
-      ["user", "帮我送两瓶矿泉水和一套牙具到 2508", "", 0, "[]", 0],
-      ["assistant", "好的，已为您生成送物工单：矿泉水 2 瓶（免费额度内）+ 牙刷套装 1 套，将由配送机器人「小云」送达 2508，预计 10 分钟内到。", "service_request", 0.93, "[]", 24],
+      ["user", "帮我开通研报速递订阅，盘前 5 分钟那个", "", 0, "[]", 0],
+      ["assistant", "好的，已为您生成订阅工单：研报速递（18 元/月，盘前 5 分钟推送，迟发按 SLA 赔付），复盘组开通后每日自动推送至本前台。", "service_request", 0.93, "[]", 24],
     ]],
     ["cv-seed-005", "cu-smith", "h5", 2, [
-      ["user", "The air conditioner in my room is not cooling. Room 1832.", "", 0, "[]", 0],
-      ["assistant", "抱歉给您带来不便。已为您生成维修工单：1832 房空调制冷异常，工程部加急 30 分钟内上门；处理进度会实时通知您。", "service_request", 0.9, "[]", 27],
+      ["user", "The portfolio NAV looks inconsistent with positions. Please check.", "", 0, "[]", 0],
+      ["assistant", "已为您生成「账户与持仓异常」加急工单：风控组 15 分钟内冻结相关展示口径，按事件库重算净值并出具差异说明——显示层可错，账本不会错。", "service_request", 0.9, "[]", 27],
     ]],
     ["cv-seed-006", "cu-zhangxiansheng", "alipay", 12, [
-      ["user", "你们这儿去萧山机场怎么走最方便？多少钱？", "", 0, "[]", 0],
-      ["assistant", "【机场交通】三种方式：①酒店接送机 7 座商务车 260 元/趟（提前 4 小时预约）；②机场大巴云栖线 35 元/人约 70 分钟，整点发车 07:00-21:00；③打车约 50 分钟约 130 元。早班机建议预约接送机。", "kb_qa", 0.92, JSON.stringify([{ documentTitle: "住客常见问答·交通位置", heading: "酒店离萧山机场多远？", content: "酒店距杭州萧山国际机场约42公里，打车正常路况约50分钟，车费约130元。" }]), 31],
+      ["user", "你们这是实盘吗？能跟着买吗？", "", 0, "[]", 0],
+      ["assistant", "【合规说明】不是实盘。系统仅运行于模拟盘（paper trading），不做真实下单、不构成投资建议、不承诺收益；日报是模拟盘运行披露，跟随操作的风险由操作者自行承担。", "kb_qa", 0.92, JSON.stringify([{ documentTitle: "投资者常见问答·合规与免责声明", heading: "这个系统构成投资建议吗？", content: "不构成。本系统为技术研究与模拟验证项目，仅模拟盘运行；日报、信号、净值均为模拟盘运行披露，不是对任何人的证券买卖建议。" }]), 31],
     ]],
   ];
   for (const [cvId, cuId, ch, hoursAgo, msgs] of convs) {
@@ -1209,11 +1209,11 @@ async function main(): Promise<void> {
 
   // 扩充工单 ×5（含 1 张 SLA 超时加急单）+ 时间线 + 通知
   const tickets2: Array<[string, string, string | null, string, string, string, string, string | null, number]> = [
-    ["tck-seed-004", "cu-wangzong", "cv-seed-004", "delivery", "送矿泉水×2 + 牙刷套装到 2508", "done", "normal", "客房部", "配送机器人·小云", 5],
-    ["tck-seed-005", "cu-smith", "cv-seed-005", "repair", "1832 房空调不制冷", "processing", "high", "工程部", "王师傅", 2],
-    ["tck-seed-006", "cu-linvshi", null, "delivery", "儿童餐椅 + 温奶器送到 1208", "assigned", "normal", "客房部", null, 1],
-    ["tck-seed-007", "cu-zhangxiansheng", null, "repair", "2021 房 WiFi 频繁掉线", "created", "normal", "工程部", null, 26], // SLA 超时样例（created 超 2h 未分派）
-    ["tck-seed-008", "cu-wangzong", null, "other", "预约 08-26 06:30 送机（萧山 T3，7 座商务）", "done", "high", "前厅部", "礼宾-小周", 30],
+    ["tck-seed-004", "cu-wangzong", "cv-seed-004", "delivery", "开通研报速递订阅（盘前 5 分钟）", "done", "normal", "复盘组", "复盘分析师", 5],
+    ["tck-seed-005", "cu-smith", "cv-seed-005", "repair", "净值显示与持仓不一致核查", "processing", "high", "风控组", "组合风险官", 2],
+    ["tck-seed-006", "cu-linvshi", null, "delivery", "个股深度报告·TEAM 逐层评分卡", "assigned", "normal", "复盘组", null, 1],
+    ["tck-seed-007", "cu-zhangxiansheng", null, "repair", "产业链景气监测数据缺口申报", "created", "normal", "数据质量组", null, 26], // SLA 超时样例（created 超 2h 未分派）
+    ["tck-seed-008", "cu-wangzong", null, "other", "申请开具 API 专业版年度发票", "done", "high", "合规组", "合规官", 30],
   ];
   for (const t of tickets2) {
     await svcQ(
@@ -1222,23 +1222,23 @@ async function main(): Promise<void> {
        ON CONFLICT (id) DO NOTHING`,
       [t[0], WS_ID, t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
        new Date(Date.now() + (t[5] === "created" ? -3600000 : 2 * 3600000)).toISOString(), // 超时样例 due_at 已过
-       t[5] === "done" ? JSON.stringify({ text: t[3] === "delivery" ? "已由机器人送达并电话确认。" : "送机车辆已准时出发，行程单已推送。", rating: { score: 5 } }) : null,
+       t[5] === "done" ? JSON.stringify({ text: t[3] === "delivery" ? "订阅已开通，明早盘前 5 分钟首期推送。" : "电子发票已开具并推送至邮箱。", rating: { score: 5 } }) : null,
        `seed-${t[0]}`, new Date(Date.now() - t[9] * 3600000).toISOString()],
     );
   }
   const tl2: Array<[string, string, string, string, string, number]> = [
-    ["tck-seed-004", "create", "c_user", "cu-wangzong", "对话中确认送物", 300],
-    ["tck-seed-004", "assign", "agent", "agt-service-desk", "智能分派 → 客房部（机器人配送）", 299],
-    ["tck-seed-004", "complete", "staff", "配送机器人·小云", "已送达 2508 并电话确认", 290],
+    ["tck-seed-004", "create", "c_user", "cu-wangzong", "对话中确认订阅", 300],
+    ["tck-seed-004", "assign", "agent", "agt-service-desk", "智能分派 → 复盘组", 299],
+    ["tck-seed-004", "complete", "staff", "复盘分析师", "订阅已开通，首期明早推送", 290],
     ["tck-seed-005", "create", "c_user", "cu-smith", "对话中建单（加急）", 120],
-    ["tck-seed-005", "assign", "agent", "agt-service-desk", "智能分派 → 工程部", 119],
-    ["tck-seed-005", "start", "staff", "王师傅", "已携检测设备前往 1832", 100],
+    ["tck-seed-005", "assign", "agent", "agt-service-desk", "智能分派 → 风控组", 119],
+    ["tck-seed-005", "start", "staff", "组合风险官", "已冻结展示口径并按事件库重算", 100],
     ["tck-seed-006", "create", "c_user", "cu-linvshi", "服务台自助提交", 60],
-    ["tck-seed-006", "assign", "agent", "agt-service-desk", "智能分派 → 客房部", 59],
+    ["tck-seed-006", "assign", "agent", "agt-service-desk", "智能分派 → 复盘组", 59],
     ["tck-seed-007", "create", "c_user", "cu-zhangxiansheng", "支付宝小程序提交", 1560],
-    ["tck-seed-008", "create", "c_user", "cu-wangzong", "电话登记转入", 1800],
-    ["tck-seed-008", "assign", "agent", "agt-service-desk", "智能分派 → 前厅部", 1799],
-    ["tck-seed-008", "complete", "staff", "礼宾-小周", "送机完成，行程单已推送", 1500],
+    ["tck-seed-008", "create", "c_user", "cu-wangzong", "邮件登记转入", 1800],
+    ["tck-seed-008", "assign", "agent", "agt-service-desk", "智能分派 → 合规组", 1799],
+    ["tck-seed-008", "complete", "staff", "合规官", "电子发票已开具并推送", 1500],
   ];
   for (const e of tl2) {
     await svcQ(
@@ -1249,11 +1249,11 @@ async function main(): Promise<void> {
     );
   }
   const notifs2: Array<[string, string, string, string, number]> = [
-    ["ntf-seed-004", "cu-wangzong", "ticket.completed", "您的送物工单「送矿泉水×2 + 牙刷套装到 2508」已办结：已由机器人送达并电话确认。欢迎评价。", 285],
-    ["ntf-seed-005", "cu-smith", "ticket.accepted", "您的维修工单「1832 房空调不制冷」已受理（加急），工程部王师傅处理中。", 115],
-    ["ntf-seed-006", "cu-linvshi", "ticket.accepted", "您的送物工单「儿童餐椅 + 温奶器送到 1208」已受理，客房部将尽快送达。", 58],
-    ["ntf-seed-007", "cu-zhangxiansheng", "sla.escalated", "您的维修工单「2021 房 WiFi 频繁掉线」受理超时已升级为加急，值班经理已介入督办。", 60],
-    ["ntf-seed-008", "cu-wangzong", "ticket.completed", "您的送机预约已完成，行程单已推送至微信。期待再次为您服务。", 1495],
+    ["ntf-seed-004", "cu-wangzong", "ticket.completed", "您的订阅工单「开通研报速递订阅（盘前 5 分钟）」已办结：订阅已开通，明早盘前首期推送。欢迎评价。", 285],
+    ["ntf-seed-005", "cu-smith", "ticket.accepted", "您的异常申报「净值显示与持仓不一致核查」已受理（加急），风控组重算中。", 115],
+    ["ntf-seed-006", "cu-linvshi", "ticket.accepted", "您的订阅工单「个股深度报告·TEAM 逐层评分卡」已受理，复盘组将尽快交付。", 58],
+    ["ntf-seed-007", "cu-zhangxiansheng", "sla.escalated", "您的异常申报「产业链景气监测数据缺口申报」受理超时已升级为加急，值班负责人已介入督办。", 60],
+    ["ntf-seed-008", "cu-wangzong", "ticket.completed", "您的发票申请已完成，电子发票已推送至邮箱。期待再次为您服务。", 1495],
   ];
   for (const n of notifs2) {
     await svcQ(
@@ -1263,14 +1263,14 @@ async function main(): Promise<void> {
       [WS_ID, n[1], n[2], JSON.stringify({ text: n[3], mock: true }), new Date(Date.now() - n[4] * 60000).toISOString(), n[3]],
     );
   }
-  console.log("✓ 服务前台扩充运行态：多客群用户×4 / 会员×2 / 订单×3 / 会话×4 / 工单×5（含 SLA 超时样例）/ 时间线×11 / 通知×5");
+  console.log("✓ 服务前台扩充运行态：多客群用户×4 / 会员×2 / 订阅订单×3 / 会话×4 / 工单×5（含 SLA 超时样例）/ 时间线×11 / 通知×5");
 
 
   // L2 收口：显式 COMMIT——本事务内全部 gateway 段写入（事件/审批/夜班/记忆/C 端运行态）
   // 同一提交；若中途抛错，main 捕获退出时连接关闭，PG 自动 ROLLBACK 不留半提交态
   await gw.query("COMMIT");
   await gw.end();
-  console.log("种子数据完成 ✅（云栖酒店演示数据集就绪）");
+  console.log("种子数据完成 ✅（演示数据集就绪：云栖酒店 B 端 + 老虎交易服务前台 C 端）");
 }
 
 main().catch((err) => {

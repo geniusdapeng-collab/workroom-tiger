@@ -77,9 +77,11 @@ export const hotelBizAdapter: BizAdapter = {
     void ctx;
     return {
       items: [
-        { sku: "RM-DLX-KING", name: "豪华大床房", priceYuan: 588 },
-        { sku: "RM-EXE-TWIN", name: "行政双床房", priceYuan: 688 },
-        { sku: "RM-VIEW-KING", name: "山景大床房", priceYuan: 528 },
+        { sku: "SVC-DAILY-PRO", name: "研报速递（月）", priceYuan: 18 },
+        { sku: "SVC-STOCK-DEPTH", name: "个股深度报告（份）", priceYuan: 30 },
+        { sku: "SVC-CHAIN-MONITOR", name: "产业链景气监测（月）", priceYuan: 68 },
+        { sku: "SVC-WATCHLIST-50", name: "自选股池监测（≤50 只·月）", priceYuan: 128 },
+        { sku: "SVC-API-STD", name: "API 推送·标准版（月）", priceYuan: 199 },
       ],
       demo: true,
     };

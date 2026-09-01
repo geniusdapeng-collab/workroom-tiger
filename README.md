@@ -111,9 +111,9 @@
 
 ### 移动端
 
-| 交易内核 · 决策日报（移动视口） | 治理外壳 · 掌上日报（手机壳页） |
-|---|---|
-| ![决策日报移动版](docs/images/shots/mb-daily-report.png) | ![掌上日报](docs/images/shots/mb-handoff.png) |
+| 交易内核 · 决策日报（移动视口） | 治理外壳 · 掌上日报（手机壳页） | C 端 · AI 服务前台（对话） | C 端 · 服务大厅 |
+|---|---|---|---|
+| ![决策日报移动版](docs/images/shots/mb-daily-report.png) | ![掌上日报](docs/images/shots/mb-handoff.png) | ![AI服务前台](docs/images/shots/mc-chat.png) | ![服务大厅](docs/images/shots/mc-service.png) |
 
 ---
 
@@ -146,7 +146,7 @@ pnpm setup && pnpm preview:all
 | 端 | 地址 | 说明 |
 |---|---|---|
 | PC 端 · 治理工作台 | http://localhost:3000 | 经营剧场（老虎交易工作台）/ 审批中心 / 夜班中心 / 董事长视图 |
-| 移动端 · C 端 | http://localhost:3002 | AI 服务前台 H5（演示直登） |
+| 移动端 · C 端 | http://localhost:3002 | 老虎交易 AI 服务前台 H5（查净值 / 数据服务 / 异常申报，演示直登） |
 
 > 治理外壳默认进入 `yunqi-hotel` 演示工作区；切换老虎交易工作区：启动 web 时设置 `VITE_DEMO_WORKSPACE=tiger-trading`（成员 `VITE_DEMO_MEMBER=MEM-T001`）。
 

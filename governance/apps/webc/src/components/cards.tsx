@@ -55,7 +55,7 @@ export function OrderCard({ order }: { order: Order }) {
         <div className="mt-1.5 flex items-center justify-between text-[11px] text-ink2">
           <span>
             {order.roomType ?? ""}
-            {order.checkIn ? ` · 入住 ${order.checkIn}` : ""}
+            {order.checkIn ? ` · 生效 ${order.checkIn}` : ""}
           </span>
           {typeof order.amount === "number" && (
             <span className="font-orb text-[13px] text-gold">¥{order.amount}</span>

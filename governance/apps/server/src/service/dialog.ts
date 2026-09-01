@@ -69,8 +69,8 @@ export function classify(text: string): { intent: Intent; tool?: BizToolName } {
 
 /** service_request 文本 → 工单类型（修/坏类 → repair；送/拿/打扫类 → delivery；其余 other） */
 export function ticketKindOf(text: string): "repair" | "delivery" | "other" {
-  if (/维修|修|坏|故障|漏水|不制冷|不制热|空调|热水|马桶/.test(text)) return "repair";
-  if (/送|拿|打扫|换床单|加一|多要|再来/.test(text)) return "delivery";
+  if (/维修|修|坏|故障|异常|中断|缺口|不刷新|漏水|不制冷|不制热|空调|热水|马桶/.test(text)) return "repair";
+  if (/订阅|开通|订购|补发|送|拿|打扫|换床单|加一|多要|再来/.test(text)) return "delivery";
   return "other";
 }
 
@@ -159,7 +159,7 @@ export async function handleMessage(input: {
   } else if (cls.intent === "complaint") {
     result = {
       intent: "complaint",
-      answer: "非常抱歉给您带来不便。我可以立即为您生成投诉工单，客服部将优先跟进。请确认是否提交？",
+      answer: "非常抱歉给您带来不便。我可以立即为您生成投诉工单，值班负责人将优先跟进。请确认是否提交？",
       confidence: 0.9,
       citations: [],
       ticketDraft: { kind: "complaint", title: input.text.slice(0, 40), payload: { text: input.text } },

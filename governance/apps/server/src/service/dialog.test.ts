@@ -15,7 +15,7 @@ describe("classify 意图规则（M8 与 base 同表）", () => {
     ["豪华大床房多少钱一晚", "biz_query", "query_catalog"],
     ["我的工单进度怎么样了", "biz_query", "query_ticket"],
     ["送站巴士几点发车", "kb_qa"],            // 含「送」但疑问句 → kb_qa 不建单
-    ["早餐几点开始？收费吗", "kb_qa"],
+    ["系统什么情况下会开仓", "kb_qa"],
     ["空调坏了，帮我修一下", "service_request"], // 坏了/修 直连建单
     ["帮我送两瓶矿泉水", "service_request"],
     ["附近地铁站怎么走", "kb_qa"],            // 无规则命中 → 默认 kb_qa（低置信拒答）

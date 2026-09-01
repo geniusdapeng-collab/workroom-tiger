@@ -43,27 +43,27 @@ export interface FrontConfig {
 }
 
 export const DEFAULT_CONFIG: FrontConfig = {
-  brandName: "云栖酒店",
-  agentName: "小栖",
-  logoText: "栖",
+  brandName: "老虎交易 · 小虎模拟盘",
+  agentName: "小虎",
+  logoText: "虎",
   theme: { primary: "#e9b558", secondary: "#45e0ff" },
   welcomeText:
-    "您好，欢迎来到{brand}。我是 AI 服务前台{agent}，可以帮您查订单、叫送物、报维修，也可以解答{brand}服务问题。",
+    "您好，欢迎来到{brand}。我是 AI 服务前台{agent}，可以帮您查净值、查持仓、订阅数据服务、申报异常，也可以解答交易纪律与合规问题。当前仅模拟盘运行，不构成投资建议。",
   quickReplies: [
-    { label: "查订单", sendText: "帮我查一下我的订单" },
-    { label: "送物服务", serviceKind: "delivery" },
-    { label: "维修报修", serviceKind: "repair" },
-    { label: "常见问题", sendText: "早餐几点开始？停车和退房怎么安排？" },
+    { label: "查净值", sendText: "帮我查一下当前模拟盘净值" },
+    { label: "数据服务", serviceKind: "delivery" },
+    { label: "异常申报", serviceKind: "repair" },
+    { label: "常见问题", sendText: "系统什么情况下会开仓？现在是实盘吗？" },
   ],
   serviceEntries: [
-    { kind: "delivery", title: "送物服务", desc: "毛巾 / 水 / 牙具等送到房间", icon: "送", sla: "约 15 分钟内送达", titlePlaceholder: "例如：补充两瓶矿泉水" },
-    { kind: "repair", title: "维修报修", desc: "设施故障一键报修", icon: "修", sla: "约 30 分钟内上门", titlePlaceholder: "例如：空调制冷效果差" },
-    { kind: "complaint", title: "投诉建议", desc: "您的意见让我们更好", icon: "诉", sla: "值班经理 2 小时内回复", titlePlaceholder: "请描述您的意见" },
-    { kind: "other", title: "其他需求", desc: "更多个性化服务", icon: "他", sla: "服务专员 30 分钟内响应", titlePlaceholder: "请描述您的需求" },
+    { kind: "delivery", title: "数据服务", desc: "研报速递 / 个股深度 / 产业链监测订阅", icon: "订", sla: "开通后每日自动推送", titlePlaceholder: "例如：开通研报速递订阅" },
+    { kind: "repair", title: "异常申报", desc: "行情 / 信号 / 账户 / 报表异常一键申报", icon: "报", sla: "加急 15 分钟内响应", titlePlaceholder: "例如：行情快照延时异常" },
+    { kind: "complaint", title: "投诉建议", desc: "您的意见让我们更好", icon: "诉", sla: "值班负责人 2 小时内回复", titlePlaceholder: "请描述您的意见" },
+    { kind: "other", title: "其他需求", desc: "合规咨询 / 发票 / 更多服务", icon: "他", sla: "服务专员 30 分钟内响应", titlePlaceholder: "请描述您的需求" },
   ],
   memberLevels: {
-    金卡会员: { label: "金卡会员" },
-    银卡会员: { label: "银卡会员" },
+    专业版: { label: "专业版" },
+    标准版: { label: "标准版" },
     游客: { label: "游客" },
   },
   enableTabs: ["chat", "service", "tickets", "messages", "me"],

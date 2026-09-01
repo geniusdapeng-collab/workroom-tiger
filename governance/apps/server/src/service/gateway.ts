@@ -152,7 +152,7 @@ async function pushAcceptedSafely(input: {
 }): Promise<void> {
   const payload = {
     ticketId: input.ticketId, title: input.title,
-    text: `您的工单「${input.title}」已受理，${input.dept ?? "客服部"}将尽快跟进。`,
+    text: `您的工单「${input.title}」已受理，${input.dept ?? "值班负责人"}将尽快跟进。`,
   };
   try {
     await pushMessage({ workspaceId: input.workspaceId, cUserId: input.cUserId, kind: "ticket.accepted", payload });
@@ -277,7 +277,7 @@ serviceGateway.post("/chat", cAuth, async (c) => {
         cards.push({ kind: "catalog", data: { items: d.items ?? [], demo: d.demo ?? true } });
       } else if (r.toolCall.tool === "query_ticket") {
         const t = d.ticket;
-        if (t) answer = `您的工单「${String(t.title)}」当前状态：${TICKET_STATUS_TEXT[String(t.status)] ?? String(t.status)}，${String(t.dept ?? "客服部")}跟进中。`;
+        if (t) answer = `您的工单「${String(t.title)}」当前状态：${TICKET_STATUS_TEXT[String(t.status)] ?? String(t.status)}，${String(t.dept ?? "值班负责人")}跟进中。`;
       }
     }
 

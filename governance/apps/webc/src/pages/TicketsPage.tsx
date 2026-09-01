@@ -49,7 +49,7 @@ export default function TicketsPage({ refreshKey }: { refreshKey: number }) {
         ) : tickets.length === 0 ? (
           <EmptyState
             title="暂无工单"
-            desc="有送物、维修或其他需求时，可到「服务」页一键提交"
+            desc="有数据服务、异常申报或其他需求时，可到「服务」页一键提交"
           />
         ) : (
           <div className="space-y-3">

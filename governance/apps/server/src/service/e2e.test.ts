@@ -231,7 +231,7 @@ describe("E 安全 · 限流", () => {
     const { token } = await cSession(`${RUN}-crl`, "h5", "198.51.100.63");
     let last = 0;
     for (let i = 0; i < 62; i++) {
-      const res = await cReq("/chat", { method: "POST", body: JSON.stringify({ text: "退房时间几点" }) }, token, "198.51.100.63");
+      const res = await cReq("/chat", { method: "POST", body: JSON.stringify({ text: "日报几点发" }) }, token, "198.51.100.63");
       last = res.status;
       if (last === 429) break;
     }
@@ -295,8 +295,8 @@ describe("E 安全 · 越权与输入约束", () => {
   it("越权续聊他人会话 → 不复用（归属校验后新建会话）", async () => {
     const a = await cSession(`${RUN}-ca`, "h5", "203.0.113.35");
     const b = await cSession(`${RUN}-cb`, "h5", "203.0.113.36");
-    const first = await chat(a.token, "退房时间几点", {}, "203.0.113.35");
-    const hijack = await chat(b.token, "早餐几点", { conversationId: first.conversationId }, "203.0.113.36");
+    const first = await chat(a.token, "日报几点发", {}, "203.0.113.35");
+    const hijack = await chat(b.token, "净值哪里看", { conversationId: first.conversationId }, "203.0.113.36");
     expect(hijack.conversationId).not.toBe(first.conversationId);
   });
 
@@ -506,22 +506,22 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
   let ticketId = "";
   const ip = "203.0.113.101";
 
-  it("F1 新用户首问「退房时间几点」→ 命中 KB 带引用", async () => {
+  it("F1 新用户首问「决策日报几点发」→ 命中 KB 带引用", async () => {
     const s = await cSession(`${RUN}-f`, "h5", ip);
     token = s.token;
     cUserId = s.user.id;
-    const r = await chat(token, "退房时间是几点？", {}, ip);
+    const r = await chat(token, "决策日报几点发？", {}, ip);
     convId = String(r.conversationId);
     expect(r.intent).toBe("kb_qa");
     expect((r.citations as unknown[]).length).toBeGreaterThan(0);
-    expect(String(r.answer)).toContain("12:00");
+    expect(String(r.answer)).toContain("盘前");
   });
 
-  it("F2 同会话追问「早餐时间是几点」→ conversationId 续聊且中置信命中引用", async () => {
-    const r = await chat(token, "早餐时间是几点？", { conversationId: convId }, ip);
+  it("F2 同会话追问「系统什么情况下会开仓」→ conversationId 续聊且中置信命中引用", async () => {
+    const r = await chat(token, "系统什么情况下会开仓？", { conversationId: convId }, ip);
     expect(r.conversationId).toBe(convId);
     expect((r.citations as unknown[]).length).toBeGreaterThan(0);
-    expect(String(r.answer)).toContain("7:00");
+    expect(String(r.answer)).toContain("MRS");
   });
 
   it("F3 查订单未绑定 → 绑定引导", async () => {
@@ -530,20 +530,20 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
     expect(r.cards).toEqual([]);
   });
 
-  it("F4 对话中建单「帮我送两瓶水」→ ticketDraft delivery（未确认不建单）", async () => {
-    const r = await chat(token, "帮我送两瓶矿泉水", { conversationId: convId }, ip);
+  it("F4 对话中建单「帮我开通研报速递订阅」→ ticketDraft delivery（未确认不建单）", async () => {
+    const r = await chat(token, "帮我开通研报速递订阅", { conversationId: convId }, ip);
     expect(r.intent).toBe("service_request");
     expect(r.ticketDraft).toMatchObject({ kind: "delivery" });
     expect(r.ticket).toBeNull();
   });
 
-  it("F5 confirmTicket:true → 建单 assigned + 客房部 + statusText 已受理", async () => {
-    const r = await chat(token, "帮我送两瓶矿泉水", {
+  it("F5 confirmTicket:true → 建单 assigned + 复盘组 + statusText 已受理", async () => {
+    const r = await chat(token, "帮我开通研报速递订阅", {
       conversationId: convId, confirmTicket: true, idempotencyKey: `${RUN}-f5`,
     }, ip);
     const t = r.ticket as { id: string; status: string; dept: string; statusText: string };
     ticketId = t.id;
-    expect(t).toMatchObject({ status: "assigned", dept: "客房部", statusText: "已受理" });
+    expect(t).toMatchObject({ status: "assigned", dept: "复盘组", statusText: "已受理" });
   });
 
   it("F6 受理通知：通知箱含 ticket.accepted", async () => {
@@ -552,7 +552,7 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
   });
 
   it("F7 同幂等键重放 → deduped:true 同单号", async () => {
-    const r = await chat(token, "帮我送两瓶矿泉水", {
+    const r = await chat(token, "帮我开通研报速递订阅", {
       conversationId: convId, confirmTicket: true, idempotencyKey: `${RUN}-f5`,
     }, ip);
     expect(r.deduped).toBe(true);
@@ -617,32 +617,32 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
 });
 
 describe("F C 端旅程 · 场景分支", () => {
-  it("投诉一句话直达 → intent complaint + complaint 草稿（confirm 后客服部）", async () => {
+  it("投诉一句话直达 → intent complaint + complaint 草稿（confirm 后值班负责人）", async () => {
     const { token } = await cSession(`${RUN}-fc`, "h5", "203.0.113.111");
     const r = await chat(token, "我要投诉，隔壁房间半夜太吵了", {}, "203.0.113.111");
     expect(r.intent).toBe("complaint");
     expect(r.ticketDraft).toMatchObject({ kind: "complaint" });
     const ok = await chat(token, "我要投诉，隔壁房间半夜太吵了", { confirmTicket: true, idempotencyKey: `${RUN}-fc-1` }, "203.0.113.111");
-    expect((ok.ticket as { dept: string; kind: string })).toMatchObject({ kind: "complaint", dept: "客服部" });
+    expect((ok.ticket as { dept: string; kind: string })).toMatchObject({ kind: "complaint", dept: "值班负责人" });
   });
 
-  it("低置信拒答转单：answer 拒答 + ticketDraft，confirm 后建 other 单（前厅部）", async () => {
+  it("低置信拒答转单：answer 拒答 + ticketDraft，confirm 后建 other 单（合规组）", async () => {
     const { token } = await cSession(`${RUN}-fl`, "h5", "203.0.113.112");
     const r = await chat(token, "火星移民船票怎么买", {}, "203.0.113.112");
     expect(String(r.answer)).toContain("无法准确回答");
     expect(r.citations).toEqual([]);
     expect(r.ticketDraft).toMatchObject({ kind: "other" });
     const ok = await chat(token, "火星移民船票怎么买", { confirmTicket: true, idempotencyKey: `${RUN}-fl-1` }, "203.0.113.112");
-    expect((ok.ticket as { kind: string; dept: string })).toMatchObject({ kind: "other", dept: "前厅部" });
+    expect((ok.ticket as { kind: string; dept: string })).toMatchObject({ kind: "other", dept: "合规组" });
   });
 
-  it("报修一句话「空调坏了」→ service_request repair 草稿，confirm 后工程部", async () => {
+  it("申报一句话「行情数据中断」→ service_request repair 草稿，confirm 后数据质量组", async () => {
     const { token } = await cSession(`${RUN}-fr`, "h5", "203.0.113.113");
-    const r = await chat(token, "房间空调坏了，帮我修一下", {}, "203.0.113.113");
+    const r = await chat(token, "行情数据推送中断，帮我申报一下", {}, "203.0.113.113");
     expect(r.intent).toBe("service_request");
     expect(r.ticketDraft).toMatchObject({ kind: "repair" });
-    const ok = await chat(token, "房间空调坏了，帮我修一下", { confirmTicket: true, idempotencyKey: `${RUN}-fr-1` }, "203.0.113.113");
-    expect((ok.ticket as { dept: string })).toMatchObject({ dept: "工程部" });
+    const ok = await chat(token, "行情数据推送中断，帮我申报一下", { confirmTicket: true, idempotencyKey: `${RUN}-fr-1` }, "203.0.113.113");
+    expect((ok.ticket as { dept: string })).toMatchObject({ dept: "数据质量组" });
   });
 
   it("疑问句含服务词不建服务单：「送站巴士几点发」走 kb_qa（未覆盖仅给拒答草稿，不落单）", async () => {
@@ -663,7 +663,7 @@ describe("F C 端旅程 · 场景分支", () => {
   // 合理预期：显式 body.ticketDraft 应优先。
   it("confirmTicket 带 body.ticketDraft 兜底（上轮草稿本轮确认，显式草稿优先）【bug 已修复】", async () => {
     const { token } = await cSession(`${RUN}-fb`, "h5", "203.0.113.115");
-    const first = await chat(token, "帮我送一床被子", {}, "203.0.113.115");
+    const first = await chat(token, "帮我订购一份个股深度报告", {}, "203.0.113.115");
     const draft = first.ticketDraft as { kind: string; title: string; payload: Record<string, unknown> };
     expect(draft).toBeDefined();
     const second = await chat(token, "好的确认提交", {
@@ -674,13 +674,13 @@ describe("F C 端旅程 · 场景分支", () => {
 
   it("mock 标注：LLM 未装配时响应 mock:true", async () => {
     const { token } = await cSession(`${RUN}-fm`, "h5", "203.0.113.116");
-    const r = await chat(token, "退房时间几点", {}, "203.0.113.116");
+    const r = await chat(token, "模拟盘净值哪里看", {}, "203.0.113.116");
     expect(r.mock).toBe(true);
   });
 
   it("latencyMs 为非负数字", async () => {
     const { token } = await cSession(`${RUN}-ft`, "h5", "203.0.113.117");
-    const r = await chat(token, "早餐几点", {}, "203.0.113.117");
+    const r = await chat(token, "日报几点发", {}, "203.0.113.117");
     expect(typeof r.latencyMs).toBe("number");
     expect(r.latencyMs as number).toBeGreaterThanOrEqual(0);
   });
@@ -689,9 +689,9 @@ describe("F C 端旅程 · 场景分支", () => {
   // 切块正文写作「Wi-Fi」（连字符），查询「wifi 密码」切词得 token "wifi"，
   // 不是 "wi-fi" 的子串 → 召回/打分双 miss，top1≈0.21 < 0.5 落入诚实拒答。
   // 连字符未归一导致高频 WiFi 问句无法命中 Wi-Fi 知识（检索召回缺陷）。
-  it("WiFi 问句命中种子 KB（密码为房间号后四位）【bug 已修复：连字符归一】", async () => {
+  it("开仓纪律问句命中种子 KB（MRS 硬逻辑）", async () => {
     const { token } = await cSession(`${RUN}-fw`, "h5", "203.0.113.118");
-    const r = await chat(token, "wifi 密码是什么", {}, "203.0.113.118");
+    const r = await chat(token, "开仓的硬逻辑是什么", {}, "203.0.113.118");
     expect((r.citations as unknown[]).length).toBeGreaterThan(0);
     expect(String(r.answer)).toMatch(/房间号的后四位|房间号后四位/); // FAQ 预置库与基线文档措辞兼容
   });
@@ -770,8 +770,8 @@ describe("G B 端 · KB 管理", () => {
   it("kb.upsertDocument 新建 → version 1 + 切块数 > 0（pending_review）", async () => {
     const r = await trpc("service.kb.upsertDocument", {
       input: {
-        collectionId: colId, title: `${RUN}-接送机政策`, sourceKind: "manual",
-        contentMd: `## 接送机\n\n酒店提供付费接送机服务，需提前四小时预约，单程一百八十元，正文长度足够。（${RUN}）\n`,
+        collectionId: colId, title: `${RUN}-研报速递政策`, sourceKind: "manual",
+        contentMd: `## 研报速递\n\n研报速递为付费订阅服务，盘前五分钟推送，每月十八元，正文长度足够。（${RUN}）\n`,
       }, token: bToken, method: "mutation",
     });
     expect(r.error).toBeNull();
@@ -784,8 +784,8 @@ describe("G B 端 · KB 管理", () => {
   it("kb.upsertDocument 同内容再传 → hash 幂等（chunks 0 同文档）", async () => {
     const r = await trpc("service.kb.upsertDocument", {
       input: {
-        collectionId: colId, title: `${RUN}-接送机政策`, sourceKind: "manual",
-        contentMd: `## 接送机\n\n酒店提供付费接送机服务，需提前四小时预约，单程一百八十元，正文长度足够。（${RUN}）\n`,
+        collectionId: colId, title: `${RUN}-研报速递政策`, sourceKind: "manual",
+        contentMd: `## 研报速递\n\n研报速递为付费订阅服务，盘前五分钟推送，每月十八元，正文长度足够。（${RUN}）\n`,
       }, token: bToken, method: "mutation",
     });
     const d = r.data as { documentId: string; version: number; chunks: number };
@@ -796,8 +796,8 @@ describe("G B 端 · KB 管理", () => {
   it("kb.upsertDocument 同标题新内容 → version 2", async () => {
     const r = await trpc("service.kb.upsertDocument", {
       input: {
-        collectionId: colId, title: `${RUN}-接送机政策`, sourceKind: "manual",
-        contentMd: `## 接送机\n\n接送机服务调整为单程二百元，需提前六小时预约，正文长度足够用来切块。（${RUN}）\n`,
+        collectionId: colId, title: `${RUN}-研报速递政策`, sourceKind: "manual",
+        contentMd: `## 研报速递\n\n研报速递服务调整为每月二十元，盘前十分钟推送，正文长度足够用来切块。（${RUN}）\n`,
       }, token: bToken, method: "mutation",
     });
     expect((r.data as { version: number }).version).toBe(2);
@@ -841,9 +841,9 @@ describe("G B 端 · KB 管理", () => {
 
   it("approveDocument 后检索可见（kb.search 命中）", async () => {
     // 查询词带 RUN 指纹：历次运行累积的同主题 active 文档不会稀释本轮命中
-    const r = await trpc("service.kb.search", { input: { query: `接送机怎么预约 ${RUN}`, limit: 20 }, token: bToken });
+    const r = await trpc("service.kb.search", { input: { query: `研报速递怎么订阅 ${RUN}`, limit: 20 }, token: bToken });
     const hits = (r.data as { hits: Array<{ documentTitle: string }> }).hits;
-    expect(hits.some((h) => h.documentTitle === `${RUN}-接送机政策`)).toBe(true);
+    expect(hits.some((h) => h.documentTitle === `${RUN}-研报速递政策`)).toBe(true);
   });
 
   it("approveDocument 不存在文档 → NOT_FOUND", async () => {
@@ -853,11 +853,11 @@ describe("G B 端 · KB 管理", () => {
 
   it("kb.setStatus disabled → 检索不可见；恢复 active 可检索", async () => {
     await trpc("service.kb.setStatus", { input: { documentId: docId, status: "disabled" }, token: bToken, method: "mutation" });
-    const off = await trpc("service.kb.search", { input: { query: `接送机预约 ${RUN}`, limit: 20 }, token: bToken });
-    expect((off.data as { hits: Array<{ documentTitle: string }> }).hits.some((h) => h.documentTitle === `${RUN}-接送机政策`)).toBe(false);
+    const off = await trpc("service.kb.search", { input: { query: `研报速递订阅 ${RUN}`, limit: 20 }, token: bToken });
+    expect((off.data as { hits: Array<{ documentTitle: string }> }).hits.some((h) => h.documentTitle === `${RUN}-研报速递政策`)).toBe(false);
     await trpc("service.kb.setStatus", { input: { documentId: docId, status: "active" }, token: bToken, method: "mutation" });
-    const on = await trpc("service.kb.search", { input: { query: `接送机预约 ${RUN}`, limit: 20 }, token: bToken });
-    expect((on.data as { hits: Array<{ documentTitle: string }> }).hits.some((h) => h.documentTitle === `${RUN}-接送机政策`)).toBe(true);
+    const on = await trpc("service.kb.search", { input: { query: `研报速递订阅 ${RUN}`, limit: 20 }, token: bToken });
+    expect((on.data as { hits: Array<{ documentTitle: string }> }).hits.some((h) => h.documentTitle === `${RUN}-研报速递政策`)).toBe(true);
   });
 });
 

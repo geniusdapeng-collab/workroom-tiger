@@ -1,38 +1,90 @@
 {
  "started": "2026-07-30",
  "initial_cash": 100000.0,
- "cash": 100000.0,
- "positions": [],
- "pending": [
-  {
-   "ticker": "CAT",
-   "shares": 26,
-   "stop_price": 579.3,
-   "risk_usd": 800.0,
-   "chain": "industrials",
-   "sector": "XLI",
-   "signal_date": "2026-07-30",
-   "note": "标准｜质量 7.47/10"
-  },
+ "cash": 98558.92,
+ "positions": [
   {
    "ticker": "STX",
-   "shares": 18,
-   "stop_price": 396.35,
-   "risk_usd": 280.0,
+   "shares": 3,
+   "entry_price": 480.3595,
+   "stop": 396.35,
+   "entry_date": "2026-09-01",
    "chain": "semis",
    "sector": "SMH",
-   "signal_date": "2026-07-30",
-   "note": "标准｜质量 7.97/10"
+   "risk_usd": 249.87,
+   "time_stop_days": 0,
+   "peak_price": 479.64,
+   "note": "标准｜质量 7.97/10",
+   "entry_raw": 479.64,
+   "friction_bps": 15.0
+  }
+ ],
+ "pending": [
+  {
+   "ticker": "TEAM",
+   "shares": 4,
+   "stop_price": 3655.6,
+   "risk_usd": 800.0,
+   "chain": "ai_compute",
+   "sector": "XLK",
+   "signal_date": "2026-09-01",
+   "time_stop_days": 7,
+   "note": "标准｜质量 9.37/10"
   },
   {
-   "ticker": "LRCX",
-   "shares": 21,
-   "stop_price": 277.97,
+   "ticker": "GTLB",
+   "shares": 3,
+   "stop_price": 4759.36,
+   "risk_usd": 800.0,
+   "chain": "ai_compute",
+   "sector": "XLK",
+   "signal_date": "2026-09-01",
+   "time_stop_days": 7,
+   "note": "标准｜质量 8.91/10"
+  },
+  {
+   "ticker": "ESTC",
+   "shares": 16,
+   "stop_price": 1100.55,
+   "risk_usd": 800.0,
+   "chain": "ai_compute",
+   "sector": "XLK",
+   "signal_date": "2026-09-01",
+   "time_stop_days": 7,
+   "note": "标准｜质量 8.91/10"
+  },
+  {
+   "ticker": "HPE",
+   "shares": 5,
+   "stop_price": 1213.02,
    "risk_usd": 280.0,
    "chain": "semis",
    "sector": "SMH",
-   "signal_date": "2026-07-30",
-   "note": "标准｜质量 7.86/10"
+   "signal_date": "2026-09-01",
+   "time_stop_days": 7,
+   "note": "标准｜质量 9.43/10"
+  },
+  {
+   "ticker": "SNPS",
+   "shares": 1,
+   "stop_price": 3580.89,
+   "risk_usd": 280.0,
+   "chain": "semis",
+   "sector": "SMH",
+   "signal_date": "2026-09-01",
+   "time_stop_days": 7,
+   "note": "标准｜质量 9.04/10"
+  },
+  {
+   "ticker": "DELL",
+   "shares": 3,
+   "stop_price": 1346.45,
+   "risk_usd": 280.0,
+   "chain": "semis",
+   "sector": "SMH",
+   "signal_date": "2026-09-01",
+   "time_stop_days": 7,
+   "note": "C｜质量 8.98/10"
   }
  ],
  "closed": [],
@@ -40,6 +92,10 @@
   {
    "date": "2026-07-30",
    "equity": 100000.0
+  },
+  {
+   "date": "2026-09-01",
+   "equity": 99992.44
   }
  ],
  "ops_log": [
@@ -49,6 +105,16 @@
     "😴 今日按兵不动——纪律优先，空仓也是一种仓位"
    ],
    "equity": 100000.0
+  },
+  {
+   "date": "2026-09-01",
+   "ops": [
+    "⚠️ CAT 开盘价漂移后风险/现金超限，放弃该信号",
+    "🟢 买入 STX 3 股 @ 479.64（开盘价成交，止损 396.35）",
+    "⚠️ LRCX 开盘价直接跌破止损 277.97，风险模型失效，信号作废",
+    "📋 新信号 6 只登记在册，明日开盘价成交（无未来函数）"
+   ],
+   "equity": 99992.44
   }
  ]
 }

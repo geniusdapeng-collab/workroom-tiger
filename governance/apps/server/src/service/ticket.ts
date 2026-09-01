@@ -39,14 +39,14 @@ export interface TicketEvent {
   detail: Record<string, unknown>; createdAt: string;
 }
 
-/** 部门路由表（kind → 受理部门；可按工作区配置化扩展） */
+/** 部门路由表（kind → 受理部门；可按工作区配置化扩展。老虎交易口径：交易域职能组） */
 export const DEPT_ROUTE: Record<string, string> = {
-  complaint: "客服部",
-  repair: "工程部",
-  delivery: "客房部",
-  service_request: "客房部",
-  consult: "前厅部",
-  other: "前厅部",
+  complaint: "值班负责人",
+  repair: "数据质量组",
+  delivery: "复盘组",
+  service_request: "复盘组",
+  consult: "合规组",
+  other: "合规组",
 };
 
 /** SLA 时限（小时，按 kind；演示口径） */

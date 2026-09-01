@@ -9,28 +9,28 @@ export function getDemoOrders(): Order[] {
   return [
     {
       id: "ORD-20260820-001",
-      title: `${brand}豪华大床房 · 2 晚`,
-      status: "已入住",
+      title: `${brand}API 推送·专业版（年付）`,
+      status: "服务中",
       checkIn: "2026-08-22",
-      roomType: "豪华大床房",
-      amount: 1376,
+      roomType: "API 推送·专业版",
+      amount: 599,
     },
     {
       id: "ORD-20260815-002",
-      title: "云端行政套房 · 1 晚",
+      title: "自选股池监测（≤50 只·月付）",
       status: "已完成",
       checkIn: "2026-08-15",
-      roomType: "行政套房",
-      amount: 1288,
+      roomType: "自选股池监测",
+      amount: 128,
     },
   ];
 }
 
 export function getDemoMember(): MemberInfo {
   return {
-    level: "金卡会员",
+    level: "专业版",
     points: 2680,
-    benefits: ["免费双人早餐", "延迟退房至 14:00", "客房免费升级（视房态）", "积分 1.2 倍累积"],
+    benefits: ["决策日报 + 个股深度免费看", "API 推送 300 次/分钟", "自选股池监测 8 折", "专属合规咨询通道"],
     demo: true,
   };
 }
@@ -39,7 +39,7 @@ export const demoTickets: Ticket[] = [
   {
     id: "TK-20260822-101",
     kind: "delivery",
-    title: "送物服务：补充两瓶矿泉水与牙具",
+    title: "数据服务：开通研报速递订阅（盘前 5 分钟）",
     status: "处理中",
     createdAt: "2026-08-22T19:42:00.000Z",
     slaDueAt: "2026-08-22T20:12:00.000Z",
@@ -47,14 +47,14 @@ export const demoTickets: Ticket[] = [
   {
     id: "TK-20260821-087",
     kind: "repair",
-    title: "维修报修：房间空调噪音偏大",
+    title: "异常申报：纳斯达克行情快照延时异常",
     status: "已完成",
     createdAt: "2026-08-21T14:05:00.000Z",
   },
   {
     id: "TK-20260820-066",
     kind: "complaint",
-    title: "投诉建议：早餐高峰等位时间过长",
+    title: "投诉建议：决策日报推送延迟 40 分钟",
     status: "已受理",
     createdAt: "2026-08-20T09:18:00.000Z",
   },
@@ -74,14 +74,14 @@ export function demoTimeline(ticketId: string): TimelineItem[] {
       action: "assigned",
       actorType: "agent",
       actorId: "AI-Concierge",
-      detail: "已派单至楼层服务组（演示流转）",
+      detail: "已派单至数据质量组（演示流转）",
       createdAt: new Date(base + 1000 * 60 * 5).toISOString(),
     },
     {
       action: "progress",
       actorType: "staff",
       actorId: "staff-0312",
-      detail: `工单 ${ticketId} 处理中，服务员已出发`,
+      detail: `工单 ${ticketId} 处理中，数据质量官已介入核对`,
       createdAt: new Date(base + 1000 * 60 * 18).toISOString(),
     },
   ];
@@ -91,19 +91,19 @@ export function getDemoNotifications(): NotificationItem[] {
   return [
     {
       kind: "ticket.accepted",
-      payload: { ticketId: "TK-20260822-101", title: "送物服务：补充两瓶矿泉水与牙具" },
+      payload: { ticketId: "TK-20260822-101", title: "数据服务：开通研报速递订阅（盘前 5 分钟）" },
       createdAt: "2026-08-22T19:42:10.000Z",
       read: false,
     },
     {
       kind: "ticket.completed",
-      payload: { ticketId: "TK-20260821-087", title: "维修报修：房间空调噪音偏大" },
+      payload: { ticketId: "TK-20260821-087", title: "异常申报：纳斯达克行情快照延时异常" },
       createdAt: "2026-08-21T15:30:00.000Z",
       read: true,
     },
     {
       kind: "member.benefit",
-      payload: { title: "会员权益到账", detail: "本月免费延迟退房权益已生效" },
+      payload: { title: "订阅权益到账", detail: "本月个股深度报告免费额度已生效" },
       createdAt: "2026-08-20T08:00:00.000Z",
       read: true,
     },
@@ -120,54 +120,54 @@ export function demoChatAnswer(text: string): {
 } {
   const brand = getConfig().brandName;
   const t = text.toLowerCase();
-  if (/订单|预订|入住/.test(text)) {
+  if (/净值|持仓|订单|订阅/.test(text)) {
     return {
       intent: "order.query",
-      answer: "为您查到以下订单，当前入住的是 8 月 22 日的豪华大床房，共 2 晚。如需续住或变更，请告诉我。",
+      answer: "为您查到以下订阅订单：API 推送·专业版（年付）服务中。模拟盘最新净值与持仓见上方卡片，逐笔留痕可回放。",
       confidence: 0.92,
       citations: [
         {
-          documentTitle: `${brand}预订政策`,
-          heading: "订单查询与变更",
-          content: "住客可凭手机号或会员号查询全部有效订单；入住当日 18:00 前可免费变更一次。",
+          documentTitle: `${brand}服务说明`,
+          heading: "净值与持仓查询",
+          content: "小虎模拟盘以 100,000 美元虚拟资金起步，逐笔留痕；净值与持仓每日随《决策日报》披露。",
         },
       ],
       cards: [{ kind: "order", data: getDemoOrders()[0] as unknown as Record<string, unknown> }],
     };
   }
-  if (/会员|积分|权益/.test(text)) {
+  if (/会员|积分|权益|专业版/.test(text)) {
     return {
       intent: "member.info",
-      answer: "您当前是金卡会员，积分 2680。金卡权益包含免费双早、延迟退房至 14:00 等，详情见下方会员卡。",
+      answer: "您当前是专业版，积分 2680。专业版权益包含决策日报 + 个股深度免费看、API 推送 300 次/分钟等，详情见下方会员卡。",
       confidence: 0.95,
       citations: [
         {
           documentTitle: `${brand}会员手册`,
-          heading: "金卡权益",
-          content: "金卡会员享免费双人早餐、延迟退房至 14:00、积分 1.2 倍累积。",
+          heading: "专业版权益",
+          content: "专业版享决策日报 + 个股深度免费看、API 推送 300 次/分钟、自选股池监测 8 折。",
         },
       ],
       cards: [{ kind: "member", data: getDemoMember() as unknown as Record<string, unknown> }],
     };
   }
-  if (/wifi|wi-fi|早餐|停车|退房/.test(t) || /早餐|停车|退房/.test(text)) {
+  if (/开仓|加仓|纪律|实盘|真实|建议/.test(t) || /开仓|加仓|纪律|实盘|真实|建议/.test(text)) {
     return {
       intent: "faq",
       answer:
-        "早餐位于 2 层云餐厅，营业时间 6:30–10:30；住客停车免费，出场前在前台扫码登记车牌即可；默认退房时间 12:00，金卡会员可延迟至 14:00。",
+        "开仓须同时满足 MRS*≥6、SHS≥7.5、TSS_final≥7.2，MRS*<4.0 禁止开仓——机械规则，模型无法越过。当前仅模拟盘运行，不做真实下单，不构成投资建议。",
       confidence: 0.88,
       citations: [
         {
-          documentTitle: `${brand}住客指南`,
-          heading: "餐饮 / 停车 / 退房",
-          content: "早餐 2 层云餐厅 6:30–10:30；住客免费停车；退房 12:00，会员可延迟。",
+          documentTitle: `${brand}交易纪律`,
+          heading: "开仓硬逻辑与合规",
+          content: "标准做多 MRS*≥6 且 SHS≥7.5 且 TSS_final≥7.2；仅模拟盘，不构成投资建议。",
         },
       ],
     };
   }
   return {
     intent: "fallback",
-    answer: "这个问题我还在学习中，已为您转专人处理，稍后会有服务员与您联系。您也可以直接描述需要的服务。",
+    answer: "这个问题我还在学习中，已为您转专人处理，稍后会有服务专员与您联系。您也可以直接描述需要的服务。",
     confidence: 0.42,
     citations: [],
   };
