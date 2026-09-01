@@ -262,7 +262,7 @@ export default function Onboarding() {
           <div className="space-y-4 rounded-xl border border-line bg-panel/70 p-5">
             <div className="text-sm font-bold">经营主体 <span className="text-xs font-normal text-ink3">写入门店档案，成为数字团队的上下文</span></div>
             <label className="block text-xs text-ink3">主体名称
-              <input className={`${inputCls} mt-1`} value={bizName} onChange={(e) => setBizName(e.target.value)} placeholder="如：云栖酒店" />
+              <input className={`${inputCls} mt-1`} value={bizName} onChange={(e) => setBizName(e.target.value)} placeholder="如：老虎基金" />
             </label>
             <label className="block text-xs text-ink3">行业
               <input className={`${inputCls} mt-1`} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="如：酒店民宿 / 餐饮 / 内容制作" />
@@ -341,7 +341,7 @@ export default function Onboarding() {
             <div className="space-y-2 rounded-lg border border-line p-3">
               <div className="text-xs font-bold text-ink">③ 试营业：问一句，看命中与依据</div>
               <div className="flex gap-2">
-                <input className={inputCls} placeholder="测试问题，如：退房时间是几点？" value={testQ} onChange={(e) => setTestQ(e.target.value)} />
+                <input className={inputCls} placeholder="测试问题，如：决策日报几点发？" value={testQ} onChange={(e) => setTestQ(e.target.value)} />
                 <button className={btnCls} disabled={testBusy || !testQ.trim()} onClick={() => void runTest()}>{testBusy ? "检索中……" : "试一句"}</button>
               </div>
               {testHits && (testHits.length === 0 ? (

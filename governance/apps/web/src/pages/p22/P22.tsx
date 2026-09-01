@@ -51,7 +51,7 @@ interface Overview {
 
 type Tab = "kb" | "tickets" | "stats";
 
-const DEPTS = ["客服部", "工程部", "客房部", "前厅部"];
+const DEPTS = ["值班负责人", "数据质量组", "复盘组", "风控组", "合规组"];
 const TICKET_STATUS: Array<{ key: string; label: string }> = [
   { key: "", label: "全部" },
   ...["created", "assigned", "processing", "done", "closed"].map((key) => ({ key, label: TICKET_STATUS_TEXT[key] ?? key })),
@@ -594,7 +594,7 @@ export default function P22() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
-              placeholder="如：退房时间是几点？"
+              placeholder="如：决策日报几点发？"
               className="flex-1 rounded-md border border-line bg-bg900 px-2.5 py-1.5 text-body text-ink outline-none focus:border-holo/50"
             />
             <button
