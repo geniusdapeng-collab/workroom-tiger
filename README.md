@@ -17,15 +17,15 @@
 
 ## 产品定位
 
-老虎交易以[财神爷 AI 炒股系统](docs/CAISHEN_README.md)为交易内核，以 [WorkLoom IM](governance/README.md) 为治理外壳，严格遵守[《AI 短线美股交易（1–15 天波段版）白皮书》](reports/AI短线美股交易白皮书_20260730.pdf)的全部交易纪律。
+老虎交易是一套**由 AI 基金经理统筹的全自动化交易系统**：以自研 21 环节管线与六层决策栈为交易内核，以 [WorkLoom IM](governance/README.md) 为治理外壳，严格遵守[《AI 短线美股交易（1–15 天波段版）白皮书》](reports/AI短线美股交易白皮书_20260730.pdf)的全部交易纪律。
 
 大多数 AI 炒股项目死在同一个地方：**让模型既当裁判又当运动员**——预测不可证、过程不可审、亏损不可追。老虎交易的答案是分层：**语义归 LLM，数值归规则，闸门必须确定**——LLM 只负责读新闻、评叙事、参与多空辩论；开仓、仓位、止损、熔断全部是确定性规则，同一输入永远同一输出。治理外壳再把每个交易动作变成可追责事件，把白皮书红线变成机器级保险的第二道锁。
 
 ```
 ┌──────────── WorkLoom IM 治理外壳（governance/，TypeScript）────────────┐
 │ 五元事件库(哈希链留痕) · 围栏引擎(白皮书阈值→block级基线) · Quest 编排    │
-│ night-shift 夜间夜班值守 · 审批卡片 · 组织记忆 · site 官网(责任界面)          │
-│ ┌────────── 财神爷交易内核（仓库根目录，Python，完整保留）──────────────┐ │
+│ night-shift 夜班值守 · 审批卡片 · 组织记忆 · site 官网(责任界面)          │
+│ ┌────────── 交易内核（仓库根目录，Python）─────────────────────────────┐ │
 │ │ 21 环节管线 · 六层决策栈(L0扫描/L1 MRS/L2 SHS/L2b ICS/L3 TSS/L4风控) │ │
 │ │ SearchHub 6源 · 七环行情降级链 · 零基线纪律 · journal→WFA→DSR        │ │
 │ │ 小G模拟盘 · 双页签HTML日报 · 复盘闭环(诸葛:归因/体检/提案审批)        │ │
@@ -34,7 +34,7 @@
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **交易内核**：仓库根目录即财神爷系统，[原 README 见此](docs/CAISHEN_README.md)。决策栈、阈值、风控公式以 `trading_system/config.py` 为 single source of truth。
+- **交易内核**：仓库根目录即交易内核（[完整文档](docs/CAISHEN_README.md)）。决策栈、阈值、风控公式以 `trading_system/config.py` 为 single source of truth。
 - **治理外壳**：`governance/` 为 WorkLoom IM 底座，只做治理不做决策——把每个交易动作变成可追责事件。接入设计见 [docs/GOVERNANCE.md](docs/GOVERNANCE.md)。
 - **行业角色包**：`governance/bundles/trading/`——AI 基金经理班组 presets、三层围栏包、投资 skills（根目录 `bundles/trading/` 为指向性说明）。
 
@@ -57,7 +57,7 @@
 - **五元事件库**：每个交易动作（谁 / 何时 / 对什么 / 做了什么 / 规则影响）append-only 落库，SHA-256 哈希链逐条锁定，`pnpm db:verify-chain` 可现场逐条重算；
 - **围栏引擎**：白皮书阈值编译为 block 级基线——突破红线的动作系统物理上无法执行；基线只可收紧不可放宽；
 - **Quest 编排与审批卡片**：复盘提案、参数调整、授权变更全部以审批卡呈现，人 30 秒批完；
-- **night-shift 夜间夜班值守**：盘后批量作业（复盘 / 归因 / 体检）落在免打扰时段，清晨交付决策包；
+- **night-shift 夜班值守**：盘后批量作业（复盘 / 归因 / 体检）落在免打扰时段，清晨交付决策包；
 - **组织记忆**：每轮决策的依据、每次驳回的理由沉淀为可检索记忆。
 
 ### AI 基金经理与数字 CEO
@@ -172,12 +172,12 @@ pnpm setup && pnpm preview:all
 
 | 文档 | 说明 |
 |---|---|
-| [docs/CAISHEN_README.md](docs/CAISHEN_README.md) | 财神爷交易内核完整文档 |
+| [docs/CAISHEN_README.md](docs/CAISHEN_README.md) | 交易内核完整文档 |
 | [reports/AI短线美股交易白皮书_20260730.pdf](reports/AI短线美股交易白皮书_20260730.pdf) | 交易理念白皮书（最高纪律） |
 | [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | WorkLoom 治理外壳接入设计 |
 | [docs/PROJECT_INTRO.md](docs/PROJECT_INTRO.md) / [docs/PROJECT_INTRO_EN.md](docs/PROJECT_INTRO_EN.md) | 项目介绍（中文详细版 / English） |
 | [README_EN.md](README_EN.md) | English README |
-| [research/UPGRADE_PLAN_v3.md](research/UPGRADE_PLAN_v3.md) | 升级方案（财神爷主体版，已确认） |
+| [research/UPGRADE_PLAN_v3.md](research/UPGRADE_PLAN_v3.md) | 升级方案（已确认） |
 | [research/01_benchmark.html](research/01_benchmark.html) | 调研一：行业标杆竞品深度调研（桥水 AIA 等 9 家） |
 | [research/02_frontline.html](research/02_frontline.html) | 调研二：投资团队一线作业与 know-how 调研 |
 | [docs/AGENT_CENSUS.md](docs/AGENT_CENSUS.md) | Agent 普查（20 个 Agent/模块分类） |
