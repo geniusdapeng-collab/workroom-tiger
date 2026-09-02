@@ -46,7 +46,8 @@
     "db:seed:trading": "tsx --env-file=.env scripts/seed-trading.ts",
     "quest:trading-nightly": "tsx --env-file=.env scripts/quest-trading-nightly.ts",
     "ingest:tiger-events": "tsx --env-file=.env scripts/ingest-tiger-events.ts",
-    "bridge:proposals": "tsx --env-file=.env scripts/proposal-bridge.ts"
+    "bridge:proposals": "tsx --env-file=.env scripts/proposal-bridge.ts",
+    "skill:forge": "tsx scripts/skill-forge.mts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
