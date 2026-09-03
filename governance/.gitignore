@@ -23,3 +23,4 @@ packages/runtime/dsh-gate/node_modules/
 
 # W2 打包产物
 dist/
+release/

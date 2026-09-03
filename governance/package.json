@@ -49,7 +49,9 @@
     "bridge:proposals": "tsx --env-file=.env scripts/proposal-bridge.ts",
     "skill:forge": "tsx scripts/skill-forge.mts",
     "app": "tsx scripts/desktop-app.mts",
-    "app:dev": "tsx scripts/desktop-app.mts --dev"
+    "app:dev": "tsx scripts/desktop-app.mts --dev",
+    "app:pack": "electron-builder --dir",
+    "app:dist": "electron-builder"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -63,7 +65,8 @@
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "yaml": "2.9.0",
-    "electron": "^44.1.1"
+    "electron": "^44.1.1",
+    "electron-builder": "^26.15.3"
   },
   "description": "WorkLoom IM · 企业级 Agent IM 底座（智能班组 + 围栏 + 人审 + 夜班）"
 }
