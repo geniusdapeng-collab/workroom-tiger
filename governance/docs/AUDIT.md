@@ -209,3 +209,11 @@ npm 最新 rc.7（latest）/ rc.8（next），与锁定 rc.8 一致——**无�
 - 评估 P3 清单第 1–3 项（DB 层加固，一个 commit 一项）；
 - apps/web 前端九大页走查（本轮聚焦后端与数据层，前端仅 build 验证 + DispatchBar #18 修复点代码确认）；
 - dsh 稳定 1.x 发布后按 §2.5 流程升级评估。
+
+
+## dsh 0.1.2-rc.1 升级登记（2026-09-05，随发布即升纪律；基座同步）
+
+- **变更面**：新增嵌入式 profile（sdk/sdk-minimal/acp）；agent-presets 改 configTrees 挂载；patchReload 热重载；sharp 图像附件链；全家桶统一 bump。
+- **动作**：vendor/dsh 换基线 0.1.2-rc.1（integrity 与 registry 逐字符一致 ✅）；dsh-gate pin 0.1.2-rc.1 + 清 lock 重装；README 中英 + oss 台账同步。
+- **坑位**：Node ≥22.15 zstd 硬要求（gate/生产须 Node 24）。
+- **验证**：基座 E6 dsh-gate 全绿（Node v24.9.0：全链验链 38 条 + kill -9 重放零重复）。
