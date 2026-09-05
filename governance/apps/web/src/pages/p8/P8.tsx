@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
+import { displayNameOf, setAliasLocal } from "../../lib/naming";
 import { AgentAvatarOf } from "../../components/AgentAvatar";
 import { FENCE_LEVEL_TEXT, actionText, dictText } from "../../lib/display";
 import { Bridge } from "../../shell/Bridge";
@@ -41,7 +42,7 @@ interface HumanRow {
   game: Game;
 }
 interface AgentRow {
-  id: string; presetKey: string; name: string; version: string; kind: string;
+  id: string; presetKey: string; name: string; alias?: string | null; version: string; kind: string;
   readonly: boolean; status: string; invalidReason: string | null;
   fenceBindings: string[]; skills: string[];
   nightShift: boolean; highRisk: boolean; description: string; online: boolean;
@@ -58,7 +59,7 @@ interface RosterList {
 }
 interface Profile {
   agent: {
-    id: string; presetKey: string; name: string; version: string; kind: string;
+    id: string; presetKey: string; name: string; alias?: string | null; version: string; kind: string;
     readonly: boolean; status: string; invalidReason: string | null;
     description: string; nightShift: boolean; highRisk: boolean;
     tools: Array<{ name: string; access: string; desc: string }>;
@@ -165,7 +166,7 @@ function AgentCard({ a, onOpen }: { a: AgentRow; onOpen: (id: string) => void })
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-body font-bold text-ink">
-            <span className="truncate">{a.name}</span>
+            <span className="truncate">{displayNameOf({ presetKey: a.presetKey, roleName: a.name })}</span>
             {a.online && (
               <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-holo shadow-[0_0_8px_rgba(77,150,255,.8)]" title="夜班在线（M4 窗口内自动上线）" />
             )}
