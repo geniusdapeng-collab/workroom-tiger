@@ -125,6 +125,7 @@ import {
   recheckBundle,
 } from "@workloom/base/bundles";
 import { serviceRouter } from "../service/router.js";
+import { appendEventOn } from "../service/events.js";
 import {
   buildEvolutionScorecard,
   decayMemories,
@@ -253,6 +254,7 @@ const onboardingRouter = router({
         llm: llmAssembly(),
         workspace: { name: ws.rows[0]?.name ?? "", events, members, agents, memories },
         workspaceId: scope.workspaceId,
+        // V4 §2 示例明示：示例包装配标记（SimBanner 银带语义事实源）
         bundle: { id: ws.rows[0]?.bundle_id ?? null, isExample: !!ws.rows[0]?.is_example },
       };
     } catch (err) {
@@ -504,6 +506,55 @@ const membersRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return listMembers(getAppPool(), scopeOf(ctx.identity));
   }),
+  /** F-NAME2：数字员工别名设置（显示层第三层；留痕上链，改别名零数据迁移） */
+  updateAlias: writeProcedure
+    .input(z.object({
+      memberNo: z.string().min(1),
+      alias: z.string().max(12).nullable(),          // null/空 = 清除别名回岗位名
+      presetKey: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = scopeOf(ctx.identity);
+      const app = getAppPool();
+      const client = await app.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+        const alias = input.alias?.trim() || null;
+        // 数字员工（agents，按 preset_key）优先；否则按人类成员 member_no
+        let objectType = "member";
+        let objectId = input.memberNo;
+        let r;
+        if (input.presetKey) {
+          r = await client.query(
+            `UPDATE agents SET alias=$3 WHERE preset_key=$1 AND workspace_id=$2 RETURNING id, name, alias`,
+            [input.presetKey, scope.workspaceId, alias],
+          );
+          objectType = "agent";
+          objectId = input.presetKey;
+        } else {
+          r = await client.query(
+            `UPDATE members SET alias=$3 WHERE member_no=$1 AND workspace_id=$2 RETURNING member_no, name, alias`,
+            [input.memberNo, scope.workspaceId, alias],
+          );
+        }
+        if (!r.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: `成员 ${input.memberNo} 不存在` });
+        await appendEventOn(client, { workspaceId: scope.workspaceId, tenantId: scope.tenantId },
+          { id: ctx.identity.memberNo, type: "human" }, {
+            objectType, objectId,
+            action: alias ? "member.alias.set" : "member.alias.clear",
+            after: { alias, preset_key: input.presetKey ?? null },
+          });
+        await client.query("COMMIT");
+        return { member: r.rows[0] };
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
+      }
+    }),
 });
 
 /** threads router：list（L7.1 越权返回空）/ dispatch（Quest 接口；H-10 越版 403+留痕） */
@@ -1061,6 +1112,9 @@ const skillsRouter = router({
         return { eventId: await rejectSuggestion(getGatewayPool(), scopeOf(ctx.identity), { ...input, by: ctx.identity.memberNo }) };
       }),
   }),
+  /** 技能保鲜环 · 下行分发（方案 v0.2 P0：官方运营台 → 客户实例）
+   *  红线：L0/L1 内容面可静默（策略可配）；L2 执行面/权限面永不静默走审批；
+   *        staging 五道预检不过不装载；一切动作进事件库哈希链 */
   skillOps: router({
     /** 分发状态投影（技能中心：staging 列表 / 静默策略 / 同步游标） */
     status: protectedProcedure.query(async ({ ctx }) => {
@@ -2594,8 +2648,8 @@ const captainRouter = router({
          ORDER BY seq DESC LIMIT 1`,
         [scope.workspaceId],
       );
-      const agents = await client.query<{ id: string; preset_key: string; name: string }>(
-        `SELECT id, preset_key, name FROM agents WHERE workspace_id=$1 AND status='ready' ORDER BY id LIMIT 12`,
+      const agents = await client.query<{ id: string; preset_key: string; name: string; alias: string | null }>(
+        `SELECT id, preset_key, name, alias FROM agents WHERE workspace_id=$1 AND status='ready' ORDER BY id LIMIT 12`,
         [scope.workspaceId],
       );
       const grades = await client.query<{ agent_id: string; grade: string }>(
@@ -2612,7 +2666,7 @@ const captainRouter = router({
          FROM biz_events WHERE workspace_id=$1
          AND payload->'decision'->'after'->>'text' NOT LIKE '%E2E-%'
          AND payload->'decision'->>'action' NOT LIKE 'test.%'
-         ORDER BY seq LIMIT 14`.replace("ORDER BY seq LIMIT", "ORDER BY seq DESC LIMIT"),
+         ORDER BY seq DESC LIMIT 14`,
         [scope.workspaceId],
       );
       const ind = await client.query<{ industry: string | null }>(
@@ -2632,7 +2686,7 @@ const captainRouter = router({
         latestBriefing: briefing.rows[0]
           ? { text: String(((briefing.rows[0].payload.decision as Record<string, unknown>).after as Record<string, unknown>)?.text ?? ""), at: briefing.rows[0].created_at }
           : null,
-        satellites: agents.rows.map((a) => ({ id: a.id, presetKey: a.preset_key, name: a.name, grade: gradeMap[a.id] ?? "正常" })),
+        satellites: agents.rows.map((a) => ({ id: a.id, presetKey: a.preset_key, name: a.name, alias: a.alias, grade: gradeMap[a.id] ?? "正常" })),
         ticker: events.rows,
         floor,
       };
