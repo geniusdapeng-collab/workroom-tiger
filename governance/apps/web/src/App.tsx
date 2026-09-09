@@ -42,6 +42,7 @@ function Shell() {
       {!bare && <SideNav />}
       {!bare && <LoomMate />}
       <div className="min-w-0 flex-1">
+
         <StarRing />
         <Routes>
       <Route path="/" element={<P0 />} />
@@ -75,7 +76,7 @@ function Shell() {
         isGuest() ? <Navigate to="/login?next=/onboarding" replace /> : <Onboarding />
       } />
       <Route path="/dev" element={<Bridge><DevMatrix /></Bridge>} />
-          <Route path="*" element={<P0 />} />
+      <Route path="*" element={<P0 />} />
         </Routes>
       </div>
       {/* 游客模式浮标（F-GUEST1：随时可去正式开通/登录） */}
