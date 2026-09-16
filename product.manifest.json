@@ -11,7 +11,7 @@
   "release": {
     "appId": "com.geniusdapeng.workroomtiger",
     "channel": "stable",
-    "artifactPrefix": "Workroom Tiger",
+    "artifactPrefix": "Workroom.Tiger",
     "workflow": ".github/workflows/build-desktop.yml",
     "website": "apps/site"
   },
