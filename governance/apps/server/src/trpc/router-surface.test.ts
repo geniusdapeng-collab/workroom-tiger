@@ -12,4 +12,13 @@ describe("三端访问权威路由面", () => {
 
     await expect(caller.access.me()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
+
+  it("挂载首次欢迎状态、进度保存与重播端点", () => {
+    const procedures = (appRouter as unknown as {
+      _def: { procedures: Record<string, unknown> };
+    })._def.procedures;
+    expect(procedures).toHaveProperty("onboarding.welcomeStatus");
+    expect(procedures).toHaveProperty("onboarding.saveWelcomeProgress");
+    expect(procedures).toHaveProperty("onboarding.replayWelcome");
+  });
 });
