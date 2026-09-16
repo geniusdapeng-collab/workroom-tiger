@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T15]
+coverage: []
 skills: [debate-facilitation]
 tools:
   - { name: docs.scored.read, access: read, desc: 读取交叉验证后文档集 }

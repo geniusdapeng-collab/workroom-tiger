@@ -8,6 +8,7 @@ readonly: true
 night_shift: false
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: [steady-return-review]
 tools:
   - { name: sim.read, access: read, desc: 三市净值曲线读取 }

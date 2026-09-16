@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: tech.signals.read, access: read, desc: 读取子集群四路输出 }

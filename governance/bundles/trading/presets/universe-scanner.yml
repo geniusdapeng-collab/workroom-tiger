@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T14]
+coverage: []
 skills: []
 tools:
   - { name: market.ohlcv.read, access: read, desc: 读取全市场行情（降级链） }

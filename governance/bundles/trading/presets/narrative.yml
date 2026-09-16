@@ -2,12 +2,13 @@
 preset_key: narrative
 name: 叙事分析官
 version: v6.3
-kind: llm_semantic
-description: SHS 叙事兑现维度。从财报电话会/新闻推理 EPS 修正方向 × 指引语气 → 0..10 分，注入板块评分。
+kind: llm-semantic
+description: 叙事兑现维度。从财报电话会和新闻推理每股收益修正方向与指引语气，形成板块评分。
 readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T15]
+coverage: []
 skills: []
 tools:
   - { name: docs.scored.read, access: read, desc: 读取交叉验证后文档集 }

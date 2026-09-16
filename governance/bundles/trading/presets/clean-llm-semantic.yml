@@ -2,12 +2,13 @@
 preset_key: clean-llm-semantic
 name: 清洗员·语义标注
 version: v6.3
-kind: llm_semantic
+kind: llm-semantic
 description: 实体消歧/情感标注/事件抽取/关联推断，逐篇产出结构化语义标注。
 readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T15]
+coverage: []
 skills: []
 tools:
   - { name: docs.base.read, access: read, desc: 读取规则清洗后文档 }

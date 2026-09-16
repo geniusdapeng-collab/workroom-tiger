@@ -8,6 +8,7 @@ readonly: true
 night_shift: false
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: calibration.samples.read, access: read, desc: 读取校准样本库（会计账） }

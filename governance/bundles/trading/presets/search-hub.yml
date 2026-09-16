@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: search.query, access: read, desc: 六源搜索查询 }

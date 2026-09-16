@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: market.global.read, access: read, desc: 读取全球联动标的行情 }

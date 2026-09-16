@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: options.chain.read, access: read, desc: 读取期权链快照 }

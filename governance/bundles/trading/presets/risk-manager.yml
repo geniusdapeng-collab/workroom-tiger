@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T1, R-T2, R-T5, R-T6, R-T9, R-T10, R-T11, R-T12, R-T13]
+coverage: []
 skills: []
 tools:
   - { name: market.quote.read, access: read, desc: 读取候选报价 }

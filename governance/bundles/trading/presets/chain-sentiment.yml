@@ -2,12 +2,13 @@
 preset_key: chain-sentiment
 name: 链舆情分析官
 version: v6.3
-kind: llm_semantic
-description: 产业链舆情温度。六子链 heat × sentiment × 叙事变化的情感分析与热度聚合。
+kind: llm-semantic
+description: 产业链舆情温度。汇总六条子链的情感、热度与叙事变化。
 readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T15]
+coverage: []
 skills: []
 tools:
   - { name: docs.scored.read, access: read, desc: 读取交叉验证后文档集 }

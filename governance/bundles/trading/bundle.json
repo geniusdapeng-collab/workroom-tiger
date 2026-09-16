@@ -1,10 +1,19 @@
 {
+  "schemaVersion": "workloom.bundle/v1",
   "name": "@workloom/trading",
   "version": "0.1.0",
   "workloom": {
     "industry": "trading",
     "displayName": "WorkLoom for Trading · 老虎交易（AI 基金经理班组）",
-    "description": "老虎交易行业角色包：33 个 Agent preset（内核 20 + 辩论/校准/数据/合规 6 + 复盘条线 4 + 执行类 3）+ 白皮书阈值三层围栏包（从 config.py 生成，单一口径）+ 投资技能套件 + 对象/阶段枚举（UPGRADE_PLAN_v3 §3.3/§3.5）",
+    "description": "老虎交易行业角色包：37 个数字投研岗位、三层围栏、投资技能套件及对象与阶段枚举，仅用于模拟盘研究和决策演练。",
+    "status": "candidate",
+    "owner": "WorkLoom 老虎资产管理产品组",
+    "example": false,
+    "compatibility": {
+      "base": ">=0.1.0 <1.0.0",
+      "ui": ">=0.1.0 <1.0.0",
+      "contract": "2.0.0"
+    },
     "provides": {
       "presets": [
         "presets/universe-scanner.yml",
@@ -39,9 +48,15 @@
         "presets/strategy-optimizer.yml",
         "presets/premarket-trader.yml",
         "presets/intraday-trader.yml",
-        "presets/portfolio-ops.yml"
+        "presets/portfolio-ops.yml",
+        "presets/global-allocator.yml",
+        "presets/global-sentinel.yml",
+        "presets/portfolio-risk-officer.yml",
+        "presets/return-steward.yml"
       ],
-      "fences": ["fences/trading-baseline.yml"],
+      "fences": [
+        "fences/trading-baseline.yml"
+      ],
       "skills": [
         "skills/premarket-plan/SKILL.md",
         "skills/daily-attribution/SKILL.md",
@@ -54,7 +69,163 @@
         "schemas/objects.json",
         "schemas/stages.json"
       ],
-      "ui": ["ui/cases.json"]
+      "ui": [
+        "ui/cases.json"
+      ],
+      "serviceFront": [
+        "service-front/client.json",
+        "service-front/delivery-catalog.json",
+        "service-front/faq.json",
+        "service-front/repair-catalog.json"
+      ],
+      "seeds": [],
+      "pipelines": [],
+      "library": [],
+      "segmentDefaults": [],
+      "connectors": [],
+      "modelPolicy": "model-policy.yml",
+      "feedbackEnums": "feedback-enums.yml"
+    },
+    "ui": {
+      "schemaVersion": "workloom.bundle.ui/v1",
+      "terminology": {
+        "businessObject": "模拟投资研究事项",
+        "customer": "投资者",
+        "operation": "模拟资产管理"
+      },
+      "navigation": {
+        "slots": []
+      },
+      "home": {
+        "widgets": [
+          {
+            "slot": "home.quick-tasks",
+            "component": "QuickTaskList",
+            "clients": [
+              "pc",
+              "b-mobile"
+            ],
+            "props": {
+              "tasks": [
+                "查看盘前研究",
+                "复核风险提示",
+                "检查模拟组合",
+                "阅读归因复盘"
+              ]
+            }
+          }
+        ]
+      },
+      "welcome": {
+        "system": [
+          "这是一套仅用于模拟盘研究与纪律训练的智能资产管理系统，不构成投资建议，也不会执行真实资金交易。"
+        ],
+        "keywords": [
+          "模拟盘",
+          "风险纪律",
+          "研究留痕",
+          "归因复盘"
+        ]
+      },
+      "objects": [
+        "研究命题",
+        "模拟组合",
+        "风险提示",
+        "复盘记录"
+      ],
+      "workflows": [
+        "盘前研究",
+        "规则校验",
+        "模拟执行",
+        "风险复核",
+        "归因复盘"
+      ],
+      "serviceFront": {
+        "enabled": true,
+        "identityPolicy": "disabled",
+        "tabs": [
+          "对话",
+          "工单",
+          "消息",
+          "我的"
+        ],
+        "services": [
+          "查看模拟组合",
+          "查看市场简报",
+          "提交咨询工单"
+        ]
+      },
+      "inspection": {
+        "enabled": false
+      },
+      "theme": {
+        "brand": {
+          "primary": "#d97706",
+          "onPrimary": "#111827",
+          "accent": "#ef4444"
+        }
+      },
+      "permissions": [],
+      "experiments": []
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "digest": "1c29e7ef1dbf8f9b83ce4b58757c7c625521d5e2f28bcc7bb1a25113ca4b7792",
+    "assets": {
+      "feedback-enums.yml": "efd126b6b8d88d0464654e5217a5e1da798a71ce1d8247f6794418f696c7e548",
+      "fences/trading-baseline.yml": "6453c367918d1aaa3af7765799ee83c257b62ce830ac685ecc15b437357779b0",
+      "model-policy.yml": "5834c591ae449bc0d1feabe21812fc4a29f35ddf63c1641054dac4cf1f914836",
+      "presets/attribution-analyst.yml": "efc11fc22e045a5a006f974ef3062a04c430f848c479be90a8643e6411bc3f36",
+      "presets/backtest-wfa.yml": "708eeca432a967240bb8d88b317a8abf795ce368b230026f537bb12a0df39fa2",
+      "presets/bear-researcher.yml": "59258cf3201324acbb62e9ded71122f9ca548023f0ac428f02a7d1779ceecf3a",
+      "presets/bull-researcher.yml": "8eda8b5db79c48b1a063a204bffc1365681a4a3b19966d0b09c4311926a1c012",
+      "presets/calibration-officer.yml": "8eababc4b5f03a3bec245a113283ee929552927b4a76d64655c8caf3951865db",
+      "presets/chain-cycle.yml": "ba8176ebe5732902523d322b98ec09e081322afa4396175cde165426ef3c7a22",
+      "presets/chain-risk.yml": "81febf505a1e95a0c3ae71cac87c256341975c3f61e4b5735db441e429592166",
+      "presets/chain-sentiment.yml": "58c0f41c443fa244c9cfaccbb49e6f9f64fb17d2dddcc7af21a7c4b710d4f380",
+      "presets/clean-llm-semantic.yml": "2e588743f92dd6c9681c6338f53f0051b0c000462f861d327d85eb083b94ea43",
+      "presets/clean-rule-base.yml": "0d2cd52672b41329b41854bbe725dcc898bdd78c35f40661fff1c06ae8b8fcec",
+      "presets/compliance-officer.yml": "e01aeba232a7cadff3acb91f2f440bb0d7ecdd686392b44566724f9b093b0585",
+      "presets/cycle-linkage.yml": "5f8750685168a7f0a163268a4c042cedff9b906095645a5edac4088bf7e0aeac",
+      "presets/data-steward.yml": "c22e6ed57c428bfe45aa13e78bcfb7d582d2f9469de3ec13db16c5d196325198",
+      "presets/debate-coordinator.yml": "3d87e67c0b5324eec7e40e975d703cb026929f3778a458690bac751be9f61305",
+      "presets/global-allocator.yml": "b820c9a6723506467311017c620ea09eb5cdffc5320ecb4002425292bca388da",
+      "presets/global-sentinel.yml": "5e9a4a3548cbd200d0f7bfe79f07dc023e40828b7e6694c635a89cd61933bed6",
+      "presets/intraday-trader.yml": "70868c86c8ad31636fdbc7203c270260fc6e95b8d823b8487293f2e86ef2e4b9",
+      "presets/journal-triggers.yml": "e3682ceb182a4afd986233db4dd6a364178ef2170727d023c67ab6bd1d395007",
+      "presets/mrs.yml": "f17562f7df861f4e178de902465aa1011a4efdf73d46b009882a739cf413ac5e",
+      "presets/narrative.yml": "add63f8da83d8bffd19f3809d51ae788921887c00f94772efefc7693daff64a5",
+      "presets/options-metrics.yml": "0a41271cf688a73d6cc735ace90805dc7f77aa6f3af35f2ff1b740dd06530f0d",
+      "presets/portfolio-ops.yml": "c05bdae1fc73eab48e4ade9974724ec1a14e1e87460a93e60727e11106638e39",
+      "presets/portfolio-risk-officer.yml": "68bc3513ba69d870f7df0d7fcb350cdf51eeba09598d1967a3f123d26ab02103",
+      "presets/premarket-trader.yml": "d41c734a6cc9517f27bf3244ec6e94b4c49ad88b30f2a2cfcf6b926e73607eb7",
+      "presets/report-main.yml": "c24af14299e272f33458958d5c014039bbb5ad0134c549d617c3944d78795b23",
+      "presets/return-steward.yml": "81e419a2298ce0c6ea2148be116643e1dd7bdd986ffe7dcd5b1f6ce7233efbbb",
+      "presets/review-chief.yml": "887f1eab7d4651c6fb11f6be9f811f75872e4a84633d92b15ce172fc104316d7",
+      "presets/risk-manager.yml": "ad807b8f0390400c5af618f86427b927d6467a6ab9b27e74eb4f189d9da37ead",
+      "presets/search-hub.yml": "490484168122edd82829b21cab48bd01ead19d0500f488ba1fea564b5ecd565e",
+      "presets/search-sources.yml": "acc5df5879e84d9b696ac4251a3f4a79512f8a9a0b0fbbbc61f64a666ae62992",
+      "presets/sector.yml": "991c39c680cf254bb586fb2559b10c53f8079eecd985db00121859011a069e9e",
+      "presets/statistician.yml": "1a3e344ae19ea643b1236a19876da19c11d919e30acdf85019a22aeccc8b1ebb",
+      "presets/strategy-optimizer.yml": "ac498ec16f9658ebaeb56a8630dc39c9b08cde0c6fa6527db28673ef42a2c2ce",
+      "presets/tech-chain-fusion.yml": "8d23062102499db88062e6145c9bb63800fe9b501b1b2734a17806388e8f2b0f",
+      "presets/tech-chain-monitor.yml": "5854c53cca4bd560c21ba0cc10b7a09f0281c6c9e3bdaa8b2e75b07cc4584d2e",
+      "presets/tss.yml": "2e43ccebde2a7ecc346b0a500bbc34d15c5ae28e8bccc30a1136dbaaaeadba99",
+      "presets/universe-scanner.yml": "68d344cba035d549c099b0b837d8aab46d5b6e63a8f009228fa08f638cb82963",
+      "schemas/objects.json": "73c229025b5be07ad60cad9bb4505f1ce3af7cf47f0988f692a22c26c6c25903",
+      "schemas/stages.json": "a074df7d2bc3413026604228f400500c38da62caeadc067a5ab648e2e5fa8645",
+      "service-front/client.json": "4b09614602d4779a64f36177df3c36f8cd6c4498fdafb3f8b2a915352b26c3ea",
+      "service-front/delivery-catalog.json": "f7e1c1f1de01caf0a7c69655c6356748fba775f155cf5161f72acd9d1a073819",
+      "service-front/faq.json": "ab027315b9959a10ffd6aa9ff7695d49b2c350fcffa3698f28e90c0742b81bf0",
+      "service-front/repair-catalog.json": "2e493993daab4503875220b3b4d8bb5c8216d4b048874d27b4a27e9c45f1c384",
+      "skills/daily-attribution/SKILL.md": "3fd88c388849521353e0d945fe6cab79bd48d791a4190293f301e10fd507066c",
+      "skills/data-hygiene-audit/SKILL.md": "ee443049218b78f4649f0af79f5c10074b3e4c6ef1523abe40dbeecf5b04ef81",
+      "skills/debate-facilitation/SKILL.md": "90e616a656d5b6684fe8b94bf3b0bbe844c79a06206505b8a8b7101f8e324416",
+      "skills/premarket-plan/SKILL.md": "9fc76ce4e3645f2ce4519a0118636f455f618e6c5b079314d7adb367de0b2381",
+      "skills/regulatory-watch/SKILL.md": "7854f262bebb0205e0c556146f296b89244da96b4f5347ffe2096a93b46aacb4",
+      "skills/wfa-tuning/SKILL.md": "64a1b01ab3c58b67d3a51c1980242190f4535a90097b604e1989ae67e6225873",
+      "ui/cases.json": "e3c1c1a5156ae1965c9626472587befad1765e6626da2de2fa7289f37e7ede00"
     }
   }
 }

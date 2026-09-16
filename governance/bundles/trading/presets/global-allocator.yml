@@ -4,10 +4,12 @@ name: 全球资产配置官
 version: v0.1
 kind: portfolio
 description: 资产管理团队负责人。三市仓位分布决策——MRS*/TOS 加权 + 组合 Gross Cap 截断，产出配置方案（预算口径，不产生交易动作）。
-readonly: true
+readonly: false
 night_shift: false
 high_risk: false
 fence_bindings: [R-T0]
+coverage:
+  - { eventPrefix: "trading.global-allocator.", label: "全球资产配置职责" }
 skills: [global-allocation]
 tools:
   - { name: result.read, access: read, desc: 读取三市当日 result（MRS*/cap/picks/TOS） }

@@ -3,11 +3,12 @@ preset_key: search-sources
 name: 搜索源集群
 version: v6.3
 kind: search
-description: 6 源接口适配与解析（edgar/federal_register/patentsview/kimi_search/google_news/kimi_fetch），T0-T3 可信度分级落地。
+description: 六类信息源的接口适配、解析与可信度分级落地。
 readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: source.fetch, access: read, desc: 各源抓取与解析 }

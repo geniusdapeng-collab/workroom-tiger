@@ -2,12 +2,13 @@
 preset_key: chain-risk
 name: 链风险预警官
 version: v6.3
-kind: llm_semantic
+kind: llm-semantic
 description: 产业链风险识别。8-K/公报/专利/新闻的事件抽取与传导推断，输出分级预警。
 readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T15]
+coverage: []
 skills: []
 tools:
   - { name: docs.cleaned.read, access: read, desc: 读取清洗后文档全集 }

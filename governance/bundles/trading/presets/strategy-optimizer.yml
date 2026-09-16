@@ -8,6 +8,7 @@ readonly: true
 night_shift: false
 high_risk: false
 fence_bindings: [R-P1]
+coverage: []
 skills: [wfa-tuning]
 tools:
   - { name: backtest.run, access: read, desc: 运行无未来函数回测/WFA }

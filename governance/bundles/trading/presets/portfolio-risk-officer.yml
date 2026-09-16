@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: true
 fence_bindings: [R-T9]
+coverage: []
 skills: [portfolio-risk-budget]
 tools:
   - { name: sim.read, access: read, desc: 三市模拟盘台账读取 }

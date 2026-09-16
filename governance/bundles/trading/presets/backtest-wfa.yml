@@ -8,6 +8,7 @@ readonly: true
 night_shift: false
 high_risk: false
 fence_bindings: [R-P1]
+coverage: []
 skills: [wfa-tuning]
 tools:
   - { name: market.history.read, access: read, desc: 读取历史行情 }

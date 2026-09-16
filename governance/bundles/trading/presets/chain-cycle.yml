@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T5]
+coverage: []
 skills: []
 tools:
   - { name: market.chain.read, access: read, desc: 读取产业链上中下游行情 }

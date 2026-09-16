@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T5, R-T6, R-T9]
+coverage: []
 skills: []
 tools:
   - { name: portfolio.state.read, access: read, desc: 读取组合净值/敞口/持仓 }

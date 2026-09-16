@@ -9,6 +9,8 @@ readonly: false
 night_shift: true
 high_risk: true
 fence_bindings: [R-T1, R-T2, R-T7, R-T8, R-T9, R-T10, R-T12, R-T13]
+coverage:
+  - { eventPrefix: "trading.intraday-trader.", label: "盘中交易员职责" }
 skills: [premarket-plan]
 tools:
   - { name: market.quote.read, access: read, desc: 读取盘中实时报价（陈旧弃用） }

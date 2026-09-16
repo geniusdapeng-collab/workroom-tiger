@@ -8,6 +8,7 @@ readonly: true
 night_shift: false
 high_risk: false
 fence_bindings: [R-T7, R-T8, R-P1]
+coverage: []
 skills: [regulatory-watch]
 tools:
   - { name: compliance.rules.read, access: read, desc: 读取三市合规规则包 }

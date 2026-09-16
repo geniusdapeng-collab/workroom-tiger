@@ -8,6 +8,7 @@ readonly: true
 night_shift: false
 high_risk: false
 fence_bindings: []
+coverage: []
 skills: []
 tools:
   - { name: journal.read, access: read, desc: 读取信号台账 }

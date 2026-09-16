@@ -8,6 +8,7 @@ readonly: true
 night_shift: true
 high_risk: false
 fence_bindings: [R-T1, R-T13]
+coverage: []
 skills: [premarket-plan]
 tools:
   - { name: market.quote.read, access: read, desc: 读取盘前报价 }
