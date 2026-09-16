@@ -21,7 +21,7 @@ import {
 } from "@workloom/base/tenancy";
 import { gatewayAppend, gatewayAppendOnClient, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
 import { makeReadableId } from "@workloom/shared";
-import { capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, writeProcedure } from "./context.js";
+import { capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
 import { accountsRouter } from "./accounts-router.js";
 import {
   ApprovalError,
@@ -126,6 +126,10 @@ import {
   recheckBundle,
 } from "@workloom/base/bundles";
 import { serviceRouter } from "../service/router.js";
+import {
+  AccessAuthorityError,
+  resolveAuthoritativeClientAccess,
+} from "../service/access-authority.js";
 import {
   buildEvolutionScorecard,
   decayMemories,
@@ -491,6 +495,34 @@ const authRouter = router({
       }
       const identity: Identity = { ...ctx.identity, plan: input.plan };
       return { token: await signDemoToken(identity), plan: input.plan };
+    }),
+});
+
+function accessRethrow(error: unknown): never {
+  if (error instanceof AccessAuthorityError) {
+    throw new TRPCError({
+      code: error.code === "SESSION_INVALID" ? "UNAUTHORIZED"
+        : error.code === "TARGET_REQUIRED" ? "BAD_REQUEST"
+          : "FORBIDDEN",
+      message: error.message,
+    });
+  }
+  throw error;
+}
+
+/**
+ * 三端访问权威接口：导航、深链与动作均消费服务端实时身份和已验 Bundle 投影。
+ * 此入口必须与 NavigationAccessProvider 同步挂载；缺失时游客首屏会失败关闭。
+ */
+const accessRouter = router({
+  me: sessionProcedure
+    .input(z.object({ tenantId: z.string().min(1), workspaceId: z.string().min(1) }).optional())
+    .query(async ({ ctx, input }) => {
+      try {
+        return await resolveAuthoritativeClientAccess(ctx.session, input);
+      } catch (error) {
+        accessRethrow(error);
+      }
     }),
 });
 
@@ -2737,6 +2769,7 @@ export const appRouter = router({
   system: systemRouter,
   onboarding: onboardingRouter,
   auth: authRouter,
+  access: accessRouter,
   accounts: accountsRouter,
   members: membersRouter,
   threads: threadsRouter,
