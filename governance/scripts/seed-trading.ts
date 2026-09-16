@@ -145,6 +145,20 @@ async function main() {
   }
   console.log(`✓ 官方技能 ×${nSkill} 已安装（安装即绑定围栏）`);
 
+  // 游客首进场只接受与产品 defaultBundle 精确匹配的唯一 active 安装。
+  await q(
+    `UPDATE bundle_installs SET status='inactive'
+     WHERE workspace_id=$1 AND bundle_id<>'trading' AND status='active'`,
+    [WS_ID],
+  );
+  await q(
+    `INSERT INTO bundle_installs (id, workspace_id, bundle_id, assets, status)
+     VALUES ($1,$2,'trading',$3,'active')
+     ON CONFLICT (id) DO UPDATE SET bundle_id='trading', status='active'`,
+    [`bi-${WS_ID}-trading`, WS_ID, JSON.stringify({ seed_batch_id: `seed-trading-${WS_ID}` })],
+  );
+  console.log("✓ 交易 Bundle active 装配台账已就绪（游客体验入口）");
+
   // 账户档案（风险预算——客户 patch 层的合法来源）
   await q(
     `INSERT INTO profiles (workspace_id, tenant_id, industry, archive, forbidden, pii_vault)
