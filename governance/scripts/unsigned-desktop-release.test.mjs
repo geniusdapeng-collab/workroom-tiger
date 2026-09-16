@@ -91,6 +91,8 @@ test("产品身份、端口与固定下载资产名保持一致", () => {
 
 test("单一发布器先封存候选，再以 Draft 原子发布五项资产并披露 unsigned 风险", () => {
   assert.ok((workflow.match(/desktop-release-finalizer\.mjs seal-platform/g) ?? []).length >= 2);
+  assert.equal((workflow.match(/merge-multiple: true/g) ?? []).length, 2);
+  assert.doesNotMatch(workflow, /uses: actions\/download-artifact@v4\s+with:\s+name:/u);
   assert.match(workflow, /--draft --latest=false/u);
   assert.match(workflow, /--draft=false --latest=true/u);
   assert.match(workflow, /isImmutable/u);
