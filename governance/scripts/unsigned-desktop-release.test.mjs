@@ -13,9 +13,12 @@ const verifier = readFileSync(resolve(governanceRoot, "scripts/verify-product-co
 const packageJson = JSON.parse(readFileSync(resolve(governanceRoot, "package.json"), "utf8"));
 const product = JSON.parse(readFileSync(resolve(repositoryRoot, "product.manifest.json"), "utf8"));
 
-test("tag 发布显式选择 unsigned，手动发布保留 signed/unsigned 两条路径", () => {
+test("仅允许从 main 手动发布，默认 unsigned 并保留 signed/unsigned 两条路径", () => {
   assert.match(workflow, /platform_signing:[\s\S]*options: \[signed, unsigned\][\s\S]*default: unsigned/u);
-  assert.match(workflow, /PLATFORM_SIGNING: \$\{\{ github\.event_name == 'push' && 'unsigned' \|\| inputs\.platform_signing \}\}/u);
+  assert.match(workflow, /on:\s*\n\s*workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /push:\s*\n\s*tags:/u);
+  assert.match(workflow, /PLATFORM_SIGNING: \$\{\{ inputs\.platform_signing \}\}/u);
+  assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/u);
   assert.match(workflow, /if: env\.PLATFORM_SIGNING == 'signed'/u);
   assert.match(workflow, /if: env\.PLATFORM_SIGNING == 'unsigned'/u);
 });
@@ -48,6 +51,8 @@ test("投影在两个平台都生成并验收", () => {
 
 test("三平台 unsigned 打包关闭自动证书发现并只在 signed 模式验签", () => {
   assert.ok((workflow.match(/CSC_IDENTITY_AUTO_DISCOVERY: "false"/g) ?? []).length >= 3);
+  assert.doesNotMatch(workflow, /(?:CSC_LINK|CSC_KEY_PASSWORD|APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|APPLE_TEAM_ID|WIN_CSC_LINK|WIN_CSC_KEY_PASSWORD)\s*:\s*["']{2}/u);
+  assert.ok((workflow.match(/retry\(\)/g) ?? []).length >= 6);
   assert.ok((workflow.match(/-c\.mac\.notarize=false/g) ?? []).length >= 2);
   assert.match(workflow, /if \[ "\$PLATFORM_SIGNING" = "signed" \]; then[\s\S]*codesign --verify --deep --strict[\s\S]*xcrun stapler validate/u);
   assert.match(workflow, /if \[ "\$PLATFORM_SIGNING" = "signed" \]; then[\s\S]*Get-AuthenticodeSignature/u);
@@ -84,12 +89,15 @@ test("产品身份、端口与固定下载资产名保持一致", () => {
   assert.match(verifier, /resolveDesktopWorkflowPath\(repositoryRoot, product\)/u);
 });
 
-test("Release 明确披露未签名安装步骤", () => {
-  assert.match(workflow, /平台签名状态/u);
+test("单一发布器先封存候选，再以 Draft 原子发布五项资产并披露 unsigned 风险", () => {
+  assert.ok((workflow.match(/desktop-release-finalizer\.mjs seal-platform/g) ?? []).length >= 2);
+  assert.match(workflow, /--draft --latest=false/u);
+  assert.match(workflow, /--draft=false --latest=true/u);
+  assert.match(workflow, /isImmutable/u);
   assert.match(workflow, /未签名、未 Apple 公证/u);
-  assert.match(workflow, /xattr -cr/u);
   assert.match(workflow, /SmartScreen/u);
-  assert.equal((workflow.match(/tag_name: \$\{\{ env\.VERSION \}\}/g) ?? []).length, 2);
+  assert.match(workflow, /WorkLoom-SHA512SUMS\.txt/u);
+  assert.match(workflow, /WorkLoom-release-manifest\.json/u);
 });
 
 test("官网固定下载入口与真实 DMG 资产一致，不保留历史 ZIP 死链", () => {
