@@ -19,7 +19,7 @@ on:
         required: true
         type: choice
         options: [signed, unsigned]
-        default: signed
+        default: unsigned
 
 permissions:
   contents: read
@@ -137,7 +137,8 @@ jobs:
         run: |
           test -n "$CSC_LINK" && test -n "$CSC_KEY_PASSWORD" || { echo "❌ 缺少 macOS Developer ID 签名证书"; exit 1; }
           test -n "$APPLE_ID" && test -n "$APPLE_APP_SPECIFIC_PASSWORD" && test -n "$APPLE_TEAM_ID" || { echo "❌ 缺少 Apple 公证凭据"; exit 1; }
-          pnpm exec electron-builder --mac dmg --arm64 --publish never -c.extraMetadata.version="${VERSION#v}"
+          retry() { local attempt=1; until "$@"; do [ "$attempt" -ge 3 ] && return 1; echo "网络依赖下载失败，准备第 $((attempt + 1))/3 次重试"; attempt=$((attempt + 1)); sleep 8; done; }
+          retry pnpm exec electron-builder --mac dmg --arm64 --publish never -c.extraMetadata.version="${VERSION#v}"
 
       - name: 打包未签名 DMG（arm64）
         if: env.PLATFORM_SIGNING == 'unsigned'
@@ -145,7 +146,8 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           echo "⚠️ 生成未签名、未 Apple 公证的 macOS arm64 安装包"
-          pnpm exec electron-builder --mac dmg --arm64 --publish never -c.mac.notarize=false -c.extraMetadata.version="${VERSION#v}"
+          retry() { local attempt=1; until "$@"; do [ "$attempt" -ge 3 ] && return 1; echo "网络依赖下载失败，准备第 $((attempt + 1))/3 次重试"; attempt=$((attempt + 1)); sleep 8; done; }
+          retry pnpm exec electron-builder --mac dmg --arm64 --publish never -c.mac.notarize=false -c.extraMetadata.version="${VERSION#v}"
 
       - name: 拆包验收 + 冒烟（对 .app 内载荷归档跑首启全流程——验证用户拿到的内容）
         run: |
@@ -204,7 +206,8 @@ jobs:
         run: |
           test -n "$CSC_LINK" && test -n "$CSC_KEY_PASSWORD" || { echo "❌ 缺少 macOS Developer ID 签名证书"; exit 1; }
           test -n "$APPLE_ID" && test -n "$APPLE_APP_SPECIFIC_PASSWORD" && test -n "$APPLE_TEAM_ID" || { echo "❌ 缺少 Apple 公证凭据"; exit 1; }
-          pnpm exec electron-builder --mac dmg --x64 --publish never -c.extraMetadata.version="${VERSION#v}"
+          retry() { local attempt=1; until "$@"; do [ "$attempt" -ge 3 ] && return 1; echo "网络依赖下载失败，准备第 $((attempt + 1))/3 次重试"; attempt=$((attempt + 1)); sleep 8; done; }
+          retry pnpm exec electron-builder --mac dmg --x64 --publish never -c.extraMetadata.version="${VERSION#v}"
 
       - name: 打包未签名 DMG（x64）
         if: env.PLATFORM_SIGNING == 'unsigned'
@@ -212,7 +215,8 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           echo "⚠️ 生成未签名、未 Apple 公证的 macOS x64 安装包"
-          pnpm exec electron-builder --mac dmg --x64 --publish never -c.mac.notarize=false -c.extraMetadata.version="${VERSION#v}"
+          retry() { local attempt=1; until "$@"; do [ "$attempt" -ge 3 ] && return 1; echo "网络依赖下载失败，准备第 $((attempt + 1))/3 次重试"; attempt=$((attempt + 1)); sleep 8; done; }
+          retry pnpm exec electron-builder --mac dmg --x64 --publish never -c.mac.notarize=false -c.extraMetadata.version="${VERSION#v}"
 
       - name: 拆包验收（x64 .app 载荷归档完整性；arm64 runner 无法跑 x64 二进制，文件级核验）
         run: |
@@ -331,7 +335,8 @@ jobs:
         shell: bash  # pwsh 会把 -c.extraMetadata.version="x" 的 -c 吞掉（ENOENT 实证），统一 bash
         run: |
           test -n "$WIN_CSC_LINK" && test -n "$WIN_CSC_KEY_PASSWORD" || { echo "❌ 缺少 Windows 代码签名证书"; exit 1; }
-          pnpm exec electron-builder --win nsis --x64 --publish never -c.extraMetadata.version="${VERSION#v}"
+          retry() { local attempt=1; until "$@"; do [ "$attempt" -ge 3 ] && return 1; echo "网络依赖下载失败，准备第 $((attempt + 1))/3 次重试"; attempt=$((attempt + 1)); sleep 8; done; }
+          retry pnpm exec electron-builder --win nsis --x64 --publish never -c.extraMetadata.version="${VERSION#v}"
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
@@ -344,7 +349,8 @@ jobs:
         shell: bash
         run: |
           echo "⚠️ 生成未 Authenticode 签名的 Windows x64 安装包"
-          pnpm exec electron-builder --win nsis --x64 --publish never -c.extraMetadata.version="${VERSION#v}"
+          retry() { local attempt=1; until "$@"; do [ "$attempt" -ge 3 ] && return 1; echo "网络依赖下载失败，准备第 $((attempt + 1))/3 次重试"; attempt=$((attempt + 1)); sleep 8; done; }
+          retry pnpm exec electron-builder --win nsis --x64 --publish never -c.extraMetadata.version="${VERSION#v}"
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
