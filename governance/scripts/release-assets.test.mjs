@@ -14,7 +14,8 @@ import {
 } from "./release-assets.mjs";
 import { resolveDesktopWorkflowPath } from "./desktop-workflow-path.mjs";
 
-const root = new URL("../", import.meta.url);
+const workloomRoot = new URL("../", import.meta.url);
+const repositoryRoot = new URL("../../", import.meta.url);
 
 test("release asset manifest pins every desktop runtime artifact", () => {
   const manifest = loadReleaseAssets();
@@ -28,7 +29,7 @@ test("release asset manifest pins every desktop runtime artifact", () => {
     "nats-server-v2.11.4-linux-amd64.tar.gz",
     "nats-server-v2.11.4-windows-amd64.zip",
     "embedded-postgres-binaries-windows-amd64-17.2.0.jar",
-    "postgresql17.17.2.0.nupkg",
+    "postgresql17.17.11.0.nupkg",
   ];
   assert.deepEqual(Object.keys(manifest.assets).sort(), required.sort());
   for (const asset of required) assert.match(expectedAssetSha256(asset), /^[a-f0-9]{64}$/);
@@ -40,9 +41,9 @@ test("release asset manifest pins every desktop runtime artifact", () => {
   });
   assert.deepEqual(manifest.sourcePins.windowsPostgresqlBuild, {
     chocolateyPackage: "postgresql17",
-    chocolateyVersion: "17.2.0",
+    chocolateyVersion: "17.11.0",
     chocolateySource: "https://community.chocolatey.org/api/v2",
-    pgConfigVersion: "PostgreSQL 17.2",
+    pgConfigVersion: "PostgreSQL 17.11",
     requireChecksums: true,
   });
 });
@@ -69,16 +70,16 @@ test("Windows PG provenance must match every locked build input", async () => {
     const file = join(dir, "WORKLOOM-PROVENANCE.txt");
     const valid = [
       "postgresql_chocolatey_package=postgresql17",
-      "postgresql_chocolatey_version=17.2.0",
+      "postgresql_chocolatey_version=17.11.0",
       "postgresql_chocolatey_source=https://community.chocolatey.org/api/v2",
-      "pg_config_version=PostgreSQL 17.2",
+      "pg_config_version=PostgreSQL 17.11",
       "pgvector_version=v0.8.6",
       "pgvector_commit=8ee86c96f0fd72390f890aa8a336fda6d3ab4c6c",
       "",
     ].join("\n");
     await writeFile(file, valid);
     assert.equal(verifyWindowsPgProvenance(file).pgvector_version, "v0.8.6");
-    await writeFile(file, valid.replace("17.2.0", "17.6.0"));
+    await writeFile(file, valid.replace("17.11.0", "17.2.0"));
     assert.throws(() => verifyWindowsPgProvenance(file), /provenance mismatch/);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -86,9 +87,8 @@ test("Windows PG provenance must match every locked build input", async () => {
 });
 
 test("every packaging download is wired through the verified fetch boundary", async () => {
-  const repositoryRoot = fileURLToPath(root);
-  const product = JSON.parse(await readFile(new URL("../product.manifest.json", import.meta.url), "utf8"));
-  const desktopWorkflowPath = resolveDesktopWorkflowPath(repositoryRoot, product).absolute;
+  const product = JSON.parse(await readFile(new URL("../../product.manifest.json", import.meta.url), "utf8"));
+  const desktopWorkflowPath = resolveDesktopWorkflowPath(fileURLToPath(repositoryRoot), product).absolute;
   const files = {
     electron: await readFile(new URL("./pack-electron-payload.sh", import.meta.url), "utf8"),
     mac: await readFile(new URL("./pack-macos.sh", import.meta.url), "utf8"),
@@ -96,7 +96,6 @@ test("every packaging download is wired through the verified fetch boundary", as
     nats: await readFile(new URL("./embedded-nats.mjs", import.meta.url), "utf8"),
     pgvectorWin: await readFile(new URL("./build-pgvector-win.ps1", import.meta.url), "utf8"),
     desktopWorkflow: await readFile(desktopWorkflowPath, "utf8"),
-    legacyWorkflow: await readFile(new URL("../.github/workflows/pack-self-contained.yml", import.meta.url), "utf8"),
   };
   for (const name of ["electron", "mac", "win"]) {
     assert.match(files[name], /source scripts\/release-assets\.sh/);
@@ -119,16 +118,15 @@ test("every packaging download is wired through the verified fetch boundary", as
   assert.doesNotMatch(files.pgvectorWin, /foreach \(\$pkg|git clone --depth 1 --branch/);
   assert.match(files.electron, /verify-windows-pg-provenance vendor\/pg-win\/WORKLOOM-PROVENANCE\.txt/);
   assert.match(files.win, /verify-windows-pg-provenance vendor\/pg-win\/WORKLOOM-PROVENANCE\.txt/);
-  for (const name of ["desktopWorkflow", "legacyWorkflow"]) {
-    assert.match(files[name], /runs-on: windows-2022/);
-    assert.doesNotMatch(files[name], /runs-on: windows-latest/);
-  }
+  assert.match(files.desktopWorkflow, /runs-on: windows-2022/);
+  assert.doesNotMatch(files.desktopWorkflow, /runs-on: windows-latest/);
   for (const [name, source] of Object.entries(files)) {
     assert.doesNotMatch(source, /curl[^\n]+-o[^\n]+(?:node-|Postgres-|nats-server|nats\.(?:zip|tgz)|pg\.dmg)/, `${name} bypasses verified fetch`);
   }
 });
 
 test("manifest is repository-local and cannot be replaced through environment", () => {
-  assert.equal(root.protocol, "file:");
+  assert.equal(workloomRoot.protocol, "file:");
+  assert.equal(repositoryRoot.protocol, "file:");
   assert.equal(loadReleaseAssets().schemaVersion, 1);
 });

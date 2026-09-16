@@ -55,7 +55,11 @@
     "setup:lite": "tsx scripts/setup-lite.mts",
     "db:seed:aipm": "tsx --env-file=.env scripts/seed-aipm.ts",
     "product:verify": "node scripts/verify-product-content.mjs",
-    "bundle:governance": "tsx scripts/bundle-governance.mts"
+    "bundle:governance": "tsx scripts/bundle-governance.mts",
+    "bundle:seal": "tsx scripts/bundle-governance.mts --refresh-digests",
+    "bundle:release": "tsx scripts/bundle-governance.mts --refresh-digests --release",
+    "projections:generate": "tsx scripts/generate-client-projections.mts --write",
+    "projections:check": "tsx scripts/generate-client-projections.mts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
