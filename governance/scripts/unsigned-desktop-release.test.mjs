@@ -76,11 +76,11 @@ test("产品身份、端口与固定下载资产名保持一致", () => {
   assert.equal(product.displayName, "老虎全球资产管理系统");
   assert.equal(product.desktop.portOffset, 610);
   assert.equal(product.release.appId, "com.geniusdapeng.workroomtiger");
-  assert.equal(product.release.artifactPrefix, "Workroom Tiger");
+  assert.equal(product.release.artifactPrefix, "Workroom.Tiger");
   assert.equal(product.release.workflow, ".github/workflows/build-desktop.yml");
   assert.match(builder, /productName: 老虎全球资产管理系统/u);
   assert.match(builder, /workloomPortOffset: 610/u);
-  assert.match(builder, /artifactName: "Workroom Tiger-\$\{os\}-\$\{arch\}\.\$\{ext\}"/u);
+  assert.match(builder, /artifactName: "Workroom\.Tiger-\$\{os\}-\$\{arch\}\.\$\{ext\}"/u);
   assert.match(verifier, /resolveDesktopWorkflowPath\(repositoryRoot, product\)/u);
 });
 
@@ -95,7 +95,7 @@ test("Release 明确披露未签名安装步骤", () => {
 test("官网固定下载入口与真实 DMG 资产一致，不保留历史 ZIP 死链", () => {
   for (const site of [siteZh, siteEn]) {
     assert.doesNotMatch(site, /WorkLoom-macOS\.zip/u);
-    assert.match(site, /releases\/latest\/download\/Workroom%20Tiger-mac-arm64\.dmg/u);
-    assert.match(site, /Workroom Tiger-mac-x64\.dmg/u);
+    assert.match(site, /releases\/latest\/download\/Workroom\.Tiger-mac-arm64\.dmg/u);
+    assert.doesNotMatch(site, /Workroom%20Tiger-/u);
   }
 });
