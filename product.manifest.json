@@ -2,7 +2,7 @@
   "schemaVersion": "workloom.product/v1",
   "productId": "workroom-tiger",
   "role": "industry",
-  "displayName": "WorkLoom 老虎全球资产管理",
+  "displayName": "老虎全球资产管理系统",
   "packageName": "workloom-im",
   "repository": "geniusdapeng-collab/workroom-tiger",
   "defaultBundle": "trading",
@@ -11,8 +11,9 @@
   "release": {
     "appId": "com.geniusdapeng.workroomtiger",
     "channel": "stable",
-    "artifactPrefix": "老虎全球资产管理",
-    "website": "site"
+    "artifactPrefix": "Workroom Tiger",
+    "workflow": ".github/workflows/build-desktop.yml",
+    "website": "apps/site"
   },
   "desktop": {
     "portOffset": 610

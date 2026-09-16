@@ -107,5 +107,12 @@
       "role": "ai",
       "text": "不会。语义判断归大模型，数值判断归确定性规则；只有市场状态、产业链健康和技术强度三道规则门槛全部通过，系统才会建议开仓。实际阈值始终由当前策略配置版本提供，模型无法越过。"
     }
-  ]
+  ],
+  "projection": {
+    "bundleId": "trading",
+    "bundleVersion": "0.1.0",
+    "contractVersion": "2.0.0",
+    "uiVersion": "0.1.1",
+    "manifestDigest": "1c29e7ef1dbf8f9b83ce4b58757c7c625521d5e2f28bcc7bb1a25113ca4b7792"
+  }
 }
