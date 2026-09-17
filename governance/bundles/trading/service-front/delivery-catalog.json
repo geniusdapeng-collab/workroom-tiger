@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "industry": "trading",
+  "categories": [
+    { "key": "free-public", "name": "免费公开内容" },
+    { "key": "free-daily", "name": "免费订阅推送" },
+    { "key": "paid", "name": "增值数据服务" },
+    { "key": "pro", "name": "专业版服务" }
+  ],
+  "items": [
+    { "name": "决策日报（双页签）", "category": "free-public", "price": 0, "unit": "份", "note": "模拟盘公开验证披露" },
+    { "name": "复盘周报", "category": "free-public", "price": 0, "unit": "份", "note": "归因与参数体检摘要" },
+    { "name": "模拟盘净值播报", "category": "free-daily", "price": 0, "unit": "日", "note": "每日收盘后推送" },
+    { "name": "放行清单变动提醒", "category": "free-daily", "price": 0, "unit": "日", "note": "放行/拦阻变动即时推送" },
+    { "name": "夜班决策包（三段式）", "category": "free-daily", "price": 0, "unit": "日", "note": "08:30 送达" },
+    { "name": "研报速递", "category": "paid", "price": 18, "unit": "月", "note": "盘前 5 分钟速递，迟发赔付" },
+    { "name": "个股深度报告", "category": "paid", "price": 30, "unit": "份", "note": "放行标的逐层评分卡" },
+    { "name": "产业链景气监测", "category": "paid", "price": 68, "unit": "月", "note": "链景气日频更新" },
+    { "name": "自选股池监测（≤50 只）", "category": "paid", "price": 128, "unit": "月", "note": "定制股票池日报告" },
+    { "name": "全球联动分析", "category": "paid", "price": 45, "unit": "月", "note": "跨市场联动与汇率因子" },
+    { "name": "历史报告补发（90 天内）", "category": "free-public", "price": 0, "unit": "份", "note": "30 分钟内推送" },
+    { "name": "历史报告补发（90 天前）", "category": "paid", "price": 5, "unit": "份", "note": "归档调取" },
+    { "name": "API 推送（标准版）", "category": "pro", "price": 199, "unit": "月", "note": "60 次/分钟，Webhook 推送" },
+    { "name": "API 推送（专业版）", "category": "pro", "price": 599, "unit": "月", "note": "300 次/分钟，专属通道" },
+    { "name": "事件库验链报告", "category": "pro", "price": 0, "unit": "份", "note": "哈希链逐条重算结果", "robot": false },
+    { "name": "合规咨询（加急）", "category": "pro", "price": 0, "unit": "次", "note": "合规官 15 分钟响应", "robot": false }
+  ]
+}

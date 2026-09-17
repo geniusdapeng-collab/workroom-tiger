@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "workloom.product/v1",
+  "productId": "workroom-tiger",
+  "role": "industry",
+  "displayName": "老虎全球资产管理系统",
+  "packageName": "workloom-im",
+  "repository": "geniusdapeng-collab/workroom-tiger",
+  "defaultBundle": "trading",
+  "demoWorkspaceSlug": "tiger-trading",
+  "demoMemberNo": "MEM-T001",
+  "release": {
+    "appId": "com.geniusdapeng.workroomtiger",
+    "channel": "stable",
+    "artifactPrefix": "Workroom.Tiger",
+    "workflow": ".github/workflows/build-desktop.yml",
+    "website": "apps/site"
+  },
+  "desktop": {
+    "portOffset": 610
+  },
+  "clients": {
+    "bPc": { "enabled": true, "entry": "apps/web" },
+    "bMobile": { "enabled": true, "entry": "apps/webb" },
+    "cMobile": { "enabled": true, "entry": "apps/webc" }
+  }
+}

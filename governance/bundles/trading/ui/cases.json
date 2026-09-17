@@ -1,0 +1,66 @@
+{
+  "$id": "workloom://bundles/trading/ui/cases",
+  "description": "老虎交易责任界面 UI 状态用例清单（UPGRADE_PLAN_v3 §3.4 责任界面官网：清晨决策包/决策回放/围栏命中日志三页）",
+  "pages": [
+    "g1",
+    "g2",
+    "g3"
+  ],
+  "cases": [
+    {
+      "page": "g1",
+      "name": "默认·清晨决策包三栏",
+      "expect": "已完成/待审批/需介入三栏从 governance_events.jsonl 投影，≤20 条"
+    },
+    {
+      "page": "g1",
+      "name": "演示数据标注",
+      "expect": "非真实事件源时全页显著标注『演示』"
+    },
+    {
+      "page": "g1",
+      "name": "高危不过期",
+      "expect": "block 命中项不自动放行，置顶红色常驻"
+    },
+    {
+      "page": "g1",
+      "name": "空态·夜间无事件",
+      "expect": "虚线空态+昨夜空仓说明"
+    },
+    {
+      "page": "g2",
+      "name": "默认·事件时间线",
+      "expect": "五元事件正序渲染，每条显 E-编号 chip"
+    },
+    {
+      "page": "g2",
+      "name": "哈希验真",
+      "expect": "每条事件前端重算 sha256(prev_hash‖canonicalJson) 显 ✓/✗"
+    },
+    {
+      "page": "g2",
+      "name": "篡改态",
+      "expect": "任一事件重算不符→该条及链尾标红"
+    },
+    {
+      "page": "g2",
+      "name": "五段依据展开",
+      "expect": "decision.basis 五段（+辩论第六段）可折叠展开"
+    },
+    {
+      "page": "g3",
+      "name": "默认·围栏命中表",
+      "expect": "rule_id/时间/对象/结果四列，block 行红底"
+    },
+    {
+      "page": "g3",
+      "name": "空态·零命中",
+      "expect": "显示『本轮无围栏命中』与围栏版本卡 trading-baseline/v1"
+    },
+    {
+      "page": "g3",
+      "name": "口径披露",
+      "expect": "页尾固定披露：治理事件为留痕旁路，不构成投资建议"
+    }
+  ]
+}

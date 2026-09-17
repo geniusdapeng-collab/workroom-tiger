@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "industry": "trading",
+  "categories": [
+    { "key": "market-data", "name": "行情与数据" },
+    { "key": "signal", "name": "信号与决策" },
+    { "key": "account", "name": "账户与持仓" },
+    { "key": "report", "name": "报表与日报" },
+    { "key": "other", "name": "其他问题" }
+  ],
+  "items": [
+    { "name": "行情报价异常", "category": "market-data", "symptoms": "报价明显偏离市场/长时间不刷新", "urgency": "high", "slaMinutes": 15, "dept": "数据质量组", "tip": "请附标的代码与时间点" },
+    { "name": "数据源降级异常", "category": "market-data", "symptoms": "降级链停留在非预期源/降级次数异常", "urgency": "normal", "slaMinutes": 30, "dept": "数据质量组" },
+    { "name": "新闻/舆情缺失", "category": "market-data", "symptoms": "板块舆情多日无更新", "urgency": "normal", "slaMinutes": 60, "dept": "数据质量组" },
+    { "name": "K 线/历史数据缺口", "category": "market-data", "symptoms": "指定区间数据缺失或重复", "urgency": "normal", "slaMinutes": 60, "dept": "数据质量组" },
+    { "name": "信号状态不更新", "category": "signal", "symptoms": "跨越完整扫描日信号无变化", "urgency": "normal", "slaMinutes": 60, "dept": "复盘组", "tip": "非扫描窗口保持不变属正常" },
+    { "name": "放行/拦阻申诉", "category": "signal", "symptoms": "对某笔放行或拦阻存疑", "urgency": "normal", "slaMinutes": 120, "dept": "复盘组", "tip": "请附标的与日期，将调取 21 环节运行报告" },
+    { "name": "评分口径疑问", "category": "signal", "symptoms": "MRS/SHS/ICS/TSS 评分与理解不符", "urgency": "normal", "slaMinutes": 120, "dept": "复盘组" },
+    { "name": "风控未触发疑问", "category": "signal", "symptoms": "认为止损/熔断应触发而未触发", "urgency": "high", "slaMinutes": 15, "dept": "风控组" },
+    { "name": "净值显示异常", "category": "account", "symptoms": "净值与持仓明显不符", "urgency": "high", "slaMinutes": 15, "dept": "风控组", "tip": "将按事件库重算并出具差异说明" },
+    { "name": "持仓记录异常", "category": "account", "symptoms": "持仓数量/成本与记录不符", "urgency": "high", "slaMinutes": 15, "dept": "风控组" },
+    { "name": "结算记录疑问", "category": "account", "symptoms": "已结算交易金额存疑", "urgency": "normal", "slaMinutes": 60, "dept": "风控组" },
+    { "name": "日报迟发/未达", "category": "report", "symptoms": "日报未按窗口送达", "urgency": "normal", "slaMinutes": 30, "dept": "复盘组", "tip": "连续两次迟发自动升级值班负责人" },
+    { "name": "日报内容勘误", "category": "report", "symptoms": "日报数字/表述有误", "urgency": "normal", "slaMinutes": 60, "dept": "复盘组" },
+    { "name": "复盘报告缺失", "category": "report", "symptoms": "周报复盘未生成", "urgency": "normal", "slaMinutes": 60, "dept": "复盘组" },
+    { "name": "API 推送中断", "category": "other", "symptoms": "Webhook 长时间无消息", "urgency": "high", "slaMinutes": 15, "dept": "数据质量组", "tip": "请先确认密钥未过期" },
+    { "name": "订阅计费疑问", "category": "other", "symptoms": "订阅扣费与目录价格不符", "urgency": "normal", "slaMinutes": 120, "dept": "合规组" },
+    { "name": "发票开具申请", "category": "other", "symptoms": "订阅发票未按时开具", "urgency": "normal", "slaMinutes": 120, "dept": "合规组" },
+    { "name": "合规咨询", "category": "other", "symptoms": "合规/免责声明相关咨询", "urgency": "normal", "slaMinutes": 120, "dept": "合规组" }
+  ]
+}
