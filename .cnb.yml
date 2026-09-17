@@ -1,0 +1,29 @@
+.py-gate: &py_gate
+  name: py-gate
+  docker:
+    image: python:3.12-bookworm
+  stages:
+    - name: 依赖安装
+      script: |
+        set -eu
+        python -V
+        pip install --quiet -r requirements.txt
+
+    - name: 交易内核测试（pytest）
+      script: |
+        set -eu
+        python -m pytest -q
+
+    - name: 内核红线自检（21 环节注册表与围栏生成物）
+      script: |
+        set -eu
+        python -c "import trading_system.redline as r; assert len(r.STEP_REGISTRY) >= 21, len(r.STEP_REGISTRY); print('STEP_REGISTRY', len(r.STEP_REGISTRY))"
+        python -m pytest -q tests/test_gen_fences.py
+
+main:
+  push:
+    - *py_gate
+
+"**":
+  pull_request:
+    - *py_gate

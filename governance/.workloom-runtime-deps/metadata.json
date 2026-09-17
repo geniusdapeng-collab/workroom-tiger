@@ -3,7 +3,7 @@
   "product": {
     "productId": "workroom-tiger",
     "role": "industry",
-    "repository": "geniusdapeng-collab/workroom-tiger",
+    "repository": "workloom-ai/workroom-tiger",
     "includePlatformOps": false
   },
   "npmVersion": "11.17.0",

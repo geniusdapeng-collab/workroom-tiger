@@ -13,9 +13,9 @@ Traditional software hands people a pile of wrenches. WorkLoom hands business ow
 > Want a more intuitive tour? The official site has the full product story, system architecture, skill-marketplace case study, and real product screenshots.
 
 
-[![Release](https://img.shields.io/github/v/release/geniusdapeng-collab/workloom-im?display_name=tag&color=1B2A4E)](https://github.com/geniusdapeng-collab/workloom-im/releases)
+[![Release](https://img.shields.io/github/v/release/workloom-ai/workloom-im?display_name=tag&color=1B2A4E)](https://github.com/workloom-ai/workloom-im/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-9A7B2D)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%C2%B7%20Apple%20Silicon-black)](https://github.com/geniusdapeng-collab/workloom-im/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%C2%B7%20Apple%20Silicon-black)](https://github.com/workloom-ai/workloom-im/releases)
 [![Runtime](https://img.shields.io/badge/runtime%20foundation-DeepSeek%20Harness-4C6FFF)](https://github.com/deepseek-ai/dsh)
 [![Data](https://img.shields.io/badge/data%20sovereignty-local--first%20PG17-blueviolet)]()
 [![Website](https://img.shields.io/badge/website-workloom.ok.kimi.link-e8b96a)](https://workloom.ok.kimi.link)
@@ -269,7 +269,7 @@ Five layers, top to bottom: **Experience** (bridge web / IM channels / Mac deskt
 
 ## Get started in 3 minutes (Mac)
 
-1. **Download** `WorkLoom-macOS.zip` from [Releases](https://github.com/geniusdapeng-collab/workloom-im/releases) (~208 MB, sha256 included).
+1. **Download** `WorkLoom-macOS.zip` from [Releases](https://github.com/workloom-ai/workloom-im/releases) (~208 MB, sha256 included).
 2. **Unzip and drag to Applications.** On first launch, if Gatekeeper prompts, click "Open Anyway" once in System Settings → Privacy & Security — the only manual authorization in the whole journey.
 3. **Double-click WorkLoom.app.** The launcher does everything: embedded PostgreSQL 17 + pgvector init, migrations, service boot, bridge opens. No dependencies, no command line.
 
@@ -286,7 +286,7 @@ Five layers, top to bottom: **Experience** (bridge web / IM channels / Mac deskt
 ## Developer quickstart
 
 ```bash
-git clone https://github.com/geniusdapeng-collab/workloom-im.git
+git clone https://github.com/workloom-ai/workloom-im.git
 cd workloom-im
 corepack enable && pnpm install
 
