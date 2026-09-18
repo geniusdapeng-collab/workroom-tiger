@@ -5,7 +5,7 @@
 ## A. 交易内核单用（5 分钟）
 
 ```bash
-git clone https://github.com/geniusdapeng-collab/workroom-tiger.git
+git clone https://github.com/workloom-ai/workroom-tiger.git
 cd workroom-tiger
 bash scripts/setup.sh        # 装依赖 + 冒烟测试 + 环境自检
 ```

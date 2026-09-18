@@ -667,7 +667,7 @@ def _decision_card(r: "PipelineResult", pick) -> str:
 
 
 # ---------------------------------------------------------------- 小虎模拟盘
-_GITHUB_URL = "https://github.com/geniusdapeng-collab/ai-stock-trading-system"
+_GITHUB_URL = "https://cnb.cool/workloom-ai/workroom-tiger"
 # 公开验证首个统计显著性检查点（机制见 docs/PUBLIC_VERIFICATION.md）：
 # 以累计真实样本重跑 WFA，用 DSR 判定策略有效性，结论照实公开
 _DSR_CHECKPOINT = "2026-10-30"
