@@ -10,10 +10,10 @@
 
 | 时机 | 动作 | 命令 |
 |---|---|---|
-| 依赖变更（改 package.json / lockfile / requirements） | CI 门禁：清单必须同步刷新，否则红灯 | `pnpm oss:check` |
-| 每周（CNB crontab + 基座审计任务） | 扫描上游最新版本，有更新则进更新计划并开 PR | `pnpm oss:watch` |
-| 安全事件（CVE / 供应链投毒） | 不等周期，立即全量扫描 | `pnpm oss:watch --all` |
-| 发布前 | 复核清单新鲜度与更新计划 | `pnpm oss:plan` |
+| 依赖变更（改 package.json / lockfile / requirements） | CI 门禁：清单必须同步刷新，否则红灯 | `node scripts/oss-inventory.mjs --check` |
+| 每周（CNB crontab + 基座审计任务） | 扫描上游最新版本，有更新则进更新计划并开 PR | `bash scripts/oss-watch.sh` |
+| 安全事件（CVE / 供应链投毒） | 不等周期，立即全量扫描 | `bash scripts/oss-watch.sh --all` |
+| 发布前 | 复核清单新鲜度与更新计划 | `bash scripts/oss-watch.sh --show` |
 
 升级纪律：**扫描可以自动，升级永不自动**；升级必须逐项走 `docs/oss-update-plan.md` 的人工圈定 + 门禁 + 发布流程。
 
