@@ -4,7 +4,7 @@
   "role": "industry",
   "displayName": "老虎全球资产管理系统",
   "packageName": "workloom-im",
-  "repository": "geniusdapeng-collab/workroom-tiger",
+  "repository": "workloom-ai/workroom-tiger",
   "defaultBundle": "trading",
   "demoWorkspaceSlug": "tiger-trading",
   "demoMemberNo": "MEM-T001",

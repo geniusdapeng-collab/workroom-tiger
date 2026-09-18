@@ -7,7 +7,7 @@
 **No prediction. Process, discipline, audit.（别人预测市场，我们执行纪律。）**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-9A7B2D)](LICENSE)
-[![GitHub](https://img.shields.io/badge/repo-workroom--tiger-1B2A4E)](https://github.com/geniusdapeng-collab/workroom-tiger)
+[![GitHub](https://img.shields.io/badge/repo-workroom--tiger-1B2A4E)](https://github.com/workloom-ai/workroom-tiger)
 
 </div>
 
