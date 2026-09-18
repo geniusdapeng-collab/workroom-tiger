@@ -32,7 +32,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "8965130f9c1fffc7014317d732ddaedaf8f287c01556253802bffde731713656"
+      "sha256": "c4dc35766b3ef614b6f9cf228ffa094080d2ec6056c61b4d5c553a3e4c9c7dce"
     },
     {
       "path": "packages/base/package.json",
@@ -56,11 +56,11 @@
     },
     {
       "path": "pnpm-lock.yaml",
-      "sha256": "80689f0e9169b32dfa71edb0f3122f9d96e72e4c16ee52f43046ccb610c88385"
+      "sha256": "9743ad2d6b5e20c95bde69cb24a939403059912cb59483f0231bdd151e7a2c70"
     },
     {
-      "path": "repository:product.manifest.json",
-      "sha256": "fd6d099dbe1ddedf9c095022fbbfd20872fbbb4af08ce512119de277165563bb"
+      "path": "product.manifest.json",
+      "sha256": "793ee1ff8e0def98b2ca6da08f6334d36c483b8c33fa67937a9f0b5cd4192eaa"
     },
     {
       "path": "scripts/pack-nm-merge.mjs",
@@ -68,11 +68,11 @@
     },
     {
       "path": "scripts/payload-policy.mjs",
-      "sha256": "d64c2cb3e1a4fe99476cdde438df751de98f3095a029e4d090a7ba691508650a"
+      "sha256": "be1035d6c7f1e12f739bbc8e94e97c3aa8a45c2fc38a605537f2eb18916a6118"
     },
     {
       "path": "scripts/product-runtime.mjs",
-      "sha256": "189981fad7f2fc1267564f5a5a9b8f5040d647087b845e83f7533ac88f422349"
+      "sha256": "bf8a446d4a600424b8d38189fa4cbe61a36126dc051124c71012a1ec46c439e3"
     },
     {
       "path": "scripts/runtime-deps-lock.mjs",
