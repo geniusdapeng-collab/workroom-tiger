@@ -36,6 +36,16 @@
   docker:
     image: node:24.19.0-bookworm
   stages:
+    - name: UI 消费契约（governance 子树：稳定制品 + 三端实际渲染）
+      script: |
+        set -eu
+        corepack enable
+        corepack prepare pnpm@10.14.0 --activate
+        cd governance
+        pnpm install --frozen-lockfile
+        node scripts/verify-ui-consumer.mjs --repo . --require-governance-state
+        node scripts/verify-client-foundation-consumer.mjs --repo .
+
     - name: 协议门禁（提交规范 + 并发冲突）
       script: |
         set -eu
