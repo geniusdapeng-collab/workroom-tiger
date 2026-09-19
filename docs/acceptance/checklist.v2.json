@@ -1,13 +1,14 @@
 {
-  "schemaVersion": "workloom.acceptance-checklist/v1",
+  "schemaVersion": "workloom.acceptance-checklist/v2",
   "spec": "docs/REAL-DEVICE-ACCEPTANCE-SPEC.md",
-  "specVersion": "rdas/v1.1",
+  "specVersion": "rdas/v2.0",
   "generatedFrom": "WorkLoom-growth 真机验收（2026-09-19）沉淀 + 业界实践映射（见规范 §11）",
   "howToUse": [
     "每轮验收逐条执行；不适用项必须写 'skip + 理由 + 补做时间'，禁止静默跳过。",
     "本文件由基座维护，经 base-sync 分发；行业专属的角色/旅程/阈值写在本仓 acceptance/profile.json。",
     "新增缺陷修复后，把可复用的检查手段回写为新的 check 项（id 递增，不删旧项，废弃标 deprecated:true）。",
-    "v1.1 起：每项必须补 automation（script | script+manual | manual）、owner、evidence 三要素；手工项缺责任人/留证要求即视为未执行。"
+    "v1.1 起：每项必须补 automation（script | script+manual | manual）、owner、evidence 三要素；手工项缺责任人/留证要求即视为未执行。",
+    "v2.0：条目只增不删；每项须带 automation/owner/evidence/severity/applies；trapChecks 每轮增量回写。"
   ],
   "severities": {
     "P0": "阻断：主线不可用/数据损坏/治理失效/泄密",
@@ -1200,6 +1201,601 @@
       "automation": "script+manual",
       "owner": "验收执行者（script 项）/ 仓负责人（manual 项）",
       "specVersion": "rdas/v1.1"
+    },
+    {
+      "id": "L10-01",
+      "layer": "L10",
+      "title": "依赖可安装性：全新克隆 10 分钟内可跑通（含私有/workspace 依赖解析）",
+      "method": "script+manual",
+      "evidence": "安装日志",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L10-02",
+      "layer": "L10",
+      "title": "SCA：无高危/严重漏洞（或豁免+期限）",
+      "method": "script:sca",
+      "evidence": "扫描报告",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L10-03",
+      "layer": "L10",
+      "title": "SBOM 生成并随发布归档",
+      "method": "script+manual",
+      "evidence": "SBOM 文件",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L10-04",
+      "layer": "L10",
+      "title": "ASVS 目标级别声明 + 按级别抽验（建议 L2）",
+      "method": "manual",
+      "evidence": "ASVS 对照表",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L10-05",
+      "layer": "L10",
+      "title": "越权对抗：跨租户/横向/纵向提权用例全拒",
+      "method": "script:suite",
+      "evidence": "对抗用例结果",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L10-06",
+      "layer": "L10",
+      "title": "秘密扫描双门禁（提交前 + CI，含 credential-in-url/私钥/token）",
+      "method": "script:secret-scan",
+      "evidence": "扫描日志",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L10-07",
+      "layer": "L10",
+      "title": "外部动作默认失败关闭，拒绝信息可读",
+      "method": "script+manual",
+      "evidence": "故障注入记录",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L11-01",
+      "layer": "L11",
+      "title": "浏览器×OS×分辨率矩阵（≥6 组合）全绿",
+      "method": "script+manual",
+      "evidence": "矩阵结果",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L11-02",
+      "layer": "L11",
+      "title": "真手机抽验 ≥1 台（非桌面视口）",
+      "method": "manual",
+      "evidence": "真机录屏/截图",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L11-03",
+      "layer": "L11",
+      "title": "弱网（3G/高丢包）关键任务可完成",
+      "method": "script+manual",
+      "evidence": "弱网记录",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L11-04",
+      "layer": "L11",
+      "title": "断网 30s 有提示可重试，恢复后状态一致",
+      "method": "manual",
+      "evidence": "断网演练记录",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L11-05",
+      "layer": "L11",
+      "title": "导出/打印/剪贴板/文件上传下载在目标浏览器可用",
+      "method": "manual",
+      "evidence": "操作记录",
+      "severity": "P2",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L12-01",
+      "layer": "L12",
+      "title": "traceId/事件号贯通：一次失败 5 分钟内定位根因",
+      "method": "manual",
+      "evidence": "定位演练记录",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L12-02",
+      "layer": "L12",
+      "title": "日志无敏感信息且可按 workspace/任务/事件号检索",
+      "method": "script+manual",
+      "evidence": "日志样例",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L12-03",
+      "layer": "L12",
+      "title": "关键失败有告警与抑制规则且能送达",
+      "method": "manual",
+      "evidence": "告警配置与实测",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L12-04",
+      "layer": "L12",
+      "title": "任务成功率/延迟/成本指标可查（≥7 天留存）",
+      "method": "script+manual",
+      "evidence": "指标页截图",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L12-05",
+      "layer": "L12",
+      "title": "DORA 五项指标逐轮采集",
+      "method": "script",
+      "evidence": "趋势表",
+      "severity": "P2",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L13-01",
+      "layer": "L13",
+      "title": "单任务成本上限与超限熔断可配置且生效",
+      "method": "script+manual",
+      "evidence": "成本用例",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L13-02",
+      "layer": "L13",
+      "title": "积分/账单与事件账本一致（可对账到事件号）",
+      "method": "script",
+      "evidence": "对账报告",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L13-03",
+      "layer": "L13",
+      "title": "峰谷/降级计费口径正确且留痕",
+      "method": "script+manual",
+      "evidence": "计费用例",
+      "severity": "P2",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L13-04",
+      "layer": "L13",
+      "title": "续费/升级路径闭环（到期降档不自动续费）",
+      "method": "manual",
+      "evidence": "流程截图",
+      "severity": "P2",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L14-01",
+      "layer": "L14",
+      "title": "客户数据留存期与自动清理策略存在并生效",
+      "method": "manual+script",
+      "evidence": "策略与清理日志",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L14-02",
+      "layer": "L14",
+      "title": "导出/删除（被遗忘权）路径可用并留痕",
+      "method": "manual",
+      "evidence": "操作记录",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L14-03",
+      "layer": "L14",
+      "title": "脱敏回归：日志/事件/预览无明文 PII",
+      "method": "script:suite",
+      "evidence": "脱敏用例",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L14-04",
+      "layer": "L14",
+      "title": "数据边界：原始客户数据不上行，匿名化/最小化可审计",
+      "method": "manual+script",
+      "evidence": "边界审计记录",
+      "severity": "P0",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L14-05",
+      "layer": "L14",
+      "title": "内容合规：广告法/平台规则/隐私政策审查通过",
+      "method": "manual",
+      "evidence": "审查清单",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L15-01",
+      "layer": "L15",
+      "title": "改字段/加岗位/换模型的步骤与影响面有文档可复现",
+      "method": "manual",
+      "evidence": "演进演练记录",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L15-02",
+      "layer": "L15",
+      "title": "bundle/策略/模型热更新可灰度可回滚（时限达标）",
+      "method": "script+manual",
+      "evidence": "灰度与回滚演练",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L15-03",
+      "layer": "L15",
+      "title": "配置即代码：env/策略有 schema 校验，缺项 fail-closed",
+      "method": "script+manual",
+      "evidence": "校验日志",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "L15-04",
+      "layer": "L15",
+      "title": "文档与代码一致（派生数字来自脚本）",
+      "method": "script",
+      "evidence": "门禁结果",
+      "severity": "P2",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "script+manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "M-01",
+      "layer": "M",
+      "title": "验收徽章已打（level/sha/date）",
+      "method": "manual",
+      "evidence": "徽章截图",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "M-02",
+      "layer": "M",
+      "title": "舰队总表已更新（十仓一行）",
+      "method": "manual",
+      "evidence": "总表链接",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "M-03",
+      "layer": "M",
+      "title": "交叉验收：非本仓作者抽验 ≥3 项",
+      "method": "manual",
+      "evidence": "复核记录",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "M-04",
+      "layer": "M",
+      "title": "错题本回写并标注是否升级门禁",
+      "method": "manual",
+      "evidence": "检查单 diff",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
+    },
+    {
+      "id": "M-05",
+      "layer": "M",
+      "title": "发布挂钩：Release 含验收结论，P0/P1 未闭合标 acceptance=blocked",
+      "method": "manual",
+      "evidence": "Release 链接",
+      "severity": "P1",
+      "applies": [
+        "base",
+        "platform",
+        "industry",
+        "experiment"
+      ],
+      "automation": "manual",
+      "owner": "验收执行者（script）/ 仓负责人（manual）",
+      "specVersion": "rdas/v2.0"
     }
   ],
   "trapChecks": [
@@ -1292,6 +1888,24 @@
       "title": "关键任务耗时/点击是否被度量",
       "check": "计时计数写进 profile 阈值",
       "ref": "spec §10 T-15"
+    },
+    {
+      "id": "T-16",
+      "title": "依赖指向不存在的上游包导致新克隆装不上",
+      "check": "全新克隆 pnpm install；检查 tarball URL 可达性",
+      "ref": "spec §16.1 L10-01"
+    },
+    {
+      "id": "T-17",
+      "title": "演示态被真实模式污染（dataMode 漂移）导致回执全变未核实",
+      "check": "跑前核对 dataMode；跑后 db:seed 复位",
+      "ref": "spec §16.1 L0-06"
+    },
+    {
+      "id": "T-18",
+      "title": "幂等丢失：重复投递/执行产生额外统计或事件",
+      "check": "同一操作连跑两次断言一致",
+      "ref": "spec §7.4"
     }
   ]
 }
