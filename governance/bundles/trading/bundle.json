@@ -15,6 +15,7 @@
       "contract": "2.0.0"
     },
     "provides": {
+      "evalQuestions": "eval/questions.json",
       "presets": [
         "presets/universe-scanner.yml",
         "presets/mrs.yml",
@@ -171,8 +172,9 @@
   },
   "integrity": {
     "algorithm": "sha256",
-    "digest": "1c29e7ef1dbf8f9b83ce4b58757c7c625521d5e2f28bcc7bb1a25113ca4b7792",
+    "digest": "d0d36c2d32a819abed5ea9bda617b4d98719438f5c9a2bec3b47fe6ebd47c913",
     "assets": {
+      "eval/questions.json": "38b9bb35fa3826e53d9a9ea0187074c1dd55fd879179990be494db747d634cf1",
       "feedback-enums.yml": "efd126b6b8d88d0464654e5217a5e1da798a71ce1d8247f6794418f696c7e548",
       "fences/trading-baseline.yml": "6453c367918d1aaa3af7765799ee83c257b62ce830ac685ecc15b437357779b0",
       "model-policy.yml": "5834c591ae449bc0d1feabe21812fc4a29f35ddf63c1641054dac4cf1f914836",
@@ -215,7 +217,7 @@
       "presets/universe-scanner.yml": "68d344cba035d549c099b0b837d8aab46d5b6e63a8f009228fa08f638cb82963",
       "schemas/objects.json": "73c229025b5be07ad60cad9bb4505f1ce3af7cf47f0988f692a22c26c6c25903",
       "schemas/stages.json": "a074df7d2bc3413026604228f400500c38da62caeadc067a5ab648e2e5fa8645",
-      "service-front/client.json": "4b09614602d4779a64f36177df3c36f8cd6c4498fdafb3f8b2a915352b26c3ea",
+      "service-front/client.json": "a2d57290b5ad226ff679eba45df7ace93f31df5bc3ce0d3f81afdbfebe78f3be",
       "service-front/delivery-catalog.json": "f7e1c1f1de01caf0a7c69655c6356748fba775f155cf5161f72acd9d1a073819",
       "service-front/faq.json": "ab027315b9959a10ffd6aa9ff7695d49b2c350fcffa3698f28e90c0742b81bf0",
       "service-front/repair-catalog.json": "2e493993daab4503875220b3b4d8bb5c8216d4b048874d27b4a27e9c45f1c384",
