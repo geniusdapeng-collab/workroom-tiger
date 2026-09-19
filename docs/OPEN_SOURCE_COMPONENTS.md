@@ -248,7 +248,7 @@
 | `@types/three` | 0.185.4 | ^0.185.4 | 开发 | governance/apps/web/package.json | **0.186.0** ⬆ |
 | `@types/ws` | 8.18.1（声明） | 8.18.1 | 开发 | governance/vendor/dsh/package.json | 8.18.1 |
 | `@vitejs/plugin-react` | 6.1.0 | 6.1.0 | 开发/生产 | governance/.workloom-runtime-deps/package.json、governance/apps/web/package.json、governance/apps/webb/package.json 等 4 处 | **6.1.1** ⬆ |
-| `@workloom/ui` | 0.1.2 | 0.1.2 | 生产 | governance/apps/web/package.json、governance/apps/webb/package.json、governance/apps/webc/package.json | —（未扫描） |
+| `@workloom/ui` | 0.1.3 | 0.1.3 | 生产 | governance/apps/web/package.json、governance/apps/webb/package.json、governance/apps/webc/package.json | —（未扫描） |
 | `commander` | 15.0.0（声明） | ^15.0.0 | 生产 | governance/vendor/dsh/package.json | 15.0.0 |
 | `concurrently` | 9.2.4 | ^9.1.0 | 开发 | governance/package.json | **10.0.5** ⬆ |
 | `drizzle-orm` | 0.45.2 | 0.45.2 / ^0.45.2 | 生产 | governance/.workloom-runtime-deps/package.json、governance/packages/db/package.json | 0.45.2 |
@@ -258,7 +258,7 @@
 | `hono` | 4.13.5 | 4.13.5 | 生产 | governance/.workloom-runtime-deps/package.json、governance/apps/server/package.json | **4.13.8** ⬆ |
 | `jose` | 6.2.10 | 6.2.10 | 生产 | governance/.workloom-runtime-deps/package.json、governance/apps/server/package.json、governance/packages/base/package.json | **6.2.12** ⬆ |
 | `js-yaml` | 4.2.0（声明） | ^4.2.0 | 生产 | governance/vendor/dsh/package.json | **5.4.2** ⬆ |
-| `jsdom` | 30.1.0 | ^30.0.1 | 开发 | governance/package.json | 30.1.0 |
+| `jsdom` | 30.1.0 | ^30.0.1 | 开发 | governance/apps/web/package.json、governance/apps/webc/package.json、governance/package.json | 30.1.0 |
 | `node-addon-require-builtin` | 0.1.4（声明） | ^0.1.4 | 生产 | governance/vendor/dsh/package.json | **0.1.6** ⬆ |
 | `pg` | 8.23.0 | 8.23.0 | 生产 | governance/.workloom-runtime-deps/package.json、governance/package.json、governance/packages/base/package.json 等 5 处 | 8.23.0 |
 | `pixi-live2d-display` | 0.4.0 | ^0.4.0 | 生产 | governance/apps/web/package.json | 0.4.0 |
