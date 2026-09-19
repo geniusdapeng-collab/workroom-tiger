@@ -202,27 +202,48 @@ LLM 的本质是**高维语义压缩器**：它擅长理解、归纳、生成、
 
 ### PC 端 · 治理外壳与交易内核
 
-| 经营剧场 · 老虎交易工作台（默认首页） | 工作台 · 总览 |
+| 经营剧场 · 老虎交易工作台（默认首页 `/`） | 数字员工 · 人机混编通讯录（`/agents`，37 个岗位） |
 |---|---|
-| ![经营剧场](docs/images/shots/pc-home.png) | ![工作台总览](docs/images/shots/pc-workbench.png) |
+| ![经营剧场](docs/images/shots/pc-home.png) | ![数字员工](docs/images/shots/pc-agents.png) |
 
-| 审批中心 | 规则与权限 |
+| 统一待办（`/inbox`） | 审批中心（`/approvals`） |
 |---|---|
-| ![审批中心](docs/images/shots/pc-approval.png) | ![规则与权限](docs/images/shots/pc-rules.png) |
+| ![统一待办](docs/images/shots/pc-inbox.png) | ![审批中心](docs/images/shots/pc-approval.png) |
 
-| 夜班中心频道 | 董事长视图 · 数字 CEO |
+| 夜班中心频道（`/night`） | 董事长视图 · 数字 CEO（`/executive`） |
 |---|---|
 | ![夜班中心](docs/images/shots/pc-night.png) | ![董事长视图](docs/images/shots/pc-chairman.png) |
 
-| 落地向导（接入真实数据） | 交易内核 · 双页签决策日报 |
+| 围栏规则（`/guardrails`） | 事件账本（`/events`） |
 |---|---|
-| ![落地向导](docs/images/shots/pc-onboarding.png) | ![决策日报](docs/images/shots/pc-daily-report.png) |
+| ![围栏规则](docs/images/shots/pc-rules.png) | ![事件账本](docs/images/shots/pc-events.png) |
+
+| 考试院（`/exams`） | 组织记忆（`/memory`） |
+|---|---|
+| ![考试院](docs/images/shots/pc-exams.png) | ![组织记忆](docs/images/shots/pc-memory.png) |
+
+| 技能中心（`/skills`） | 经营报告 · 决策日报（`/reports`） |
+|---|---|
+| ![技能中心](docs/images/shots/pc-skills.png) | ![决策日报](docs/images/shots/pc-reports.png) |
+
+### 数字人 · 织伴（Live2D 常驻值守）
+
+| 织伴开场（S0–S4 全身像登场） | 织伴面板（聊聊 / 设置 / 记忆） |
+|---|---|
+| ![织伴开场](docs/images/shots/pc-mate-welcome.png) | ![织伴面板](docs/images/shots/pc-mate-chat.png) |
 
 ### 移动端
 
-| 交易内核 · 决策日报（移动视口） | 治理外壳 · 掌上日报（手机壳页） | C 端 · AI 服务前台（对话） | C 端 · 服务大厅 |
+| 治理外壳 · 掌上经营主页 | 治理外壳 · 数字员工名册 | 交易内核 · 决策日报（移动视口） | 治理外壳 · 掌上日报（手机壳页） |
 |---|---|---|---|
-| ![决策日报移动版](docs/images/shots/mb-daily-report.png) | ![掌上日报](docs/images/shots/mb-handoff.png) | ![AI服务前台](docs/images/shots/mc-chat.png) | ![服务大厅](docs/images/shots/mc-service.png) |
+| ![掌上经营主页](docs/images/shots/mb-home.png) | ![移动端数字员工](docs/images/shots/mb-agents.png) | ![决策日报移动版](docs/images/shots/mb-daily-report.png) | ![掌上日报](docs/images/shots/mb-handoff.png) |
+
+| C 端 · AI 服务前台（对话） | C 端 · 服务大厅 |
+|---|---|
+| ![AI服务前台](docs/images/shots/mc-chat.png) | ![服务大厅](docs/images/shots/mc-service.png) |
+
+> **数字员工名册（`/agents`）**：AI 基金经理统领的 **37 位数字投研成员**（研究 / 辩论 / 执行 / 风控 / 复盘 / 数据六条线）与人类投资者同一本通讯录——每位都有档案（来源 Bundle、**围栏授权逐条对账**、绑定技能包、运行约束、30 天战绩与段位）。风控与复盘条线多为**只读岗位**（无写工具，物理上碰不到交易按钮），夜班岗位 22:00–08:00 自动上线。
+> **数字人织伴（LoomMate）**：全页面常驻的 Live2D 值守员——语音 + 口型播报晨间决策包、风控熔断与夜班交接；三态（小角落 / 大形象 / 屏保）可切，屏保模式替你守着全场，记忆面板把「它记住了什么」摊开给你看。
 
 ---
 
@@ -246,7 +267,7 @@ LLM 的本质是**高维语义压缩器**：它擅长理解、归纳、生成、
 
 ```bash
 bash scripts/setup.sh                # 一键安装+自检（或 pip install -r requirements.txt）
-python3 -m pytest tests/ -q          # 272 项测试
+python3 -m pytest tests/ -q          # 交易内核测试（本机实测 327 passed，2026-09-19）
 python3 main.py --demo               # 离线演示（合成数据，端到端 21 环节）
 python3 main.py --universe full --top 30 --picks 8   # 生产模式（每日全市场）
 bash scripts/stack_setup.sh          # 全栈：+ WorkLoom 治理底座（Node≥24/Docker）
@@ -306,6 +327,15 @@ pnpm setup && pnpm preview:all
 | [docs/AGENT_CENSUS.md](docs/AGENT_CENSUS.md) | Agent 普查（20 个 Agent/模块分类） |
 | [docs/DATA_HYGIENE.md](docs/DATA_HYGIENE.md) | 数据卫生纪律 |
 | [docs/PUBLIC_VERIFICATION.md](docs/PUBLIC_VERIFICATION.md) | 模拟盘公开验证章程 |
+
+## 质量与验证（本机实测 · 2026-09-19）
+
+| 层 | 命令 | 结果 |
+|---|---|---|
+| 交易内核（Python） | `python3 -m pytest tests/ -q` | ✅ **327 passed** |
+| 治理外壳（WorkLoom IM） | `cd governance && SUITE_SERVER_PORT=8899 pnpm suite` | ⚠️ **354/459 通过（105 失败）** |
+
+治理外壳套件的失败高度集中在外键约束（`threads/night_runs/triggers_workspace_id_fkey`）与「基线规则装载 0 条」两类，根因是 `governance/scripts/suite.ts` 的 scope 仍硬编码基座酒店演示工作区 `ws-yunqi`，而本仓种子建的是交易工作区 `trading`（`governance/bundles/` 下也不再随仓携带 hotel 包）。**本次未修改测试逻辑**，如实登记为待修；修复方向是把 suite scope 参数化到 `product.manifest.json` 的演示工作区。
 
 ## 合规声明
 
