@@ -17,14 +17,25 @@
  * 用法：
  *   node scripts/acceptance/live.mjs --out outputs/acceptance/live           # 按 profile.live 跑
  *   node scripts/acceptance/live.mjs --tasks LLM-R1,IMG-01 --env deployed
+ *   node scripts/acceptance/live.mjs --keys-file ~/.workloom/live.env         # 凭据从仓库外秘密文件读取
  *   node scripts/acceptance/live.mjs --selftest                               # 无凭据自检管道
  *   node scripts/acceptance/live.mjs --require-live                            # blocked 即非零退出（发布门禁用）
+ *
+ * 凭据来源（可混用，自动发现，优先级：进程环境 > --keys-file > $WORKLOOM_LIVE_ENV > ~/.workloom/live.env > Keychain > 客户端运行时 .env）：
+ *   ① 进程环境（CI secret / Keychain 导出 / `security find-generic-password … -w`）；
+ *   ② `--keys-file <path>`：仓库外文件（推荐 `~/.workloom/live.env`，chmod 600，永不入库；`--env-file` 为兼容别名，
+ *      但注意与 Node 自带同名参数冲突——文件不存在时 Node 会先报错，因此正式口径用 `--keys-file`）；
+ *   ③ 自动发现：`$WORKLOOM_LIVE_ENV` → `~/.workloom/live.env` → macOS Keychain
+ *      （`workloom-live-deepseek` / `workloom-live-ark`）→ `--env client-runtime` 时客户端 `<支持目录>/runtime/.env`。
+ *   `--no-auto-keys` 可关闭自动发现。**封存好的 key 无需每次手动指定。**
+ * 报告只写来源与键名，任何密钥值都不落盘、不进日志。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { cliArgs, findRepoRoot, loadProfile } from "./lib/profile.mjs";
-import { fingerprintEnvironment, fingerprintLines, resolveEnvironment, probeEnvironment } from "./lib/target.mjs";
+import { fingerprintEnvironment, fingerprintLines, loadEnvFile, resolveEnvironment, probeEnvironment } from "./lib/target.mjs";
 import { createBudget, normalizeBudgets } from "./lib/live/budget.mjs";
 import {
   createMultimodalFixture,
@@ -49,6 +60,15 @@ const REQUIRE_LIVE = has("--require-live");
 const ONLY_TASKS = arg("--tasks", null)?.split(",").map((s) => s.trim()).filter(Boolean) ?? null;
 const TASK_TIMEOUT_MS = Number(arg("--timeout-s", "0")) > 0 ? Number(arg("--timeout-s")) * 1000 : 8 * 60_000;
 const ALLOW_PROD_WRITES = has("--allow-prod-writes");
+/**
+ * 凭据文件（推荐放在仓库外，如 ~/.workloom/live.env；只读、只进进程内存，不进报告）。
+ * 主口径 `--keys-file`；`--env-file` 仅作兼容别名（与 Node 自带参数同名，文件缺失时 Node 会先崩）。
+ */
+const ENV_FILE = arg("--keys-file", null) ?? arg("--env-file", null);
+/** 客户端运行时档位：是否从客户端 `.env` 兜底读取缺失凭据（默认开） */
+const KEYS_FROM_CLIENT = !has("--no-keys-from-client");
+/** 自动发现封存凭据（默认开；--no-auto-keys 关闭） */
+const AUTO_KEYS = !has("--no-auto-keys");
 
 mkdirSync(join(OUT_DIR, "artifacts"), { recursive: true });
 mkdirSync(join(OUT_DIR, "receipts"), { recursive: true });
@@ -85,7 +105,75 @@ if (SELFTEST) {
   notes.push("自检模式：全部调用打到本地替身（stub），产物为合成数据，仅验证执行器管道");
 }
 
-resolvedModels = resolveLiveModels(modelsForRun, process.env);
+/**
+ * 凭据来源解析（只记来源与**键名**，永不记录值）：
+ *   ① `--env-file <path>`：仓库外的秘密文件（推荐 ~/.workloom/live.env，chmod 600）；
+ *   ② 客户端运行时档位：`<supportDir>/runtime/.env` 兜底补齐缺失键（客户端自己配的凭据即可复用）；
+ *   ③ 进程环境（含 macOS Keychain 导出的变量、CI secret、dsh 凭据 seam）。
+ * 优先级：显式进程环境 > env-file > 客户端 .env（同名键不覆盖已有值，避免意外串仓）。
+ */
+const credentialSources = [];
+const runnerEnv = { ...process.env };
+/**
+ * 自动发现封存凭据（v3.1.1）：
+ *   ① `--env-file`（显式）→ ② `$WORKLOOM_LIVE_ENV` → ③ `~/.workloom/live.env`
+ *   → ④ macOS Keychain（workloom-live-deepseek / workloom-live-ark）→ ⑤ 客户端 runtime/.env（下方）。
+ * 只补齐缺失键，不覆盖已有值；只记录来源与键名，值永不落盘/回显。
+ */
+const autoEnvFiles = [
+  ENV_FILE ? { path: resolve(ENV_FILE), kind: "env-file-explicit" } : null,
+  !ENV_FILE && process.env.WORKLOOM_LIVE_ENV ? { path: resolve(process.env.WORKLOOM_LIVE_ENV), kind: "env-file-WORKLOOM_LIVE_ENV" } : null,
+  !ENV_FILE && AUTO_KEYS ? { path: join(homedir(), ".workloom", "live.env"), kind: "env-file-default" } : null,
+].filter(Boolean);
+
+for (const entry of autoEnvFiles) {
+  const abs = entry.path;
+  if (!existsSync(abs)) {
+    if (entry.kind !== "env-file-default") notes.push(`${entry.kind} 指向的文件不存在：${abs}（继续按其他来源解析）`);
+    continue;
+  }
+  const kv = loadEnvFile(abs);
+  let filled = 0;
+  for (const [key, value] of Object.entries(kv)) {
+    if (value && !runnerEnv[key]) { runnerEnv[key] = value; filled += 1; }
+  }
+  credentialSources.push({ source: entry.kind, path: abs, keys: Object.keys(kv).filter((k) => kv[k]), filled });
+}
+
+/** macOS Keychain 兜底：封存好的 key 不需要每次手动导出 */
+if (AUTO_KEYS && process.platform === "darwin") {
+  const keychainSlots = [
+    { service: "workloom-live-deepseek", env: "DEEPSEEK_API_KEY" },
+    { service: "workloom-live-ark", env: "VOLCENGINE_ARK_API_KEY" },
+  ];
+  const found = [];
+  for (const slot of keychainSlots) {
+    if (runnerEnv[slot.env]) continue;
+    const res = spawnSync("security", ["find-generic-password", "-s", slot.service, "-w"], { encoding: "utf-8" });
+    const value = (res.stdout ?? "").trim();
+    if (res.status === 0 && value) { runnerEnv[slot.env] = value; found.push(slot.env); }
+  }
+  if (found.length) credentialSources.push({ source: "macos-keychain", path: "login.keychain-db", keys: found, filled: found.length });
+}
+if (KEYS_FROM_CLIENT && environment.kind === "client-runtime" && environment.supportDir) {
+  const clientEnvPath = join(environment.supportDir, "runtime", ".env");
+  if (existsSync(clientEnvPath)) {
+    const kv = loadEnvFile(clientEnvPath);
+    /** 只取模型凭据相关键：不把客户端 JWT/PII/DB 口令带进验收进程（最小权限） */
+    const CREDENTIAL_KEY_RE = /^(DEEPSEEK_|LLM_|SEEDREAM_|SEEDANCE_|VOLCENGINE_|ARK_)/;
+    const picked = Object.fromEntries(Object.entries(kv).filter(([key]) => CREDENTIAL_KEY_RE.test(key)));
+    let filled = 0;
+    for (const [key, value] of Object.entries(picked)) {
+      if (value && !runnerEnv[key]) { runnerEnv[key] = value; filled += 1; }
+    }
+    credentialSources.push({ source: "client-runtime-env", path: clientEnvPath, keys: Object.keys(picked).filter((k) => picked[k]), filled });
+  } else {
+    notes.push(`客户端运行时未找到 .env：${clientEnvPath}（可先用向导「真实大模型」步骤写入，或用 --env-file）`);
+  }
+}
+credentialSources.push({ source: "process-env", keys: Object.keys(process.env).filter((k) => /^(DEEPSEEK|LLM|SEEDREAM|SEEDANCE|VOLCENGINE|ARK)_/.test(k)), filled: null });
+
+resolvedModels = resolveLiveModels(modelsForRun, runnerEnv);
 
 /* ---------------------------- 任务清单 ---------------------------- */
 const declaredTasks = Array.isArray(liveProfile.tasks) ? liveProfile.tasks : [];
@@ -213,22 +301,28 @@ async function runTask(task) {
           prompt: task.prompt,
           rulesUrl: SELFTEST && stub ? `${stub.baseUrl}/rules` : `${environment.urls.api}/trpc/fence.activeRules`,
           env: {
-            DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? "",
-            DEEPSEEK_BASE_URL: process.env.LLM_BASE_URL ?? process.env.DEEPSEEK_BASE_URL ?? "",
+            DEEPSEEK_API_KEY: runnerEnv.DEEPSEEK_API_KEY ?? runnerEnv.LLM_API_KEY ?? "",
+            /**
+             * dsh 的 deepseek-official 适配器默认走 **Messages 协议**（`<root>/v1/messages`），
+             * 因此要指到 DeepSeek 的 Anthropic 兼容根 `https://api.deepseek.com/anthropic`；
+             * `LLM_BASE_URL` 是产品 model-router 的 OpenAI 兼容根（`https://api.deepseek.com`），
+             * 直接拿它给 dsh 会 404（2026-09-20 实测）。优先级：DEEPSEEK_BASE_URL > LLM_BASE_URL。
+             */
+            DEEPSEEK_BASE_URL: runnerEnv.DEEPSEEK_BASE_URL ?? runnerEnv.LLM_BASE_URL ?? "",
           },
           timeoutMs: TASK_TIMEOUT_MS,
           imagePath: fixturePath,
         });
       } else {
         const image = task.imageFixture ? readImageFixture(resolve(REPO_ROOT, task.imageFixture)) : null;
-        out = await runChatTask({ resolved, prompt: task.prompt, timeoutMs: TASK_TIMEOUT_MS, image });
+        out = await runChatTask({ resolved, prompt: task.prompt, timeoutMs: TASK_TIMEOUT_MS, image, env: runnerEnv });
       }
       budget.commit({ taskId: task.id, kind: "llm", tokens: out.tokens ?? 0, detail: chain });
       const verified = verifyExpectations(effectiveTask, out);
       const status = out.status === "ok" && verified.ok ? "ok" : out.status === "blocked" ? "blocked" : "failed";
       return {
         ...base, chain, status, ms: out.ms ?? Date.now() - startedAt,
-        reason: out.status === "blocked" ? out.reason : verified.ok ? undefined : `未满足期望：${verified.detail}`,
+        reason: failureReason(out, verified),
         answer: (out.answer ?? "").slice(0, 800),
         receipt: out.receipt ?? null,
         evidence: out.evidence ?? null,
@@ -242,13 +336,13 @@ async function runTask(task) {
       const units = Number(task.images ?? 1);
       const gate = budget.reserve({ taskId: task.id, kind: "image", units, detail: chain });
       if (!gate.allowed) return { ...base, status: "blocked", reason: gate.reason, ms: Date.now() - startedAt };
-      const out = await runImageTask({ resolved, task, timeoutMs: Math.max(TASK_TIMEOUT_MS, 5 * 60_000), artifactsDir: join(OUT_DIR, "artifacts") });
+      const out = await runImageTask({ resolved, task, timeoutMs: Math.max(TASK_TIMEOUT_MS, 5 * 60_000), artifactsDir: join(OUT_DIR, "artifacts"), env: runnerEnv });
       budget.commit({ taskId: task.id, kind: "image", units, detail: chain });
       const verified = verifyExpectations(task, out);
       return {
         ...base, chain, status: out.status === "ok" && verified.ok ? "ok" : out.status === "blocked" ? "blocked" : "failed",
         ms: out.ms ?? Date.now() - startedAt,
-        reason: out.status === "blocked" ? out.reason : verified.ok ? undefined : `未满足期望：${verified.detail}`,
+        reason: failureReason(out, verified),
         artifacts: out.artifacts ?? [],
         receipt: out.receipt ?? null,
         units,
@@ -261,14 +355,14 @@ async function runTask(task) {
       if (!gate.allowed) return { ...base, status: "blocked", reason: gate.reason, ms: Date.now() - startedAt };
       const out = await runVideoTask({
         resolved, task, timeoutMs: Math.max(TASK_TIMEOUT_MS, 20 * 60_000),
-        artifactsDir: join(OUT_DIR, "artifacts"), pollMs: SELFTEST ? 200 : 8000,
+        artifactsDir: join(OUT_DIR, "artifacts"), pollMs: SELFTEST ? 200 : 8000, env: runnerEnv,
       });
       budget.commit({ taskId: task.id, kind: "video", units, detail: chain });
       const verified = verifyExpectations(task, out);
       return {
         ...base, chain, status: out.status === "ok" && verified.ok ? "ok" : out.status === "blocked" ? "blocked" : "failed",
         ms: out.ms ?? Date.now() - startedAt, taskId: out.taskId ?? null,
-        reason: out.status === "blocked" ? out.reason : verified.ok ? undefined : `未满足期望：${verified.detail}`,
+        reason: failureReason(out, verified),
         artifacts: out.artifacts ?? [],
         receipt: out.receipt ?? null,
         units,
@@ -374,9 +468,11 @@ const report = {
       : "生产档位：默认只读；写入需 --allow-prod-writes",
   },
   fingerprint,
+  credentialSources,
   models: resolvedModels.map((m) => ({
     id: m.id, kind: m.kind, adapter: m.adapter, model: m.model, baseUrl: m.baseUrl,
     ready: m.ready, missing: m.missing, credentialEnv: m.credentialEnv ?? null, modelNote: m.modelNote ?? null,
+    warnings: m.warnings ?? [],
   })),
   tasks: results,
   budget: budgetSummary,
@@ -392,6 +488,16 @@ console.log(`[acceptance:live] 结论：${verdict}；任务 ${results.length}（
 if (REQUIRE_LIVE && verdict !== "pass") process.exitCode = 1;
 
 /* ---------------------------- helpers ---------------------------- */
+/**
+ * 统一失败原因口径：blocked 用原始原因；调用失败保留**适配器原始错误**（不再只剩“未满足期望”）；
+ * 调用成功但判定不过才写“未满足期望”。这样报告能直接指出 404/参数不支持等真实原因。
+ */
+function failureReason(out, verified) {
+  if (out.status === "blocked") return out.reason;
+  if (out.status !== "ok") return `调用失败：${String(out.reason ?? "未知原因").slice(0, 240)}`;
+  return verified.ok ? undefined : `未满足期望：${verified.detail}`;
+}
+
 function verifyExpectations(task, out) {
   const problems = [];
   const text = `${out.answer ?? ""} ${(out.artifacts ?? []).map((a) => a.path ?? a.url ?? "").join(" ")} ${out.reason ?? ""}`;
@@ -431,6 +537,11 @@ function renderMarkdown(r) {
     md.push("");
   }
   md.push("## 二、内置模型与凭据状态");
+  md.push("");
+  md.push("凭据来源（只记来源与键名，绝不记录值）：");
+  for (const c of r.credentialSources ?? []) {
+    md.push(`- \`${c.source}\`${c.path ? ` → ${c.path}` : ""}：${(c.keys ?? []).filter(Boolean).join(", ") || "（无相关键）"}`);
+  }
   md.push("");
   md.push("| 模型 | 模态 | 链路 | 模型 ID | 端点 | 凭据 | 状态 |");
   md.push("|---|---|---|---|---|---|---|");
