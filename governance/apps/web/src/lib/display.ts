@@ -9,7 +9,7 @@
  * 扩展纪律：基座只保留公共术语；行业岗位、动作与字段显示名必须通过
  * 当前已验签 Bundle 的 terminology 投影注入，禁止在客户端追加行业词表。
  */
-import { clientChineseText, clientFieldLabel, clientStatusLabel, clientValueText } from "@workloom/ui";
+import { clientChineseText, clientFieldLabel, clientStatusLabel, clientValueText, registerClientSafeTerms } from "@workloom/ui";
 
 let DISPLAY_TERMINOLOGY: Readonly<Record<string, string>> = {};
 
@@ -18,6 +18,71 @@ export function hydrateDisplayTerminology(terminology: Record<string, string>): 
   DISPLAY_TERMINOLOGY = Object.freeze(Object.fromEntries(
     Object.entries(terminology).filter(([, value]) => clientChineseText(value, "") === value.trim()),
   ));
+}
+
+/**
+ * 行业术语白名单随装配投影注入（`ui.safeTerms`）：行业通用缩写与品牌词在
+ * 中文显示边界内放行，其它规则不变。切换身份/工作区时必须传空数组清空。
+ */
+export function hydrateClientSafeTerms(terms: readonly string[] | undefined): void {
+  registerClientSafeTerms(terms ?? []);
+}
+
+/**
+ * 剔除术语串里的拉丁技术记号（SOP / RPA / PRD / eval / gh API / v1 …）。
+ * clientChineseText 遇到夹带技术记号的串会**整串回落**，技能名就会裸奔成
+ * 「dev-dispatch」「prd-forge」这类内部 id（真机验收实测：基座技能中心 20 项里 13 项）。
+ */
+function stripTechnicalTokens(value: string): string {
+  return value
+    .replace(/[A-Za-z][A-Za-z0-9._+/'-]*/g, " ")
+    .replace(/[\s·—–-]+/g, " ")
+    .trim();
+}
+
+/** 必须给中文名的场景：先按原串过词典（保留 GEO 这类词典认可的行业词），被拒再剔除记号重试 */
+export function chineseDisplayName(value: string | null | undefined, fallback: string): string {
+  const raw = (value ?? "").trim();
+  if (!raw) return fallback;
+  const kept = clientChineseText(raw, "");
+  if (kept) return kept;
+  const cleaned = stripTechnicalTokens(raw);
+  if (cleaned) {
+    const accepted = clientChineseText(cleaned, "");
+    if (accepted) return accepted;
+  }
+  return fallback;
+}
+
+/**
+ * 技能展示名（Bundles 技能口径）：优先从技能说明首段解析中文名。
+ * 首段分隔符覆盖行业写作习惯：。「」（）以及破折号「——」（ai-pm 技能大量用破折号）；
+ * 首段夹带技术记号时先剔除再取，避免整串回落成裸 id。
+ * 行业词表仍由各 Bundle 的技能正文提供，客户端不新增行业词汇（本文件顶部扩展纪律）。
+ */
+export function skillDisplayName(name: string, description?: string | null): string {
+  const text = (description ?? "").trim();
+  if (text) {
+    const m = /^([^（(。：:—]{2,40})[（(。：:—]/.exec(text);
+    const candidate = m?.[1]?.trim();
+    if (candidate) {
+      const resolved = chineseDisplayName(candidate, "");
+      if (resolved) return resolved;
+    }
+    /**
+     * 长说明兜底（RDAS v3.0 实测：badcase-harvest / model-scout 首段 >40 字导致整串回落成裸 id）：
+     * 按句号/分号/破折号切第一段，再取第一个逗号前的短句；剔除技术记号与符号后必须是中文。
+     */
+    const first = text.split(/[。；;！!？?\n]|——/)[0]?.trim() ?? "";
+    const clause = (first.split(/[，,]/)[0] ?? first)
+      .replace(/[+/*#_|]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 32);
+    const resolved = clause ? chineseDisplayName(clause, "") : "";
+    if (resolved) return resolved;
+  }
+  return chineseDisplayName(name, name);
 }
 
 function projectedText(key: string): string | undefined {
@@ -408,4 +473,22 @@ function payloadValueText(value: unknown, depth = 0): string {
 export function payloadText(after: unknown, maxLen = 160): string {
   if (after == null) return "";
   return payloadValueText(after).slice(0, maxLen);
+}
+
+/**
+ * 数字职场「头顶气泡」文案（D25）：服务端的 statusLine 形如
+ * 「最近：competitor.fetch」「请示待裁：price.adjust」，前缀是中文状态、
+ * 后半段是内部动作码。动作码必须先经动作字典，否则中文显示边界会把整句
+ * 回落成「当前状态待确认」（RDAS 实测：职场气泡 5/11 位员工不可读）。
+ */
+const FLOOR_STATUS_PREFIX = /^(请示待裁|遇阻|刚完成|最近)：(.+)$/;
+
+export function floorStatusText(line: string | null | undefined, fallback: string): string {
+  const raw = (line ?? "").trim();
+  if (!raw) return fallback;
+  const matched = FLOOR_STATUS_PREFIX.exec(raw);
+  if (matched?.[1] && matched[2]) {
+    return `${matched[1]}：${actionText(matched[2].trim())}`;
+  }
+  return clientChineseText(raw, fallback);
 }

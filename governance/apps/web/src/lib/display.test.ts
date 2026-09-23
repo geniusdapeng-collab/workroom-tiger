@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { actionText, actorText, approvalGestureText, hydrateDisplayTerminology, payloadText, versionText } from "./display";
+import { actionText, actorText, approvalGestureText, chineseDisplayName, floorStatusText, hydrateClientSafeTerms, hydrateDisplayTerminology, payloadText, skillDisplayName, versionText } from "./display";
+import { clientChineseText } from "@workloom/ui";
+
+describe("技能中文展示名（基座：技能中心不得裸奔内部 id）", () => {
+  it("首段即中文短名（含破折号分隔）", () => {
+    expect(skillDisplayName("dev-dispatch", "开发任务派发——选机床、建隔离 worktree、快照、启动受管会话。")).toBe("开发任务派发");
+    expect(skillDisplayName("kb-fresh", "知识库保鲜巡检——过期检测（模型版本/价格/政策失效）…")).toBe("知识库保鲜巡检");
+  });
+
+  it("首段夹带技术记号时剔除后再取（PRD/eval/LLM 这类词不进技能名）", () => {
+    expect(skillDisplayName("eval-forge", "评测集锻造。从 PRD/需求自动生成可执行 eval 集（30-40 案例起步）…")).toBe("评测集锻造");
+    expect(chineseDisplayName("gh API 读取 issue/PR 提交节奏", "github-pulse")).toBe("读取 提交节奏");
+  });
+
+  it("实在取不到中文名才回落原 id", () => {
+    expect(skillDisplayName("some-skill", "")).toBe("some-skill");
+  });
+});
 
 describe("客户端版本文案", () => {
   it("只展示人类可读版本序号", () => {
@@ -44,5 +61,30 @@ describe("审批手势文案", () => {
     expect(approvalGestureText("edit")).toBe("已修改后批准");
     expect(approvalGestureText("reject")).toBe("已驳回");
     expect(approvalGestureText("private_gesture")).toBe("审批已处理");
+  });
+});
+
+describe("数字职场气泡（内部动作码先经动作字典）", () => {
+  it("请示/最近/遇阻/刚完成前缀后的动作码映射为中文", () => {
+    hydrateDisplayTerminology({ "action.competitor.fetch": "竞对价格抓取", "action.price.adjust": "调价审批" });
+    expect(floorStatusText("最近：competitor.fetch", "当前状态待确认")).toBe("最近：竞对价格抓取");
+    expect(floorStatusText("请示待裁：price.adjust", "当前状态待确认")).toBe("请示待裁：调价审批");
+    expect(floorStatusText("遇阻：inspection.scan", "当前状态待确认")).toBe("遇阻：扫描");
+  });
+
+  it("未收录动作码也给中文兜底，不裸奔原始码；中文状态原样保留", () => {
+    hydrateDisplayTerminology({});
+    expect(floorStatusText("最近：vendor.unknown.thing", "当前状态待确认")).toBe("最近：系统操作");
+    expect(floorStatusText("飞猪渠道新客首图发布", "当前状态待确认")).toBe("飞猪渠道新客首图发布");
+    expect(floorStatusText("", "待命")).toBe("待命");
+  });
+});
+
+describe("行业术语白名单投影", () => {
+  it("行业包声明的术语放行，切换工作区后清空", () => {
+    hydrateClientSafeTerms(["WiFi", "OCC"]);
+    expect(clientChineseText("客房 WiFi 密码为房间号后四位", "信息待确认")).toBe("客房 WiFi 密码为房间号后四位");
+    hydrateClientSafeTerms([]);
+    expect(clientChineseText("客房 WiFi 密码为房间号后四位", "信息待确认")).toBe("信息待确认");
   });
 });
