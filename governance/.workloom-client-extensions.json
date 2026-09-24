@@ -1,9 +1,10 @@
 {
   "schemaVersion": "workloom.client-extensions/v1",
-  "reason": "workroom-tiger 的 governance 壳承载织伴「小织」本机克隆音色接入层（apps/*/src/voice/**）；该层属本仓自有产品层，不随基座客户端升级被覆盖，也不回流基座。",
+  "reason": "workroom-tiger 的 governance 壳承载织伴「小织」本机克隆音色接入层（apps/*/src/voice/**）；该层属本仓自有产品层，不随基座客户端升级被覆盖，也不回流基座。；apps/*/vite.config.ts 为 dev/preview 提供 /api 代理（本机克隆音色取音链路的开发态入口）。",
   "scope": "repo-owned-client-paths",
   "industryExtensionPaths": [
-    "apps/*/src/voice/**"
+    "apps/*/src/voice/**",
+    "apps/*/vite.config.ts"
   ],
   "guarantees": {
     "requiredEntries": "apps/web/src/main.tsx · apps/webb/src/main.tsx · apps/webc/src/main.tsx · apps/webc/public/service-front.config.json 仍按基座受管口径校验",
