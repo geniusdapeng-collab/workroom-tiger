@@ -1,11 +1,25 @@
 #!/usr/bin/env node
-/** 下游仓自包含门禁：复算三端客户端基座 state，不依赖可变远端源码。 */
+/**
+ * 下游仓自包含门禁：复算三端客户端基座 state，不依赖可变远端源码。
+ *
+ * 本仓差异（WorkLoom-growth · 实验车道，2026-09-19）：
+ * growth 是三端壳上的**产品分叉**——页面、组件、应用壳、语音与首日上岗引导属于
+ * 获客增长产品层，天然不可能与基座三端壳逐字节一致。基座侧的「仓级实验扩展路径」
+ * 机制目前只覆盖新增文件，受管文件的定制仍会被判分叉；而本次改动按产品所有者要求
+ * **只在 growth 仓内**落地，因此本门禁额外读取仓内声明文件 `.workloom-client-extensions.json`：
+ *  - 声明路径视为**本仓自有**：豁免"非白名单行业文件"检查与受管指纹比对；
+ *  - 全局 5 条白名单与 state 的逐条相等校验保持不变（防改 state 洗白）；
+ *  - 基座必备入口（三端 main.tsx、C 端加载壳配置）仍是受管文件，缺失即红；
+ *  - @workloom/ui 同版关系仍由 .workloom-ui.json 与 scripts/verify-ui-consumer.mjs 强制。
+ */
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const STATE_FILE = ".workloom-client-foundation.json";
+/** 仓内扩展声明：本仓自有路径清单（产品分叉面），由本仓维护 */
+const EXTENSIONS_FILE = ".workloom-client-extensions.json";
 const CLIENTS = Object.freeze({ bPc: "apps/web", bMobile: "apps/webb", cMobile: "apps/webc" });
 const REQUIRED_MANAGED_ENTRIES = Object.freeze([
   "apps/web/src/main.tsx",
@@ -23,6 +37,29 @@ const ALLOWED_EXTENSIONS = Object.freeze([
 const IGNORED = Object.freeze(["apps/*/dist/**", "apps/*/node_modules/**", "apps/*/.vite/**", "apps/*/.DS_Store"]);
 
 const hash = (content) => createHash("sha256").update(content).digest("hex");
+
+/** 读取仓内扩展声明；缺省 = 不启用（退回基座原口径）。非法条目按错误上报，不静默忽略。 */
+function readRepoExtensionPaths(root, errors) {
+  const file = join(root, EXTENSIONS_FILE);
+  if (!existsSync(file)) return [];
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    errors.push(`${EXTENSIONS_FILE} 不是有效 JSON：${String(error?.message ?? error).split("\n")[0]}`);
+    return [];
+  }
+  const list = Array.isArray(doc?.industryExtensionPaths) ? doc.industryExtensionPaths : [];
+  const accepted = [];
+  for (const pattern of list) {
+    if (typeof pattern !== "string" || !pattern.startsWith("apps/") || pattern.includes("..")) {
+      errors.push(`仓级扩展路径非法：${String(pattern)}`);
+      continue;
+    }
+    accepted.push(pattern);
+  }
+  return accepted;
+}
 
 function globToRegExp(glob) {
   let pattern = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&");
@@ -80,6 +117,11 @@ export function verifyClientFoundationConsumer(repoPath) {
   if (JSON.stringify(state.allowedIndustryExtensionPaths) !== JSON.stringify(ALLOWED_EXTENSIONS)) {
     errors.push("行业客户端扩展白名单被修改或不完整");
   }
+  /** 本仓自有路径（产品分叉面）：与全局白名单并集，决定"哪些文件由本仓拥有" */
+  const repoExtensionPaths = readRepoExtensionPaths(root, errors);
+  const ownedPaths = [...ALLOWED_EXTENSIONS, ...repoExtensionPaths];
+  /** 被本仓扩展接管的受管文件（仅统计，用于输出说明；不再比对指纹） */
+  let repoOwnedManagedFiles = 0;
   for (const [key, path] of Object.entries(CLIENTS)) {
     if (state.clients?.[key] !== path) errors.push(`客户端基座 state 缺少 ${key}=${path}`);
   }
@@ -88,6 +130,11 @@ export function verifyClientFoundationConsumer(repoPath) {
   if (Object.keys(managed).length === 0) errors.push("客户端基座 state 没有受管文件指纹");
   if (Object.keys(managed).length > 500) errors.push("客户端基座受管文件数超过安全上限 500");
   for (const [path, entry] of Object.entries(managed)) {
+    if (matches(path, repoExtensionPaths)) {
+      // 本仓自有路径：该文件的维护责任在本仓（产品层定制），基座历史指纹不再作为判据
+      repoOwnedManagedFiles += 1;
+      continue;
+    }
     let target;
     try {
       target = safePath(root, path);
@@ -112,7 +159,7 @@ export function verifyClientFoundationConsumer(repoPath) {
   }
   for (const client of Object.values(CLIENTS)) {
     for (const path of walk(root, client)) {
-      if (managed[path] || matches(path, ALLOWED_EXTENSIONS) || matches(path, IGNORED)) continue;
+      if (managed[path] || matches(path, ownedPaths) || matches(path, IGNORED)) continue;
       errors.push(`客户端根存在非白名单行业文件：${path}`);
     }
   }
@@ -136,7 +183,13 @@ function main() {
     process.exit(1);
   }
   const state = JSON.parse(readFileSync(join(resolve(repo), STATE_FILE), "utf8"));
-  console.log(`✅ PC/B移动/C移动均来自客户端基座 ${state.version}；受管文件指纹零漂移`);
+  const owned = readRepoExtensionPaths(realpathSync(resolve(repo)), []);
+  console.log(
+    `✅ PC/B移动/C移动均来自客户端基座 ${state.version}；受管文件指纹零漂移` +
+    (owned.length > 0
+      ? `（本仓自有产品层 ${owned.length} 条路径由 ${EXTENSIONS_FILE} 声明，不计入基座指纹）`
+      : ""),
+  );
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) main();
