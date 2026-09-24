@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "workloom.client-extensions/v1",
+  "reason": "workroom-tiger 的 governance 壳承载织伴「小织」本机克隆音色接入层（apps/*/src/voice/**）；该层属本仓自有产品层，不随基座客户端升级被覆盖，也不回流基座。",
+  "scope": "repo-owned-client-paths",
+  "industryExtensionPaths": [
+    "apps/*/src/voice/**"
+  ],
+  "guarantees": {
+    "requiredEntries": "apps/web/src/main.tsx · apps/webb/src/main.tsx · apps/webc/src/main.tsx · apps/webc/public/service-front.config.json 仍按基座受管口径校验",
+    "uiVersionLock": "@workloom/ui 版本仍由 .workloom-ui.json 与 scripts/verify-ui-consumer.mjs 强制"
+  }
+}
