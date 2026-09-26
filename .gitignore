@@ -12,3 +12,7 @@ reports/calibration_samples.json
 reports/governance_events.jsonl
 reports/复盘_*.md
 reports/review_proposals/
+
+# 手绘白板解说引擎：venv 随机器重建；渲染任务产物不入库
+scripts/whiteboard/engine/.venv/
+var/whiteboard/
