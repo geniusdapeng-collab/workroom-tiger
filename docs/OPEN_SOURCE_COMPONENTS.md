@@ -113,7 +113,7 @@
 | 90 | python-pptx | [github.com/scanny/python-pptx](https://github.com/scanny/python-pptx) · MIT | 按需安装（未锁定版本） | 1.0.2 | 开发/构建 | scripts/build-capability-pptx.py（能力清单 PPT 生成） | 本地工具链依赖，不随产品分发；版本未锁定属已知缺口（建议后续补 requirements 引脚） |
 | 91 | Playwright（Python · computer-use 工具链） | [github.com/microsoft/playwright-python](https://github.com/microsoft/playwright-python) · Apache-2.0 | 1.40.0 | **1.46.0** ⬆ | 开发/构建 | packages/base/computer-use/toolkit（安装脚本按 requirements 拉取） | 与 Node 侧 @playwright/test 独立版本线；浏览器二进制由 playwright install 管理，升级需同步预检脚本断言 |
 | 92 | pandas | [github.com/pandas-dev/pandas](https://github.com/pandas-dev/pandas) · BSD-3-Clause | 2.0 | 2.2.2 | 运行时 | trading_system（行情与回测数据处理） | 交易内核数据处理；升级后必须重跑 pytest 与回测冒烟（无未来函数校验） |
-| 93 | NumPy | [github.com/numpy/numpy](https://github.com/numpy/numpy) · BSD-3-Clause | 1.24 / 2.5.3 | 2.0.1 | 运行时 | trading_system | 与 pandas 同批升级；大版本变更注意 dtype 与默认行为变化 |
+| 93 | NumPy | [github.com/numpy/numpy](https://github.com/numpy/numpy) · BSD-3-Clause | 2.5.3 / 1.24 | 2.0.1 | 运行时 | trading_system | 与 pandas 同批升级；大版本变更注意 dtype 与默认行为变化 |
 | 94 | yfinance | [github.com/ranaroussi/yfinance](https://github.com/ranaroussi/yfinance) · Apache-2.0 | 0.2.40 | **0.2.41** ⬆ | 运行时 | trading_system（行情抓取） | 非官方 Yahoo 接口封装，上游字段漂移频繁；升级后必须跑真实抓取冒烟（demo 模式除外） |
 | 95 | pytest | [github.com/pytest-dev/pytest](https://github.com/pytest-dev/pytest) · MIT | 8.0 | 8.3.2 | 开发/构建 | tests | CI 测试运行器；版本与插件矩阵相关 |
 | 96 | requests | [github.com/psf/requests](https://github.com/psf/requests) · Apache-2.0 | 2.31 | 2.32.3 | 运行时 | trading_system | HTTP 客户端；升级后过行情抓取与重试路径 |
@@ -285,11 +285,11 @@
 
 | 包 | 当前版本 | 声明 | 出现位置 | 上游最新 |
 |---|---|---|---|---|
-| `av` | 18.1.0 | ==18.1.0 | scripts/whiteboard/engine/requirements.txt | —（未扫描） |
-| `numpy` | >=1.24（下限声明） | >=1.24 | requirements.txt、scripts/whiteboard/engine/requirements.txt | 2.0.1 |
-| `opencv-python` | 5.0.0.93 | ==5.0.0.93 | scripts/whiteboard/engine/requirements.txt | —（未扫描） |
+| `av` | 18.1.0 | ==18.1.0 | governance/scripts/whiteboard/engine/requirements.txt、scripts/whiteboard/engine/requirements.txt | —（未扫描） |
+| `numpy` | 2.5.3 / 1.24 | ==2.5.3 | governance/scripts/whiteboard/engine/requirements.txt、requirements.txt、scripts/whiteboard/engine/requirements.txt | 2.0.1 |
+| `opencv-python` | 5.0.0.93 | ==5.0.0.93 | governance/scripts/whiteboard/engine/requirements.txt、scripts/whiteboard/engine/requirements.txt | —（未扫描） |
 | `pandas` | >=2.0（下限声明） | >=2.0 | requirements.txt | 2.2.2 |
-| `Pillow` | 12.3.0 | ==12.3.0 | scripts/whiteboard/engine/requirements.txt | —（未扫描） |
+| `Pillow` | 12.3.0 | ==12.3.0 | governance/scripts/whiteboard/engine/requirements.txt、scripts/whiteboard/engine/requirements.txt | —（未扫描） |
 | `playwright` | >=1.40.0（下限声明） | >=1.40.0 | governance/packages/base/computer-use/toolkit/requirements.txt | 1.46.0 |
 | `pytest` | >=8.0（下限声明） | >=8.0 | requirements.txt | 8.3.2 |
 | `PyYAML` | >=6.0（下限声明） | >=6.0 | requirements.txt | 6.0.3 |
