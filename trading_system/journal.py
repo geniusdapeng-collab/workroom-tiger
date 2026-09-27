@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from . import config
+from .ledger_io import write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,26 @@ class Journal:
         self.records: list[dict] = self._load()
 
     def _load(self) -> list[dict]:
-        if self.path.exists():
-            try:
-                return json.loads(self.path.read_text())
-            except Exception:
-                return []
-        return []
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return []
+        try:
+            records = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"信号日记 {self.path} JSON 损坏，已停止以保留原账本") from exc
+        if not isinstance(records, list) or any(
+            not isinstance(record, dict)
+            or not {"date", "ticker", "status"}.issubset(record)
+            or not all(isinstance(record[key], str) and record[key]
+                       for key in ("date", "ticker", "status"))
+            for record in records
+        ):
+            raise ValueError(f"信号日记 {self.path} 结构无效，已停止以保留原账本")
+        return records
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.records, ensure_ascii=False, indent=2))
+        write_json_atomic(self.path, self.records)
 
     # ------------------------------------------------------------
 
