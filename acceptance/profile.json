@@ -1,0 +1,175 @@
+{
+  "schemaVersion": "workloom.acceptance-profile/v2",
+  "repo": "workloom-ai/workroom-tiger",
+  "productName": "老虎全球资产管理系统（WorkLoom for Trading）",
+  "lane": "industry",
+  "primaryBundle": "trading",
+  "workspaceId": null,
+  "dataMode": "simulated",
+  "startup": {
+    "command": "cd governance && pnpm preview:all",
+    "ports": { "pc": 3000, "bMobile": 3001, "cMobile": 3002, "server": 8787 },
+    "notes": "交易内核独立运行：`bash scripts/setup.sh`（Python venv + 冒烟）与 `python3 main.py --demo`；治理壳在 governance/ 子树（base-sync pathPrefix=governance）。全栈一键：`bash scripts/stack_setup.sh`（需要 Docker + PostgreSQL 17）。"
+  },
+  "identity": {
+    "human": "MEM-T001",
+    "guest": "demo-direct",
+    "workspaceSlug": "tiger-trading"
+  },
+  "surfaces": {
+    "pcRoutes": ["/", "/tasks", "/approvals", "/reports", "/guardrails", "/skills", "/agents", "/inbox", "/nights", "/executive"],
+    "bMobileRoutes": ["/", "/inbox", "/tasks", "/operations", "/account"],
+    "cRoutes": ["#chat", "#service", "#tickets", "#messages", "#me"]
+  },
+  "thresholds": {
+    "firstValueMs": 20000,
+    "dispatchMs": 60000,
+    "approvalMs": 30000,
+    "traceClicks": 2,
+    "guestFirstReplyMs": 30000,
+    "decisionQuota": 7,
+    "minContrastRatio": 4.5,
+    "idleInterruptionWindowS": 20,
+    "taskSuccessP0": 1.0,
+    "taskSuccessP1": 0.9,
+    "susMin": 68,
+    "susTarget": 80,
+    "seqMin": 5.5,
+    "csatMin": 4.2,
+    "targetSizePx": 24,
+    "zoomPercent": 200,
+    "axCritical": 0,
+    "adr1Target": 0.85,
+    "hirNiMax": 0.1,
+    "h34Max": 0.03,
+    "hmpoMax": 0.5,
+    "passK": 5,
+    "p0PassKTarget": 0.8,
+    "offlineAuditSample": 10,
+    "soakHours": 24
+  },
+  "ux": {
+    "personas": [
+      { "id": "investor", "jtbd": ["每天 10 分钟看清市场许可、主线与放行标的"], "criticality": "P0" },
+      { "id": "portfolio-manager", "jtbd": ["今天管哪些仓位、风控闸门放行谁、模拟盘成交与净值"], "criticality": "P0" },
+      { "id": "analyst", "jtbd": ["接活产出研报/复盘并看到回执"], "criticality": "P0" },
+      { "id": "partner", "jtbd": ["看清数据服务与异常申报的授权边界"], "criticality": "P1" },
+      { "id": "guest", "jtbd": ["问得清（净值/持仓/纪律）、答得快、能转人工"], "criticality": "P0" }
+    ],
+    "journeys": [
+      { "id": "U-01", "persona": "investor", "stage": "daily", "title": "清晨决策包：市场许可 → 主线 → 放行标的", "mot": true },
+      { "id": "U-02", "persona": "investor", "stage": "daily", "title": "单票决策回放：五段依据 + 失效条件", "mot": true },
+      { "id": "U-03", "persona": "portfolio-manager", "stage": "daily", "title": "风控闸门与围栏命中复核（block 不过期）", "mot": true },
+      { "id": "U-04", "persona": "portfolio-manager", "stage": "daily", "title": "小虎模拟盘：持仓/成交/净值曲线与来源披露", "mot": true },
+      { "id": "U-05", "persona": "analyst", "stage": "weekly", "title": "复盘纪要：归因、违规标记与提案状态", "mot": true },
+      { "id": "U-06", "persona": "guest", "stage": "exception", "title": "C 端首响：查净值/异常申报/转人工", "mot": true }
+    ],
+    "tasks": [
+      { "id": "U1-T01", "persona": "investor", "criticality": "P0", "budgetMs": 20000, "paths": ["normal", "empty"] },
+      { "id": "U2-T01", "persona": "portfolio-manager", "criticality": "P0", "budgetMs": 30000, "paths": ["normal", "error", "permission"] },
+      { "id": "U3-T01", "persona": "guest", "criticality": "P0", "budgetMs": 30000, "paths": ["normal", "offline"] }
+    ],
+    "research": {
+      "participants": [],
+      "methods": ["think-aloud", "first-click", "five-second", "tree-test"],
+      "instruments": ["SUS", "SEQ", "NASA-TLX", "CSAT"]
+    }
+  },
+  "outcome": {
+    "roles": [
+      {
+        "role": "risk-manager",
+        "agentPreset": "risk-manager",
+        "al": "AL2",
+        "deliverableUnit": "日内风控闸门判定（五态行动 + 股数 + 交易卡片）",
+        "minSubstance": "每条放行标的可回放 MRS*/SHS/ICS/TSS 与闸门依据；AVOID 日不得有新开仓",
+        "kpis": [
+          { "name": "单笔风险 ≤ 净值 0.8%", "source": "journal", "baseline": null, "target": 0.008 },
+          { "name": "总敞口 ≤ MRS* 仓位上限", "source": "sim_portfolio", "baseline": null, "target": null }
+        ],
+        "attribution": "observational",
+        "guardrails": ["csat", "complaints", "refund"]
+      },
+      {
+        "role": "review-chief",
+        "agentPreset": "review-chief",
+        "al": "AL3",
+        "deliverableUnit": "日度复盘纪要（归因 + 违规标记 + 校准状态）",
+        "minSubstance": "纪要必须列出当轮违规命中与未生成原因；不得改写决策输入",
+        "kpis": [{ "name": "纪要生成率", "source": "review.daily", "baseline": null, "target": 1.0 }],
+        "attribution": "observational",
+        "guardrails": ["csat"]
+      },
+      {
+        "role": "portfolio-risk-officer",
+        "agentPreset": "portfolio-risk-officer",
+        "al": "AL2",
+        "deliverableUnit": "组合层风险预算复核（单链 ≤3%、Gross Cap 截断说明）",
+        "minSubstance": "截断记录可审计；缺数据市场权重为 0 并如实标注",
+        "kpis": [{ "name": "单链累计风险 ≤3%", "source": "portfolio", "baseline": null, "target": 0.03 }],
+        "attribution": "observational",
+        "guardrails": ["complaints"]
+      },
+      {
+        "role": "global-allocator",
+        "agentPreset": "global-allocator",
+        "al": "AL2",
+        "deliverableUnit": "三市配置方案（额度权重 + 闸门截断说明）",
+        "minSubstance": "组合层只有预算没有观点；验证期市场强制轻仓",
+        "kpis": [{ "name": "配置方案可回放", "source": "governance_events.jsonl", "baseline": null, "target": 1.0 }],
+        "attribution": "observational",
+        "guardrails": ["csat"]
+      }
+    ],
+    "taskSuites": [],
+    "receipts": []
+  },
+  "autonomy": {
+    "interventionTaxonomy": "H0-H4",
+    "fixtureFilters": ["suite.", "suite-", "apr-suite-", "apr-e-", "T-suite"],
+    "windows": ["4w"],
+    "targetPrecisionPp": 10,
+    "offlineAuditSample": 10
+  },
+  "soak": { "hours": [24, 168, 672], "metrics": ["success", "latency", "cost", "drift"] },
+  "environment": {
+    "kind": "local-preview",
+    "allowWrites": false,
+    "supportDir": null,
+    "target": {},
+    "timeouts": { "healthMs": 8000, "probeMs": 20000 },
+    "notes": "Tiger 只运行模拟/纸面交易（不变量 §4.10）：P 域真实下单类任务不适用；治理壳与内核可分别以 governance/ 与根目录命令启动。"
+  },
+  "live": {
+    "enabled": false,
+    "requireRealModels": false,
+    "allowDb": false,
+    "budgets": {
+      "maxLlmCalls": 40,
+      "maxLlmTokens": 300000,
+      "maxImages": 8,
+      "maxVideoClips": 3,
+      "minVideoSeconds": 10,
+      "maxVideoSeconds": 15,
+      "maxVideoSecondsTotal": 45,
+      "maxCostCny": 120,
+      "maxWallClockMin": 45
+    },
+    "models": [],
+    "tasks": [],
+    "notes": "本仓 LLM 采用自带 API（LLM_BACKEND=api|local）且不接受聊天内凭据注入：未在受控秘密存储配置前，P 域（内置模型真实触发）保持 enabled=false → 验收报告按规范写『未验证』，不得伪造通过。"
+  },
+  "journeys": [
+    { "id": "EXP-01", "persona": "investor", "title": "首启看到市场许可与今日放行", "script": "builtin:first-value" },
+    { "id": "EXP-02", "persona": "portfolio-manager", "title": "围栏命中复核（block 置顶）", "script": "builtin:approval" },
+    { "id": "EXP-03", "persona": "investor", "title": "决策一键溯源（五段依据）", "script": "builtin:traceability" },
+    { "id": "EXP-04", "persona": "portfolio-manager", "title": "紧急制动确认与撤回", "script": "builtin:brake" },
+    { "id": "EXP-05", "persona": "analyst", "title": "派活并看拆解", "script": "builtin:dispatch" },
+    { "id": "EXP-06", "persona": "portfolio-manager", "title": "统一待办聚合", "script": "builtin:inbox" },
+    { "id": "EXP-07", "persona": "analyst", "title": "移动端接活（390px）", "script": "builtin:mobile-staff" },
+    { "id": "EXP-08", "persona": "partner", "title": "伙伴授权边界可见", "script": "builtin:partner-scope" },
+    { "id": "EXP-09", "persona": "guest", "title": "C 端首响与转人工（小虎）", "script": "builtin:guest-service" },
+    { "id": "EXP-10", "persona": "portfolio-manager", "title": "围栏 dry-run", "script": "builtin:dry-run" }
+  ],
+  "notes": "行业专属补充：Tiger 的交易内核（根目录 Python）不在治理壳验收面内，必须单独跑 `python3 main.py --demo` + `pytest tests/` + `scripts/gen_fences.py --check` 后再交 RDAS；O 域任务套件（acceptance/outcomes/*.yaml）尚未配置，验收报告中 O 域只能写『未验证』。阈值一律沿用基座下限，未放宽。"
+}
