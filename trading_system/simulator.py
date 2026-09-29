@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+import math
 from dataclasses import dataclass, field
 
 from . import config
+from .ledger_io import write_json_atomic
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,8 @@ class SimEngine:
     def __init__(self, path: str, initial_cash: float = 100_000.0):
         self.path = path
         self.initial_cash = initial_cash
-        self.state = self._load() or {
+        loaded = self._load()
+        self.state = loaded if loaded is not None else {
             "started": None, "initial_cash": initial_cash,
             "cash": initial_cash, "positions": [], "pending": [],
             "closed": [], "equity_curve": [], "ops_log": [],
@@ -72,18 +74,28 @@ class SimEngine:
 
     # ---------------------------------------------------------------- 持久化
     def _load(self) -> dict | None:
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return None
-        return None
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                state = json.load(f)
+        except FileNotFoundError:
+            return None
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"模拟盘账本 {self.path} JSON 损坏，已停止以保留原账本") from exc
+        required = {"started", "initial_cash", "cash", "positions", "pending",
+                    "closed", "equity_curve", "ops_log"}
+        if (not isinstance(state, dict) or not required.issubset(state)
+                or any(not isinstance(state[key], list)
+                       for key in ("positions", "pending", "closed", "equity_curve", "ops_log"))
+                or state["started"] is not None and not isinstance(state["started"], str)
+                or any(isinstance(state[key], bool)
+                       or not isinstance(state[key], (int, float))
+                       or not math.isfinite(state[key])
+                       for key in ("initial_cash", "cash"))):
+            raise ValueError(f"模拟盘账本 {self.path} 结构无效，已停止以保留原账本")
+        return state
 
     def save(self) -> None:
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self.state, f, ensure_ascii=False, indent=1)
+        write_json_atomic(self.path, self.state, indent=1)
 
     # ---------------------------------------------------------------- 主节拍
     def step(self, trade_date: str, result, get_bar, max_new: int = 8) -> dict:
