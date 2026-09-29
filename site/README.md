@@ -16,7 +16,7 @@
 ## 数据流（后端 → 前端）
 
 ```
-trading_system/ 全链路（17 个注册环节）
+trading_system/ 全链路（21 个注册环节，口径见 trading_system/redline.STEP_REGISTRY）
       │  PipelineResult（市场环境/板块/产业链/观察名单/决策/动作）
       ▼
 report_html.render_html()  ── 生成 ──▶  reports/日报_YYYYMMDD.html

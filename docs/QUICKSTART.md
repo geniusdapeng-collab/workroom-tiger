@@ -82,7 +82,11 @@ python3 main.py --market hk --mode daily --html     # 港股（轻仓验证期 0
 bash scripts/stack_setup.sh
 ```
 
-脚本完成：依赖安装 → PostgreSQL 17 容器 → 迁移 → 演示种子 + **trading bundle 种子**（33 数字员工 presets、18 条三层围栏、6 个官方技能、7 个三市/夜班/WFA 触发器）→ 内核事件入库 → 启动指引。
+脚本完成：依赖安装 → PostgreSQL 17 容器 → 迁移 → 演示种子 + **trading bundle 种子**（37 个岗位 preset、19 条三层围栏规则、10 个官方技能、7 个三市/夜班/WFA 触发器）→ 内核事件入库 → 启动指引。
+
+> 数量口径以可执行产物为准，不在文档里手工维护第二份：preset/围栏/技能来自
+> `governance/bundles/trading/{presets,fences,skills}` 与 `bundle.json#provides`，
+> 触发器来自 `governance/scripts/seed-trading.ts`；三者任一变化时以该处实际数量为准。
 
 落地核验（2026-08-30 实测）：
 

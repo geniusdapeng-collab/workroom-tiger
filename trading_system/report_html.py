@@ -19,6 +19,7 @@ import re as _re
 
 from . import config
 from .data_models import PipelineResult
+from .redline import STEP_REGISTRY
 
 try:  # AI 生成美术资源（老虎全球资产管理头图 / 产业链主题产品图，内嵌 base64，零外链）
     from .hero_art import HERO_ART_B64, THEME_ART_B64
@@ -2153,7 +2154,8 @@ def _philosophy_tab() -> str:
                    "覆盖率与来源血缘每轮披露；每轮运行从零开始，绝不消费历史残留——"
                    "决策只能由「本轮真实数据 + 固定规则」产生，任何上轮残留进入决策都是污染。"))
     P.append(_idea("②", "工程红线：流程的机器级保险",
-                   "17 个注册环节每次运行逐一点名，缺一个即判系统性事故；LLM 环节只有两个出口——"
+                   f"{len(STEP_REGISTRY)} 个注册环节每次运行逐一点名，缺一个即判系统性事故；"
+                   "LLM 环节只有两个出口——"
                    "真实产出或透传兜底加留痕，<b>代码里不存在「LLM 失败改用规则冒充」的分支</b>；"
                    "系统的成熟标志不是永远有答案，而是永远说得清哪部分有答案、哪部分没有。"))
     P.append(_idea("③", "在统计面前保持诚实：落账结算 + WFA·DSR 迭代",
@@ -2177,7 +2179,8 @@ def _philosophy_tab() -> str:
     P.append(f"<div class='card' style='margin-top:16px;border-color:#a8d400;text-align:center'>"
              "<div style='font-size:15px'><b>📕 《AI短线美股交易（1–15天波段版）白皮书》</b></div>"
              "<div class='sub' style='margin:6px 0 10px'>完整版 PDF · 16 章 + 4 附录：四层共振全章详解、"
-             "五环 17 环节架构、阈值与权限总表、交易卡片模板、每日看板读法</div>"
+             f"五环架构（白皮书原始口径 17 环节，现行内核 {len(STEP_REGISTRY)} 环节）、"
+             "阈值与权限总表、交易卡片模板、每日看板读法</div>"
              f"<a href='AI短线美股交易白皮书_20260730.pdf' download "
              f"style='display:inline-block;background:{LIME};color:#1c2a10;font-weight:800;"
              f"padding:10px 28px;border-radius:10px;text-decoration:none;font-size:14.5px;"

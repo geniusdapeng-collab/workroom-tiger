@@ -108,6 +108,10 @@ class SimEngine:
         s = self.state
         s["started"] = s["started"] or trade_date
         ops: list[str] = []
+        # v6.5 来源留痕：每条成交/持仓记录数据来源（合成数据统一记 "demo"），
+        # 让"合成数据是否进过公开台账"在事后可机器判定，而不是靠信任。
+        from .providers.base import source_label
+        source = source_label(getattr(result, "provider", ""))
 
         # ---------- 1. 昨日信号成交（T+1 开盘价，无未来函数） ----------
         still_pending = []
@@ -153,6 +157,7 @@ class SimEngine:
                 "risk_usd": round(shares * risk_ps, 2),
                 "time_stop_days": p.get("time_stop_days", 0),
                 "peak_price": fill, "note": p.get("note", ""),
+                "source": source,
                 # v6.3 三栏台账：毛口径入场价与入场摩擦档位（出场摩擦按当时 ADV 重定档）
                 "entry_raw": fill, "friction_bps": bps,
             })
@@ -203,6 +208,7 @@ class SimEngine:
                     "days": _trading_days(pos["entry_date"], trade_date, s["equity_curve"]),
                     "gross_pnl": gross_pnl, "gross_r": gross_r,
                     "friction_cost": friction, "net_r": r_mult,
+                    "source": source,
                 })
                 ops.append(f"🔴 卖出 {pos['ticker']} {pos['shares']} 股 @ {exit_price:.2f}"
                            f"（{reason}，{'盈' if pnl >= 0 else '亏'} ${abs(pnl):,.0f}，{r_mult}R）")
@@ -244,6 +250,7 @@ class SimEngine:
                     "chain": pick.chain, "sector": pick.sector,
                     "signal_date": trade_date,
                     "time_stop_days": getattr(pick, "time_stop_days", 0) or 0,
+                    "source": source,
                     "note": f"{pick.entry_template or '标准'}｜质量 {pick.tss_final}/10",
                 })
                 held.add(pick.ticker)
@@ -254,7 +261,7 @@ class SimEngine:
         if not ops:
             ops.append("😴 今日按兵不动——纪律优先，空仓也是一种仓位")
 
-        entry = {"date": trade_date, "ops": ops, "equity": equity}
+        entry = {"date": trade_date, "ops": ops, "equity": equity, "source": source}
         if s["ops_log"] and s["ops_log"][-1]["date"] == trade_date:
             s["ops_log"][-1] = entry               # 同日重跑幂等覆盖
         else:

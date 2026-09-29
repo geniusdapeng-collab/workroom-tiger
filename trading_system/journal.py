@@ -57,6 +57,9 @@ class Journal:
 
     def log_picks(self, result, account_usd: float = 100_000) -> int:
         """把本次放行的 picks 落账（同日同票去重）。返回新增条数。"""
+        from .providers.base import source_label
+
+        source = source_label(getattr(result, "provider", ""))   # v6.5 来源留痕
         existing = {(r["date"], r["ticker"]) for r in self.records}
         added = 0
         for p in result.picks:
@@ -77,6 +80,7 @@ class Journal:
                 "time_stop_days": getattr(p, "time_stop_days", 0) or 0,   # v6.0 ATR 档位
                 "mrs_star": result.mrs.mrs_star if result.mrs else None,
                 "action": result.action,
+                "source": source,
                 "status": "open",
                 "entry": None, "entry_date": None,
                 "exit": None, "exit_date": None, "r": None, "win": None,

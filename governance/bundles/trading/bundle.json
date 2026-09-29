@@ -64,7 +64,11 @@
         "skills/wfa-tuning/SKILL.md",
         "skills/regulatory-watch/SKILL.md",
         "skills/debate-facilitation/SKILL.md",
-        "skills/data-hygiene-audit/SKILL.md"
+        "skills/data-hygiene-audit/SKILL.md",
+        "skills/global-allocation/SKILL.md",
+        "skills/global-watch/SKILL.md",
+        "skills/portfolio-risk-budget/SKILL.md",
+        "skills/steady-return-review/SKILL.md"
       ],
       "schemas": [
         "schemas/objects.json",
@@ -172,7 +176,7 @@
   },
   "integrity": {
     "algorithm": "sha256",
-    "digest": "d0d36c2d32a819abed5ea9bda617b4d98719438f5c9a2bec3b47fe6ebd47c913",
+    "digest": "b21f258084d06a5c79dddc490362808c027eb292c27f79367874a822eed9ea92",
     "assets": {
       "eval/questions.json": "38b9bb35fa3826e53d9a9ea0187074c1dd55fd879179990be494db747d634cf1",
       "feedback-enums.yml": "efd126b6b8d88d0464654e5217a5e1da798a71ce1d8247f6794418f696c7e548",
@@ -224,8 +228,12 @@
       "skills/daily-attribution/SKILL.md": "3fd88c388849521353e0d945fe6cab79bd48d791a4190293f301e10fd507066c",
       "skills/data-hygiene-audit/SKILL.md": "ee443049218b78f4649f0af79f5c10074b3e4c6ef1523abe40dbeecf5b04ef81",
       "skills/debate-facilitation/SKILL.md": "90e616a656d5b6684fe8b94bf3b0bbe844c79a06206505b8a8b7101f8e324416",
+      "skills/global-allocation/SKILL.md": "36347fa28ba17151e256618fc148bd33a9e120e9046290ece498a83c73d620e1",
+      "skills/global-watch/SKILL.md": "8dbc04dc8bcd600b330682bc3c6ab8e14b9444a3d2e720249d77386bd5efb4a2",
+      "skills/portfolio-risk-budget/SKILL.md": "b7977380cb92c0f9e7a4b33012c3661f2207faec88a973ad5382df59b65656fd",
       "skills/premarket-plan/SKILL.md": "9fc76ce4e3645f2ce4519a0118636f455f618e6c5b079314d7adb367de0b2381",
       "skills/regulatory-watch/SKILL.md": "7854f262bebb0205e0c556146f296b89244da96b4f5347ffe2096a93b46aacb4",
+      "skills/steady-return-review/SKILL.md": "22e49ca5f54dedf9971b66b05e7f2ab956faaac22636a5c9f154cd0829ffea0d",
       "skills/wfa-tuning/SKILL.md": "64a1b01ab3c58b67d3a51c1980242190f4535a90097b604e1989ae67e6225873",
       "ui/cases.json": "e3c1c1a5156ae1965c9626472587befad1765e6626da2de2fa7289f37e7ede00"
     }

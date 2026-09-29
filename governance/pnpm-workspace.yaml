@@ -2,7 +2,11 @@ packages:
   - "apps/*"
   - "packages/*"
 overrides:
-  "@workloom/ui@0.1.1": "https://cnb.cool/workloom-ai/workloom-im/-/releases/download/ui-v0.1.1/workloom-ui-0.1.1.tgz"
+  # 必须与 apps/*/package.json 声明、.workloom-ui.json 与 pnpm-lock.yaml 同版本：
+  # @workloom/ui 不在 npm registry（README 记录为 CNB Release 制品），
+  # override 落后一版时，任何重新解析依赖（pnpm 11+ 忽略 package.json#pnpm.overrides、
+  # 或 pnpm install 非 frozen）都会去 registry 找不存在的包而 404 / 锁文件校验失败。
+  "@workloom/ui@0.1.14": "https://cnb.cool/workloom-ai/workloom-im/-/releases/download/ui-v0.1.14/workloom-ui-0.1.14.tgz"
 onlyBuiltDependencies:
   - electron-winstaller
   - esbuild
