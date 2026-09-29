@@ -7,6 +7,8 @@ tuned_params.json
 reports/journal.json
 reports/日报_*.md
 reports/result_*.json
+# 演示（--demo 合成数据）落盘目录：与真实公开台账物理隔离，不入库
+reports/demo/
 .DS_Store
 reports/calibration_samples.json
 reports/governance_events.jsonl
@@ -16,3 +18,6 @@ reports/review_proposals/
 # 手绘白板解说引擎：venv 随机器重建；渲染任务产物不入库
 scripts/whiteboard/engine/.venv/
 var/whiteboard/
+
+# 排雷/验收等本地产物（与基座 .gitignore 同口径，不入库）
+outputs/

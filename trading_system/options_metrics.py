@@ -108,7 +108,11 @@ def score_options(ticker: str, provider, store: OptionsHistoryStore | None = Non
 
     # v6.1：demo 合成快照【禁止写入】真实历史库——否则 demo 的编造数据会
     # 混入生产分位（"拿不到就瞎编"的典型污染链）。demo 下仅内存中计算。
-    if getattr(provider, "name", "") == "demo":
+    # v6.5：判定改用 providers.base.is_synthetic（按 synthetic 标记，不再按 name
+    # 字符串）——原先 `name == "demo"` 会被 DemoProvider 子类（测试夹具改名如
+    # "onestale-demo"）绕过，合成快照照样落进 reports/options_hist/。
+    from .providers.base import is_synthetic
+    if is_synthetic(provider):
         persist = False
     store = store or OptionsHistoryStore()
     hist = store.append(ticker, snap) if persist else (store.load(ticker) + [snap])

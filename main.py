@@ -23,12 +23,63 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import logging
 import os
 
 from trading_system import config
 from trading_system.pipeline import run_pipeline
 from trading_system.report import render_markdown, to_json, to_markdown
+
+log = logging.getLogger(__name__)
+
+
+def _looks_like_live_ledger(out_dir: str) -> list[str]:
+    """列出该目录下【已含非合成记录】的台账文件（合成数据写入前的前置闸门）。
+
+    判据：记录缺 `source` 字段、或 `source != "demo"` 即视为真实台账——
+    历史台账（v6.5 之前没有 source 字段）同样按真实处理（fail-closed：
+    宁可拒绝一次演示落账，也不能把合成成交混进公开战绩）。
+    """
+    hits: list[str] = []
+    sim_path = os.path.join(out_dir, "sim_portfolio.json")
+    if os.path.exists(sim_path):
+        try:
+            with open(sim_path, encoding="utf-8") as f:
+                state = json.load(f)
+        except Exception:
+            state = None
+        if isinstance(state, dict):
+            records: list = []
+            for key in ("positions", "pending", "closed", "ops_log"):
+                records.extend(v for v in (state.get(key) or []) if isinstance(v, dict))
+            if any(rec.get("source") != "demo" for rec in records):
+                hits.append("sim_portfolio.json")
+    journal_path = os.path.join(out_dir, "journal.json")
+    if os.path.exists(journal_path):
+        try:
+            with open(journal_path, encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            records = None
+        if isinstance(records, list) and any(
+                isinstance(rec, dict) and rec.get("source") != "demo" for rec in records):
+            hits.append("journal.json")
+    return hits
+
+
+def _resolve_out_dir(requested: str, synthetic: bool) -> str:
+    """合成数据运行的落盘目录（默认隔离到 reports/demo/）。
+
+    只有调用方【显式】指定了别的目录（--out）才按调用方给的路径走，
+    并在写入前由调用方执行 live-ledger 闸门。
+    """
+    # 与真实公开台账物理隔离：reports/ 下的 journal.json / sim_portfolio.json /
+    # options_hist / 日报_* 都是真账，合成数据一律另起 reports/demo/。
+    demo_out_dir = os.path.join(config.REPORTS_DIR, "demo")
+    if synthetic and os.path.abspath(requested) == os.path.abspath(config.REPORTS_DIR):
+        return demo_out_dir
+    return requested
 
 
 def _journal_section(stats: dict) -> str:
@@ -60,7 +111,24 @@ def _journal_section(stats: dict) -> str:
 def _daily(args, provider) -> None:
     from trading_system.journal import Journal
     from trading_system.providers import get_provider
+    from trading_system.providers.base import is_synthetic
     from trading_system.state import purge_run_state
+
+    # ---- 合成数据隔离闸门（v6.5）：demo 运行绝不写真实公开台账 ----
+    # 触发路径：docs/QUICKSTART.md 第一条命令 `python3 main.py --demo`；修复前它会把
+    # 合成价格的成交写进 reports/sim_portfolio.json（公开验证台账）与 journal.json，
+    # 并在 reports/options_hist/ 留下合成期权样本（污染 TSS 期权分位）。
+    synthetic = is_synthetic(get_provider(provider))
+    if synthetic:
+        args.out = _resolve_out_dir(args.out, True)
+        live = _looks_like_live_ledger(args.out)
+        if live:
+            raise SystemExit(
+                "红线：合成数据（demo）运行不得写入含真实记录的台账目录 "
+                f"{os.path.abspath(args.out)}（命中 {', '.join(live)}）——"
+                "请改用 `--out <独立目录>` 指定演示落盘位置。")
+        log.warning("演示模式（合成数据）：本轮台账与报告落盘到 %s，"
+                    "不写 reports/ 下的真实公开台账", os.path.abspath(args.out))
 
     # 零基线纪律：每轮从零开始，先清除上一轮残留（搜索缓存/全市场清单缓存），
     # 白名单仅保留 journal.json（会计台账，不进入决策输入）。

@@ -48,6 +48,9 @@ class DemoProvider(DataProvider):
     """
 
     name = "demo"
+    # 合成数据标记（v6.5）：所有生产台账的写入判据见 providers.base.is_synthetic；
+    # 子类自动继承，改名不再绕过"合成数据不入台账"的红线。
+    synthetic = True
 
     def __init__(self, scenario: str = "normal"):
         assert scenario in ("normal", "riskoff"), f"未知 demo 剧本: {scenario}"

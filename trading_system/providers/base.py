@@ -16,6 +16,11 @@ import pandas as pd
 
 class DataProvider(ABC):
     name: str = "base"
+    # 产出是否为【合成/演示】数据（demo 及其子类）。生产台账（公开验证台账、
+    # 期权历史库、治理事件账）一律禁止写入合成数据；判定只看本标记，
+    # 不看 name 字符串——测试用的 DemoProvider 子类常改 name（如 "onestale-demo"），
+    # 用 name 比对会被绕过（v6.5 修复）。
+    synthetic: bool = False
 
     @abstractmethod
     def ohlcv(self, ticker: str, days: int = 400) -> pd.DataFrame:
@@ -173,3 +178,29 @@ class DataProvider(ABC):
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
         return df
+
+
+# ============================================================
+# 数据来源判定（v6.5）：合成/演示数据不得写入任何生产台账
+# ============================================================
+
+def is_synthetic_name(name: object) -> bool:
+    """按 provider 名判定合成数据（历史口径兜底："demo" / "*-demo"）。"""
+    lowered = str(name or "").lower()
+    return lowered == "demo" or lowered.endswith("-demo")
+
+
+def is_synthetic(provider: object) -> bool:
+    """统一判定：该 provider 的产出是否属于合成/演示数据（台账写入的唯一准入判据）。
+
+    优先级：显式 `synthetic` 标记 > 历史 name 兜底（"demo" / "*-demo"）。
+    """
+    flag = getattr(provider, "synthetic", None)
+    if isinstance(flag, bool):
+        return flag
+    return is_synthetic_name(getattr(provider, "name", ""))
+
+
+def source_label(name: object) -> str:
+    """台账里记录的数据来源标签：合成数据统一归一为 "demo"（下游闸门据此识别）。"""
+    return "demo" if is_synthetic_name(name) else str(name or "")

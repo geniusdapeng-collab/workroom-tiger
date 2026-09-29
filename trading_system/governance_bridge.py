@@ -22,21 +22,80 @@ SHA-256 哈希链（防篡改留痕）。
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+try:                       # POSIX（macOS / Linux）
+    import fcntl
+except ImportError:        # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+try:                       # Windows
+    import msvcrt
+except ImportError:        # pragma: no cover - POSIX
+    msvcrt = None  # type: ignore[assignment]
+
 GENESIS_HASH = "GENESIS"          # 对齐 governance workdata events.ts
 FENCE_VERSION = "trading-baseline/v1"
 _EVENT_SEQ_BASE = 8800            # 对齐底座种子编号段（E-88xx），运行时自然续接
 _CST = timezone(timedelta(hours=8))   # 事件时间用 +08:00（附录 E 示例口径）
+LOCK_TIMEOUT_S = 15.0             # 事件账写锁等待上限（超时=放弃本次事件，不阻塞内核）
+
+
+@contextlib.contextmanager
+def _ledger_lock(path: str, timeout: float = LOCK_TIMEOUT_S):
+    """事件账跨进程互斥锁（v6.5）。
+
+    为什么必须加锁：append-only 哈希链是 "读链尾 → 算哈希 → 追加" 的
+    read-modify-write 序列。两个进程（例如 cron 的 daily 与手工/夜班运行）
+    同时进入时，各自读到同一个链尾 → 事件号撞号、prev_hash 断链，
+    整本账的防篡改证据（INV-2 只增不改）当场失效。
+    2026-09-29 实测：4 进程 × 25 条事件 → 100 条里 29 个 event_id 重复、
+    verify_chain 判否（证据：outputs/mine-clear/T-2026-0929-0002/evidence/）。
+
+    实现：对 `<jsonl>.lock` 取排他锁（POSIX fcntl / Windows msvcrt），
+    拿不到锁则短睡重试直到 timeout；超时抛 TimeoutError（由调用方按
+    "治理旁路失败不阻塞内核"处理）。锁文件与事件文件同目录，永不删除。
+    """
+    lock_path = f"{path}.lock"
+    os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
+    handle = open(lock_path, "a+", encoding="utf-8")
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                elif msvcrt is not None:      # pragma: no cover - Windows
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:                          # pragma: no cover - 无锁实现可用
+                    raise RuntimeError("平台无文件锁实现，拒绝在无互斥下写事件账")
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"事件账写锁等待超时（{timeout}s）: {lock_path}")
+                time.sleep(0.02)
+        yield
+    finally:
+        try:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:           # pragma: no cover - Windows
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            handle.close()
 
 
 def canonical_json(value: Any) -> str:
@@ -157,21 +216,25 @@ class GovernanceBridge:
         return seq, prev
 
     def emit(self, event: FiveElementEvent) -> dict | None:
-        """追加一条事件（分配 E-N、计算哈希链接龙）。异常只记 WARNING 返回 None。"""
+        """追加一条事件（分配 E-N、计算哈希链接龙）。异常只记 WARNING 返回 None。
+
+        v6.5：读链尾与追加在同一把跨进程文件锁内完成——并发写不再撞号/断链。
+        """
         if not self.enabled:
             return None
         try:
-            seq, prev = self._tail()
-            event.event_id = f"E-{seq + 1}"
-            event.context.setdefault("tenant_id", self.tenant_id)
-            event.context.setdefault("workspace_id", self.workspace_id)
-            event.context.setdefault("time", _now_iso())
-            payload = event.to_payload()
-            h = event_hash(prev, payload)
-            rec = {"payload": payload, "prev_hash": prev, "hash": h}
             os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            with _ledger_lock(self.path):
+                seq, prev = self._tail()
+                event.event_id = f"E-{seq + 1}"
+                event.context.setdefault("tenant_id", self.tenant_id)
+                event.context.setdefault("workspace_id", self.workspace_id)
+                event.context.setdefault("time", _now_iso())
+                payload = event.to_payload()
+                h = event_hash(prev, payload)
+                rec = {"payload": payload, "prev_hash": prev, "hash": h}
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             return rec
         except Exception as exc:  # 治理旁路：失败不阻塞内核
             logger.warning("[治理桥] 事件写入失败（不阻塞内核）: %s", exc)
