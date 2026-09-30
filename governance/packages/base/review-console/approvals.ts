@@ -36,8 +36,32 @@ export interface ApprovalRow {
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
+  /** 审批分级（0010 迁移）：l2_captain / l3_fleet / l4_chairman —— 权威列，非派生快照字段 */
+  tier?: "l2_captain" | "l3_fleet" | "l4_chairman" | null;
   /** 队列投影附带：被审批事件（diff/规则版本/影响面，F5.1/F5.3） */
   event?: BusinessEvent;
+}
+
+/**
+ * 高危审批的**单一判据**（2026-09-29 第二次修复，来源：WorkLoom-growth 独立验收 W-04）。
+ *
+ * 为什么要有这个函数：Y-01 的批量守卫原先只读 `snapshot.high_risk`，而该字段只有
+ * `packages/runtime/src/loop.ts` 一条快照构造路径会写；CEO 队列（hr.replacement / org.hiring）、
+ * 技能下发（skill.dist）、视频人工门、种子审批等路径的快照都没有这个字段——
+ * 于是"高危必须逐条人审"这条不变量在这些入口直接空转（第三方实测：种子两条
+ * l4_chairman 审批被一次批量调用全部放行，`skipped=[]`）。
+ *
+ * 判据取**权威列 + 步骤语义**，不再依赖各生产者"记得打标"：
+ *   ① `approvals.tier = 'l4_chairman'`（董事长级，0010 迁移的权威分级列）；
+ *   ② 快照显式声明 `high_risk`（围栏提案、desktop 高危及 loop.ts 派生路径）；
+ *   ③ 快照声明 `irreversible`（不可逆写步骤，与 loop.ts 的派生口径同源）。
+ * 三者在批量采纳与超时扫描两处共用，防止两侧口径漂移。
+ */
+export function isHighRiskApproval(row: Pick<ApprovalRow, "tier" | "snapshot">): boolean {
+  if (row.tier === "l4_chairman") return true;
+  if (row.snapshot?.high_risk === true) return true;
+  if ((row.snapshot as { irreversible?: unknown } | null | undefined)?.irreversible === true) return true;
+  return false;
 }
 
 export class ApprovalError extends Error {
@@ -156,6 +180,8 @@ export async function decide(
   approvalId: string,
   gesture: GestureInput,
   embedder: Embedder = new MockEmbedder(),
+  /** B-05：批准后副作用钩子（事务提交后调用，deduped 不触发；Quest 续跑/围栏激活/HR 汰换等由调用方注入） */
+  opts?: { onApproved?: (approvalId: string, snapshot: unknown) => Promise<void> | void },
 ): Promise<DecideResult> {
   // L5.1/L5.5 角色校验 + L5.2 手势校验（先校验，不碰库）
   assertApproverRole(actor.role);
@@ -224,12 +250,29 @@ export async function decide(
       ],
     );
 
+    /**
+     * MC-101 / MC-104（同事务前置查询）：被审事件的归属线程与会话必须先取到——
+     *   · 手势事件缺 sessionId 时 `threads.events`（按 session_id 过滤）看不到人工决策（MC-104）；
+     *   · 采纳/编辑后需要把步骤级关卡所属线程从 pending_review 重新入队，交给调度器重入
+     *     runQuest 续跑（#34 恢复闭环携带 approvalRef 直接执行），否则任务永远停在关卡上（MC-101）。
+     * 查询仍在本事务内（FOR UPDATE 已锁定 approval 行），不引入新的竞态窗口。
+     */
+    const owner = await c.query<{ session_id: string | null; step_id: string | null }>(
+      `SELECT session_id, payload->'decision'->>'step_id' AS step_id
+         FROM biz_events WHERE event_id=$1 AND workspace_id=$2`,
+      [row.event_id, scope.workspaceId],
+    );
+    const ownerThread = owner.rows[0]?.session_id ?? null;
+    const ownerStep = owner.rows[0]?.step_id ?? null;
+
     // D16（#1/A）：状态变更、手势事件、校准记忆全部在同一事务同一 COMMIT——
     // 不再存在「状态已改、事件/记忆未落」的崩溃孤儿窗口
     // F5.5 手势回写：事件库（经安全网关；人类手势动作）
     const gres = await gatewayAppendOnClient(c, {
       ...scope,
       actor: { id: actor.memberNo, type: "human" },
+      // MC-104：人工决策归属被审事件所在线程（threads.events 按 session_id 过滤）
+      sessionId: ownerThread,
     }, {
       who: { type: "human", id: actor.memberNo },
       context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
@@ -243,6 +286,8 @@ export async function decide(
           reason_enum: gesture.reasonEnum,
           edited_after: gesture.editedAfter,
           edit_kind: gesture.editKind,
+          // MC-101：线程直达（与 GR-10 驳回分支的口径一致，供前端与复盘定位）
+          ...(ownerThread ? { thread_id: ownerThread } : {}),
         },
         basis: gesture.reasonText ? [gesture.reasonText] : undefined,
       },
@@ -276,20 +321,32 @@ export async function decide(
      * 非步骤级审批（如围栏规则提案、HR 汰换）保持原语义：不动线程。
      */
     if (gesture.type === "reject") {
-      const owner = await c.query<{ session_id: string | null; step_id: string | null }>(
-        `SELECT session_id, payload->'decision'->>'step_id' AS step_id
-           FROM biz_events WHERE event_id=$1 AND workspace_id=$2`,
-        [row.event_id, scope.workspaceId],
-      );
-      const owner_row = owner.rows[0];
-      const ownerThread = owner_row?.session_id ?? null;
-      if (ownerThread && owner_row?.step_id) {
+      if (ownerThread && ownerStep) {
         await c.query(
           `UPDATE threads SET status='cancelled', error=$3, updated_at=now()
             WHERE id=$1 AND workspace_id=$2 AND status <> 'completed'`,
           [ownerThread, scope.workspaceId, `步骤被驳回：${gesture.reasonEnum ?? "未注明"}`],
         );
       }
+    }
+
+    /**
+     * MC-101：步骤级关卡被**采纳/编辑后采纳** → 线程自动续跑（同一事务重新入队）。
+     *
+     * 此前的断点：decide() 只在 reject 分支联动线程，approve/edit 既不回队也不触发调度，
+     * 线程停在 pending_review，只有人工再点「推进」才会动（真机实测 T-127：approve 后 60s
+     * 事件数 4→4、状态不变）。现在改为：状态置 `queued` + 清空 error，由既有调度器
+     * （apps/server/src/runtime/scheduler.ts，每 7s 扫描 queued）重入 runQuestForThread；
+     * replay 时 approvedStepIds 命中本条审批 → 携带 approvalRef 直接执行该步骤（#34 闭环），
+     * 不产生第二个关卡、不重复事件（step_id 幂等锚点）。非步骤级审批（围栏规则提案、
+     * HR 汰换、技能下发等无 session_id/step_id 的行）保持原语义：不动线程。
+     */
+    if ((gesture.type === "approve" || gesture.type === "edit") && ownerThread && ownerStep) {
+      await c.query(
+        `UPDATE threads SET status='queued', error=NULL, updated_at=now()
+          WHERE id=$1 AND workspace_id=$2 AND status='pending_review'`,
+        [ownerThread, scope.workspaceId],
+      );
     }
     return { kind: "decided" as const, row, status, gestureEventId: gres.eventId };
   });
@@ -300,10 +357,22 @@ export async function decide(
   if (txResult.kind === "expired") {
     throw new ApprovalError("EXPIRED", `快照已过期（${txResult.expiresAt.toISOString()}），审批标记 expired（E5.3/F5.7）`);
   }
+  /**
+   * B-05/B-06 修复（来源：WorkLoom-growth 排雷 T-2026-0929-0003）：批准后副作用统一钩子。
+   * 此前副作用只挂在单笔 decide 路由——batchApprove、IM 手势回调批准后动作永不执行（批准≠执行断链）；
+   * 且副作用抛错反噬接口（审批已 approved 却 500）。现在在审批事务提交后调用，
+   * 钩子内部各自隔离失败，deduped 不重复触发（与"重试 deduped 副作用不再触发"口径一致）。
+   */
+  if ((txResult.status === "approved" || txResult.status === "edited") && opts?.onApproved) {
+    await opts.onApproved(approvalId, txResult.row.snapshot);
+  }
   return { approvalId, status: txResult.status, deduped: false, gestureEventId: txResult.gestureEventId };
 }
 
 /* ================= 批量采纳（F5.2；仅非高危，P4 原型口径） ================= */
+
+/** B-01：批量守卫的对外/花钱动作识别（快照缺 high_risk 标记时的保守兜底） */
+const BATCH_GUARD_EXTERNAL_ACTION = /^(publish\.|ads\.|geo\.publish|content\.submit|message\.mass|im\.broadcast|trade\.|payment\.)/;
 
 export async function batchApprove(
   app: pg.Pool,
@@ -311,6 +380,8 @@ export async function batchApprove(
   scope: { tenantId: string; workspaceId: string },
   actor: { memberNo: string; role: MemberRole },
   approvalIds: string[],
+  /** B-05：透传给 decide 的批准后副作用钩子（批量批准同样触发 Quest 续跑等联动） */
+  opts?: { onApproved?: (approvalId: string, snapshot: unknown) => Promise<void> | void },
 ): Promise<{ approved: string[]; skipped: Array<{ id: string; reason: string }> }> {
   assertApproverRole(actor.role);
   const approved: string[] = [];
@@ -322,9 +393,24 @@ export async function batchApprove(
     const row = rows.rows[0];
     if (!row) { skipped.push({ id, reason: "不存在" }); continue; }
     if (row.status !== "pending") { skipped.push({ id, reason: `已处理（${row.status}）` }); continue; }
-    if (row.snapshot?.high_risk) { skipped.push({ id, reason: "高危项不可批量采纳（须逐条）" }); continue; }
+    // W-04：判据统一走 isHighRiskApproval（tier=l4_chairman / snapshot.high_risk / snapshot.irreversible），
+    // 不再只看某一条快照路径写的 high_risk（那条路径之外全是空转）
+    if (isHighRiskApproval(row)) { skipped.push({ id, reason: "高危项不可批量采纳（须逐条）" }); continue; }
+    /**
+     * B-01 修复（守卫空转对症）：高危标记此前靠"生产者自觉写 snapshot.high_risk"，
+     * G8/G9/G10 等对外/花钱门快照从未写过该字段 → 一键批量照批对外发布。
+     * 保守口径（防未来生产者再漏写）：
+     *   ① 董事长级（l4）一律须逐条裁决（已由 isHighRiskApproval 覆盖）；
+     *   ② 快照缺 high_risk 标记且动作属对外/花钱类（发布/投放/外发/群发/交易支付），按高危处理。
+     * 已显式标记 high_risk:false 的 quest 低危步骤（Y-01 三口径派生）不受影响，仍可批量。
+     */
+    const snapAction = (row.snapshot as { action?: string; tool?: string } | null)?.action
+      ?? (row.snapshot as { tool?: string } | null)?.tool ?? "";
+    if (row.snapshot?.high_risk === undefined && BATCH_GUARD_EXTERNAL_ACTION.test(snapAction)) {
+      skipped.push({ id, reason: `对外/花钱类动作（${snapAction}）未标记风险等级，按高危处理须逐条` }); continue;
+    }
     try {
-      await decide(app, gateway, scope, actor, id, { type: "approve" });
+      await decide(app, gateway, scope, actor, id, { type: "approve" }, undefined, opts);
       approved.push(id);
     } catch (err) {
       skipped.push({ id, reason: err instanceof Error ? err.message : String(err) });
@@ -352,7 +438,7 @@ export async function expireSweep(
   for (const row of pend) {
     const exp = row.snapshot?.expires_at ? new Date(row.snapshot.expires_at) : null;
     if (!exp || exp.getTime() >= Date.now()) continue;
-    if (row.snapshot?.high_risk) {
+    if (isHighRiskApproval(row)) {
       keptHighRisk.push(row.approval_id); // L5.4：高危项超时标提醒但不放行不expired跳过
       continue;
     }
@@ -360,9 +446,16 @@ export async function expireSweep(
     // D16（#1/A）：expired 状态与过期事件同一事务提交——不再存在状态已变、事件未落的孤儿窗口
     await scoped(app, scope, async (c) => {
       await c.query(`UPDATE approvals SET status='expired' WHERE approval_id=$1`, [row.approval_id]);
+      // MC-104：过期事件同样归属被审事件所在线程（threads.events 按 session_id 过滤，
+      // 缺 session_id 时系统侧的超时处置在任务时间线上不可见）
+      const own = await c.query<{ session_id: string | null }>(
+        `SELECT session_id FROM biz_events WHERE event_id=$1 AND workspace_id=$2`,
+        [row.event_id, scope.workspaceId],
+      );
       await gatewayAppendOnClient(c, {
         tenantId: scope.tenantId, workspaceId: scope.workspaceId,
         actor: { id: "review-console", type: "system" },
+        sessionId: own.rows[0]?.session_id ?? null,
       }, {
         who: { type: "system", id: "review-console" },
         context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
