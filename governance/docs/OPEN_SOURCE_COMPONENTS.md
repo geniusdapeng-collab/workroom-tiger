@@ -3,7 +3,7 @@
 <!-- 自动生成，请勿手改：node scripts/oss-inventory.mjs --write -->
 
 > 生成器：`scripts/oss-inventory.mjs`（离线事实）＋ `scripts/oss-watch.sh`（上游最新版本）
-> 仓库：workloom-ai/workroom-tiger ｜ 最近一次成功扫描：尚未成功扫描（运行 `pnpm oss:watch`） ｜ 最近尝试：未记录
+> 仓库：workloom-ai/workroom-tiger ｜ 最近一次成功扫描：尚未记录已核实成功（运行 `pnpm oss:watch`） ｜ 最近尝试：未记录
 > 每项上游版本按成功时间、查询状态和 TTL 单独判定；历史缓存与失败查询不作本次最新版本结论。
 > 统计：登记组件 41 个 ｜ npm 直接依赖 155 个 ｜ Python 依赖 5 个 ｜ 容器镜像 1 个
 
@@ -253,3 +253,4 @@
 ## 3. 有可用更新
 
 已核实记录未发现可用更新；历史缓存、失败及未扫描项不在此结论内。
+
