@@ -55,6 +55,25 @@
         node scripts/ci/verify-commit-msg.mjs
         node scripts/ci/verify-lock-conflict.mjs
 
+    - name: 交付证据、预算与行业配置回归
+      script: |
+        set -eu
+        cd governance
+        pnpm test:governance
+        node scripts/generate-capabilities.mjs --check
+        node scripts/acceptance/profile-check.mjs --repo .
+
+    - name: 媒体真实解码与完整 CLI 回归（隔离夹具）
+      script: |
+        set -eu
+        cd governance
+        instrumentation_dir=$(mktemp -d)
+        trap 'rm -rf "$instrumentation_dir"' EXIT HUP INT TERM
+        npm install --prefix "$instrumentation_dir" playwright@1.63.0 --ignore-scripts --no-audit --no-fund
+        node "$instrumentation_dir/node_modules/playwright/cli.js" install --with-deps chromium
+        export NODE_PATH="$instrumentation_dir/node_modules${NODE_PATH:+:$NODE_PATH}"
+        pnpm test:media
+
 main:
   push:
     - *py_gate
