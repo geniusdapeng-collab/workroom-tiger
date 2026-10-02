@@ -4,7 +4,7 @@
 
 > 生成器：`scripts/oss-inventory.mjs`（离线事实）＋ `scripts/oss-watch.sh`（上游最新版本）
 > 仓库：workloom-ai/workroom-tiger ｜ 最近一次上游扫描：尚未扫描（运行 `pnpm oss:watch`）
-> 统计：登记组件 41 个 ｜ npm 直接依赖 155 个 ｜ Python 依赖 5 个 ｜ 容器镜像 1 个
+> 统计：登记组件 42 个 ｜ npm 直接依赖 155 个 ｜ Python 依赖 5 个 ｜ 容器镜像 1 个
 
 ## 0. 维护机制（四件事）
 
@@ -59,9 +59,10 @@
 | 36 | browseract | [github.com/browser-act/skills](https://github.com/browser-act/skills) | 选型入库（技能市场执行面技能 · 可选） | —（未扫描） | — | skills/registry/browser-act（执行面技能，L2 审批安装） | MIT；freemium 云依赖（stealth>5/代理/打码付费）——适配纪律：proxyMode=custom-only、凭据客户本机、出站 api.browseract.com 全声明过三段瀑布；集成评估与适配见 skills/official/component-integration |
 | 37 | scrapling | [github.com/D4Vinci/Scrapling](https://github.com/D4Vinci/Scrapling) | 选型入库（技能市场执行面技能） | —（未扫描） | — | skills/registry/scrapling-collector | BSD-3-Clause；纯本地零出站；经 skill:forge 集成 |
 | 38 | kaykit-adventurers | [github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) | 运行时素材（真人风数字员工角色/动画/道具） | —（未扫描） | — | apps/web/public/models/kaykit（5 角色 GLB + 道具，CC0 可商用免署名） | CC0 许可证；76 组骨骼动画；贴图内嵌单文件；装备节点显隐做外观差异化 |
-| 39 | Kokoro-82M（织伴本机女声模型） | [github.com/hexgrad/kokoro](https://github.com/hexgrad/kokoro) · Apache-2.0 | a71e4d38b236d968966a2002c4c895dbd12b1c3c | —（未扫描） | 素材/资产 | 本机可选织伴语音包（zf_xiaoni，不随基础客户端打包） | 模型事实源为 loommate-voice.json：HF 固定修订与 SHA-256 校验；Apple Silicon 独立回环推理服务，128 MiB Metal 缓存。中文自然韵律，不支持任意情绪指令。模型升级需同句试听、延迟与回退回归。 |
+| 39 | Kokoro-82M（织伴本机女声模型） | [github.com/hexgrad/kokoro](https://github.com/hexgrad/kokoro) · Apache-2.0 | ae315a79b623f244700e4afb9246c46a26066782e049ba174bf3ba433970ee9c | —（未扫描） | 素材/资产 | 本机可选织伴语音包（zf_xiaoni，不随基础客户端打包） | 模型事实源为 loommate-voice.json：固定 Kokoro ONNX INT8 图与声线集 SHA-256；约 142 MB，本机 CPU 子进程推理，两个计算线程与有界队列。中文自然韵律，不支持任意情绪指令。导出来源 thewh1teagle/kokoro-onnx（MIT），模型 Apache-2.0。更新需同句试听、延迟与回退回归。 |
 | 40 | Misaki（织伴中文文本转发音） | [github.com/hexgrad/misaki](https://github.com/hexgrad/misaki) · Apache-2.0 | 0.9.4 | 0.9.4 | 独立服务 | 已有语音工位 venv；scripts/install-loommate-voice.py 安装可选 zh 依赖 | 仅可选本机语音环境，既有业务和 Agent 运行时不增加 Python 依赖；复核中文、数字、英文混读后才升级。 |
-| 41 | mlx-audio（织伴独立轻量推理服务） | [github.com/Blaizzy/mlx-audio](https://github.com/Blaizzy/mlx-audio) · MIT | 0.5.5 | **0.5.7** ⬆ | 独立服务 | 复用已有本机语音工位 venv；scripts/loommate-voice-engine.py | 复用已安装且实测的 0.5.5，安装器只校验版本；共享影视/个人克隆引擎配置保持独立。独立服务只加载固定 Kokoro 资产；版本升级需重跑本机真实 HTTP 与冷启动、热机、缓存测试。 |
+| 41 | mlx-audio（既有个人克隆工位） | [github.com/Blaizzy/mlx-audio](https://github.com/Blaizzy/mlx-audio) · MIT | 0.5.5 | **0.5.7** ⬆ | 独立服务 | 现有个人克隆/影视工位；女声安装器不升级该共享环境的 mlx-audio | 保留已安装且实测的 0.5.5，女声安装器只校验版本。织伴默认使用独立 CPU ONNX 后端；现有影视和个人克隆模型配置保持独立。升级需重跑原工位回归。 |
+| 42 | ONNX Runtime（织伴 CPU 女声推理） | [github.com/microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) · MIT | 1.30.0 | 1.30.0 | 独立服务 | 可选本机织伴工位；scripts/loommate-voice-engine.py | 固定并实测 1.30.0，显式 CPUExecutionProvider；导入前禁用遥测。不改 Node 或行业依赖锁。模型与声音不联网推理；更新需真实合成、并发、进程恢复回归。 |
 
 ## 2. 全量直接依赖（本仓事实，含上游最新）
 
@@ -252,5 +253,5 @@
 ## 3. 有可用更新
 
 登记组件滞后 1 个，直接依赖滞后 0 个 —— 逐项执行单见 `docs/oss-update-plan.md`。
-- `mlx-audio（织伴独立轻量推理服务）` 0.5.5 → **0.5.7**（门禁 standard）
+- `mlx-audio（既有个人克隆工位）` 0.5.5 → **0.5.7**（门禁 standard）
 
