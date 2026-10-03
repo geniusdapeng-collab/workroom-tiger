@@ -1,14 +1,14 @@
 {
   "baseRepo": "workloom-ai/workloom-im",
-  "lastSyncedBaseSha": "632fad3e7e5ace47fcd66bf410d93c04b2a102da",
-  "lastSyncAt": "2026-10-02T23:50:32.366Z",
-  "filesTouched": 49,
+  "lastSyncedBaseSha": "08a757df13034483855d45ba52b83faf34e80435",
+  "lastSyncAt": "2026-10-03T00:53:00.130Z",
+  "filesTouched": 4,
   "extraExclude": [
     "apps/server/src/service/contract.test.ts",
     "apps/server/src/service/dialog.test.ts",
     "apps/server/src/service/e2e.test.ts"
   ],
-  "lastRequiredAssetsBaseSha": "632fad3e7e5ace47fcd66bf410d93c04b2a102da",
+  "lastRequiredAssetsBaseSha": "08a757df13034483855d45ba52b83faf34e80435",
   "lastSyncMode": "full",
   "pathPrefix": "governance",
   "requiredRootAssetsSha256": {
@@ -104,8 +104,8 @@
     "scripts/acceptance/lib/live/usage.test.mjs": "5041610aef39dbd00489e338d5155497b70fc3415fd3a7d725cf8e08a1a02d41",
     "scripts/acceptance/lib/live/audit.plugin.mjs": "ab37039bc9c549a1867482c1e0c1497a25e573f404769707a00cbd917f453dd1",
     "scripts/acceptance/lib/live/audit.test.mjs": "7eac09f2c768bc4241d2fb78ce765e729134fbaaec3238993635ce349cb0f1f6",
-    "scripts/acceptance/lib/live/providers-http.test.mjs": "b1c7424061e70dd8db5d977466bff6a4f35987f65a8782d041016e71d15c4136",
-    "scripts/acceptance/lib/live/dsh-process.test.mjs": "126f4a484abc70908df66a439351c6161fbec4720e0690705b05ecafe1cbec22",
+    "scripts/acceptance/lib/live/providers-http.test.mjs": "211c7e1ed507d54293d936d0a988032bfeb78c7d0802ca6c3a8f2c7f89b394e7",
+    "scripts/acceptance/lib/live/dsh-process.test.mjs": "d79b8e09b32c0b18eaebf71a2bd2666d59e4c87fefa9d3f5c82afddf86a1e274",
     "scripts/acceptance/lib/live/live-cli-wire.test.mjs": "950af0ee8abe2aa444e47e31a6a3103fa381c384269e6f8aacde32b7d51c5661",
     "scripts/ui-release-registration.mjs": "84e12423a1f70a980119306200afef4548d00d74477b24306814d99f3aa80df8",
     "scripts/ui-release-registration.test.mjs": "b93171bcff00bc01a33449dba6b5064e8a88ff451ca0a5392fb8cf205c367030",
