@@ -68,7 +68,7 @@
     "test:desktop-bootstrap": "node --test apps/desktop/electron/*.test.cjs scripts/desktop-bootstrap-db.test.mjs scripts/payload-integrity.test.mjs scripts/vite-product.test.mjs",
     "test:oss": "node --test scripts/oss-inventory.test.mjs",
     "runtime:deps:verify": "node scripts/runtime-deps-lock.mjs verify",
-    "test:tiger-native": "node --test --test-concurrency=1 scripts/tiger-desktop-delivery.test.mjs scripts/proposal-bridge.test.mjs scripts/desktop-workflow-path.test.mjs scripts/unsigned-desktop-release.test.mjs scripts/desktop-guest-seed.test.mjs scripts/agent-capabilities.test.mjs",
+    "test:tiger-native": "node --import ./node_modules/tsx/dist/loader.mjs --test --test-concurrency=1 scripts/tiger-desktop-delivery.test.mjs scripts/proposal-bridge.test.mjs scripts/desktop-workflow-path.test.mjs scripts/unsigned-desktop-release.test.mjs scripts/desktop-guest-seed.test.mjs scripts/agent-capabilities.test.mjs",
     "test:tiger-agent": "node --test --test-concurrency=1 ../scripts/tiger-agent.test.mjs"
   },
   "devDependencies": {
