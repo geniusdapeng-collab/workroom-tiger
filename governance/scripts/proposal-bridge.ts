@@ -1,162 +1,113 @@
-/**
- * 老虎交易 · WFA 参数提案 × 审批控制台 双向桥（T3）
- *
- * 把内核复盘团队（诸葛·策略优化师）的月度 WFA 提案接入 WorkLoom 审批流：
- *
- * push 模式（提案 → 审批卡片）：
- *   扫描内核 reports/review_proposals/*.json 中 status=pending_review 的提案，
- *   逐条写五元事件（action=param.change，命中 R-P1 review 规则）+ 创建审批卡片
- *   （approvals 表 pending，snapshot 为提案快照）。幂等（approval_id=proposal_id）。
- *
- * pull 模式（裁决 → 内核执行）：
- *   读取审批控制台已裁决（approved/rejected）的提案审批，
- *   调内核审批 CLI（main.py --review-approve / --review-reject --reason）执行状态机：
- *   approve → 次日生效 + tuned_params.json 披露；reject → 原因回流（必填）。
- *   已执行的审批在 gesture.executed=true 标记，幂等。
- *
- * 用法：
- *   pnpm tsx --env-file=.env scripts/proposal-bridge.ts push [proposalsDir]
- *   pnpm tsx --env-file=.env scripts/proposal-bridge.ts pull [proposalsDir]
- *   默认 proposalsDir = ../reports/review_proposals
- */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+/** WFA proposal approvals: bind the reviewed bytes and consume only a verified paper receipt. */
+import { readdirSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import pg from "pg";
-import { appendEventIdempotent } from "../packages/base/workdata/events.ts";
-import { getGatewayPool, closeAllPools } from "../packages/db/src/client.ts";
-import type { BusinessEvent } from "../packages/shared/src/event-schema.ts";
+import { appendEventInTx, type EventDraft } from "../packages/base/workdata/events.ts";
+import { approvalSnapshot, PROPOSAL_KIND, reviewContext, sha256, TIGER_SCOPE, validateApproval, verifyExecution } from "./proposal-bridge-contract.mjs";
 
+const require = createRequire(import.meta.url);
+const { redactText } = require("../apps/desktop/electron/diagnostic-redaction.cjs");
 const execFileP = promisify(execFile);
-const [, , mode, proposalsDir = "../reports/review_proposals"] = process.argv;
-const KERNEL_ROOT = join(process.cwd(), "..");
-const SCOPE = { tenantId: "tiger", workspaceId: "trading" };
-const APP_URL = process.env.DATABASE_APP_URL
-  ?? "postgres://workloom_app:workloom_dev_app@localhost:5432/workloom";
+type Context = ReturnType<typeof reviewContext>;
+type Approval = { approval_id: string; tenant_id: string; workspace_id: string; status: string; gesture: Record<string, unknown>; snapshot: Record<string, unknown>; decided_by: string; decided_at: string };
 
-interface Proposal {
-  proposal_id: string; status: string; verdict: string;
-  dsr: number; oos_expectancy: number;
-  grid_result: Record<string, unknown>; created_at: string;
-  reason?: string; effective_from?: string;
-}
-
-function loadProposals(): Proposal[] {
-  if (!existsSync(proposalsDir)) return [];
-  return readdirSync(proposalsDir).filter((f) => f.endsWith(".json")).sort()
-    .map((f) => JSON.parse(readFileSync(join(proposalsDir, f), "utf-8")) as Proposal);
-}
-
-/** 事务级 RLS 上下文包装（A3：autocommit 下 set_config 即失效） */
-async function withRls<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-  const c = await pool.connect();
+export async function withRls<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
   try {
-    await c.query("BEGIN");
-    await c.query("SELECT set_config('app.tenant_id', $1, true)", [SCOPE.tenantId]);
-    await c.query("SELECT set_config('app.workspace_id', $1, true)", [SCOPE.workspaceId]);
-    const r = await fn(c);
-    await c.query("COMMIT");
-    return r;
-  } catch (e) {
-    await c.query("ROLLBACK").catch(() => undefined);
-    throw e;
-  } finally {
-    c.release();
-  }
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [TIGER_SCOPE.tenantId]);
+    await client.query("SELECT set_config('app.workspace_id', $1, true)", [TIGER_SCOPE.workspaceId]);
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch (rollbackError) { throw new AggregateError([error, rollbackError], "审批事务及回滚失败"); }
+    throw error;
+  } finally { client.release(); }
 }
 
-async function push(): Promise<void> {
-  const pending = loadProposals().filter((p) => p.status === "pending_review");
-  if (!pending.length) {
-    console.log("无待审批提案（DSR 不显著的提案已由内核自动 reject）。");
-    return;
-  }
-  const gateway = getGatewayPool();
-  const app = new pg.Pool({ connectionString: APP_URL });
-  for (const p of pending) {
-    // event_id 须形如 E-12345：由 proposal_id 确定性派生（幂等键）
-    let h = 0;
-    for (const ch of p.proposal_id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    const evtId = `E-9${String(h % 100000).padStart(5, "0")}`;
-    const event: BusinessEvent = {
-      event_id: evtId,
-      who: { type: "agent", id: "strategy-optimizer", version: "v0.1" },
-      context: { tenant_id: SCOPE.tenantId, workspace_id: SCOPE.workspaceId,
-                 time: p.created_at || new Date().toISOString(),
-                 channel: "review", stage: "paper" },
-      object: { type: "report", id: p.proposal_id },
-      decision: {
-        action: "param.change",
-        before: null,
-        after: p.grid_result,
-        basis: [
-          `WFA 提案：DSR=${p.dsr}，OOS 期望=${p.oos_expectancy}R`,
-          "纪律：DSR 显著方可进入审批；生效次日披露（白皮书§14）",
-        ],
-      },
-      rule_impact: [{ rule_id: "R-P1", version: "trading-baseline/v1", result: "review" }],
-    } as BusinessEvent;
-    await appendEventIdempotent(gateway, SCOPE, event);
-    await withRls(app, async (c) => {
-      await c.query(
-        `INSERT INTO approvals (approval_id, tenant_id, workspace_id, event_id, channel, status, snapshot)
-         VALUES ($1,$2,$3,$4,'inapp','pending',$5)
-         ON CONFLICT (approval_id) DO NOTHING`,
-        [p.proposal_id, SCOPE.tenantId, SCOPE.workspaceId, evtId,
-         JSON.stringify({
-           kind: "wfa.param.proposal", dsr: p.dsr,
-           oos_expectancy: p.oos_expectancy,
-           recommended_params: p.grid_result?.recommended_params,
-           gestures: ["approve", "edit_approve", "reject（原因必填）"],
-         })]);
-    });
-    console.log(`✓ 审批卡片已创建：${p.proposal_id}（DSR=${p.dsr}，OOS=${p.oos_expectancy}R）`);
-  }
-  await app.end();
+function eventFor(id: string, action: string, after: unknown): EventDraft {
+  return {
+    who: { type: "agent", id: "strategy-optimizer", version: "tiger-approval/v1" },
+    context: { tenant_id: TIGER_SCOPE.tenantId, workspace_id: TIGER_SCOPE.workspaceId, time: new Date().toISOString(), channel: "review", stage: "paper" },
+    object: { type: "report", id }, decision: { action, after, basis: ["只允许研究/模拟/纸面；审批与内核回执绑定受审文件、参数、配置、目录和裁决人"] },
+    rule_impact: [{ rule_id: "R-P1", version: "trading-baseline/v1", result: action === "param.change" ? "review" : "pass" }],
+  };
 }
 
-async function pull(): Promise<void> {
-  const app = new pg.Pool({ connectionString: APP_URL });
-  const decided = await withRls(app, async (c) => {
-    const r = await c.query<{
-      approval_id: string; status: string; gesture: Record<string, unknown> | null;
-    }>(
-      `SELECT approval_id, status, gesture FROM approvals
-       WHERE workspace_id=$1 AND status IN ('approved','rejected')
-         AND (gesture->>'executed') IS DISTINCT FROM 'true'`,
-      [SCOPE.workspaceId]);
-    return r.rows;
-  });
-  if (!decided.length) {
-    console.log("无新裁决需要回写内核。");
-    await app.end();
-    return;
-  }
-  for (const a of decided) {
-    const reason = String(a.gesture?.reason ?? "");
-    const args = a.status === "approved"
-      ? ["main.py", "--review-approve", a.approval_id]
-      : ["main.py", "--review-reject", a.approval_id, "--reason",
-         reason || "审批控制台驳回（未附原因）"];
-    const { stdout } = await execFileP("python3", args, { cwd: KERNEL_ROOT });
-    await withRls(app, async (c) => {
-      await c.query(
-        `UPDATE approvals SET gesture = COALESCE(gesture,'{}'::jsonb) || $1::jsonb
-         WHERE approval_id=$2`,
-        [JSON.stringify({ executed: true, executed_at: new Date().toISOString() }),
-         a.approval_id]);
+export async function push(app: pg.Pool, context: Context, append = appendEventInTx): Promise<number> {
+  let count = 0;
+  for (const file of readdirSync(context.proposalsDir).filter((name) => /^PROP-[A-Za-z0-9_-]+\.json$/u.test(name)).sort()) {
+    const id = file.slice(0, -5);
+    let snapshot;
+    try { snapshot = approvalSnapshot(context, id); }
+    catch (error) { if (String(error).includes("只有待审")) continue; throw error; }
+    await withRls(app, async (client) => {
+      // Serialize absent rows too; a duplicate push must not leave an orphan event.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tiger-proposal:${TIGER_SCOPE.tenantId}:${id}`]);
+      const previous = await client.query<Approval>("SELECT * FROM approvals WHERE approval_id=$1 AND tenant_id=$2 AND workspace_id=$3 FOR UPDATE", [id, TIGER_SCOPE.tenantId, TIGER_SCOPE.workspaceId]);
+      if (previous.rows[0]) {
+        const old = previous.rows[0].snapshot;
+        if (old.kind !== PROPOSAL_KIND || old.proposal_sha256 !== snapshot.proposal_sha256 || old.parameters_sha256 !== snapshot.parameters_sha256 || old.proposals_dir !== snapshot.proposals_dir || old.config_sha256 !== snapshot.config_sha256) throw new Error(`提案 ${id} 已变化，须生成新提案与新审批`);
+        return;
+      }
+      const event = await append(client, TIGER_SCOPE, { event: eventFor(id, "param.change", snapshot.recommended_params) });
+      await client.query("INSERT INTO approvals (approval_id,tenant_id,workspace_id,event_id,channel,status,snapshot) VALUES ($1,$2,$3,$4,'inapp','pending',$5)", [id, TIGER_SCOPE.tenantId, TIGER_SCOPE.workspaceId, event.eventId, JSON.stringify(snapshot)]);
+      count++;
     });
-    console.log(`✓ 裁决已回写内核：${a.approval_id} [${a.status}] ${String(stdout).split("\n")[0]}`);
   }
-  await app.end();
+  return count;
+}
+
+export async function executeDecision(row: Approval, context: Context, expected: ReturnType<typeof validateApproval>) {
+  const args = [join(context.kernelRoot, "main.py"), "--out", context.outDir,
+    row.status === "approved" ? "--review-approve" : "--review-reject", row.approval_id,
+    "--review-expected-sha256", String(row.snapshot.proposal_sha256), "--review-execution-id", expected.executionId];
+  if (row.status === "rejected") args.push("--reason", expected.reason);
+  await execFileP(context.pythonExe, args, { cwd: context.outDir, timeout: 60_000, maxBuffer: 2_000_000,
+    env: { ...process.env, TIGER_KERNEL_ROOT: context.kernelRoot, TIGER_PYTHON_EXE: context.pythonExe, PYTHONNOUSERSITE: "1", PYTHONDONTWRITEBYTECODE: "1" } });
+}
+
+export async function pull(app: pg.Pool, context: Context, execute = executeDecision, append = appendEventInTx): Promise<number> {
+  const pending = await withRls(app, async (client) => (await client.query<{ approval_id: string }>(
+    "SELECT approval_id FROM approvals WHERE tenant_id=$1 AND workspace_id=$2 AND snapshot->>'kind'=$3 AND status IN ('approved','rejected') AND (gesture->>'executed') IS DISTINCT FROM 'true' ORDER BY approval_id",
+    [TIGER_SCOPE.tenantId, TIGER_SCOPE.workspaceId, PROPOSAL_KIND])).rows);
+  let count = 0;
+  const failures: Error[] = [];
+  for (const { approval_id: id } of pending) {
+    try {
+      await withRls(app, async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tiger-proposal-directory:${sha256(context.proposalsDir)}`]);
+        const locked = await client.query<Approval>("SELECT * FROM approvals WHERE approval_id=$1 AND tenant_id=$2 AND workspace_id=$3 AND (gesture->>'executed') IS DISTINCT FROM 'true' FOR UPDATE SKIP LOCKED", [id, TIGER_SCOPE.tenantId, TIGER_SCOPE.workspaceId]);
+        const row = locked.rows[0];
+        if (!row) return;
+        const expected = validateApproval(row, context);
+        if (!expected.recovered) await execute(row, context, expected);
+        const receipt = verifyExecution(row, context, expected);
+        const event = await append(client, TIGER_SCOPE, { event: eventFor(id, "approval.kernel.executed", receipt) });
+        const updated = await client.query("UPDATE approvals SET gesture=COALESCE(gesture,'{}'::jsonb)||$1::jsonb WHERE approval_id=$2 AND tenant_id=$3 AND workspace_id=$4 AND status=$5 AND (gesture->>'executed') IS DISTINCT FROM 'true' RETURNING approval_id", [JSON.stringify({ executed: true, executed_at: receipt.executed_at, execution_receipt: { ...receipt, event_id: event.eventId, event_hash: event.hash } }), id, TIGER_SCOPE.tenantId, TIGER_SCOPE.workspaceId, row.status]);
+        if (updated.rowCount !== 1) throw new Error("审批消费状态冲突");
+        count++;
+      });
+    } catch (error) { failures.push(new Error(`审批 ${id} 未执行完成：${redactText(error instanceof Error ? error.message : String(error))}`)); }
+  }
+  if (failures.length) throw new AggregateError(failures, failures.map((error) => error.message).join("；"));
+  return count;
 }
 
 async function main() {
-  if (mode === "push") await push();
-  else if (mode === "pull") await pull();
-  else { console.error("用法：proposal-bridge.ts push|pull [proposalsDir]"); process.exit(2); }
-  await closeAllPools();
+  const [, , mode, directory = process.env.TIGER_PROPOSALS_DIR] = process.argv;
+  if (mode !== "push" && mode !== "pull") throw new Error("用法：proposal-bridge.ts push|pull <绝对 review_proposals 目录>");
+  const context = reviewContext({ kernelRoot: process.env.TIGER_KERNEL_ROOT, pythonExe: process.env.TIGER_PYTHON_EXE, proposalsDir: directory, environment: process.env.TIGER_EXECUTION_ENVIRONMENT ?? "paper" });
+  if (!process.env.DATABASE_APP_URL) throw new Error("审批桥缺少 DATABASE_APP_URL，禁止使用出厂凭据回退");
+  const app = new pg.Pool({ connectionString: process.env.DATABASE_APP_URL, connectionTimeoutMillis: 5000, statement_timeout: 90_000 });
+  app.on("error", (error) => console.error(redactText(error.message)));
+  try { console.log(`${mode === "push" ? "审批已创建" : "内核裁决已核验"}：${await (mode === "push" ? push(app, context) : pull(app, context))} 条`); }
+  finally { await app.end(); }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => { console.error(redactText(error instanceof Error ? error.message : String(error))); process.exitCode = 1; });

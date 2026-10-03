@@ -12,10 +12,15 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
+from functools import wraps
 
 import pandas as pd
+import numpy as np
 
 from . import config
 from .agents import (
@@ -26,8 +31,9 @@ from .agents.narrative_agent import NarrativeAgent
 from .cleaning.pipeline import llm_semantic_clean, rule_base_clean, unwrap_cleaned
 from .data_models import PipelineResult
 from .events import EventCalendar
-from .llm.client import default_client
+from .llm.client import LLMClient, default_client
 from .providers import get_provider
+from .parameters import GateParams, risk_limits_for, tighten_risk_limits
 from .redline import ExecutionTracer, Passthrough
 from .search.hub import SearchHub
 from .tech_chain.agents import (
@@ -46,15 +52,75 @@ _LINEAGE: list[tuple[str, str]] = []   # 本轮行情来源血缘（对象, 实�
 _HEALTH: dict[str, dict] = {}
 
 
+@dataclass
+class _Diagnostics:
+    lineage: list = field(default_factory=list)
+    health: dict = field(default_factory=dict)
+    as_of: str | None = None
+
+
+_RUN_DIAGNOSTICS: ContextVar[_Diagnostics | None] = ContextVar("tiger_run_diagnostics", default=None)
+
+
+def _lineage():
+    run = _RUN_DIAGNOSTICS.get()
+    return run.lineage if run is not None else _LINEAGE
+
+
+def _health():
+    run = _RUN_DIAGNOSTICS.get()
+    return run.health if run is not None else _HEALTH
+
+
+def _isolated_run(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        context_handle = _RUN_DIAGNOSTICS.set(_Diagnostics())
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _RUN_DIAGNOSTICS.reset(context_handle)
+    return wrapped
+
+
+def _visible_data(out):
+    if isinstance(out, (pd.DataFrame, pd.Series)):
+        if out.empty:
+            raise RuntimeError("Empty market observations")
+        if not isinstance(out.index, pd.DatetimeIndex) or not out.index.is_unique or not out.index.is_monotonic_increasing:
+            raise ValueError("Market dates must be unique and strictly increasing")
+    run = _RUN_DIAGNOSTICS.get()
+    if (run is not None and run.as_of and isinstance(out, (pd.DataFrame, pd.Series))
+            and isinstance(out.index, pd.DatetimeIndex)):
+        out = out[out.index.date <= datetime.strptime(run.as_of, "%Y-%m-%d").date()].copy()
+        if out.empty:
+            raise RuntimeError("No market observations at or before this run's date")
+    if isinstance(out, pd.DataFrame) and set(("Open", "High", "Low", "Close")).issubset(out.columns):
+        prices = out[["Open", "High", "Low", "Close"]].astype(float)
+        observed = prices.dropna()
+        if (np.isinf(prices.to_numpy()).any() or (observed <= 0).any().any()
+                or (observed["Low"] > observed[["Open", "Close"]].min(axis=1)).any()
+                or (observed["High"] < observed[["Open", "Close"]].max(axis=1)).any()):
+            raise ValueError("OHLC prices must be finite, positive and inside the daily envelope")
+        if "Volume" in out.columns:
+            volume = out["Volume"].astype(float)
+            if np.isinf(volume).any() or (volume.dropna() < 0).any():
+                raise ValueError("Volume must be finite and non-negative")
+    elif isinstance(out, pd.Series):
+        if np.isinf(out.astype(float)).any():
+            raise ValueError("Macro observations must be finite")
+    return out
+
+
 def _health_record(name: str, ok: bool, elapsed: float) -> None:
-    h = _HEALTH.setdefault(name, {"ok": 0, "fail": 0, "secs": 0.0})
+    h = _health().setdefault(name, {"ok": 0, "fail": 0, "secs": 0.0})
     h["ok" if ok else "fail"] += 1
     h["secs"] = round(h["secs"] + elapsed, 2)
 
 
 def _health_score(name: str) -> float:
     """健康分：成功率优先，连续失败惩罚（用于降级顺序自适应排序）。"""
-    h = _HEALTH.get(name)
+    h = _health().get(name)
     if not h:
         return 0.5
     total = h["ok"] + h["fail"]
@@ -100,7 +166,11 @@ def _series_stale(out, max_lag_days: int = 5) -> bool:
         if not isinstance(idx, pd.DatetimeIndex):
             return False
         last = idx.max().to_pydatetime().date()
-        return (datetime.now().date() - last).days > max_lag_days
+        run = _RUN_DIAGNOSTICS.get()
+        reference = (datetime.strptime(run.as_of, "%Y-%m-%d").date()
+                     if run is not None and run.as_of else datetime.now().date())
+        lag = (reference - last).days
+        return lag < 0 or lag > max_lag_days
     except Exception:
         return False
 
@@ -127,16 +197,19 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
     what = f"{method}({args[0] if args else ''})"
     t0 = time.time()
     try:
-        out = getattr(provider, method)(*args, **kwargs)
+        out = _visible_data(getattr(provider, method)(*args, **kwargs))
         if out is None:
             raise RuntimeError(f"{provider.name}.{method} 返回 None（视同失败，继续降级）")
         if _series_stale(out):
             raise RuntimeError(f"{provider.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
-        _LINEAGE.append((what, provider.name))
+        _lineage().append((what, provider.name))
         _health_record(provider.name, True, time.time() - t0)
         return out
     except Exception as e:
         _health_record(provider.name, False, time.time() - t0)
+        from .providers.base import is_synthetic
+        if is_synthetic(provider):
+            raise
         chain: list = []
         if provider.name == "yahoo":
             from .providers.stooq import StooqProvider
@@ -148,12 +221,12 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
             t1 = time.time()
             try:
                 logger.warning("%s.%s 失败（%s），降级 %s", provider.name, method, last, alt.name)
-                out = getattr(alt, method)(*args, **kwargs)
+                out = _visible_data(getattr(alt, method)(*args, **kwargs))
                 if out is None:
                     raise RuntimeError(f"{alt.name}.{method} 返回 None（视同失败，继续降级）")
                 if _series_stale(out):
                     raise RuntimeError(f"{alt.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
-                _LINEAGE.append((what, alt.name))
+                _lineage().append((what, alt.name))
                 _health_record(alt.name, True, time.time() - t1)
                 return out
             except Exception as e2:
@@ -186,22 +259,26 @@ def quote_with_fallback(provider, ticker: str) -> dict | None:
     新鲜报价；全链皆陈旧时返回最后一个并标注 stale=True（触发器将弃用，
     用上周的价格触发止损/入场比不报警更危险）。
     """
-    chain: list = [provider]
-    if provider.name != "stooq":
-        try:
+    from .providers.base import is_synthetic
+    def sources():
+        yield provider
+        if is_synthetic(provider):
+            return
+        if provider.name != "stooq":
             from .providers.stooq import StooqProvider
-            chain.append(StooqProvider())
-        except Exception:
-            pass
-    chain.extend(p for p in _channel_chain() if p.name != provider.name)
+            yield StooqProvider()
+        yield from (src for src in _channel_chain() if src.name != provider.name
+                    and not is_synthetic(src))
     stale_q: dict | None = None
-    for src in chain:
+    for src in sources():
         try:
             q = src.quote(ticker)
         except Exception as e:
             logger.warning("%s.quote(%s) 异常（%s），降级下一环", src.name, ticker, e)
             continue
-        if not q or not q.get("price"):
+        if (not isinstance(q, dict) or isinstance(q.get("price"), bool)
+                or not isinstance(q.get("price"), (int, float))
+                or not math.isfinite(q["price"]) or q["price"] <= 0):
             logger.warning("%s.quote(%s) 无数据，降级下一环", src.name, ticker)
             continue
         if _quote_stale(q):
@@ -210,54 +287,59 @@ def quote_with_fallback(provider, ticker: str) -> dict | None:
             q["stale"] = True
             stale_q = stale_q or q
             continue
-        _LINEAGE.append((f"quote({ticker})[{q.get('kind', '?')}]", src.name))
+        _lineage().append((f"quote({ticker})[{q.get('kind', '?')}]", src.name))
         return q
     if stale_q is not None:
-        _LINEAGE.append((f"quote({ticker})[stale]", "STALE"))
+        _lineage().append((f"quote({ticker})[stale]", "STALE"))
         return stale_q
     return None
 
 
 def _batch_with_fallback(provider, tickers: list[str], days: int,
                          label: str = "batch") -> dict[str, pd.DataFrame]:
-    """批量拉取：yahoo → stooq → 服务端通道群依次补洞
-    （仅真实源之间降级；生产链路绝不回退合成数据，覆盖率如实记录 data_coverage）。"""
-    data = provider.ohlcv_batch(tickers, days=days)
+    """Merge successful real sources; one failed batch does not suppress fallback."""
+    from .providers.base import is_synthetic
+    data: dict[str, pd.DataFrame] = {}
+    def sources():
+        yield provider
+        if is_synthetic(provider):
+            return
+        if provider.name != "stooq":
+            from .providers.stooq import StooqProvider
+            yield StooqProvider()
+        yield from (src for src in _channel_chain() if src.name != provider.name
+                    and _supports(src, "ohlcv_batch") and not is_synthetic(src))
     enough = max(3, len(tickers) // 3)
-    _LINEAGE.append((f"{label}[{len(data)}/{len(tickers)}]", provider.name))
-    if len(data) >= enough:
-        return data
-    if provider.name != "stooq":
-        logger.warning("%s 批量拉取覆盖率不足（%d/%d），降级 stooq",
-                       provider.name, len(data), len(tickers))
-        from .providers.stooq import StooqProvider
-        try:
-            # v6.1：stooq 批量异常必须被吞掉并继续降级——单源故障不得中断任务
-            # （白皮书§12.1 调度层原则同样适用于行情链）
-            data2 = StooqProvider().ohlcv_batch(tickers, days=days)
-        except Exception as exc:
-            logger.warning("stooq 批量拉取异常（%s），跳过该环继续降级", exc)
-            data2 = {}
-        got = {k: v for k, v in data2.items() if k not in data}
-        data.update(got)
-        if got:
-            _LINEAGE.append((f"{label}+补{len(got)}只", "stooq"))
-        if len(data) >= enough:
-            return data
-    for alt in _channel_chain():
-        missing = [t for t in tickers if t not in data]
-        if not missing or len(data) >= len(tickers):
+    for src in sources():
+        missing = [ticker for ticker in tickers if ticker not in data]
+        if not missing:
             break
-        logger.warning("覆盖率仍不足（%d/%d），%s 通道补 %d 只",
-                       len(data), len(tickers), alt.name, len(missing))
-        data3 = alt.ohlcv_batch(missing, days=days)
-        got = {k: v for k, v in data3.items() if k not in data}
-        data.update(got)
-        if got:
-            _LINEAGE.append((f"{label}+补{len(got)}只", alt.name))
+        t0 = time.time()
+        try:
+            batch = src.ohlcv_batch(missing, days=days)
+            if not isinstance(batch, dict):
+                raise ValueError("Batch OHLCV payload must be a dictionary")
+            got = {}
+            for ticker, frame in batch.items():
+                if ticker not in missing or frame is None or frame.empty:
+                    continue
+                try:
+                    got[ticker] = _visible_data(frame)
+                except (ValueError, RuntimeError) as exc:
+                    logger.warning("%s %s OHLCV rejected: %s", src.name, ticker, exc)
+            _health_record(src.name, bool(got), time.time() - t0)
+            data.update(got)
+            if got:
+                _lineage().append((f"{label}+{len(got)}[{len(data)}/{len(tickers)}]", src.name))
+            if len(data) >= enough:
+                break
+        except Exception as exc:
+            _health_record(src.name, False, time.time() - t0)
+            logger.warning("%s batch failed; proceeding to next source: %s", src.name, exc)
     return data
 
 
+@_isolated_run
 def run_pipeline(
     provider_name: str | None = None,
     universe_mode: str = "extended",
@@ -268,16 +350,29 @@ def run_pipeline(
     trade_date: str | None = None,
     use_tuned: bool = False,
     market: str = "us",
+    llm_client: LLMClient | None = None,
+    tuned_path: str = "tuned_params.json",
+    run_state_dir: str | None = None,
+    ledger_dir: str | None = None,
+    risk_limits: dict | None = None,
 ) -> PipelineResult:
     started = time.time()
-    _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
-    _HEALTH.clear()    # 零基线：provider 健康度每轮重新度量
-    trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
+    if isinstance(account_usd, bool) or not isinstance(account_usd, (int, float)) or not math.isfinite(account_usd) or account_usd <= 0:
+        raise ValueError("Account equity must be finite and positive")
+    gate_params = tighten_risk_limits(GateParams(max_picks=max_picks), risk_limits)
+    from .state import run_path, run_directory
+    run_cache = str(run_path(run_state_dir, "cache")) if run_state_dir is not None else None
+    ledger_root = run_directory(ledger_dir) if ledger_dir is not None else None
+    _lineage().clear()
+    _health().clear()
     provider = get_provider(provider_name)
     # S4 多市场（D1 框架不变、输入替换）：市场规格解析——日历/基准组/板块代理/
     # 扫描过滤/合规规则/轻仓毕业门槛全部来自 spec（参数 single source = config）。
     from .markets import get_market
     spec = get_market(market)
+    trade_date = trade_date or spec.prev_trading_day(datetime.now().date()).isoformat()
+    datetime.strptime(trade_date, "%Y-%m-%d")
+    _RUN_DIAGNOSTICS.get().as_of = trade_date
     bmk = spec.benchmarks
     benchmark_labels = {"index": bmk.get("index_label", bmk["index"]),
                         "rate": bmk.get("rate_label", bmk["rate"]),
@@ -289,24 +384,24 @@ def run_pipeline(
     if spec.market_id == "us":
         if universe_mode == "full":
             from .universe import load_full_universe
-            universe, universe_source = load_full_universe()   # nasdaqtrader/cache/fallback
+            universe, universe_source = load_full_universe(cache_dir=run_cache)   # nasdaqtrader/cache/fallback
         else:
-            universe = load_universe(universe_mode, universe_file)
+            universe = load_universe(universe_mode, universe_file, cache_dir=run_cache)
     else:
         # CN/HK：full=东财全量清单（两级拉取复刻 US）；其他=内嵌池/文件
         from .universe import load_market_universe
         universe, universe_source = load_market_universe(
-            spec.market_id, universe_mode, universe_file)
+            spec.market_id, universe_mode, universe_file, cache_dir=run_cache)
     tracer = ExecutionTracer(run_id=trade_date)
-    demo_mode = (provider_name == "demo") or getattr(provider, "name", "") == "demo"
-    if not demo_mode and getattr(provider, "name", "") == "demo":
-        raise RuntimeError("红线：生产链路禁止注入 demo 合成数据源")
+    from .providers.base import is_synthetic
+    synthetic_source = is_synthetic(provider)
+    demo_mode = (provider_name == "demo") or synthetic_source
 
     # ================= 搜索与清洗（系统的命脉环节） =================
-    llm = default_client()
+    llm = llm_client if llm_client is not None else default_client()
 
     with tracer.step("search.collect"):
-        hub = SearchHub(demo=demo_mode)
+        hub = SearchHub(demo=demo_mode, use_disk_cache=False)
         # 主题集注册（SearchHub 同款机制）：科技六子链 + 全领域八主题——每个板块
         # 都要有自己的情报输入，否则非科技板块的 LLM 叙事维度被架空（情报偏科即评分偏科）。
         # S3：AH（A股/港股）主题默认关闭（config.AH_TOPICS_ENABLED，S4 多市场启用），
@@ -347,14 +442,13 @@ def run_pipeline(
     # 零基线纪律下每轮从零开始；仅当调用方显式 use_tuned=True 时才覆盖默认闸门。
     tuned_note = ""
     if use_tuned:
-        try:
-            from .backtest import apply_tuned_params
-            applied = apply_tuned_params()
-            if applied:
-                tuned_note = f"已加载 WFA 调优参数（显式 --use-tuned）: {applied}"
-                logger.info(tuned_note)
-        except Exception:
-            pass
+        from .backtest import apply_tuned_params
+        applied = apply_tuned_params(tuned_path, as_of=trade_date)
+        if applied:
+            gate_params = tighten_risk_limits(replace(gate_params, **applied),
+                                              risk_limits_for(gate_params))
+            tuned_note = f"本轮使用已批准 WFA 参数（显式 --use-tuned）: {applied}"
+            logger.info(tuned_note)
     logger.info("=== Pipeline 启动 market=%s provider=%s universe=%s(%d) ===",
                 spec.market_id, provider.name, universe_mode, len(universe))
 
@@ -395,6 +489,8 @@ def run_pipeline(
         expect = spec.prev_trading_day(trade_date)
         spy_last = spy_df.index[-1].date()
         lag = (expect - spy_last).days
+        if lag < 0:
+            raise RuntimeError(f"[{spec.market_id}] 基准包含运行日期之后的未来行情，拒绝评分")
         report["benchmark_last_bar"] = str(spy_last)
         report["benchmark_lag_days"] = lag
         if lag > 3:
@@ -521,9 +617,10 @@ def run_pipeline(
     # ================= 科技股产业链专项子集群 =================
     # （放在数据准备之后：monitor 复用已下载行情，仅全球联动标的单独拉取）
     with tracer.step("tech.monitor"):
-        tech_monitor = TechChainMonitorAgent(provider).execute(tracer, prefetched=stock_data)
+        tech_monitor = TechChainMonitorAgent(provider).execute(tracer, prefetched=stock_data,
+                                                                as_of=trade_date)
     with tracer.step("tech.cycle_linkage"):
-        tech_linkage = CycleLinkageAgent(provider).execute(tracer)
+        tech_linkage = CycleLinkageAgent(provider).execute(tracer, as_of=trade_date)
     with tracer.step("tech.sentiment"):
         tech_sentiment = ChainSentimentAgent(llm).execute(score_docs, tracer)
     with tracer.step("tech.risk"):
@@ -548,7 +645,13 @@ def run_pipeline(
     chain_coverage = f"{_mapped}/{len(all_tickers)}（{_mapped / max(len(all_tickers), 1):.0%}）"
     logger.info("产业链映射覆盖率: %s", chain_coverage)
 
+    from .options_metrics import OptionsHistoryStore
+    options_store = (OptionsHistoryStore(run_path(ledger_root, "options_hist"))
+                     if ledger_root is not None else None)
     context: dict = {
+        "options_store": options_store,
+        "gate_params": gate_params,
+        "risk_limits": risk_limits_for(gate_params),
         "market_data": market_data,
         "trade_date": trade_date,
         "chain_coverage": chain_coverage,
@@ -613,7 +716,13 @@ def run_pipeline(
     with tracer.step("iteration.calibration"):
         from .calibration import CalibrationLayer
         try:
-            calibration_summary = CalibrationLayer().run()
+            calibration = (CalibrationLayer(
+                journal_path=str(run_path(ledger_root, "journal.json")),
+                samples_path=str(run_path(ledger_root, "calibration_samples.json")))
+                if ledger_root is not None else CalibrationLayer())
+            calibration_summary = calibration.run()
+            calibration_summary["samples_path"] = str(calibration.samples_path)
+            calibration_summary["journal_path"] = str(calibration.journal_path)
         except Exception as exc:
             # 注册表约定：本环节不可透传——失败则跳过披露并记录（不阻塞主链路）
             logger.warning("iteration.calibration 失败，跳过披露并记录: %s", exc)
@@ -643,9 +752,14 @@ def run_pipeline(
                 "universe_mode": universe_mode,
                 "universe_source": universe_source,
                 "account_usd": account_usd,
+                "account_currency": spec.currency,
+                "data_synthetic": synthetic_source,
+                "gross_cap": context.get("gross_cap", 0.0),
                 "pick_rationale": context.get("pick_rationale", {}),
-                "source_lineage": list(_LINEAGE),
-                "provider_health": dict(_HEALTH),
+                "source_lineage": list(_lineage()),
+                "provider_health": {name: dict(value) for name, value in _health().items()},
+                "gate_params": asdict(context["gate_params"]),
+                "risk_limits": dict(context["risk_limits"]),
                 "freshness": market_data.get("freshness", {}),
                 "chain_coverage": context.get("chain_coverage", ""),
                 "data_coverage": f"{len(stock_data)}/{len(all_tickers)}",

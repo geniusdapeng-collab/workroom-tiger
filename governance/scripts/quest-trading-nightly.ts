@@ -1,76 +1,79 @@
-/**
- * 老虎全球资产管理 · 夜班 Quest 编排入口（夜班自治驱动交易链路）
- *
- * 每晚（cron/触发器 tg-tiger-night-2200 调度）执行：
- *   数据源自检 → 内核全链路（扫描→六层决策→模拟盘→日报）→ 事件入库 → 官网发布
- *
- * 机制全部走 WorkLoom Quest 运行时（packages/runtime/src/loop.ts runQuest）：
- *   - 围栏瀑布逐步判定（R-T0：模拟盘阶段编排动作 auto；实盘落 default review 待审）
- *   - 每步写五元事件（含回执位；无实证产物 →「未核实」，线程不得转 completed）
- *   - replay 断点续跑：同一线程重入时已完成步骤幂等跳过（kill -9 安全）
- *
- * 用法：
- *   pnpm tsx --env-file=.env scripts/quest-trading-nightly.ts [threadId]
- *   验证/演示（demo 内核，2 分钟级）：
- *   TIGER_KERNEL_CMD="python3 main.py --demo --out reports" \
- *     pnpm tsx --env-file=.env scripts/quest-trading-nightly.ts
- */
-import { randomUUID } from "node:crypto";
-import pg from "pg";
-import { runQuest } from "../packages/runtime/src/loop.ts";
+/** Tiger 夜班独立研究：建档/绑定计划/五元派遣同一事务，再走公共逐步围栏与原子认领。 */
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { MAX_CONCURRENT_THREADS } from "@workloom/shared";
+import { closeAllPools, getAppPool } from "../packages/db/src/client.js";
+import { gatewayAppendOnClient, insertWithReadableId, THREAD_ID_SOURCE } from "@workloom/base/workdata";
+import {
+  prepareTigerThreadOn, runTigerQuestForThread, type TigerResearchOptions,
+} from "../apps/server/src/industry/tiger-runtime.js";
+import type { Scope, ThreadQuestOutcome } from "../apps/server/src/runtime/thread-runner.js";
 
-const APP_URL = process.env.DATABASE_APP_URL
-  ?? "postgres://workloom_app:workloom_dev_app@localhost:5432/workloom";
-const GW_URL = process.env.DATABASE_GATEWAY_URL
-  ?? "postgres://workloom_gateway:workloom_dev_gateway@localhost:5432/workloom";
+const DEFAULT_SCOPE: Scope = { tenantId: "tiger", workspaceId: "trading" };
+const DEFAULT_GOAL = "老虎夜班：独立模拟研究管线与日报";
 
-const SCOPE = { tenantId: "tiger", workspaceId: "trading" };
-/** 目标决定编排模板（planQuest 关键词路由）：
- *  默认夜班（美股 daily 全链路）；A股盘后/港股盘后/A股盘中/港股盘中/美股盘中 见 loop.ts planQuest */
-const GOAL = process.env.TIGER_QUEST_GOAL ?? "老虎全球资管夜班：全链路日报与复盘编排";
-
-async function main() {
-  const threadId = process.argv[2] ?? `quest-tiger-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
-  const app = new pg.Pool({ connectionString: APP_URL });
-  const gateway = new pg.Pool({ connectionString: GW_URL });
-
-  // 线程建档（Quest 线程卡：进度/当前动作投影到 IM 与审批台）
-  // 事务级 RLS 上下文（A3：autocommit 下 set_config 语句结束即失效，必须显式事务）
-  const tc = await app.connect();
+/** Explicit fixture scope is an internal API; public clients cannot supply deployment paths or tenants. */
+export async function runTradingNightly(input: {
+  scope?: Scope; threadId?: string; goal?: string; research?: TigerResearchOptions;
+} = {}): Promise<ThreadQuestOutcome> {
+  const scope = input.scope ?? DEFAULT_SCOPE;
+  const goal = input.goal?.trim() ?? DEFAULT_GOAL;
+  if (!goal || goal.length > 500) throw new Error("夜班目标必须是 1 至 500 字的明确研究任务");
+  const client = await getAppPool().connect();
+  let threadId = input.threadId;
   try {
-    await tc.query("BEGIN");
-    await tc.query("SELECT set_config('app.tenant_id', $1, true)", [SCOPE.tenantId]);
-    await tc.query("SELECT set_config('app.workspace_id', $1, true)", [SCOPE.workspaceId]);
-    await tc.query(
-      `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by)
-       VALUES ($1,$2,$3,$4,'quest','queued','night-shift')
-       ON CONFLICT (id) DO NOTHING`,
-      [threadId, SCOPE.tenantId, SCOPE.workspaceId, GOAL]);
-    await tc.query("COMMIT");
-  } catch (e) {
-    await tc.query("ROLLBACK").catch(() => undefined);
-    throw e;
-  } finally {
-    tc.release();
-  }
-
-  console.log(`[夜班 Quest] 线程 ${threadId} 启动（围栏 R-T0 自治窗口：stage=paper）`);
-  const t0 = Date.now();
-  const result = await runQuest(app, gateway, SCOPE, {
-    threadId, goal: GOAL, presetKey: "review-chief",
-  });
-  const mins = ((Date.now() - t0) / 60000).toFixed(1);
-
-  console.log(`[夜班 Quest] 完成（${mins} 分钟）：status=${result.status} `
-    + `步骤 ${result.stepsDone}/${result.stepsTotal}`
-    + (result.unverified.length ? ` 未核实=${result.unverified.join(",")}` : "")
-    + (result.blockedBy ? ` 熔断=${result.blockedBy}` : "")
-    + (result.pendingApprovalId ? ` 待审批=${result.pendingApprovalId}` : ""));
-
-  await app.end();
-  await gateway.end();
-  // completed 且无未核实步骤 → 0；其余（待审/熔断/未核实）→ 1（cron 告警语义）
-  process.exit(result.status === "completed" && result.unverified.length === 0 ? 0 : 1);
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.workspace_id',$1,true)", [scope.workspaceId]);
+    await client.query("SELECT set_config('app.tenant_id',$1,true)", [scope.tenantId]);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`thread-dispatch:${scope.workspaceId}`]);
+    const existing = threadId ? (await client.query<{ title: string }>(
+      "SELECT title FROM threads WHERE id=$1 AND workspace_id=$2 FOR UPDATE", [threadId, scope.workspaceId])).rows[0] : undefined;
+    if (existing && existing.title !== goal) throw new Error("夜班续跑不能替换已有线程目标");
+    if (!existing) {
+      const count = await client.query<{ n: string }>(
+        "SELECT count(*)::text n FROM threads WHERE workspace_id=$1 AND status IN ('queued','running')", [scope.workspaceId]);
+      if (Number(count.rows[0]?.n ?? 0) >= MAX_CONCURRENT_THREADS) {
+        throw Object.assign(new Error(`工作区并发上限 ${MAX_CONCURRENT_THREADS}，请等待当前任务结束`), { code: "TOO_MANY_REQUESTS" });
+      }
+      const insert = async (id: string) => {
+        await client.query(`INSERT INTO threads(id,tenant_id,workspace_id,title,mode,status,created_by)
+          VALUES($1,$2,$3,$4,'quest','queued','night-shift')`, [id, scope.tenantId, scope.workspaceId, goal]);
+        return id;
+      };
+      if (threadId) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,119}$/.test(threadId)) throw new Error("夜班线程标识无效");
+        await insert(threadId);
+      } else threadId = (await insertWithReadableId(client, THREAD_ID_SOURCE, insert)).id;
+      await prepareTigerThreadOn(client, scope, { threadId, goal, presetRef: "kernel-orchestrator", research: input.research });
+      await gatewayAppendOnClient(client, { ...scope, actor: { id: "kernel-orchestrator", type: "agent" }, sessionId: threadId }, {
+        who: { type: "agent", id: "kernel-orchestrator", version: "tiger-nightly/v1" },
+        context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "夜班" },
+        object: { type: "thread", id: threadId },
+        decision: { action: "thread.dispatch", after: { threadId, title: goal, mode: "quest", presetKey: "kernel-orchestrator", origin: "nightly" } },
+        rule_impact: [],
+      });
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    try { await client.query("ROLLBACK"); }
+    catch (rollbackError) { throw new AggregateError([error, rollbackError], "夜班建档失败且回滚未成功"); }
+    throw error;
+  } finally { client.release(); }
+  return runTigerQuestForThread(scope, { threadId: threadId!, goal, presetRef: "kernel-orchestrator" });
 }
 
-main().catch((e) => { console.error("[夜班 Quest] 系统性失败:", e); process.exit(2); });
+async function main(): Promise<void> {
+  const started = Date.now();
+  try {
+    const result = await runTradingNightly({ threadId: process.argv[2], goal: process.env.TIGER_QUEST_GOAL });
+    console.log(JSON.stringify({ threadId: result.threadId, status: result.status, stepsDone: result.stepsDone,
+      stepsTotal: result.stepsTotal, unverified: result.unverified, blockedBy: result.blockedBy,
+      pendingApprovalId: result.pendingApprovalId, elapsedMs: Date.now() - started }));
+    process.exitCode = result.status === "completed" && result.unverified.length === 0 ? 0 : 1;
+  } catch {
+    console.error("夜班研究执行失败；未获得可交付回执。请查部署连接、已验行业包与线程事件。");
+    process.exitCode = 2;
+  } finally { await closeAllPools(); }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

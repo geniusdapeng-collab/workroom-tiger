@@ -28,8 +28,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from enum import IntEnum
+from urllib.parse import urlsplit
 
 from .. import config
+from ..data_safety import finite_timestamp
 from .models import CleanDocument, Evidence, RawDocument
 
 log = logging.getLogger("search.credibility")
@@ -53,8 +55,18 @@ class SourceTier(IntEnum):
 
 # ---------------------------------------------------------------- 分级
 def _domain_of(url: str) -> str:
-    m = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+)", url or "")
-    return (m.group(1).lower() if m else "").split(":")[0]
+    if not isinstance(url, str) or "\\" in url or any(ord(c) < 32 for c in url):
+        return ""
+    try:
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in {"http", "https"} or not parts.hostname:
+            return ""
+        # Accessing port also validates malformed/non-numeric authority ports.
+        _port = parts.port
+        domain = parts.hostname.encode("idna").decode("ascii").lower().rstrip(".")
+        return domain if re.fullmatch(r"[a-z0-9.:-]+", domain) else ""
+    except (ValueError, UnicodeError):
+        return ""
 
 
 def tier_for_source(source: str, url: str = "") -> SourceTier:
@@ -69,31 +81,30 @@ def tier_for_source(source: str, url: str = "") -> SourceTier:
 
 
 # ---------------------------------------------------------------- Point-in-Time 时间戳
-def parse_published(published: str) -> float | None:
+def parse_published(published: str | int | float | None) -> float | None:
     """把各源的 published 字符串规整为 epoch 秒（UTC）。无法解析返回 None
     （调用方在统计中披露计数——"当时可知"纪律不容忍编造时间）。"""
-    s = (published or "").strip()
+    if not isinstance(published, str):
+        return finite_timestamp(published)
+    s = published.strip()
     if not s:
         return None
     try:                                   # ISO 日期 / 日期时间（EDGAR、demo 等）
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-    except ValueError:
+        return finite_timestamp(dt.timestamp())
+    except (ValueError, OverflowError, OSError):
         pass
     try:                                   # RFC 2822（Google News pubDate）
         dt = parsedate_to_datetime(s)
         if dt is not None:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-    except (TypeError, ValueError):
+            return finite_timestamp(dt.timestamp())
+    except (TypeError, ValueError, OverflowError, OSError):
         pass
-    try:                                   # epoch 秒（Reddit created_utc）
-        return float(s)
-    except ValueError:
-        return None
+    return finite_timestamp(s)             # epoch 秒（Reddit created_utc）
 
 
 def content_hash(content: str) -> str:

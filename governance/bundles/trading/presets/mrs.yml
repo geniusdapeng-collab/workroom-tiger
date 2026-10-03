@@ -11,6 +11,7 @@ fence_bindings: [R-T10, R-T11]
 coverage: []
 skills: []
 tools:
+  - { name: tiger.mrs.run, access: read, desc: 调用真实 Python 大盘许可官并核验隔离研究产物 }
   - { name: market.benchmark.read, access: read, desc: 读取基准组（指数/利率/波动率） }
 prompt:
   role: 你是老虎交易的大盘许可官，只按五维映射表输出 MRS* 与仓位上限档位。

@@ -323,7 +323,7 @@ MARKET_SECTOR_SYMBOLS = {
 MARKET_SECTOR_HARD_FAIL = {"us": True, "cn": False, "hk": False}
 
 # ---- CN/HK 交易日历（规则实现：周末 + 内置节假日表，交易所公告后在此维护）----
-CN_HOLIDAYS = {  # 沪深交易所休市日（2024-2027，国务院放假安排口径，遇调整在此改）
+CN_HOLIDAYS = {  # 2024/25 legacy; 2026 verified SSE; 2027 estimates are not executable.
     # 2024
     "2024-01-01",
     "2024-02-09", "2024-02-12", "2024-02-13", "2024-02-14", "2024-02-15", "2024-02-16",
@@ -339,15 +339,16 @@ CN_HOLIDAYS = {  # 沪深交易所休市日（2024-2027，国务院放假安排�
     "2025-05-01", "2025-05-02", "2025-05-05",
     "2025-06-02",
     "2025-10-01", "2025-10-02", "2025-10-03", "2025-10-06", "2025-10-07", "2025-10-08",
-    # 2026
-    "2026-01-01",
-    "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",
+    # 2026: SSE official 2025-12-22 closure notice, checked 2026-10-02.
+    # https://www.sse.com.cn/disclosure/dealinstruc/closed/c/c_20251222_10802510.shtml
+    "2026-01-01", "2026-01-02",
+    "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-23",
     "2026-04-06",
-    "2026-05-01",
+    "2026-05-01", "2026-05-04", "2026-05-05",
     "2026-06-19",
     "2026-09-25",
     "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07",
-    # 2027
+    # 2027 estimate only: CNMarket.check_order refuses this unverified year.
     "2027-01-01",
     "2027-02-08", "2027-02-09", "2027-02-10", "2027-02-11", "2027-02-12",
     "2027-04-05",
@@ -407,8 +408,13 @@ HK_VCM_SYMBOLS = [
 
 # ---- CN 个股涨跌停规则（交易所规则源）----
 CN_LIMIT_MAIN = 0.10       # 沪深主板 ±10%
-CN_LIMIT_STAR_CHINEXT = 0.20  # 科创板(688)/创业板(300) ±20%
-CN_LIMIT_ST = 0.05         # ST/*ST ±5%（名称含 "ST" 判定）
+CN_LIMIT_STAR_CHINEXT = 0.20  # 科创板(688)/创业板(30号段) ±20%，风险警示不改变板块比例
+# SSE/SZSE 2026 rules: mainboard risk-warning shares changed on 2026-07-06.
+# https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20260424_10816474.shtml
+# https://www.szse.cn/lawrules/service/member/t20260630_621404.html
+CN_LIMIT_ST = 0.10
+CN_LIMIT_ST_LEGACY = 0.05
+CN_LIMIT_ST_EFFECTIVE_FROM = "2026-07-06"
 # US：无个股涨跌停，但有熔断 LULD 标记（披露用，不作追单拒绝）
 # HK：无涨跌停，VCM 冷静期标的集合见 HK_VCM_SYMBOLS
 

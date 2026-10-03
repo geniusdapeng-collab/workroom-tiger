@@ -4,7 +4,7 @@
   - 身份：market_id / name / timezone / currency / 结算规则（T+0/T+1）
   - 交易日历：is_trading_day / next_trading_day / prev_trading_day（规则实现：
     周末 + config 内置节假日表；HK 另有半日市标记）
-  - 交易规则：涨跌停（US 无个股涨跌停但有 LULD 熔断标记；CN ±10%/±20%/ST ±5%；
+  - 交易规则：涨跌停（US 无个股涨跌停但有 LULD 熔断标记；CN 按板块/生效日期计算；
     HK 无涨跌停但有 VCM 冷静期标的集合）、最小价位
   - 基准映射：benchmarks（指数/利率/波动率符号，MRS 输入替换的唯一出口）
   - 合规校验：check_order → ComplianceVerdict（围栏前置，供 L4 与未来围栏层消费）
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import math
 
 from .. import config
 
@@ -146,7 +147,17 @@ class MarketSpec:
     def check_order(self, side: str, ticker: str, price: float,
                     prev_close: float, trade_date, buy_date=None,
                     name: str = "", vcm_cooling: bool = False) -> ComplianceVerdict:
-        """订单合规校验（围栏前置）。基类：无额外限制，放行。"""
+        """Common input and exchange-session fences precede market rules."""
+        if side not in ("buy", "sell") or not isinstance(ticker, str) or not ticker:
+            return ComplianceVerdict(False, "订单方向或标的无效", "ORDER_INVALID")
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
+            return ComplianceVerdict(False, "成交价非有限正数", "PRICE_INVALID")
+        try:
+            session = self.is_trading_day(trade_date)
+        except (TypeError, ValueError, AttributeError):
+            return ComplianceVerdict(False, "交易日期无效", "TRADE_DATE_INVALID")
+        if not session:
+            return ComplianceVerdict(False, f"{self.market_id.upper()} 非交易日不得成交", "MARKET_CLOSED")
         return ComplianceVerdict(True, f"{self.market_id.upper()} 无个股级围栏限制",
                                  f"{self.market_id.upper()}_OK")
 

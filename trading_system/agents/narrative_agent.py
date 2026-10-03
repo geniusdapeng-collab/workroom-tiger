@@ -18,6 +18,7 @@ from ..llm.client import LLMClient
 from ..llm.prompts import NARRATIVE_SCHEMA, NARRATIVE_USER_TMPL, SYSTEM_ANALYST
 from ..redline import ExecutionTracer, Passthrough, llm_guard
 from ..search.models import CleanDocument
+from ..semantic_values import finite_number, object_rows, text_list
 
 log = logging.getLogger("agents.narrative")
 
@@ -44,19 +45,25 @@ class NarrativeAgent:
                 user=NARRATIVE_USER_TMPL.format(etfs=" ".join(etfs), docs=payload),
                 schema_hint=NARRATIVE_SCHEMA, max_tokens=2000)
             result: dict[str, dict] = {}
-            for item in out.get("sectors", []):
-                etf = str(item.get("etf") or "").upper()
+            for item in object_rows(out, "sectors"):
+                if not isinstance(item.get("etf"), str):
+                    continue
+                etf = item["etf"].upper()
                 if etf not in etfs:
                     continue
-                try:
-                    score = max(0.0, min(10.0, float(item.get("narrative_score"))))
-                except (TypeError, ValueError):
+                score = finite_number(item.get("narrative_score"), 0.0, 10.0)
+                evidence = text_list(item.get("evidence"), 2)
+                bias = item.get("eps_revision_bias", "unknown")
+                tone = item.get("guidance_tone", "unknown")
+                if (score is None or evidence is None
+                        or bias not in ("up", "flat", "down", "unknown")
+                        or tone not in ("positive", "neutral", "negative", "unknown")):
                     continue
                 result[etf] = {
                     "score": score,
-                    "bias": item.get("eps_revision_bias", "unknown"),
-                    "tone": item.get("guidance_tone", "unknown"),
-                    "evidence": "; ".join(str(x) for x in (item.get("evidence") or [])[:2]),
+                    "bias": bias,
+                    "tone": tone,
+                    "evidence": "; ".join(evidence),
                 }
             return result or None
 

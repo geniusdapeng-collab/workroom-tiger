@@ -14,6 +14,11 @@ reports/calibration_samples.json
 reports/governance_events.jsonl
 reports/复盘_*.md
 reports/review_proposals/
+# 事务侧锁与不可变审批执行回执是运行证据，保留本地但不提交源码仓库
+reports/**/*.json.lock
+reports/**/*.jsonl.lock
+reports/**/.review-state.lock
+reports/review_executions/
 
 # 手绘白板解说引擎：venv 随机器重建；渲染任务产物不入库
 scripts/whiteboard/engine/.venv/

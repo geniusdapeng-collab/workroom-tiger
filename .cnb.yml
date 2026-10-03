@@ -55,17 +55,74 @@
         node scripts/ci/verify-commit-msg.mjs
         node scripts/ci/verify-lock-conflict.mjs
 
+.desktop-mac-release: &desktop_mac_release
+  name: tiger-mac-native-release
+  runner:
+    namespace: group
+    tags: [mac, arm64]
+  stages:
+    - name: Mac M 原生签名、公证与最终资源验收（必需）
+      script: |
+        set -eu
+        version="0.1.0-$(git rev-parse --short=12 HEAD)"
+        bash governance/scripts/build-tiger-desktop-native.sh "$version"
+
+.desktop-win-release: &desktop_win_release
+  name: tiger-windows-native-release
+  runner:
+    namespace: group
+    tags: [windows]
+  stages:
+    - name: Windows x64 原生编译、签名与最终资源验收（必需）
+      script: |
+        $ErrorActionPreference = "Stop"
+        $revision = (git rev-parse --short=12 HEAD).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "无法读取构建 commit" }
+        & .\governance\scripts\build-tiger-desktop-native.ps1 -Version "0.1.0-$revision"
+
+.desktop-mac-candidate: &desktop_mac_candidate
+  name: tiger-mac-native-candidate
+  runner:
+    namespace: group
+    tags: [mac, arm64]
+  stages:
+    - name: Mac M 原生候选包与最终资源验收（必需）
+      script: |
+        set -eu
+        version="0.1.0-$(git rev-parse --short=12 HEAD)"
+        bash governance/scripts/build-tiger-desktop-native.sh "$version" --candidate
+
+.desktop-win-candidate: &desktop_win_candidate
+  name: tiger-windows-native-candidate
+  runner:
+    namespace: group
+    tags: [windows]
+  stages:
+    - name: Windows x64 原生候选包与最终资源验收（必需）
+      script: |
+        $ErrorActionPreference = "Stop"
+        $revision = (git rev-parse --short=12 HEAD).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "无法读取构建 commit" }
+        & .\governance\scripts\build-tiger-desktop-native.ps1 -Version "0.1.0-$revision" -Candidate
+
+# Native jobs deliberately have no allow_failure/optional bypass. CNB group runners and
+# signing secrets must be configured by the organization. A missing/offline runner or
+# missing credential fails the gate; Linux tests alone cannot authorize a desktop release.
 main:
   push:
     - *py_gate
     - *oss_gate
     - *protocol_gate
+    - *desktop_mac_release
+    - *desktop_win_release
 
 "**":
   pull_request:
     - *py_gate
     - *oss_gate
     - *protocol_gate
+    - *desktop_mac_candidate
+    - *desktop_win_candidate
 
 # 每周开源组件上游扫描（周一 07:00，CNB crontab 使用 Asia/Shanghai 时区）：
 #   刷新「当前版本 + 上游最新版本」清单与更新计划；有变化即开 chore/oss-watch-* PR（扫描只刷新事实）。

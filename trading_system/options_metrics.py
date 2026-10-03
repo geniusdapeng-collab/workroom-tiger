@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import datetime
+import re
+from datetime import date, datetime
 from pathlib import Path
 
 from . import config
+from .ledger_io import file_transaction, read_json_strict, write_json_atomic
 from .indicators import (
     aggregate, score_crowding_neutral_best, score_from_quantile,
     score_iv_pct_tss,
@@ -34,7 +36,7 @@ KEEP_OBS = 126        # 历史库保留长度（约半年交易日）
 
 def _pct_rank(values: list[float], x: float) -> float:
     """x 在 values 中的分位（≤x 的占比）。values 含 x 自身。"""
-    vals = [v for v in values if not math.isnan(v)]
+    vals = [v for v in values if math.isfinite(v)]
     if not vals:
         return float("nan")
     return sum(1 for v in vals if v <= x) / len(vals)
@@ -56,38 +58,67 @@ class OptionsHistoryStore:
                          or Path(config.REPORTS_DIR) / "options_hist")
 
     def _path(self, ticker: str) -> Path:
-        return self.root / f"{ticker}.json"
+        if not isinstance(ticker, str) or not re.fullmatch(r"[A-Za-z0-9^][A-Za-z0-9.^_-]{0,47}", ticker):
+            raise ValueError("Invalid options-history ticker identifier")
+        if self.root.is_symlink():
+            raise ValueError("Options-history root cannot be a symlink")
+        target = self.root / f"{ticker}.json"
+        if target.is_symlink():
+            raise ValueError("Options-history file cannot be a symlink")
+        return target
+
+    @staticmethod
+    def _validate(hist: object) -> list[dict]:
+        if not isinstance(hist, list):
+            raise ValueError("Options history must be an array")
+        seen = set()
+        previous = ""
+        for rec in hist:
+            if not isinstance(rec, dict) or not isinstance(rec.get("date"), str):
+                raise ValueError("Options history record must contain an ISO date")
+            date.fromisoformat(rec["date"])
+            if rec["date"] in seen or rec["date"] < previous:
+                raise ValueError("Options history dates must be unique and increasing")
+            seen.add(rec["date"])
+            previous = rec["date"]
+            for key in ("pcr_oi", "atm_iv", "call_oi"):
+                value = rec.get(key)
+                if value is not None and (isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or value < 0):
+                    raise ValueError(f"Options history {key} must be finite and non-negative, or null")
+        return hist
 
     def load(self, ticker: str) -> list[dict]:
-        p = self._path(ticker)
-        if not p.exists():
-            return []
+        target = self._path(ticker)
         try:
-            return json.loads(p.read_text())
-        except Exception:
+            hist = read_json_strict(target)
+        except FileNotFoundError:
             return []
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"Options history {target} is damaged; original evidence preserved") from exc
+        return self._validate(hist)
 
-    def append(self, ticker: str, snap: dict) -> list[dict]:
-        """按日落账（同日重复运行不重复积累），返回完整历史。"""
-        hist = self.load(ticker)
-        today = datetime.now().strftime("%Y-%m-%d")
-        rec = {
-            "date": today,
-            "pcr_oi": snap.get("pcr_oi"),
-            "atm_iv": snap.get("atm_iv"),
-            "call_oi": snap.get("call_oi"),
-        }
-        if hist and hist[-1].get("date") == today:
-            hist[-1] = rec
-        else:
-            hist.append(rec)
-        hist = hist[-KEEP_OBS:]
-        try:
-            self.root.mkdir(parents=True, exist_ok=True)
-            self._path(ticker).write_text(json.dumps(hist))
-        except Exception as exc:
-            logger.debug("期权历史写入失败 %s: %s", ticker, exc)
-        return hist
+    def append(self, ticker: str, snap: dict, *, as_of: str | None = None) -> list[dict]:
+        """Lock the complete RMW and publish only a successfully persisted history."""
+        if not isinstance(snap, dict):
+            raise ValueError("Options snapshot must be an object")
+        target = self._path(ticker)
+        today = as_of or datetime.now().strftime("%Y-%m-%d")
+        rec = {"date": today, "pcr_oi": snap.get("pcr_oi"),
+               "atm_iv": snap.get("atm_iv"), "call_oi": snap.get("call_oi")}
+        self._validate([rec])
+        with file_transaction(target):
+            hist = self.load(ticker)
+            if hist and hist[-1]["date"] > today:
+                raise ValueError("Refusing a historical append behind the stored options sample")
+            if hist and hist[-1]["date"] == today:
+                hist[-1] = rec
+            else:
+                hist.append(rec)
+            hist = hist[-KEEP_OBS:]
+            write_json_atomic(target, hist)
+            return hist
 
 
 def score_options(ticker: str, provider, store: OptionsHistoryStore | None = None,
@@ -121,7 +152,7 @@ def score_options(ticker: str, provider, store: OptionsHistoryStore | None = Non
         """缺失/None/NaN 统一归一为 NaN（v5.4：旧代码遇显式 None 直接 TypeError）。"""
         try:
             f = float(v)
-            return f if f == f else float("nan")
+            return f if math.isfinite(f) and not isinstance(v, bool) else float("nan")
         except (TypeError, ValueError):
             return float("nan")
 

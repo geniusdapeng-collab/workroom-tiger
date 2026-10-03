@@ -5,7 +5,7 @@
   "workloom": {
     "industry": "trading",
     "displayName": "WorkLoom for Trading · 老虎交易（AI 基金经理班组）",
-    "description": "老虎交易行业角色包：37 个数字投研岗位、三层围栏、投资技能套件及对象与阶段枚举，仅用于模拟盘研究和决策演练。",
+    "description": "老虎交易行业角色包：37个投研角色和1个真实内核研究编排员、三层围栏、研究技能及对象与阶段枚举；实际执行能力以已声明适配器为准，仅用于模拟盘研究和决策演练。",
     "status": "candidate",
     "owner": "WorkLoom 老虎资产管理产品组",
     "example": false,
@@ -53,7 +53,8 @@
         "presets/global-allocator.yml",
         "presets/global-sentinel.yml",
         "presets/portfolio-risk-officer.yml",
-        "presets/return-steward.yml"
+        "presets/return-steward.yml",
+        "presets/kernel-orchestrator.yml"
       ],
       "fences": [
         "fences/trading-baseline.yml"
@@ -72,7 +73,8 @@
       ],
       "schemas": [
         "schemas/objects.json",
-        "schemas/stages.json"
+        "schemas/stages.json",
+        "schemas/risk-defaults.json"
       ],
       "ui": [
         "ui/cases.json"
@@ -170,7 +172,9 @@
           "accent": "#ef4444"
         }
       },
-      "permissions": [],
+      "permissions": [
+        "trading.research.execute"
+      ],
       "experiments": []
     }
   },

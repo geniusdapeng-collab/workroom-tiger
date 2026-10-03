@@ -240,6 +240,6 @@ def test_intraday_rejects_stale_report(tmp_path):
         {"ticker": "AAA", "entry_price": 100.0, "stop_price": 95.0,
          "entry_template": "A", "tss_final": 8.0}]}))
     args = SimpleNamespace(out=str(tmp_path), watch=None, interval=1,
-                           cycles=1, demo=True, provider="demo")
+                           cycles=1, demo=True, provider="demo", market="US")
     with pytest.raises(SystemExit, match="已过期|陈旧"):
         main_mod._intraday(args, "demo")

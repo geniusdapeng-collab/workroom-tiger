@@ -17,10 +17,12 @@ from __future__ import annotations
 import glob
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import config
+from ..ledger_io import read_json_strict
 
 log = logging.getLogger("portfolio.allocator")
 
@@ -58,6 +60,8 @@ class GlobalAllocator:
     def __init__(self, gross_cap: float | None = None):
         self.gross_cap = (gross_cap if gross_cap is not None
                           else float(getattr(config, "PORTFOLIO_GROSS_CAP", 0.90)))
+        if isinstance(self.gross_cap, bool) or not math.isfinite(self.gross_cap) or not 0 <= self.gross_cap <= 1:
+            raise ValueError("Portfolio gross cap must be a finite fraction")
         sr = getattr(config, "LIGHT_PROBE", {}).get("size_ratio", 0.35)
         # size_ratio 可能为区间（如 (0.30, 0.40)）——取中值
         self.light_ratio = (float(sr[0] + sr[1]) / 2.0
@@ -69,7 +73,7 @@ class GlobalAllocator:
         if not files:
             return None
         try:
-            return json.loads(Path(files[-1]).read_text())
+            return read_json_strict(files[-1])
         except Exception as e:
             log.warning("读取 %s 失败: %s", files[-1], e)
             return None
@@ -79,13 +83,23 @@ class GlobalAllocator:
         if not result:
             return MarketAllocation(market=mid, available=False,
                                     note="当日无有效数据（独立诚实失败）")
-        mrs = (result.get("mrs") or {})
+        if not isinstance(result, dict) or not isinstance(result.get("mrs"), dict):
+            return MarketAllocation(market=mid, available=False, note="市场结果结构无效（未配置额度）")
+        mrs = result["mrs"]
         mrs_star = mrs.get("mrs_star")
         cap = mrs.get("position_cap")
-        local_cap = float(cap[1]) if isinstance(cap, (list, tuple)) and len(cap) == 2 else 0.0
+        def finite(value, maximum=None):
+            return (not isinstance(value, bool) and isinstance(value, (int, float))
+                    and math.isfinite(value) and value >= 0
+                    and (maximum is None or value <= maximum))
+        if (not finite(mrs_star, 10) or not isinstance(cap, (list, tuple)) or len(cap) != 2
+                or not all(finite(v, 1) for v in cap) or cap[0] > cap[1]):
+            return MarketAllocation(market=mid, available=False, note="市场分数或仓位上限无效（未配置额度）")
+        local_cap = cap[1]
         picks = result.get("picks") or []
-        tos_vals = [float(getattr(p, "tos", 0) or (p.get("tos") or 0))
-                    for p in picks] if picks and isinstance(picks[0], dict) else []
+        if not isinstance(picks, list) or any(not isinstance(p, dict) or not finite(p.get("tos")) for p in picks):
+            return MarketAllocation(market=mid, available=False, note="市场交易质量字段无效（未配置额度）")
+        tos_vals = [p["tos"] for p in picks]
         avg_tos = (sum(tos_vals) / len(tos_vals)) if tos_vals else 0.0
         ms = float(mrs_star) if isinstance(mrs_star, (int, float)) else 0.0
         # 质量分：市场环境 × 标的质量（无量纲，仅用于截断排序）

@@ -18,14 +18,19 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import os
 import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import uuid
 from typing import Protocol
 
-from .models import RawDocument
+from ..data_safety import ensure_finite_tree, safe_diagnostic, strict_json_loads
+from .credibility import parse_published
+from .models import RawDocument, SearchUnavailable
 
 log = logging.getLogger("search.sources")
 
@@ -39,26 +44,51 @@ class SearchSource(Protocol):
         ...
 
 
+class _ConfiguredSource:
+    """Explicit, stable cache identity; runtime clients/counters are excluded."""
+    _cache_fields = ("timeout",)
+
+    def cache_identity(self) -> dict:
+        return {name: list(value) if isinstance(value, tuple) else value
+                for name in self._cache_fields
+                for value in (getattr(self, name),)}
+
+
 def _http_json(url: str, timeout: float, headers: dict | None = None):
-    req = urllib.request.Request(url, headers={**_UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8", "ignore"))
+    try:
+        req = urllib.request.Request(url, headers={**_UA, **(headers or {})})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read()
+    except Exception as error:
+        diagnostic = safe_diagnostic(error)
+        raise SearchUnavailable("remote-error", diagnostics=[diagnostic],
+                                status=diagnostic.status) from None
+    return strict_json_loads(body)
 
 
 def _http_text(url: str, timeout: float, headers: dict | None = None) -> str:
-    req = urllib.request.Request(url, headers={**_UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "ignore")
+    try:
+        req = urllib.request.Request(url, headers={**_UA, **(headers or {})})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "ignore")
+    except Exception as error:
+        diagnostic = safe_diagnostic(error)
+        raise SearchUnavailable("remote-error", diagnostics=[diagnostic],
+                                status=diagnostic.status) from None
 
 
 # ---------------------------------------------------------------- agent-gw
-class KimiSearchSource:
+class KimiSearchSource(_ConfiguredSource):
     """agent-gw search：全网实时搜索（主力源，已实测可用）。"""
     name = "kimi_search"
+    _cache_fields = ("timeout", "_cache_scope")
 
     def __init__(self, timeout: float = 25.0):
         self.timeout = timeout
         self._client = None
+        # The SDK's credential/account configuration is opaque to this module.
+        # Keep its disk cache scoped to this source instance, without reading it.
+        self._cache_scope = uuid.uuid4().hex
 
     def _gw(self):
         if self._client is None:
@@ -67,10 +97,20 @@ class KimiSearchSource:
         return self._client
 
     def search(self, query: str, limit: int = 8) -> list[RawDocument]:
-        resp = self._gw().search(query, timeout=self.timeout)
-        results = (resp or {}).get("search_results") or []
+        try:
+            resp = self._gw().search(query, timeout=self.timeout)
+            ensure_finite_tree(resp)
+        except Exception as error:
+            diagnostic = safe_diagnostic(error)
+            raise SearchUnavailable("remote-error", diagnostics=[diagnostic],
+                                    status=diagnostic.status) from None
+        if not isinstance(resp, dict) or not isinstance(resp.get("search_results"), list):
+            raise SearchUnavailable("invalid-response") from None
+        results = resp["search_results"]
         docs = []
         for item in results[:limit]:
+            if not isinstance(item, dict):
+                raise SearchUnavailable("invalid-response") from None
             content = str(item.get("content") or "")
             title = str(item.get("title") or "") or content[:60].replace("\n", " ")
             url = str(item.get("url") or "")
@@ -83,19 +123,29 @@ class KimiSearchSource:
         return docs
 
 
-class FetchSource:
+class FetchSource(_ConfiguredSource):
     """agent-gw fetch：按 URL 抓正文（财报电话会记录页、深度文章）。"""
     name = "kimi_fetch"
+    _cache_fields = ("timeout", "_cache_scope")
 
     def __init__(self, timeout: float = 30.0):
         self.timeout = timeout
         self._client = None
+        self._cache_scope = uuid.uuid4().hex
 
     def fetch_doc(self, url: str) -> RawDocument | None:
-        if self._client is None:
-            from agent_gw import AgentGwClient
-            self._client = AgentGwClient(timeout=self.timeout)
-        resp = self._client.fetch(url, as_markdown=True, timeout=self.timeout)
+        try:
+            if self._client is None:
+                from agent_gw import AgentGwClient
+                self._client = AgentGwClient(timeout=self.timeout)
+            resp = self._client.fetch(url, as_markdown=True, timeout=self.timeout)
+            ensure_finite_tree(resp)
+        except Exception as error:
+            diagnostic = safe_diagnostic(error)
+            raise SearchUnavailable("remote-error", diagnostics=[diagnostic],
+                                    status=diagnostic.status) from None
+        if not isinstance(resp, dict):
+            raise SearchUnavailable("invalid-response") from None
         content = ""
         if isinstance(resp, dict):
             content = str(resp.get("content") or resp.get("markdown") or "")
@@ -110,20 +160,27 @@ class FetchSource:
         # query 形如 "fetch:<url> <url2> ..."
         urls = [u for u in query.replace("fetch:", "").split() if u.startswith("http")]
         docs = []
+        failures = []
         for u in urls[:limit]:
             try:
                 d = self.fetch_doc(u)
                 if d:
                     docs.append(d)
             except Exception as e:
-                log.info("fetch %s 失败: %s", u, e)
+                diagnostic = safe_diagnostic(e)
+                failures.append(diagnostic)
+                log.info("源 %s 抓取失败: %s", self.name, diagnostic.summary)
+        if failures:
+            raise SearchUnavailable("partial-failure", documents=docs,
+                                    diagnostics=failures) from None
         return docs
 
 
 # ---------------------------------------------------------------- 主流新闻
-class GoogleNewsSource:
+class GoogleNewsSource(_ConfiguredSource):
     """Google News RSS（免 key，多语言由查询词决定）。"""
     name = "google_news"
+    _cache_fields = ("timeout", "lang", "country")
 
     def __init__(self, timeout: float = 15.0, lang: str = "en-US", country: str = "US"):
         self.timeout = timeout
@@ -152,9 +209,10 @@ class GoogleNewsSource:
         return docs
 
 
-class RedditSource:
+class RedditSource(_ConfiguredSource):
     """Reddit 公开 JSON（小众论坛情绪：默认 wallstreetstocks/stocks/wallstreetbets）。"""
     name = "reddit"
+    _cache_fields = ("timeout", "subreddits")
 
     def __init__(self, timeout: float = 15.0,
                  subreddits: tuple[str, ...] = ("stocks", "wallstreetbets", "investing")):
@@ -164,34 +222,43 @@ class RedditSource:
     def search(self, query: str, limit: int = 8) -> list[RawDocument]:
         q = urllib.parse.quote(query)
         docs = []
+        failures = []
         per = max(1, limit // len(self.subreddits))
         for sub in self.subreddits:
             url = (f"https://www.reddit.com/r/{sub}/search.json"
                    f"?q={q}&restrict_sr=1&sort=new&limit={per}")
             try:
                 data = _http_json(url, self.timeout)
+                ensure_finite_tree(data)
+                subreddit_docs = []
+                for child in (data.get("data", {}).get("children") or []):
+                    d = child.get("data", {})
+                    title = str(d.get("title") or "")
+                    body = str(d.get("selftext") or "")[:800]
+                    link = "https://www.reddit.com" + str(d.get("permalink") or "")
+                    content = f"{title}\n{body}\n[score={d.get('score')} comments={d.get('num_comments')}]"
+                    subreddit_docs.append(RawDocument(
+                        doc_id=RawDocument.make_id(self.name, link, title, content),
+                        source=self.name, title=title, url=link,
+                        content=content[:1500], published=str(d.get("created_utc") or ""),
+                        meta={"subreddit": sub, "score": d.get("score", 0)}))
+                docs.extend(subreddit_docs)
             except Exception as e:
-                log.info("reddit r/%s 失败: %s", sub, e)
-                continue
-            for child in (data.get("data", {}).get("children") or []):
-                d = child.get("data", {})
-                title = str(d.get("title") or "")
-                body = str(d.get("selftext") or "")[:800]
-                link = "https://www.reddit.com" + str(d.get("permalink") or "")
-                content = f"{title}\n{body}\n[score={d.get('score')} comments={d.get('num_comments')}]"
-                docs.append(RawDocument(
-                    doc_id=RawDocument.make_id(self.name, link, title, content),
-                    source=self.name, title=title, url=link,
-                    content=content[:1500], published=str(d.get("created_utc") or ""),
-                    meta={"subreddit": sub, "score": d.get("score", 0)}))
+                diagnostic = safe_diagnostic(e)
+                failures.append(diagnostic)
+                log.info("源 %s 子查询失败: %s", self.name, diagnostic.summary)
+        if failures:
+            raise SearchUnavailable("partial-failure", documents=docs[:limit],
+                                    diagnostics=failures) from None
         return docs[:limit]
 
 
 # ---------------------------------------------------------------- 纵向穿透
-class EDGARSource:
+class EDGARSource(_ConfiguredSource):
     """SEC EDGAR 全文检索（免 key 官方 API）：8-K 供应链/客户集中扰动、
     10-Q 风险因子措辞变动、S-1 重大合同——财报电话会之外的一手信息。"""
     name = "edgar"
+    _cache_fields = ("timeout", "forms")
 
     def __init__(self, timeout: float = 15.0, forms: tuple[str, ...] = ("8-K", "10-Q")):
         self.timeout = timeout
@@ -205,11 +272,15 @@ class EDGARSource:
         # 官方全文检索端点（近两年）
         url = f"https://efts.sec.gov/LATEST/search-index?q={q}&forms={forms}"
         docs = []
+        fallback_diagnostic = None
         try:
             data = _http_json(url, self.timeout,
                               headers={"User-Agent": "AI-Stock-Trading-System admin@localhost"})
-        except Exception:
+        except Exception as error:
             # 兜底：标准端点
+            fallback_diagnostic = safe_diagnostic(error)
+            log.info("源 %s 主查询失败，尝试标准端点: %s",
+                     self.name, fallback_diagnostic.summary)
             url2 = (f"https://efts.sec.gov/LATEST/search-index?q={q}")
             data = _http_json(url2, self.timeout,
                               headers={"User-Agent": "AI-Stock-Trading-System admin@localhost"})
@@ -225,44 +296,110 @@ class EDGARSource:
                 doc_id=RawDocument.make_id(self.name, adsh, title, content),
                 source=self.name, title=title, url=link, content=content,
                 published=filed, meta={"form": src.get("form"), "adsh": adsh}))
+        if fallback_diagnostic is not None:
+            raise SearchUnavailable("partial-failure", documents=docs,
+                                    diagnostics=[fallback_diagnostic]) from None
         return docs
 
 
-class PatentsViewSource:
-    """USPTO PatentsView 专利 API（免 key 旧版端点）：专利动态纵向穿透。"""
+class PatentsViewSource(_ConfiguredSource):
+    """Explicitly configured, authenticated PatentSearch API adapter.
+
+    PATENTSVIEW_API_KEY and PATENTSVIEW_API_URL (or constructor arguments) are
+    both required. There is no default endpoint or synthetic-data fallback.
+    The documented modern endpoint is https://search.patentsview.org/api/v1/patent/.
+    API availability is not assumed: USPTO announced an API migration pause,
+    and the official API examples still state that new key grants are paused.
+    Contract checked 2026-10-03:
+    https://github.com/PatentsView/PatentSearch-API/blob/main/docs/docs/Search%20API/Examples.md
+    https://www.uspto.gov/subscription-center/2026/patentsview-migrating-uspto-open-data-portal-march-20
+    """
     name = "patentsview"
 
-    def __init__(self, timeout: float = 15.0):
+    def __init__(self, timeout: float = 15.0, *, api_key: str | None = None,
+                 endpoint: str | None = None):
         self.timeout = timeout
+        self.api_key = os.environ.get("PATENTSVIEW_API_KEY", "") if api_key is None else api_key
+        self.endpoint = os.environ.get("PATENTSVIEW_API_URL", "") if endpoint is None else endpoint
+
+    def cache_identity(self) -> dict:
+        # Only a credential scope digest enters the cache namespace, never key text.
+        return {"timeout": self.timeout, "endpoint": self.endpoint,
+                "credential_scope": hashlib.sha256(self.api_key.encode()).hexdigest()}
 
     def search(self, query: str, limit: int = 8) -> list[RawDocument]:
-        q = urllib.parse.quote(
-            json.dumps({"_text_any": {"patent_title": query}}))
-        f = urllib.parse.quote(json.dumps(
-            ["patent_number", "patent_title", "patent_date", "assignee_organization"]))
-        url = (f"https://api.patentsview.org/patents/query"
-               f"?q={q}&f={f}&o={urllib.parse.quote(json.dumps({'per_page': limit}))}")
-        data = _http_json(url, self.timeout)
+        if not self.api_key or not self.endpoint:
+            raise SearchUnavailable("not-configured") from None
+        try:
+            parts = urllib.parse.urlsplit(self.endpoint)
+            valid = (parts.scheme == "https" and parts.hostname and
+                     parts.username is None and parts.password is None and
+                     not parts.query and not parts.fragment and "\\" not in self.endpoint and
+                     not any(ord(c) < 32 for c in self.endpoint))
+            _port = parts.port
+        except (ValueError, UnicodeError):
+            valid = False
+        if not valid:
+            raise SearchUnavailable("invalid-endpoint") from None
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError("Invalid patent search limit") from None
+        if limit == 0:
+            return []
+        size = min(limit, 1000)
+        params = {
+            "q": json.dumps({"_text_any": {"patent_title": query}}, allow_nan=False),
+            "f": json.dumps(["patent_id", "patent_title", "patent_date",
+                             "assignees.assignee_organization"]),
+            "s": json.dumps([{"patent_date": "desc"}, {"patent_id": "asc"}]),
+            "o": json.dumps({"size": size}),
+        }
+        endpoint = urllib.parse.urlunsplit((parts.scheme, parts.netloc,
+                                           parts.path.rstrip("/") + "/", "", ""))
+        url = endpoint + "?" + urllib.parse.urlencode(params)
+        data = _http_json(url, self.timeout,
+                          headers={"X-Api-Key": self.api_key, "Accept": "application/json"})
+        try:
+            ensure_finite_tree(data)
+        except ValueError:
+            raise SearchUnavailable("invalid-response") from None
+        if not isinstance(data, dict) or "error" not in data:
+            raise SearchUnavailable("invalid-response") from None
+        if data["error"] is not False:
+            raise SearchUnavailable("remote-error") from None
+        records = data.get("patents")
+        count = data.get("count")
+        if (not isinstance(records, list) or not isinstance(count, int) or
+                isinstance(count, bool) or count != len(records)):
+            raise SearchUnavailable("invalid-response") from None
         docs = []
-        for p in (data.get("patents") or [])[:limit]:
-            title = str(p.get("patent_title") or "")
-            org = ""
-            ass = p.get("assignees") or p.get("assignee_organization") or ""
-            if isinstance(ass, list) and ass:
-                org = str(ass[0].get("assignee_organization", ""))
-            elif isinstance(ass, str):
-                org = ass
-            content = f"Patent {p.get('patent_number')} | {title} | {org} | {p.get('patent_date')}"
+        for p in records[:size]:
+            if not isinstance(p, dict):
+                raise SearchUnavailable("invalid-response") from None
+            number, title, published = (p.get("patent_id"), p.get("patent_title"), p.get("patent_date"))
+            if (not all(isinstance(value, str) and value.strip() for value in (number, title, published)) or
+                    not re.fullmatch(r"[A-Za-z0-9]+", number) or
+                    not re.fullmatch(r"\d{4}-\d{2}-\d{2}", published) or
+                    parse_published(published) is None):
+                raise SearchUnavailable("invalid-response") from None
+            assignees = p.get("assignees", [])
+            if not isinstance(assignees, list) or any(not isinstance(a, dict) for a in assignees):
+                raise SearchUnavailable("invalid-response") from None
+            organizations = [a.get("assignee_organization", "") for a in assignees]
+            if any(not isinstance(org, str) for org in organizations):
+                raise SearchUnavailable("invalid-response") from None
+            org = "; ".join(org for org in organizations if org)
+            content = f"Patent {number} | {title} | {org} | {published}"
+            public_number = number if number.startswith("US") else "US" + number
             docs.append(RawDocument(
-                doc_id=RawDocument.make_id(self.name, str(p.get("patent_number")), title, content),
+                doc_id=RawDocument.make_id(self.name, number, title, content),
                 source=self.name, title=f"[专利] {title}",
-                url=f"https://patents.google.com/patent/US{p.get('patent_number')}",
-                content=content, published=str(p.get("patent_date") or ""),
-                meta={"assignee": org}))
+                url=f"https://patents.google.com/patent/{public_number}",
+                content=content, published=published,
+                meta={"patent_id": number, "assignee": org}))
         return docs
 
 
-class FederalRegisterSource:
+class FederalRegisterSource(_ConfiguredSource):
     """美国联邦公报 API（免 key）：政策微调——出口管制、实体清单、补贴规则。"""
     name = "federal_register"
 
@@ -291,9 +428,10 @@ class FederalRegisterSource:
 
 
 # ---------------------------------------------------------------- 离线演示
-class DemoSearchSource:
+class DemoSearchSource(_ConfiguredSource):
     """离线确定性合成文档（demo 模式专用，保证 demo 全链路可跑可复现）。"""
     name = "demo"
+    _cache_fields = ("seed",)
 
     def __init__(self, seed: int = 42):
         self.seed = seed
@@ -339,7 +477,7 @@ def default_sources(demo: bool = False) -> list[SearchSource]:
 
 
 # ---------------------------------------------------------------- v3 可达性强化
-class EastmoneyNewsSource:
+class EastmoneyNewsSource(_ConfiguredSource):
     """东方财富资讯搜索（免费，T2 聚合门户）：中文财经新闻检索，
     覆盖美股/宏观/A股/港股——在 google_news/reddit 不可达的网络环境下
     提供真实新闻流（v3 数据层强化，实测 2026-08-30 可达且新鲜）。"""
@@ -358,13 +496,11 @@ class EastmoneyNewsSource:
         }, ensure_ascii=False)
         url = ("https://search-api-web.eastmoney.com/search/jsonp?cb=cb&param="
                + urllib.parse.quote(param))
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            raw = r.read().decode("utf-8", "ignore")
+        raw = _http_text(url, self.timeout)
         m = re.search(r"cb\((.*)\)\s*$", raw, re.S)
         if not m:
             raise RuntimeError("eastmoney_news 返回非 JSONP 内容（疑似被封禁）")
-        data = json.loads(m.group(1))
+        data = strict_json_loads(m.group(1))
         items = ((data.get("result") or {}).get("cmsArticleWebOld")) or []
         docs = []
         for it in items[:limit]:
@@ -382,10 +518,11 @@ class EastmoneyNewsSource:
         return docs
 
 
-class SinaFlashSource:
+class SinaFlashSource(_ConfiguredSource):
     """新浪财经 7×24 快讯（免费，T2）：zhibo 实时快讯流，按查询词过滤。
     快讯为中文，英文主题词命中少时如实返回空集（不编造、不凑数）。"""
     name = "sina_flash"
+    _cache_fields = ("timeout", "zhibo_id")
 
     def __init__(self, timeout: float = 12.0, zhibo_id: int = 152):
         self.timeout = timeout

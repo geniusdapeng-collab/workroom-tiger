@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import config
 from .data_models import PipelineResult
+from .parameters import RISK_LIMIT_FIELDS, validate_risk_limits
 
 
 def to_json(result: PipelineResult, out_dir: str = config.REPORTS_DIR) -> str:
@@ -57,6 +58,13 @@ def render_markdown(r: PipelineResult) -> str:
     m = r.mrs
     mk = r.raw.get("market") or {}
     mk_grad = r.raw.get("market_grad") or {}
+    policy = (validate_risk_limits(r.raw["risk_limits"], complete=True)
+              if "risk_limits" in r.raw else None)
+    snapshot = r.raw.get("gate_params")
+    if policy is not None and snapshot is not None:
+        if (not isinstance(snapshot, dict) or not set(RISK_LIMIT_FIELDS).issubset(snapshot)
+                or any(snapshot[name] != value for name, value in policy.items())):
+            raise ValueError("Risk policy differs from the recorded execution parameters")
     lines: list[str] = []
     lines.append(f"# AI 短线{mk.get('short_name', '美股')}交易日报 — {r.trade_date}")
     lines.append("")
@@ -79,13 +87,21 @@ def render_markdown(r: PipelineResult) -> str:
         sub_sectors = [s for s in r.sectors if s.in_sub_pool]
         main_txt = "；".join(f"{s.etf}(SHS {s.shs})" for s in main_sectors) or "无"
         lines.append(f"1. **市场状态（MRS*）**：{m.mrs_star}/10（{m.regime}，k={m.k}）")
-        lines.append(f"2. **总仓位上限**：{m.position_cap[0]:.0%} - {m.position_cap[1]:.0%}")
+        actual_cap = min(m.position_cap[1], r.raw.get("gross_cap", m.position_cap[1]),
+                         policy["gross_cap"] if policy is not None else 1.0)
+        lines.append(f"2. **总仓位上限**：{min(m.position_cap[0], actual_cap):.0%} - {actual_cap:.0%}")
         lines.append(f"3. **主线板块**：{main_txt}" +
                      (f" ｜ 次主线: " + "；".join(f"{s.etf}(SHS {s.shs})" for s in sub_sectors) if sub_sectors else ""))
         lines.append(f"4. **允许交易标的**：{len(r.picks)} 只 → " +
                      ("、".join(p.ticker for p in r.picks) if r.picks else "无达标标的，等待"))
     lines.append("")
     lines.append(f"**系统指令**：`{r.action}` — {r.market_view}")
+    if policy is not None:
+        lines.append(f"**记录的风险政策**：单笔计划风险不超过 {policy['risk_r_pct']:.1%}｜"
+                     f"单票市值不超过 {policy['max_single_position_pct']:.0%}｜"
+                     f"政策总仓位不超过 {policy['gross_cap']:.0%}。")
+    else:
+        lines.append("**风险政策快照**：未记录，无法从当前默认配置还原历史实际限制。")
     lines.append("")
 
     # ---- MRS 明细 ----
@@ -280,7 +296,7 @@ def render_markdown(r: PipelineResult) -> str:
         lines.append("")
         lines.append(f"> 口径披露：样本门槛 {config.CALIBRATION_MIN_SAMPLES} 条"
                      f"（config.CALIBRATION_MIN_SAMPLES），样本库 "
-                     f"{config.CALIBRATION_SAMPLES_PATH} 属会计账白名单，"
+                     f"{cal.get('samples_path', '历史样本库路径未记录')} 属会计账白名单，"
                      "与 journal 同级，禁止进入决策输入。")
         lines.append("")
 

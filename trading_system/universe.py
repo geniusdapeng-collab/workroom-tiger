@@ -178,24 +178,29 @@ def fetch_full_universe(include_etfs: bool = False, timeout: int = 25) -> list[s
     return sorted(set(tickers))
 
 
-def load_full_universe(include_etfs: bool = False) -> tuple[list[str], str]:
+def load_full_universe(include_etfs: bool = False, *,
+                       cache_dir: str | Path | None = None) -> tuple[list[str], str]:
     """加载全市场清单：在线下载 → 本地缓存（7天） → 回退 extended。
 
     返回 (tickers, source)，source ∈ {nasdaqtrader, cache, fallback}。
     """
+    cache = _FULL_CACHE
+    if cache_dir is not None:
+        from .state import run_path
+        cache = run_path(cache_dir, "universe_full.json")
     try:
         tickers = fetch_full_universe(include_etfs)
         if len(tickers) >= 2000:
-            _FULL_CACHE.parent.mkdir(parents=True, exist_ok=True)
-            _FULL_CACHE.write_text(json.dumps(
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps(
                 {"ts": time.time(), "tickers": tickers}))
             logger.info("全市场清单下载成功: %d 只（已缓存）", len(tickers))
             return tickers, "nasdaqtrader"
     except Exception as exc:
         logger.warning("全市场清单下载失败: %s", exc)
-    if _FULL_CACHE.exists():
+    if cache.exists():
         try:
-            blob = json.loads(_FULL_CACHE.read_text())
+            blob = json.loads(cache.read_text())
             age = time.time() - blob.get("ts", 0)
             if age < _FULL_TTL_S and len(blob.get("tickers", [])) >= 2000:
                 logger.info("使用缓存全市场清单: %d 只（缓存 %.1f 天）",
@@ -207,7 +212,8 @@ def load_full_universe(include_etfs: bool = False) -> tuple[list[str], str]:
     return list(dict.fromkeys(EXTENDED_UNIVERSE)), "fallback"
 
 
-def load_universe(mode: str = "extended", file_path: str | None = None) -> list[str]:
+def load_universe(mode: str = "extended", file_path: str | None = None, *,
+                  cache_dir: str | Path | None = None) -> list[str]:
     if mode == "core":
         return list(dict.fromkeys(CORE_UNIVERSE))
     if mode == "file":
@@ -218,7 +224,7 @@ def load_universe(mode: str = "extended", file_path: str | None = None) -> list[
                    if ln.strip() and not ln.startswith("#")]
         return list(dict.fromkeys(tickers))
     if mode == "full":
-        tickers, _src = load_full_universe()
+        tickers, _src = load_full_universe(cache_dir=cache_dir)
         return tickers
     return list(dict.fromkeys(EXTENDED_UNIVERSE))
 
@@ -346,7 +352,8 @@ def _load_market_full(market_id: str, fetch, cache: Path,
 
 
 def load_market_universe(market_id: str, mode: str = "extended",
-                         file_path: str | None = None) -> tuple[list[str], str]:
+                         file_path: str | None = None, *,
+                         cache_dir: str | Path | None = None) -> tuple[list[str], str]:
     """CN/HK 股票池加载。返回 (tickers, source)。
 
     full → 东财全量清单（两级拉取模式复刻 US：清单缓存 + 内嵌兜底）；
@@ -356,12 +363,17 @@ def load_market_universe(market_id: str, mode: str = "extended",
     if mid not in ("cn", "hk"):
         raise ValueError(f"load_market_universe 仅支持 cn/hk: {market_id}")
     if file_path:
-        return load_universe("file", file_path), "file"
+        return load_universe("file", file_path, cache_dir=cache_dir), "file"
     embedded = CN_UNIVERSE if mid == "cn" else HK_UNIVERSE
     if mode == "full":
+        cn_cache, hk_cache = _CN_CACHE, _HK_CACHE
+        if cache_dir is not None:
+            from .state import run_path
+            cn_cache = run_path(cache_dir, "universe_cn.json")
+            hk_cache = run_path(cache_dir, "universe_hk.json")
         if mid == "cn":
-            return _load_market_full(mid, fetch_cn_universe, _CN_CACHE,
+            return _load_market_full(mid, fetch_cn_universe, cn_cache,
                                      embedded, 4000)
-        return _load_market_full(mid, fetch_hk_universe, _HK_CACHE,
+        return _load_market_full(mid, fetch_hk_universe, hk_cache,
                                  embedded, 1500)
     return list(dict.fromkeys(embedded)), "embedded"

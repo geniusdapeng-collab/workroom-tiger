@@ -11,6 +11,7 @@ fence_bindings: [R-T14]
 coverage: []
 skills: []
 tools:
+  - { name: tiger.scanner.run, access: read, desc: 调用真实 Python 扫描员并核验隔离研究产物 }
   - { name: market.ohlcv.read, access: read, desc: 读取全市场行情（降级链） }
   - { name: universe.list.read, access: read, desc: 读取股票池清单 }
 prompt:

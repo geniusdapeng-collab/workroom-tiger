@@ -20,6 +20,7 @@ from ..llm.prompts import CLEAN_SCHEMA, CLEAN_USER_TMPL, SYSTEM_ANALYST
 from ..redline import ExecutionTracer, Passthrough, llm_guard
 from ..search.credibility import evidence_for
 from ..search.models import CleanDocument, RawDocument
+from ..semantic_values import finite_number, object_rows, text_list
 
 log = logging.getLogger("cleaning")
 
@@ -73,21 +74,36 @@ def _docs_payload(docs: list[RawDocument]) -> str:
 
 def _apply_llm_annotations(docs: list[RawDocument],
                            llm_out: dict) -> list[CleanDocument]:
-    by_id = {str(x.get("id")): x for x in llm_out.get("documents", []) if isinstance(x, dict)}
+    by_id = {x["id"]: x for x in object_rows(llm_out, "documents")
+             if isinstance(x.get("id"), str)}
     cleaned: list[CleanDocument] = []
     for d in docs:
         ann = by_id.get(d.doc_id)
         if not ann:
             cleaned.append(_with_evidence(CleanDocument(raw=d, degraded=True)))
             continue
+        tickers = text_list(ann.get("tickers"), 8)
+        events = text_list(ann.get("events"), 6)
+        sentiment = ann.get("sentiment")
+        score = _safe_float(ann.get("sentiment_score"))
+        relevance = finite_number(ann.get("relevance"), 0.0, 1.0)
+        summary = ann.get("summary_zh")
+        invalid = (tickers is None or events is None
+                   or sentiment is not None and sentiment not in ("bullish", "bearish", "neutral", "mixed")
+                   or summary is not None and not isinstance(summary, str)
+                   or ann.get("sentiment_score") is not None and score is None
+                   or ann.get("relevance") is not None and relevance is None)
+        if invalid:
+            cleaned.append(_with_evidence(CleanDocument(raw=d, degraded=True)))
+            continue
         cleaned.append(_with_evidence(CleanDocument(
             raw=d,
-            tickers=[str(t).upper() for t in (ann.get("tickers") or [])][:8],
-            sentiment=ann.get("sentiment"),
-            sentiment_score=_safe_float(ann.get("sentiment_score")),
-            events=[str(e) for e in (ann.get("events") or [])][:6],
-            summary_zh=ann.get("summary_zh"),
-            relevance=_safe_float(ann.get("relevance")),
+            tickers=[ticker.upper() for ticker in tickers],
+            sentiment=sentiment,
+            sentiment_score=score,
+            events=events,
+            summary_zh=summary,
+            relevance=relevance,
             degraded=False,
         )))
     return cleaned
@@ -101,10 +117,7 @@ def _with_evidence(doc: CleanDocument) -> CleanDocument:
 
 
 def _safe_float(v) -> float | None:
-    try:
-        return max(-1.0, min(1.0, float(v)))
-    except (TypeError, ValueError):
-        return None
+    return finite_number(v, -1.0, 1.0)
 
 
 def llm_semantic_clean(docs: list[RawDocument], llm: LLMClient,

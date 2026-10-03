@@ -9,6 +9,7 @@
 
 本夹具把默认 root 重定向到临时目录，从机制上断开"测试 → 产品台账"的写路径：
 即使某条测试忘了注入 store，也只会写进 tmp，不会污染真实分位历史。
+默认校准 journal 与样本路径也指向该测试目录，防止 pipeline 读写产品会计账。
 """
 
 from __future__ import annotations
@@ -18,7 +19,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_product_ledgers(tmp_path_factory, monkeypatch):
-    """把期权历史库的默认落盘目录指向临时目录（每个测试一份）。"""
+    """把期权历史与校准会计账的默认路径指向每个测试的临时目录。"""
+    from trading_system import config
     ledger_root = tmp_path_factory.mktemp("options-hist")
     monkeypatch.setenv("TS_OPTIONS_HIST_DIR", str(ledger_root))
+    monkeypatch.setattr(config, "CALIBRATION_JOURNAL_PATH", str(ledger_root / "journal.json"))
+    monkeypatch.setattr(config, "CALIBRATION_SAMPLES_PATH", str(ledger_root / "calibration_samples.json"))
     yield

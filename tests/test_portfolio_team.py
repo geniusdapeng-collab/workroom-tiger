@@ -19,12 +19,15 @@ def _mk_result(d: Path, mrs=7.0, cap=(0.4, 0.7), tos=(50.0, 40.0)):
         "picks": [{"tos": tos[0]}, {"tos": tos[1]}], "raw": {}}))
 
 
-def _mk_sim(d: Path, equities):
+def _mk_sim(d: Path, equities, *, currency=None):
     d.mkdir(parents=True, exist_ok=True)
-    (d / "sim_portfolio.json").write_text(json.dumps({
+    ledger = {
         "cash": equities[-1], "positions": [], "pending": [],
         "equity_curve": [{"date": f"2026-08-{i + 1:02d}", "equity": e}
-                         for i, e in enumerate(equities)]}))
+                         for i, e in enumerate(equities)]}
+    if currency:
+        ledger["currency"] = currency
+    (d / "sim_portfolio.json").write_text(json.dumps(ledger))
 
 
 # ---------------------------------------------------------------- 配置官
@@ -105,8 +108,9 @@ def test_sentinel_missing_honest(monkeypatch):
 
 # ---------------------------------------------------------------- 组合风险官 + 收益稳定官
 def test_risk_view_concentration(tmp_path):
-    _mk_sim(tmp_path / "us", [100000, 101000])
-    _mk_sim(tmp_path / "cn", [50000, 50000])
+    # 组合金额与集中度只在所有账户明确使用同一货币时可求和。
+    _mk_sim(tmp_path / "us", [100000, 101000], currency="USD")
+    _mk_sim(tmp_path / "cn", [50000, 50000], currency="USD")
     view = PortfolioRiskOfficer().view(
         {"us": str(tmp_path / "us"), "cn": str(tmp_path / "cn"),
          "hk": str(tmp_path / "hk")})

@@ -23,6 +23,7 @@ from trading_system.review.attribution import (
     VIOLATIONS, attribute_journal, detect_violations,
 )
 from trading_system.review.chief import ReviewChief
+from trading_system.ledger_io import file_digest
 
 
 # ---------------------------------------------------------------- 样本构造
@@ -204,7 +205,9 @@ class TestApprovalFlow:
         """approve → approved + tuned_params.json（次日生效 + 披露）。"""
         chief, p = self._pending(tmp_path)
         tuned = str(tmp_path / "tuned_params.json")
-        p2 = chief.approve(p.proposal_id, tuned_path=tuned)
+        digest = file_digest(tmp_path / "props" / f"{p.proposal_id}.json")
+        p2 = chief.approve(p.proposal_id, tuned_path=tuned,
+                           expected_sha256=digest, execution_id="approved-one")
         assert p2.status == "approved"
         tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
         assert p2.effective_from == tomorrow
@@ -217,18 +220,21 @@ class TestApprovalFlow:
         # 次日生效纪律：今日 apply_tuned_params 拒绝加载
         from trading_system.backtest import apply_tuned_params
         assert apply_tuned_params(tuned) is None
-        # 生效日已到（模拟昨天批准）→ 正常加载
-        blob["effective_from"] = (
-            datetime.now().date() - timedelta(days=1)).isoformat()
-        json.dump(blob, open(tuned, "w"), ensure_ascii=False)
-        applied = apply_tuned_params(tuned)
+        # 显式回放批准后的生效日；修改审批产物会破坏快照绑定。
+        applied = apply_tuned_params(tuned, as_of=tomorrow)
         assert applied == {"mrs_gate": 6.5}
 
     def test_approve_twice_blocked(self, tmp_path):
         chief, p = self._pending(tmp_path)
-        chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"))
+        digest = file_digest(tmp_path / "props" / f"{p.proposal_id}.json")
+        done = chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"),
+                             expected_sha256=digest, execution_id="approved-one")
+        retried = chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"),
+                                expected_sha256=digest, execution_id="approved-one")
+        assert done.execution_id == retried.execution_id  # 同执行重试是幂等恢复
         with pytest.raises(ValueError):
-            chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"))
+            chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"),
+                           expected_sha256=digest, execution_id="different-execution")
 
     def test_reject_requires_reason(self, tmp_path):
         """reject 无 reason → 报错（三手势纪律：驳回必填原因）。"""
@@ -237,7 +243,9 @@ class TestApprovalFlow:
             chief.reject(p.proposal_id, "")
         with pytest.raises(ValueError, match="原因"):
             chief.reject(p.proposal_id, None)
-        p2 = chief.reject(p.proposal_id, "OOS 样本仅 20 笔，再观察一个月")
+        digest = file_digest(tmp_path / "props" / f"{p.proposal_id}.json")
+        p2 = chief.reject(p.proposal_id, "OOS 样本仅 20 笔，再观察一个月",
+                          expected_sha256=digest, execution_id="rejected-one")
         assert p2.status == "rejected"
         assert p2.reason == "OOS 样本仅 20 笔，再观察一个月"
         # 驳回后不得再生效
@@ -252,7 +260,9 @@ class TestApprovalFlow:
                             bridge=bridge)
         p = monthly.generate_proposal(
             _wfa(0.97, 0.20, {"mrs_gate": 6.5}), str(tmp_path / "props"))
-        chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"))
+        digest = file_digest(tmp_path / "props" / f"{p.proposal_id}.json")
+        chief.approve(p.proposal_id, tuned_path=str(tmp_path / "t.json"),
+                       expected_sha256=digest, execution_id="approved-event")
         ok, errs = GovernanceBridge.verify_chain(str(tmp_path / "events.jsonl"))
         assert ok, errs
         lines = [json.loads(x) for x in

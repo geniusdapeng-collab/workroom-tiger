@@ -77,7 +77,8 @@ class TestCompliance:
         v = CN.check_order("buy", "600519.SS", 11.0, 10.0, "2026-08-28")
         assert not v.allowed and v.rule_id == "CN_LIMIT_UP_CHASE"
         # 跌停价卖出拒绝
-        v2 = CN.check_order("sell", "600519.SS", 9.0, 10.0, "2026-08-28")
+        v2 = CN.check_order("sell", "600519.SS", 9.0, 10.0, "2026-08-28",
+                            buy_date="2026-08-27")
         assert not v2.allowed and v2.rule_id == "CN_LIMIT_DOWN_CHASE"
         # 板内价格放行
         assert CN.check_order("buy", "600519.SS", 10.5, 10.0, "2026-08-28").allowed
@@ -87,14 +88,14 @@ class TestCompliance:
         assert CN.price_limit_pct("300750.SZ") == config.CN_LIMIT_STAR_CHINEXT
         assert CN.price_limit_pct("688981.SS") == config.CN_LIMIT_STAR_CHINEXT
         assert CN.price_limit_pct("600519.SS") == config.CN_LIMIT_MAIN
-        # ST ±5%（名称判定优先于板块）
+        # 当前主板 ST ±10%；20% 板块不受 ST 名称覆盖
         assert CN.price_limit_pct("600519.SS", name="ST某某") == config.CN_LIMIT_ST
         v = CN.check_order("buy", "300750.SZ", 12.0, 10.0, "2026-08-28")
         assert not v.allowed                       # +20% 涨停追买
         assert CN.check_order("buy", "300750.SZ", 11.5, 10.0, "2026-08-28").allowed
-        v_st = CN.check_order("buy", "600519.SS", 10.5, 10.0, "2026-08-28",
+        v_st = CN.check_order("buy", "600519.SS", 11.0, 10.0, "2026-08-28",
                               name="ST某某")
-        assert not v_st.allowed                    # ST +5% 涨停追买
+        assert not v_st.allowed                    # 生效后的 ST +10% 涨停追买
 
     def test_hk_vcm_cooling_rejected(self):
         v = HK.check_order("buy", "0700.HK", 600.0, 590.0, "2026-08-28",
@@ -113,7 +114,8 @@ class TestCompliance:
 
     def test_hk_min_tick_table(self):
         assert HK.min_tick(0.10) == 0.001
-        assert HK.min_tick(15.0) == 0.02
+        assert HK.min_tick(15.0, "2026-10-02") == 0.01
+        assert HK.min_tick(15.0, "2025-08-03") == 0.02
         assert HK.min_tick(700.0) == 0.5
         assert CN.min_tick(10.0) == 0.01
         assert US.min_tick(100.0) == 0.01
@@ -191,7 +193,10 @@ class TestMrsBenchmarkMissing:
 class TestHonestFailure:
     def test_cn_total_data_outage_fails_honestly(self, monkeypatch):
         import trading_system.pipeline as pl
+        import trading_system.providers.stooq as stooq
         from trading_system.providers.base import DataProvider
+        from trading_system.search.hub import SearchHub
+        from trading_system.redline import LLMUnavailable
 
         class BrokenProvider(DataProvider):
             name = "broken"
@@ -206,10 +211,16 @@ class TestHonestFailure:
                 raise RuntimeError("模拟数据全断")
 
         monkeypatch.setattr(pl, "get_provider", lambda name=None: BrokenProvider())
+        # All channels in this outage fixture must fail deterministically.
+        monkeypatch.setattr(stooq, "StooqProvider", BrokenProvider)
         monkeypatch.setattr(pl, "_channel_chain", lambda: [])
+        monkeypatch.setattr(pl, "SearchHub", lambda **kwargs: SearchHub(demo=True, use_disk_cache=False))
+        class Offline:
+            def complete_json(self, **kwargs):
+                raise LLMUnavailable("Outage fixture model channel is unavailable")
         with pytest.raises(RuntimeError, match=r"\[cn\].*诚实失败"):
             run_pipeline(provider_name="broken", universe_mode="extended",
-                         top_n=5, market="cn")
+                         top_n=5, market="cn", llm_client=Offline())
 
     def test_us_unaffected_when_cn_broken(self):
         """其余市场照常：CN 全断不影响 US 正常产出。"""

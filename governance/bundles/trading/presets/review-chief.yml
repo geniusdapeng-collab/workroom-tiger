@@ -11,6 +11,7 @@ fence_bindings: []
 coverage: []
 skills: [daily-attribution]
 tools:
+  - { name: tiger.review.run, access: read, desc: 绑定同一租户的已核验日报源并执行真实只读归因复盘 }
   - { name: journal.read, access: read, desc: 读取信号台账 }
   - { name: memory.write_internal, access: read, desc: 复盘结论沉淀（由内核记忆层执行，preset 不持写权限） }
 prompt:

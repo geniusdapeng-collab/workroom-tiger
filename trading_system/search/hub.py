@@ -16,15 +16,22 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import logging
 import os
 import time
+import tempfile
+import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass
 from typing import Iterable
 
 from .. import config
-from .models import RawDocument, SearchBatch
+from ..data_safety import ensure_finite_tree, finite_timestamp, safe_diagnostic, strict_json_loads
+from .models import RawDocument, SearchBatch, SearchUnavailable
 from .sources import SearchSource, default_sources
 
 log = logging.getLogger("search.hub")
@@ -34,32 +41,43 @@ TTL_SECONDS = 6 * 3600          # 内存/磁盘缓存 6 小时（未分类查询
 WALL_CLOCK_BUDGET = 45.0        # 单批搜索总墙钟（秒）
 BREAKER_FAILS = 3               # 连续失败熔断阈值
 BREAKER_COOLDOWN = 900.0        # 熔断冷却（秒）
+CACHE_VERSION = 2
+
+
+@dataclass
+class _CacheEntry:
+    created_at: float
+    docs: list[RawDocument]
+    source_stats: dict[str, dict]
 
 
 class _Breaker:
     def __init__(self):
         self.fails: dict[str, int] = {}
         self.opened_at: dict[str, float] = {}
+        self._lock = threading.RLock()
 
     def allow(self, name: str) -> bool:
-        if name not in self.opened_at:
-            return True
-        if time.time() - self.opened_at[name] > BREAKER_COOLDOWN:
-            self.opened_at.pop(name, None)
-            self.fails.pop(name, None)
-            return True
-        return False
+        with self._lock:
+            if name not in self.opened_at:
+                return True
+            if time.time() - self.opened_at[name] > BREAKER_COOLDOWN:
+                self.opened_at.pop(name, None)
+                self.fails.pop(name, None)
+                return True
+            return False
 
     def report(self, name: str, ok: bool) -> None:
-        if ok:
-            self.fails[name] = 0
-            self.opened_at.pop(name, None)
-        else:
-            self.fails[name] = self.fails.get(name, 0) + 1
-            if self.fails[name] >= BREAKER_FAILS:
-                self.opened_at[name] = time.time()
-                log.warning("[搜索熔断] 源 %s 连续失败 %d 次，冷却 %.0fs",
-                            name, BREAKER_FAILS, BREAKER_COOLDOWN)
+        with self._lock:
+            if ok:
+                self.fails[name] = 0
+                self.opened_at.pop(name, None)
+            else:
+                self.fails[name] = self.fails.get(name, 0) + 1
+                if self.fails[name] >= BREAKER_FAILS:
+                    self.opened_at[name] = time.time()
+                    log.warning("[搜索熔断] 源 %s 连续失败 %d 次，冷却 %.0fs",
+                                name, BREAKER_FAILS, BREAKER_COOLDOWN)
 
 
 class SearchHub:
@@ -69,20 +87,27 @@ class SearchHub:
                  use_disk_cache: bool = True,
                  ttl_tiers: dict[str, int] | None = None):
         self.sources = list(sources) if sources is not None else default_sources(demo)
+        self.demo = bool(demo)
         self.ttl = ttl
         self.budget = budget
         self.max_workers = max_workers
         self.use_disk_cache = use_disk_cache
         # S3 分层 TTL：缓存按类别取 TTL（config.TTL_TIERS，可注入覆盖便于测试）
         self.ttl_tiers = dict(config.TTL_TIERS if ttl_tiers is None else ttl_tiers)
-        self._mem: dict[str, tuple[float, list[RawDocument]]] = {}
+        self._mem: dict[str, _CacheEntry] = {}
+        self._cache_lock = threading.RLock()
+        self._source_scopes: dict[int, str] = {}
         self._breaker = _Breaker()
         # 主题集注册表（CHAIN_TOPICS/SECTOR_TOPICS 同款模式）：
         # name -> {"topics": {id: query}, "enabled": bool,
         #          "routing": {id: [源名...] | None}}
         self._topic_sets: dict[str, dict] = {}
         if use_disk_cache:
-            os.makedirs(CACHE_DIR, exist_ok=True)
+            try:
+                os.makedirs(CACHE_DIR, exist_ok=True)
+            except OSError as error:
+                self.use_disk_cache = False
+                log.info("搜索磁盘缓存不可用，使用内存缓存: %s", safe_diagnostic(error).summary)
 
     # ---------------------------------------------------------- 主题集注册
     def register_topic_set(self, name: str, topics: dict, *, enabled: bool = True) -> None:
@@ -126,40 +151,157 @@ class SearchHub:
     # ---------------------------------------------------------- 缓存
     def _ttl_for(self, category: str) -> float:
         """分层 TTL：按类别取 config.TTL_TIERS，未分类回退默认。"""
-        return float(self.ttl_tiers.get(category, self.ttl))
+        value = finite_timestamp(self.ttl_tiers.get(category, self.ttl))
+        return max(0.0, value) if value is not None else 0.0
 
-    def _cache_key(self, query: str, limit: int, category: str = "news") -> str:
-        import hashlib
-        # S3：缓存 key 增加类别维度——同一句查询在不同类别下 TTL 不同、互不污染
-        return hashlib.sha1(f"{category}|{query}|{limit}".encode()).hexdigest()[:20]
+    def _source_identity(self, source: SearchSource) -> dict:
+        identity = {"name": source.name,
+                    "type": f"{type(source).__module__}.{type(source).__qualname__}"}
+        configured_identity = getattr(source, "cache_identity", None)
+        if callable(configured_identity):
+            try:
+                value = configured_identity()
+                ensure_finite_tree(value)
+                identity["configuration"] = value
+                return identity
+            except Exception as error:
+                log.info("源 %s 缓存配置不可用，隔离当前实例: %s",
+                         source.name, safe_diagnostic(error).summary)
+        # Unknown/custom adapters must opt in to a stable disk-cache identity.
+        # Their private config/credentials are never inspected or serialized.
+        with self._cache_lock:
+            identity["instance_scope"] = self._source_scopes.setdefault(id(source), uuid.uuid4().hex)
+        return identity
+
+    def _cache_key(self, query: str, limit: int, category: str = "news",
+                   sources: list[str] | None = None) -> str:
+        selected = [self._source_identity(source) for source in self.sources
+                    if sources is None or source.name in sources]
+        namespace = {
+            "version": CACHE_VERSION, "query": query, "limit": limit,
+            "category": category, "demo": self.demo,
+            "sources": sorted(selected, key=lambda item: json.dumps(item, sort_keys=True)),
+            "routing": sorted(set(sources)) if sources is not None else None,
+            "ttl": self._ttl_for(category), "disk": self.use_disk_cache,
+            "budget": self.budget, "workers": self.max_workers,
+        }
+        encoded = json.dumps(namespace, sort_keys=True, ensure_ascii=False, allow_nan=False)
+        return hashlib.sha256(encoded.encode()).hexdigest()[:32]
+
+    @staticmethod
+    def _validated_docs(docs) -> list[RawDocument]:
+        if not isinstance(docs, list) or any(not isinstance(doc, RawDocument) for doc in docs):
+            raise SearchUnavailable("invalid-response") from None
+        for doc in docs:
+            ensure_finite_tree(asdict(doc))
+        return docs
+
+    @staticmethod
+    def _validated_stats(stats, docs: list[RawDocument]) -> dict[str, dict]:
+        if not isinstance(stats, dict) or not stats:
+            raise ValueError("Missing search cache source statistics")
+        ensure_finite_tree(stats)
+        observed: dict[str, int] = {}
+        for doc in docs:
+            if not isinstance(doc.source, str):
+                raise ValueError("Invalid cached document source")
+            observed[doc.source] = observed.get(doc.source, 0) + 1
+        for name, stat in stats.items():
+            if (not isinstance(name, str) or not isinstance(stat, dict) or
+                    stat.get("ok") is not True or set(stat) - {"ok", "n", "ms"} or
+                    type(stat.get("n")) is not int or stat["n"] < 0 or
+                    stat["n"] != observed.get(name, 0)):
+                raise ValueError("Invalid search cache source statistics")
+            if "ms" in stat and (type(stat["ms"]) not in (int, float) or
+                                  finite_timestamp(stat["ms"]) is None or stat["ms"] < 0):
+                raise ValueError("Invalid search cache source duration")
+        if set(observed) - set(stats):
+            raise ValueError("Missing cached document source statistics")
+        return stats
+
+    def _cache_entry_get(self, key: str, category: str = "news") -> _CacheEntry | None:
+        ttl, now = self._ttl_for(category), time.time()
+        if ttl <= 0:
+            return None
+        with self._cache_lock:
+            hit = self._mem.get(key)
+            if hit and 0 <= now - hit.created_at < ttl:
+                return copy.deepcopy(hit)
+            self._mem.pop(key, None)
+        if not self.use_disk_cache:
+            return None
+        try:
+            path = os.path.join(CACHE_DIR, f"{key}.json")
+            file_time = os.stat(path).st_mtime
+            with open(path, encoding="utf-8") as stream:
+                raw = strict_json_loads(stream.read())
+            if (not isinstance(raw, dict) or raw.get("version") != CACHE_VERSION or
+                    raw.get("key") != key or not isinstance(raw.get("docs"), list) or
+                    not isinstance(raw.get("source_stats"), dict)):
+                raise ValueError("Invalid search cache envelope")
+            original_time = finite_timestamp(raw.get("created_at"))
+            if original_time is None:
+                raise ValueError("Invalid search cache creation timestamp")
+            # Disk reads retain the original clock. A conservatively older file
+            # mtime also shortens the lifetime; reads never refresh the TTL.
+            created_at = min(original_time, file_time)
+            if not 0 <= now - created_at < ttl:
+                return None
+            docs = self._validated_docs([RawDocument(**record) for record in raw["docs"]])
+            stats = self._validated_stats(raw["source_stats"], docs)
+            entry = _CacheEntry(created_at, docs, stats)
+            with self._cache_lock:
+                self._mem[key] = copy.deepcopy(entry)
+            return entry
+        except FileNotFoundError:
+            return None  # Ordinary miss or another reader's concurrent purge.
+        except Exception as error:
+            log.info("搜索磁盘缓存读取失败，重新查询: %s", safe_diagnostic(error).summary)
+            return None
 
     def _cache_get(self, key: str, category: str = "news") -> list[RawDocument] | None:
-        ttl = self._ttl_for(category)
-        hit = self._mem.get(key)
-        if hit and time.time() - hit[0] < ttl:
-            return hit[1]
-        if self.use_disk_cache:
-            path = os.path.join(CACHE_DIR, f"{key}.json")
-            if os.path.exists(path) and time.time() - os.path.getmtime(path) < ttl:
-                try:
-                    raw = json.load(open(path, encoding="utf-8"))
-                    docs = [RawDocument(**d) for d in raw]
-                    self._mem[key] = (time.time(), docs)
-                    return docs
-                except Exception:
-                    return None
-        return None
+        entry = self._cache_entry_get(key, category)
+        return entry.docs if entry is not None else None
 
-    def _cache_put(self, key: str, docs: list[RawDocument]) -> None:
-        self._mem[key] = (time.time(), docs)
+    def _cache_put(self, key: str, docs: list[RawDocument],
+                   source_stats: dict[str, dict] | None = None) -> None:
+        try:
+            docs = self._validated_docs(docs)
+            if source_stats is None:
+                source_stats = {}
+                for doc in docs:
+                    stat = source_stats.setdefault(doc.source, {"ok": True, "n": 0})
+                    stat["n"] += 1
+            stats = self._validated_stats(source_stats, docs)
+        except Exception as error:
+            log.info("搜索缓存内容无效，跳过缓存: %s", safe_diagnostic(error).summary)
+            return
+        entry = _CacheEntry(time.time(), copy.deepcopy(docs), copy.deepcopy(stats))
+        with self._cache_lock:
+            self._mem[key] = entry
         if self.use_disk_cache:
+            temp_path = None
             try:
-                from dataclasses import asdict
-                json.dump([asdict(d) for d in docs],
-                          open(os.path.join(CACHE_DIR, f"{key}.json"), "w", encoding="utf-8"),
-                          ensure_ascii=False)
-            except Exception as e:
-                log.info("搜索磁盘缓存写入失败: %s", e)
+                envelope = {"version": CACHE_VERSION, "key": key,
+                            "created_at": entry.created_at,
+                            "docs": [asdict(doc) for doc in entry.docs],
+                            "source_stats": entry.source_stats}
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=CACHE_DIR,
+                                                  prefix=f"{key}-", suffix=".tmp", delete=False) as stream:
+                    temp_path = stream.name
+                    json.dump(envelope, stream, ensure_ascii=False, allow_nan=False)
+                os.replace(temp_path, os.path.join(CACHE_DIR, f"{key}.json"))
+                temp_path = None
+            except Exception as error:
+                log.info("搜索磁盘缓存写入失败: %s", safe_diagnostic(error).summary)
+            finally:
+                if temp_path is not None:
+                    try:
+                        os.unlink(temp_path)
+                    except FileNotFoundError:
+                        temp_path = None
+                    except OSError as error:
+                        log.info("搜索临时缓存清理失败: %s", safe_diagnostic(error).summary)
 
     # ---------------------------------------------------------- 查询规划
     @staticmethod
@@ -187,38 +329,53 @@ class SearchHub:
                category: str = "news") -> SearchBatch:
         """跨源并发搜索。任何单源失败不阻塞整体；返回源级统计供审计。
         category：缓存分层类别（quote/news/announcement/macro），决定 TTL。"""
-        key = self._cache_key(query, limit, category)
-        cached = self._cache_get(key, category)
+        key = self._cache_key(query, limit, category, sources)
+        cached = self._cache_entry_get(key, category)
         if cached is not None:
-            return SearchBatch(query=query, docs=cached,
-                               source_stats={"cache": {"ok": True, "n": len(cached), "ms": 0}})
-        active = [s for s in self.sources
-                  if (sources is None or s.name in sources) and self._breaker.allow(s.name)]
-        skipped = [s.name for s in self.sources if not self._breaker.allow(s.name)]
+            stats = cached.source_stats
+            stats["cache"] = {"ok": True, "n": len(cached.docs), "ms": 0}
+            return SearchBatch(query=query, docs=cached.docs, source_stats=stats)
+        selected = [s for s in self.sources if sources is None or s.name in sources]
+        active, skipped = [], []
+        for source in selected:
+            (active if self._breaker.allow(source.name) else skipped).append(source)
         if skipped:
-            log.info("[搜索熔断] 冷却中跳过: %s", skipped)
+            log.info("[搜索熔断] 冷却中跳过: %s", [s.name for s in skipped])
         docs: list[RawDocument] = []
-        stats: dict[str, dict] = {}
-        deadline = time.time() + self.budget
+        stats: dict[str, dict] = {s.name: {"ok": False, "n": 0, "err": "circuit-open"}
+                                  for s in skipped}
+        deadline = time.monotonic() + self.budget
         pool = ThreadPoolExecutor(max_workers=self.max_workers)
         try:
             futs = {pool.submit(s.search, query, limit): s for s in active}
             try:
-                for fut in as_completed(futs, timeout=self.budget):
+                for fut in as_completed(futs, timeout=max(0.0, deadline - time.monotonic())):
                     src = futs[fut]
                     try:
-                        got = fut.result(timeout=max(0.1, deadline - time.time()))
+                        got = self._validated_docs(fut.result())
                         self._breaker.report(src.name, True)
                         stats[src.name] = {"ok": True, "n": len(got)}
                         docs.extend(got)
                     except Exception as e:
                         self._breaker.report(src.name, False)
-                        stats[src.name] = {"ok": False, "n": 0, "err": str(e)[:120]}
-                        log.info("源 %s 失败: %s", src.name, e)
+                        diagnostic = safe_diagnostic(e)
+                        partial = []
+                        detail = diagnostic.summary
+                        if isinstance(e, SearchUnavailable):
+                            try:
+                                partial = self._validated_docs(e.documents)
+                                detail = e.safe_summary()
+                            except Exception as invalid:
+                                detail = "invalid partial source response: " + safe_diagnostic(invalid).summary
+                        stats[src.name] = {"ok": False, "n": len(partial), "err": detail}
+                        if diagnostic.status is not None:
+                            stats[src.name]["http_status"] = diagnostic.status
+                        docs.extend(partial)
+                        log.info("源 %s 失败: %s", src.name, detail)
             except TimeoutError:
                 # 总墙钟截止：未完成的慢源记超时失败并取消，绝不阻塞整体
                 for fut, src in futs.items():
-                    if not fut.done():
+                    if src.name not in stats:
                         fut.cancel()
                         self._breaker.report(src.name, False)
                         stats[src.name] = {"ok": False, "n": 0,
@@ -226,7 +383,10 @@ class SearchHub:
                         log.warning("源 %s 超时被墙钟切断", src.name)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
-        self._cache_put(key, docs)
+        # A cached partial/failed batch must never turn into a healthy receipt.
+        # Failed batches are retried (subject to the same circuit breaker).
+        if stats and all(stat["ok"] is True for stat in stats.values()) and self._ttl_for(category) > 0:
+            self._cache_put(key, docs, stats)
         return SearchBatch(query=query, docs=docs, source_stats=stats)
 
     def gather(self, topic: str, tickers: list[str] | None = None,

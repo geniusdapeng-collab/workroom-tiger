@@ -6,6 +6,8 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 
+from ..data_safety import SafeDiagnostic, ensure_finite_tree, finite_timestamp, http_status
+
 
 @dataclass(frozen=True)
 class RawDocument:
@@ -18,6 +20,13 @@ class RawDocument:
     published: str       # ISO 日期或 ""
     fetched_at: float = field(default_factory=time.time)
     meta: dict = field(default_factory=dict)   # 源特定字段（如 EDGAR form 类型）
+
+    def __post_init__(self):
+        if type(self.fetched_at) not in (int, float) or finite_timestamp(self.fetched_at) is None:
+            raise ValueError("Invalid document fetched timestamp")
+        if not isinstance(self.meta, dict):
+            raise ValueError("Invalid document metadata")
+        ensure_finite_tree(self.meta)
 
     @staticmethod
     def make_id(source: str, url: str, title: str, content: str) -> str:
@@ -42,6 +51,13 @@ class Evidence:
     content_hash: str = ""
     fetched_at: float = 0.0
 
+    def __post_init__(self):
+        if self.published_at is not None and (type(self.published_at) not in (int, float) or
+                                               finite_timestamp(self.published_at) is None):
+            raise ValueError("Invalid evidence published timestamp")
+        if type(self.fetched_at) not in (int, float) or finite_timestamp(self.fetched_at) is None:
+            raise ValueError("Invalid evidence fetched timestamp")
+
 
 @dataclass
 class CleanDocument:
@@ -65,3 +81,36 @@ class SearchBatch:
     query: str
     docs: list[RawDocument]
     source_stats: dict[str, dict] = field(default_factory=dict)  # source -> {ok, n, ms, err}
+
+
+_SOURCE_FAILURES = {
+    "not-configured": "source not configured",
+    "invalid-endpoint": "invalid source endpoint configuration",
+    "invalid-response": "invalid source response",
+    "remote-error": "source returned an error",
+    "partial-failure": "partial source failure",
+}
+
+
+class SearchUnavailable(RuntimeError):
+    """Source-level failure, optionally carrying valid documents from other calls.
+
+    Only fixed failure codes and sanitized diagnostic objects can be reported;
+    raw external exception messages or response bodies are never attached.
+    """
+    def __init__(self, reason: str, *, documents: list[RawDocument] | None = None,
+                 diagnostics: list[SafeDiagnostic] | None = None,
+                 status: int | None = None):
+        self.reason = reason if reason in _SOURCE_FAILURES else "remote-error"
+        self.documents = documents or []
+        self.diagnostics = diagnostics or []
+        self.status = http_status(status)
+        super().__init__(self.safe_summary())
+
+    def safe_summary(self) -> str:
+        summary = _SOURCE_FAILURES.get(self.reason, "source unavailable")
+        if self.status is not None:
+            summary += f" (HTTP {self.status})"
+        if self.diagnostics:
+            summary += ": " + ", ".join(sorted({d.summary for d in self.diagnostics}))
+        return summary

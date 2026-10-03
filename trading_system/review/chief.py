@@ -21,25 +21,31 @@ import json
 import logging
 import os
 import time
+import hashlib
+import re
+from dataclasses import asdict
+from pathlib import Path
 from datetime import datetime, timedelta
 
 from .. import config
+from ..ledger_io import (file_digest, file_transaction, read_json_strict,
+                         write_bytes_atomic, write_json_atomic)
+from ..parameters import validate_tuned_params
 from . import monthly, weekly
 from .attribution import VIOLATIONS, attribute_journal
-from .monthly import Proposal, list_proposals, load_proposal, save_proposal
+from .monthly import Proposal, list_proposals, load_proposal, safe_identifier
 
 logger = logging.getLogger(__name__)
 
 
 def _read_journal(path: str) -> list[dict]:
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, list) else []
-        except Exception as exc:
-            logger.warning("复盘读取 journal 失败（按空账处理）: %s", exc)
-    return []
+    from ..calibration import validate_accounting_rows
+    try:
+        data = read_json_strict(path)
+    except FileNotFoundError:
+        return []
+    validate_accounting_rows(data)
+    return data
 
 
 class ReviewChief:
@@ -168,67 +174,195 @@ class ReviewChief:
 
     # ------------------------------------------------------------ 审批流
 
-    def approve(self, proposal_id: str,
-                tuned_path: str = "tuned_params.json") -> Proposal:
-        """批准提案：状态→approved，写 tuned_params.json（次日生效+披露）。
+    def _paths(self, proposal_id: str, execution_id: str, tuned_path: str | None):
+        safe_identifier(proposal_id)
+        safe_identifier(execution_id)
+        root = Path(self.out_dir).absolute()
+        proposals = Path(self.proposals_dir).absolute()
+        if root.is_symlink() or proposals.is_symlink() or not proposals.resolve().is_relative_to(root.resolve()):
+            raise ValueError("Review paths must stay inside the selected output directory")
+        proposal = Path(monthly._proposal_path(str(proposals), proposal_id))
+        execution_dir = root / "review_executions"
+        if execution_dir.is_symlink():
+            raise ValueError("Execution directory cannot be a symlink")
+        receipt = execution_dir / f"{execution_id}.json"
+        effect = execution_dir / f"{execution_id}.effect.json"
+        intent = execution_dir / f"{execution_id}.intent.json"
+        active = Path(tuned_path or (root / "tuned_params.json")).absolute()
+        if (active.parent.resolve() != root.resolve() or active.is_symlink()
+                or any(path.is_symlink() for path in (proposal, receipt, effect, intent))):
+            raise ValueError("Review effect and receipt paths must stay inside the selected output directory")
+        return root, proposal, receipt, effect, intent, active
 
-        纪律（D7）：生效动作不直接改 config——写 tuned_params.json 后由
-        下一轮 --use-tuned 显式加载（pipeline 默认不加载）；effective_from
-        为次日，apply_tuned_params 在生效日前拒绝加载（次日生效的机器执行）。
-        """
-        p = load_proposal(self.proposals_dir, proposal_id)
-        if p.status != "pending_review":
-            raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，"
-                             "仅 pending_review 可批准")
-        tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
-        p.status = "approved"
-        p.approved_at = datetime.now().isoformat(timespec="seconds")
-        p.effective_from = tomorrow
-        save_proposal(p, self.proposals_dir)
+    @staticmethod
+    def _hash_params(params: dict) -> str:
+        raw = json.dumps(params, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
 
-        blob = {
-            "tuned_at": p.approved_at,
-            "params": p.grid_result.get("recommended_params") or {},
-            "oos_aggregate": p.oos_aggregate,
-            "dsr": p.dsr,
-            "proposal_id": p.proposal_id,
-            "effective_from": tomorrow,
-            "disclosure": f"复盘提案 {p.proposal_id} 经审批批准，"
-                          f"自 {tomorrow} 起随 --use-tuned 显式启用（次日生效；"
-                          "默认仍不加载：零基线纪律），本披露写入日报与复盘纪要；"
-                          f"DSR={p.dsr}，OOS期望={p.oos_expectancy}R",
-        }
-        with open(tuned_path, "w", encoding="utf-8") as f:
-            json.dump(blob, f, ensure_ascii=False, indent=2)
+    @staticmethod
+    def _snapshot_hash(expected_sha256: str | None) -> str:
+        if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+            raise ValueError("Approval requires the reviewed proposal SHA256 snapshot")
+        return expected_sha256.lower()
 
-        self._emit(
-            action="review.proposal.approve", object_id=p.proposal_id,
-            basis=[f"批准人三手势: 采纳", blob["disclosure"]],
-            after={"status": "approved", "effective_from": tomorrow,
-                   "tuned_params": tuned_path})
-        logger.info("提案 %s 已批准，自 %s 起随 --use-tuned 生效（已披露）",
-                    p.proposal_id, tomorrow)
+    def _execute(self, action: str, proposal_id: str, *, expected_sha256: str | None,
+                 execution_id: str | None, tuned_path: str | None = None,
+                 reason: str = "") -> Proposal:
+        expected = self._snapshot_hash(expected_sha256)
+        root, proposal_path, receipt_path, effect_path, intent_path, active_path = self._paths(
+            proposal_id, execution_id, tuned_path)
+        with file_transaction(root / ".review-state"), file_transaction(proposal_path):
+            p = load_proposal(self.proposals_dir, proposal_id)
+            binding = {"proposal_id": proposal_id, "execution_id": execution_id,
+                       "preimage_sha256": expected, "status": action}
+            # An execution identity is immutable. A retry may recover a crash,
+            # but cannot approve a different snapshot or replace a later effect.
+            if receipt_path.exists():
+                receipt = read_json_strict(receipt_path)
+                intent = read_json_strict(intent_path)
+                if (not isinstance(intent, dict) or receipt != intent.get("receipt")
+                        or file_digest(receipt_path) != hashlib.sha256(json.dumps(
+                            intent["receipt"], ensure_ascii=False, indent=2,
+                            allow_nan=False).encode("utf-8")).hexdigest()):
+                    raise ValueError("Receipt differs from its immutable prepared execution")
+                if (str(active_path) != intent.get("active_path")
+                        or reason != intent.get("reason", "")):
+                    raise ValueError("Execution retry parameters differ from the original review")
+                if not isinstance(receipt, dict) or any(receipt.get(k) != v for k, v in binding.items()):
+                    raise ValueError("Execution id is already bound to another review action")
+                if (p.status != action or p.execution_id != execution_id
+                        or p.preimage_sha256 != expected
+                        or file_digest(proposal_path) != receipt.get("proposal_sha256")):
+                    raise ValueError("Receipt and proposal status differ")
+                if action == "approved" and file_digest(effect_path) != receipt.get("tuned_sha256"):
+                    raise ValueError("Approved immutable effect differs from its receipt")
+                return p
+
+            if intent_path.exists():
+                intent = read_json_strict(intent_path)
+                if not isinstance(intent, dict) or any(intent.get(k) != v for k, v in binding.items()):
+                    raise ValueError("Execution id is already bound to another review intent")
+                if str(active_path) != intent["active_path"] or reason != intent.get("reason", ""):
+                    raise ValueError("Execution retry parameters differ from the original review")
+                if p.status != "pending_review" and not (
+                        p.status == action and p.execution_id == execution_id
+                        and p.preimage_sha256 == expected):
+                    raise ValueError("A later decision has already consumed this proposal")
+                if p.status == "pending_review" and file_digest(proposal_path) != expected:
+                    raise ValueError("Reviewed proposal snapshot changed before execution")
+            else:
+                if p.status != "pending_review":
+                    raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，仅 pending_review 可审批")
+                if file_digest(proposal_path) != expected:
+                    raise ValueError("Reviewed proposal snapshot changed before execution")
+                expiry = datetime.fromisoformat(p.expires_at)
+                if datetime.now(expiry.tzinfo) >= expiry:
+                    raise ValueError("Reviewed proposal has expired; generate and review a new proposal")
+                params = validate_tuned_params(p.grid_result.get("recommended_params"))
+                if p.dsr < config.REVIEW_DSR_SIGNIFICANT or p.oos_expectancy <= 0:
+                    raise ValueError("Proposal evidence does not meet the approval gate")
+                now = datetime.now().isoformat(timespec="seconds")
+                effective = (datetime.now().date() + timedelta(days=1)).isoformat() if action == "approved" else None
+                old_proposal = proposal_path.read_bytes().hex()
+                old_active = active_path.read_bytes().hex() if active_path.exists() else None
+                p.status = p.verdict = action
+                p.execution_id, p.preimage_sha256 = execution_id, expected
+                p.parameters_sha256 = self._hash_params(params)
+                p.effective_from = effective
+                if action == "approved":
+                    p.approved_at = now
+                else:
+                    p.rejected_at, p.reason = now, reason
+                blob = None
+                if action == "approved":
+                    blob = {
+                        "tuned_at": now, "params": params, "oos_aggregate": p.oos_aggregate,
+                        "dsr": p.dsr, **binding, "parameters_sha256": p.parameters_sha256,
+                        "effective_from": effective, "proposal_path": str(proposal_path),
+                        "receipt_path": str(receipt_path),
+                        "disclosure": f"复盘提案 {proposal_id} 经审批批准，自 {effective} 起随 --use-tuned 显式启用（次日生效；默认不加载）；DSR={p.dsr}，OOS期望={p.oos_expectancy}R",
+                    }
+                    raw = json.dumps(blob, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+                    p.tuned_sha256 = hashlib.sha256(raw).hexdigest()
+                    p.tuned_path = str(effect_path)
+                receipt = {
+                    **binding, "parameters_sha256": p.parameters_sha256,
+                    "effective_from": effective, "tuned_sha256": p.tuned_sha256,
+                    "tuned_path": p.tuned_path, "reason": reason or None,
+                    "proposal_sha256": hashlib.sha256(json.dumps(
+                        asdict(p), ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")).hexdigest(),
+                }
+                intent = {
+                    **binding, "reason": reason, "active_path": str(active_path),
+                    "old_proposal": old_proposal, "old_active": old_active,
+                    "proposal": asdict(p), "effect": blob, "receipt": receipt,
+                }
+                write_json_atomic(intent_path, intent)
+
+            original = bytes.fromhex(intent["old_proposal"])
+            if hashlib.sha256(original).hexdigest() != expected:
+                raise ValueError("Prepared review intent does not contain the reviewed preimage")
+            original_params = validate_tuned_params(json.loads(original)["grid_result"]["recommended_params"])
+            target_proposal = Proposal(**intent["proposal"])
+            if (any(intent["proposal"].get(k) != v for k, v in binding.items())
+                    or target_proposal.parameters_sha256 != self._hash_params(original_params)
+                    or intent["receipt"].get("proposal_sha256") != hashlib.sha256(json.dumps(
+                        intent["proposal"], ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")).hexdigest()):
+                raise ValueError("Prepared review intent changed its approved proposal")
+            if action == "approved" and (intent["effect"].get("params") != original_params
+                    or any(intent["effect"].get(k) != v for k, v in binding.items())
+                    or hashlib.sha256(json.dumps(intent["effect"], ensure_ascii=False,
+                        indent=2, allow_nan=False).encode("utf-8")).hexdigest() != intent["receipt"]["tuned_sha256"]):
+                raise ValueError("Prepared review effect changed before execution")
+
+            try:
+                if action == "approved":
+                    if effect_path.exists():
+                        if file_digest(effect_path) != intent["receipt"]["tuned_sha256"]:
+                            raise ValueError("Immutable execution effect has been changed")
+                    else:
+                        write_json_atomic(effect_path, intent["effect"])
+                    write_json_atomic(active_path, intent["effect"])
+                write_json_atomic(proposal_path, intent["proposal"])
+                write_json_atomic(receipt_path, intent["receipt"])
+            except Exception as error:
+                # Ordinary I/O errors restore the exact reviewed bytes. The
+                # prepared intent and immutable effect allow the same id/hash
+                # to recover even if the process crashes during rollback.
+                try:
+                    write_bytes_atomic(proposal_path, bytes.fromhex(intent["old_proposal"]))
+                    if action == "approved":
+                        if intent["old_active"] is None:
+                            active_path.unlink(missing_ok=True)
+                        else:
+                            write_bytes_atomic(active_path, bytes.fromhex(intent["old_active"]))
+                except Exception as rollback_error:
+                    raise OSError(f"Review failed and rollback requires recovery with execution id {execution_id}: {rollback_error}") from error
+                raise
+            p = load_proposal(self.proposals_dir, proposal_id)
+        self._emit(action=f"review.proposal.{ 'approve' if action == 'approved' else 'reject'}",
+                   object_id=proposal_id,
+                   basis=[f"reviewed_sha256={expected}", reason or f"effective_from={p.effective_from}"],
+                   after={"status": action, "execution_id": execution_id,
+                          "effective_from": p.effective_from, "tuned_params": p.tuned_path})
         return p
 
-    def reject(self, proposal_id: str, reason: str | None = None) -> Proposal:
-        """驳回提案：原因必填（驳回样本回流，对齐 WorkLoom 三手势）。"""
-        if not reason or not reason.strip():
-            raise ValueError("驳回必须填写原因（--reason \"...\"），"
-                             "驳回样本需回流组织记忆（三手势纪律）")
-        p = load_proposal(self.proposals_dir, proposal_id)
-        if p.status != "pending_review":
-            raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，"
-                             "仅 pending_review 可驳回")
-        p.status = "rejected"
-        p.reason = reason.strip()
-        p.rejected_at = datetime.now().isoformat(timespec="seconds")
-        save_proposal(p, self.proposals_dir)
-        self._emit(
-            action="review.proposal.reject", object_id=p.proposal_id,
-            basis=[f"驳回原因: {p.reason}"],
-            after={"status": "rejected"})
-        logger.info("提案 %s 已驳回: %s", p.proposal_id, p.reason)
-        return p
+    def approve(self, proposal_id: str, tuned_path: str | None = None, *,
+                expected_sha256: str | None = None,
+                execution_id: str | None = None) -> Proposal:
+        """Approve exactly the reviewed bytes and persist an immutable receipt."""
+        return self._execute("approved", proposal_id, expected_sha256=expected_sha256,
+                             execution_id=execution_id, tuned_path=tuned_path)
+
+    def reject(self, proposal_id: str, reason: str | None = None, *,
+               expected_sha256: str | None = None,
+               execution_id: str | None = None) -> Proposal:
+        """Reject exactly the reviewed bytes; a rejection reason is required."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("驳回必须填写原因（--reason），驳回样本需回流组织记忆")
+        return self._execute("rejected", proposal_id, expected_sha256=expected_sha256,
+                             execution_id=execution_id, reason=reason.strip())
 
     # ------------------------------------------------------------ 纪要渲染
 

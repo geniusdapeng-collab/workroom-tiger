@@ -106,7 +106,8 @@ def _pick(ticker="AAA", shares=100, stop=90.0, risk=1000.0):
 
 
 def _result(action="BUY", picks=(), cap=0.25):
-    mrs = SimpleNamespace(position_cap=(0.0, cap))
+    mrs = SimpleNamespace(position_cap=(0.0, cap), mrs_star=5.0,
+                          allow_new_positions=True, shock=False)
     return SimpleNamespace(action=action, picks=list(picks), mrs=mrs)
 
 

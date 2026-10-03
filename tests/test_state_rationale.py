@@ -60,13 +60,12 @@ def test_pipeline_does_not_autoload_tuned(monkeypatch):
     monkeypatch.setattr(bt, "apply_tuned_params", spy)
     from trading_system.pipeline import run_pipeline
     res = run_pipeline(provider_name="demo", universe_mode="core",
-                       top_n=8, max_picks=3, trade_date="2026-07-30")
+                       top_n=8, max_picks=3)
     assert calls["n"] == 0, "默认路径禁止加载历史调优参数"
     assert res.raw["account_usd"] == 100_000
 
     res2 = run_pipeline(provider_name="demo", universe_mode="core",
-                        top_n=8, max_picks=3, trade_date="2026-07-30",
-                        use_tuned=True)
+                        top_n=8, max_picks=3, use_tuned=True)
     assert calls["n"] == 1, "显式 use_tuned=True 才允许加载"
 
 
@@ -75,7 +74,8 @@ def test_pick_rationale_transparent():
     """每个放行标的必须有完整判定要素：三闸门、R反推、TOS、通道。"""
     from trading_system.pipeline import run_pipeline
     res = run_pipeline(provider_name="demo", universe_mode="core",
-                       top_n=8, max_picks=3, trade_date="2026-07-30")
+                       top_n=8, max_picks=3)
+    assert res.picks, "当前demo必须产出pick后才能覆盖风险依据，不能以空集合通过"
     ra = res.raw.get("pick_rationale", {})
     assert set(ra) == {p.ticker for p in res.picks}, "放行标的与依据必须一一对应"
     for t, info in ra.items():
@@ -83,12 +83,11 @@ def test_pick_rationale_transparent():
         g = info["gate"]
         for gate in ("mrs", "shs", "tss"):
             assert g[gate]["ok"], f"{t} 被放行但 {gate} 门未过——逻辑矛盾"
-        # R 反推一致性：r_usd = account × r_pct × size_ratio
-        assert info["r_usd"] == pytest.approx(
-            info["account"] * info["r_pct"] * info["size_ratio"], rel=1e-2)
-        # 股数反推一致性
-        assert info["shares"] == int(info["r_usd"] / info["risk_per_share"]) or \
-               info["position_capped"], f"{t} 股数与风险预算不一致且未标注截断"
+        # 风险预算先打折；整数股数/单票上限截断后披露实际风险。
+        assert info["risk_budget_usd"] == pytest.approx(
+            info["account"] * info["r_pct"] * info["size_ratio"], abs=.01)
+        assert info["r_usd"] <= info["risk_budget_usd"] + .01
+        assert info["r_usd"] == pytest.approx(info["shares"] * info["risk_per_share"], abs=.03)
 
 
 def test_html_rationale_sections():
@@ -96,14 +95,15 @@ def test_html_rationale_sections():
     from trading_system.pipeline import run_pipeline
     from trading_system.report_html import render_html
     res = run_pipeline(provider_name="demo", universe_mode="core",
-                       top_n=8, max_picks=3, trade_date="2026-07-30")
+                       top_n=8, max_picks=3)
+    assert res.picks, "真实demo末日应有放行标的，避免空集合跳过决策卡覆盖"
     html_text = render_html(res)
     # 内嵌 AI 美术为 base64 数据载荷（可能随机撞上短 token），剥离后再做纪律断言
     import re as _re
     html_text = _re.sub(r"data:image/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+", "IMG", html_text)
     for kw in ("市场环境体检", "板块选择理由", "产业链景气", "个股质地",
                "交易计划与风控", "失效与离场条件", "系统审计底稿",
-               "单笔最大亏损", "今日优先级", "主线地位"):
+               "计划止损风险", "今日优先级", "主线地位"):
         assert kw in html_text, f"决策依据缺少: {kw}"
     # 业务语言纪律：不出现内部公式与核心参数
     for leak in ("MRS_raw", "TOS", "仓位系数", "bonus_hint"):

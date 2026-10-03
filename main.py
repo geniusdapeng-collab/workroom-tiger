@@ -8,7 +8,7 @@
 
 独立工具：
   --backtest  无未来函数回测（--bt-days 信号日数）
-  --tune      滚动 WFA 调参 + DSR 校正 → tuned_params.json（显著才覆盖默认）
+  --tune      滚动 WFA 调参 + DSR 校正 → 待审批参数提案
 
 示例：
   python main.py --demo                          # 离线演示
@@ -25,6 +25,7 @@ import argparse
 import glob
 import json
 import logging
+import math
 import os
 
 from trading_system import config
@@ -48,6 +49,7 @@ def _looks_like_live_ledger(out_dir: str) -> list[str]:
             with open(sim_path, encoding="utf-8") as f:
                 state = json.load(f)
         except Exception:
+            hits.append("sim_portfolio.json（损坏或不可读）")
             state = None
         if isinstance(state, dict):
             records: list = []
@@ -61,6 +63,7 @@ def _looks_like_live_ledger(out_dir: str) -> list[str]:
             with open(journal_path, encoding="utf-8") as f:
                 records = json.load(f)
         except Exception:
+            hits.append("journal.json（损坏或不可读）")
             records = None
         if isinstance(records, list) and any(
                 isinstance(rec, dict) and rec.get("source") != "demo" for rec in records):
@@ -132,7 +135,7 @@ def _daily(args, provider) -> None:
 
     # 零基线纪律：每轮从零开始，先清除上一轮残留（搜索缓存/全市场清单缓存），
     # 白名单仅保留 journal.json（会计台账，不进入决策输入）。
-    purged = purge_run_state()
+    purged = purge_run_state(args.out)
     logging.getLogger(__name__).info("零基线清除: %s", purged)
 
     result = run_pipeline(
@@ -144,6 +147,9 @@ def _daily(args, provider) -> None:
         account_usd=args.account,
         use_tuned=args.use_tuned,
         market=args.market,
+        tuned_path=os.path.join(args.out, "tuned_params.json"),
+        run_state_dir=args.out,
+        ledger_dir=args.out,
     )
     json_path = to_json(result, args.out)
     md_path = to_markdown(result, args.out)
@@ -152,7 +158,7 @@ def _daily(args, provider) -> None:
     j = Journal(os.path.join(args.out, "journal.json"))
     added = j.log_picks(result, args.account)
     settle_provider = get_provider(provider or ("demo" if args.demo else None))
-    settled = j.settle(settle_provider)
+    settled = j.settle(settle_provider, as_of=result.trade_date, risk_limits=result.raw.get("risk_limits"))
     stats = j.stats()
     if getattr(j, "last_failed", None):
         stats["settle_failed"] = j.last_failed      # v6.1：日报披露无法结算清单
@@ -163,8 +169,13 @@ def _daily(args, provider) -> None:
     # 台账 sim_portfolio.json 为会计账（零基线白名单保留）；行情一律当日实时拉取。
     from trading_system.pipeline import _single_with_fallback
     from trading_system.simulator import Bar, SimEngine
-    sim = SimEngine(os.path.join(args.out, "sim_portfolio.json"))
+    sim = SimEngine(os.path.join(args.out, "sim_portfolio.json"), initial_cash=args.account)
     _bar_cache: dict = {}
+    from datetime import date, timedelta
+    from trading_system.markets import get_market
+    day = date.fromisoformat(result.trade_date)
+    spec = get_market(args.market)
+    prior_day = spec.prev_trading_day(day - timedelta(days=1))
 
     def get_bar(ticker: str):
         if ticker in _bar_cache:
@@ -173,13 +184,19 @@ def _daily(args, provider) -> None:
         try:
             df = _single_with_fallback(settle_provider, "ohlcv", ticker, days=400)
             if df is not None and len(df):
+                df = df[df.index.date <= day]
+                if df.empty or df.index[-1].date() != day:
+                    raise ValueError(f"{ticker} lacks an actual bar for {day}; paper execution is deferred")
                 row = df.iloc[-1]
+                prior = df[df.index.date == prior_day]
+                previous_close = float(prior["Close"].iloc[-1]) if len(prior) == 1 else 0.0
                 # v6.3：20 日平均成交额（ADV）用于分档滑点（保守摩擦口径）
                 adv = float((df["Close"] * df["Volume"]).tail(20).mean()) \
                     if "Volume" in df.columns else 0.0
                 bar = Bar(open=float(row["Open"]), high=float(row["High"]),
                           low=float(row["Low"]), close=float(row["Close"]),
-                          adv=adv)
+                          adv=adv, date=str(df.index[-1].date()),
+                          prev_close=previous_close)
         except Exception as exc:
             logging.getLogger(__name__).warning("小G模拟盘取 %s 日K失败（顺延）: %s", ticker, exc)
         _bar_cache[ticker] = bar
@@ -264,6 +281,7 @@ def _daily(args, provider) -> None:
             try:
                 bdf = _single_with_fallback(settle_provider, "ohlcv", bmk, days=400)
                 if bdf is not None and len(bdf):
+                    bdf = bdf[bdf.index.date <= day]
                     bench[bmk] = [[str(d.date()), round(float(c), 2)]
                                   for d, c in zip(bdf.index, bdf["Close"])]
             except Exception as exc:
@@ -292,11 +310,11 @@ def _intraday(args, provider) -> None:
     # 触发，等于用过期的地图开车（数据时效性红线）。
     import re as _re
     from datetime import datetime as _dt
-    from trading_system.calendar import prev_trading_day as _ptd
+    from trading_system.markets import get_market
     m = _re.search(r"result_(\d{4})-?(\d{2})-?(\d{2})", os.path.basename(latest))
     if m:
         rpt_date = _dt.strptime("".join(m.groups()), "%Y%m%d").date()
-        earliest = _ptd(_dt.now().date())
+        earliest = get_market(args.market).prev_trading_day(_dt.now().date())
         if rpt_date < earliest:
             raise SystemExit(
                 f"最新日报为 {rpt_date}（最近交易日 {earliest}）——入场/止损参考价已过期，"
@@ -324,10 +342,12 @@ def _backtest(args, provider) -> None:
     from trading_system.universe import load_universe
 
     prov = get_provider(provider or ("demo" if args.demo else None))
-    universe = load_universe(args.universe, args.universe_file)
+    universe = load_universe(args.universe, args.universe_file,
+                             cache_dir=os.path.join(args.out, "cache"))
     frames, panel, _ = collect_day_frames(
-        prov, universe, days=args.bt_days + 200, signal_days=args.bt_days, top_n=args.top)
-    res = run_backtest(frames, panel, GateParams())
+        prov, universe, days=args.bt_days + 200, signal_days=args.bt_days, top_n=args.top,
+        cache_dir=os.path.join(args.out, "cache"))
+    res = run_backtest(frames, panel, GateParams(max_picks=args.picks), account_usd=args.account)
 
     lines = [f"# 回测报告 — {res['n_days']} 个信号日（provider={prov.name}）", ""]
     lines.append(f"- 交易 **{res['n_trades']}** 笔 ｜ 胜率 **{res['win_rate']:.1%}** ｜ "
@@ -359,16 +379,21 @@ def _backtest(args, provider) -> None:
 
 def _tune(args, provider) -> None:
     from trading_system.backtest import (
-        collect_day_frames, run_wfa, save_tuned_params,
+        GateParams, collect_day_frames, run_wfa,
     )
     from trading_system.providers import get_provider
     from trading_system.universe import load_universe
 
     prov = get_provider(provider or ("demo" if args.demo else None))
-    universe = load_universe(args.universe, args.universe_file)
+    universe = load_universe(args.universe, args.universe_file,
+                             cache_dir=os.path.join(args.out, "cache"))
     frames, panel, _ = collect_day_frames(
-        prov, universe, days=args.bt_days + 200, signal_days=args.bt_days, top_n=args.top)
-    wfa = run_wfa(frames, panel)
+        prov, universe, days=args.bt_days + 200, signal_days=args.bt_days, top_n=args.top,
+        cache_dir=os.path.join(args.out, "cache"))
+    wfa = run_wfa(frames, panel, base_params=GateParams(max_picks=args.picks),
+                  account_usd=args.account)
+    if wfa.get("error"):
+        raise SystemExit(wfa["error"])
 
     lines = ["# WFA 滚动前推调参报告", ""]
     lines.append(f"折数 {wfa.get('n_folds')} ｜ 网格 {wfa.get('grid_size')} 组合 ｜ "
@@ -384,15 +409,18 @@ def _tune(args, provider) -> None:
     lines.append("| 折 | 训练 | 测试 | 样本内参数 | IS SR | OOS胜率 | OOS期望R |")
     lines.append("|---|---|---|---|---|---|---|")
     for f_ in wfa.get("folds", []):
+        is_sr = f"{f_['is_sharpe']:.2f}" if f_["is_sharpe"] is not None else "N/A（样本不足）"
         lines.append(f"| {f_['fold']} | {f_['train']} | {f_['test']} | {f_['is_params']} "
-                     f"| {f_['is_sharpe']:.2f} | {f_['oos_win_rate']:.0%} | {f_['oos_expectancy']} |")
+                     f"| {is_sr} | {f_['oos_win_rate']:.0%} | {f_['oos_expectancy']} |")
+    from trading_system.review.chief import ReviewChief
+    proposal = ReviewChief(out_dir=args.out).monthly(wfa)
+    lines.extend(["", f"参数提案：{proposal.proposal_id}（{proposal.status}）——审批后自次日显式启用。"])
     path = os.path.join(args.out, "WFA报告.md")
     os.makedirs(args.out, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    saved = save_tuned_params(wfa)
     print("\n".join(lines))
-    print(f"\nWFA 报告: {path}" + (f"\n调优参数已写入: {saved}" if saved else ""))
+    print(f"\nWFA 报告: {path}\n参数提案: {os.path.join(args.out, 'review_proposals', proposal.proposal_id + '.json')}")
 
 
 def _review_admin(args) -> None:
@@ -434,7 +462,9 @@ def _review_admin(args) -> None:
 
     if args.review_approve:
         p = chief.approve(args.review_approve,
-                          tuned_path=os.path.join(args.out, "tuned_params.json"))
+                          tuned_path=os.path.join(args.out, "tuned_params.json"),
+                          expected_sha256=args.review_expected_sha256,
+                          execution_id=args.review_execution_id)
         print(f"提案 {p.proposal_id} 已批准：自 {p.effective_from} 起随 "
               f"--use-tuned 显式启用（默认仍不加载：零基线纪律）。\n"
               f"披露已写入 {os.path.join(args.out, 'tuned_params.json')} "
@@ -445,7 +475,9 @@ def _review_admin(args) -> None:
         if not args.reason or not args.reason.strip():
             raise SystemExit("错误：--review-reject 必须同时提供 "
                              "--reason \"...\"（驳回原因必填，三手势纪律）。")
-        p = chief.reject(args.review_reject, args.reason)
+        p = chief.reject(args.review_reject, args.reason,
+                         expected_sha256=args.review_expected_sha256,
+                         execution_id=args.review_execution_id)
         print(f"提案 {p.proposal_id} 已驳回，原因已记录并回流: {p.reason}")
 
 
@@ -465,7 +497,7 @@ def main() -> None:
     parser.add_argument("--universe-file", default=None)
     parser.add_argument("--top", type=int, default=config.SCAN_TOP_N, help="扫描精评候选数")
     parser.add_argument("--picks", type=int, default=config.MAX_PICKS_DEFAULT, help="最终放行标的数上限")
-    parser.add_argument("--account", type=float, default=100_000, help="账户净值（USD）")
+    parser.add_argument("--account", type=float, default=100_000, help="账户净值（目标市场本币：US=USD/CN=CNY/HK=HKD）")
     parser.add_argument("--out", default=config.REPORTS_DIR)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--backtest", action="store_true", help="运行无未来函数回测")
@@ -481,15 +513,27 @@ def main() -> None:
     parser.add_argument("--no-html", dest="html", action="store_false",
                         help="关闭 HTML 日报")
     # S6 复盘审批流（三手势；模拟盘阶段不阻塞 pipeline，只影响提案生效）
-    parser.add_argument("--review-list", action="store_true",
+    reviews = parser.add_mutually_exclusive_group()
+    reviews.add_argument("--review-list", action="store_true",
                         help="列出全部 WFA 参数提案及审批状态")
-    parser.add_argument("--review-approve", default=None, metavar="ID",
+    reviews.add_argument("--review-approve", default=None, metavar="ID",
                         help="批准提案：状态→approved，次日随 --use-tuned 生效并披露")
-    parser.add_argument("--review-reject", default=None, metavar="ID",
+    reviews.add_argument("--review-reject", default=None, metavar="ID",
                         help="驳回提案：必须同时提供 --reason（原因必填）")
     parser.add_argument("--reason", default=None,
                         help="驳回原因（--review-reject 必填，回流组织记忆）")
+    parser.add_argument("--review-expected-sha256", default=None,
+                        help="审批界面已核对的原始提案文件 SHA256；快照变化时拒绝执行")
+    parser.add_argument("--review-execution-id", default=None,
+                        help="稳定审批执行标识；同标识同快照可恢复重试")
     args = parser.parse_args()
+    if not math.isfinite(args.account) or args.account <= 0:
+        parser.error("--account must be finite and positive in the target market currency")
+    if (args.backtest or args.tune) and args.market != "us":
+        parser.error("Backtest/WFA currently supports US only; CN/HK historical market inputs are not implemented")
+    if args.review_approve or args.review_reject:
+        if not args.review_expected_sha256 or not args.review_execution_id:
+            parser.error("Review mutations require --review-expected-sha256 and --review-execution-id from the reviewed snapshot")
 
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO,
@@ -502,6 +546,8 @@ def main() -> None:
         return
 
     if args.backtest or args.tune:
+        from trading_system.state import purge_run_state
+        purge_run_state(args.out)
         if args.backtest:
             _backtest(args, provider)
         if args.tune:

@@ -9,7 +9,8 @@ governance/bundles/trading/fences/trading-baseline.yml：
   - 客户 patch 层示例（review，只可加严）；
   - 策略快照层说明（注释段）。
 
-生成记录写 gen_report.json（生成时间 / config 哈希 / 规则条数）。
+同时生成 schemas/risk-defaults.json，供新客户档案与行业执行准入读取同一风险上限。
+生成记录写 gen_report.json（生成时间 / config 哈希 / 规则条数 / 默认档案资产摘要）。
 
 用法：
   python3 scripts/gen_fences.py            # 生成 YAML + gen_report.json
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +36,36 @@ from trading_system.redline import STEP_REGISTRY  # noqa: E402
 
 FENCE_PATH = ROOT / "governance/bundles/trading/fences/trading-baseline.yml"
 REPORT_PATH = ROOT / "governance/bundles/trading/fences/gen_report.json"
+RISK_DEFAULTS_PATH = ROOT / "governance/bundles/trading/schemas/risk-defaults.json"
 FENCE_VERSION = "trading-baseline/v1"
+
+
+def build_risk_defaults() -> dict:
+    """新档案默认值派生资产；客户已写的 archive 不使用默认值重新覆盖。"""
+    values = {
+        "risk_per_trade_pct": config.RISK_R_PCT,
+        "max_position_per_ticker_pct": config.MAX_SINGLE_POSITION_PCT,
+        "gross_cap_pct": max(row[3] for row in config.MRS_POSITION_CAP),
+    }
+    for field, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, (float, int)) \
+                or not math.isfinite(value) or not 0 < value <= 1:
+            raise ValueError(f"无效内核风险配置：{field}")
+    return {
+        "schemaVersion": "trading.risk-defaults/v1",
+        "source": {
+            "path": "trading_system/config.py",
+            "sha256": hashlib.sha256((ROOT / "trading_system/config.py").read_bytes()).hexdigest(),
+        },
+        "account": {
+            "base_currency": "USD", **values, "markets": ["us"], "stage": "paper",
+        },
+    }
+
+
+def render_risk_defaults() -> str:
+    return json.dumps(build_risk_defaults(), ensure_ascii=False, sort_keys=True, indent=2,
+                      allow_nan=False) + "\n"
 
 
 def _num(x: float) -> str:
@@ -75,7 +106,7 @@ def build_rules() -> list[dict]:
                     "actions": ["position.open", "order.buy"]},
              when=f"params.risk_pct > {_num(config.RISK_R_PCT)}",
              source=f"config.RISK_R_PCT={_num(config.RISK_R_PCT)}",
-             note="1R=账户净值 0.8%，Shares=(Account×r)/|Pin−Psl|"),
+             note=f"1R=账户净值 {config.RISK_R_PCT * 100:g}%，Shares=(Account×r)/|Pin−Psl|"),
         dict(rule_id="R-T3", name="标准开仓三分数联动不满足", level="block",
              is_baseline=True,
              match={"object_types": ["signal", "position"],
@@ -85,7 +116,7 @@ def build_rules() -> list[dict]:
                    f" || params.tss < {_num(ol['tss'])})"),
              source=(f"config.OPEN_LONG={{'mrs': {_num(ol['mrs'])}, 'shs': {_num(ol['shs'])},"
                      f" 'tss': {_num(ol['tss'])}}}"),
-             note="标准做多 MRS*≥6 且 SHS≥7.5 且 TSS_final≥7.2（白皮书§9.2）"),
+             note=f"标准做多 MRS*≥{ol['mrs']:g} 且 SHS≥{ol['shs']:g} 且 TSS_final≥{ol['tss']:g}（白皮书§9.2）"),
         dict(rule_id="R-T4", name="轻仓通道门槛不满足", level="block",
              is_baseline=True,
              match={"object_types": ["signal", "position"],
@@ -95,7 +126,7 @@ def build_rules() -> list[dict]:
                    f" || params.tss < {_num(lp['tss'])})"),
              source=(f"config.LIGHT_PROBE={{'mrs_lo': {_num(lp['mrs_lo'])}, 'tss': {_num(lp['tss'])}}}"
                      f" + config.OPEN_LONG.mrs={_num(ol['mrs'])}"),
-             note="轻仓通道 MRS*∈[5.5,6.0) 且 TSS_final≥7.8"),
+             note=f"轻仓通道 MRS*∈[{lp['mrs_lo']:g},{ol['mrs']:g}) 且 TSS_final≥{lp['tss']:g}"),
         dict(rule_id="R-T5", name="单条产业链累计风险超限", level="block",
              is_baseline=True,
              match={"object_types": ["position", "portfolio"],
@@ -129,28 +160,28 @@ def build_rules() -> list[dict]:
                      f" / config.CN_LIMIT_ST={_num(config.CN_LIMIT_ST)}"
                      f" + config.HK_VCM_SYMBOLS（{len(config.HK_VCM_SYMBOLS)} 只）"),
              note="涨跌停追单与 VCM 冷静期买入一律拒绝"),
-        dict(rule_id="R-T9", name="单票仓位超 20% 净值", level="block",
+        dict(rule_id="R-T9", name=f"单票仓位超 {config.MAX_SINGLE_POSITION_PCT * 100:g}% 净值", level="block",
              is_baseline=True,
              match={"object_types": ["position"],
                     "actions": ["position.open", "position.adjust"]},
              when=f"after.position_pct > {_num(config.MAX_SINGLE_POSITION_PCT)}",
              source=f"config.MAX_SINGLE_POSITION_PCT={_num(config.MAX_SINGLE_POSITION_PCT)}",
              note="行为风控硬上限（白皮书§10）"),
-        dict(rule_id="R-T10", name="MRS*<4 开新仓", level="block",
+        dict(rule_id="R-T10", name=f"MRS*<{config.MRS_GATE_BLOCK:g} 开新仓", level="block",
              is_baseline=True,
              match={"object_types": ["signal", "position"],
                     "actions": ["position.open"]},
              when=f"params.mrs < {_num(config.MRS_GATE_BLOCK)}",
              source=f"config.MRS_GATE_BLOCK={_num(config.MRS_GATE_BLOCK)}",
-             note="MRS*<4.0 禁止新开波段仓（除对冲白名单）——刻意不赚的钱"),
-        dict(rule_id="R-T11", name="MRS*<6 未按轻仓通道放行", level="block",
+             note=f"MRS*<{config.MRS_GATE_BLOCK:g} 禁止新开波段仓（除对冲白名单）——刻意不赚的钱"),
+        dict(rule_id="R-T11", name=f"MRS*<{config.MRS_GATE_LIGHT:g} 未按轻仓通道放行", level="block",
              is_baseline=True,
              match={"object_types": ["signal", "position"],
                     "actions": ["position.open"]},
              when=f"params.mrs < {_num(config.MRS_GATE_LIGHT)} && params.channel == 'standard'",
              source=f"config.MRS_GATE_LIGHT={_num(config.MRS_GATE_LIGHT)}",
-             note="MRS*<6.0 只许轻仓试探，按标准仓放行即越线"),
-        dict(rule_id="R-T12", name="轻仓通道仓位未×0.30–0.40", level="block",
+             note=f"MRS*<{config.MRS_GATE_LIGHT:g} 只许轻仓试探，按标准仓放行即越线"),
+        dict(rule_id="R-T12", name=f"轻仓通道仓位未×{sr[0]:g}–{sr[1]:g}", level="block",
              is_baseline=True,
              match={"object_types": ["position"],
                     "actions": ["position.open"]},
@@ -158,13 +189,13 @@ def build_rules() -> list[dict]:
                    f" || params.size_ratio > {_num(sr[1])})"),
              source=f"config.LIGHT_PROBE.size_ratio={tuple(sr)}",
              note="轻仓试错仓位系数区间（取中值执行）"),
-        dict(rule_id="R-T13", name="浮盈≥2R 未做盈利保护", level="block",
+        dict(rule_id="R-T13", name=f"浮盈≥{config.PROFIT_PROTECT_R:g}R 未做盈利保护", level="block",
              is_baseline=True,
              match={"object_types": ["position"],
                     "actions": ["position.hold", "position.adjust"]},
              when=f"params.profit_r >= {_num(config.PROFIT_PROTECT_R)} && params.protect_active != true",
              source=f"config.PROFIT_PROTECT_R={_num(config.PROFIT_PROTECT_R)}",
-             note="浮盈 ≥2R 启动盈利保护（止损上移 +0.5R，白皮书§10）"),
+             note=f"浮盈 ≥{config.PROFIT_PROTECT_R:g}R 启动盈利保护；保护动作以本轮内核记录为准（白皮书§10）"),
         dict(rule_id="R-T14", name="数据硬依赖全断仍产出报告", level="block",
              is_baseline=True,
              match={"object_types": ["report"],
@@ -187,7 +218,7 @@ def build_rules() -> list[dict]:
              when="true",
              source="白皮书§14 迭代诚实纪律（D7：不显著保持默认）",
              note="策略优化师只提案不生效；DSR 不显著自动驳回，生效次日披露"),
-        dict(rule_id="R-P2", name="单票上限收紧示例（20%→15%）", level="review",
+        dict(rule_id="R-P2", name=f"单票上限收紧示例（{config.MAX_SINGLE_POSITION_PCT * 100:g}%→{(config.MAX_SINGLE_POSITION_PCT - 0.05) * 100:g}%）", level="review",
              is_baseline=False,
              match={"object_types": ["position"],
                     "actions": ["position.open", "position.adjust"]},
@@ -266,18 +297,31 @@ def _semantic(yaml_text: str) -> dict:
 
 
 def check() -> int:
-    """比对现有 YAML 与 config 是否漂移。0 = 一致；1 = 漂移/缺失。"""
+    """围栏与新档案派生资产都必须吻合 config；任一损坏/缺失/漂移即阻断。"""
+    risk_ok = False
+    try:
+        actual_defaults = json.loads(RISK_DEFAULTS_PATH.read_text(encoding="utf-8"))
+        risk_ok = actual_defaults == build_risk_defaults()
+        if not risk_ok:
+            print("✗ 漂移: schemas/risk-defaults.json 与 config 不一致")
+    except (OSError, ValueError, TypeError) as error:
+        print(f"✗ 默认风险资产缺失或损坏: {type(error).__name__}")
     if not FENCE_PATH.exists():
         print(f"✗ 围栏文件不存在: {FENCE_PATH}（请先运行生成器）")
         return 1
     rules = build_rules()
     expect = _semantic(render_yaml(rules, "<hash>", "<ts>"))
-    actual = _semantic(FENCE_PATH.read_text(encoding="utf-8"))
+    try:
+        actual = _semantic(FENCE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError) as error:
+        print(f"✗ 围栏文件损坏: {type(error).__name__}")
+        return 1
     if actual == expect:
         n = len([r for r in rules if r["is_baseline"]])
-        print(f"✓ 围栏与 config 无漂移：{n} 条基线规则（block）+ "
+        blocked = sum(r["is_baseline"] and r["level"] == "block" for r in rules)
+        print(f"✓ 围栏与 config 无漂移：{n} 条基线规则（block {blocked} 条、paper auto {n - blocked} 条）+ "
               f"{len(rules) - n} 条 patch 示例逐条一致")
-        return 0
+        return 0 if risk_ok else 1
     # 定位漂移点
     a_rules = {r["rule_id"]: r for r in actual.get("rules", [])}
     e_rules = {r["rule_id"]: r for r in expect.get("rules", [])}
@@ -306,8 +350,11 @@ def main() -> int:
     cfg_hash = config_hash(rules)
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     text = render_yaml(rules, cfg_hash, ts)
+    risk_text = render_risk_defaults()
     FENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FENCE_PATH.write_text(text, encoding="utf-8")
+    RISK_DEFAULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RISK_DEFAULTS_PATH.write_text(risk_text, encoding="utf-8")
     baseline_n = len([r for r in rules if r["is_baseline"]])
     report = {
         "generated_at": ts,
@@ -318,12 +365,15 @@ def main() -> int:
         "baseline_rules": baseline_n,
         "patch_examples": len(rules) - baseline_n,
         "output": str(FENCE_PATH.relative_to(ROOT)),
+        "risk_defaults_output": str(RISK_DEFAULTS_PATH.relative_to(ROOT)),
+        "risk_defaults_sha256": hashlib.sha256(risk_text.encode("utf-8")).hexdigest(),
     }
     REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                            encoding="utf-8")
     print(f"✓ 已生成 {FENCE_PATH.relative_to(ROOT)}（基线 {baseline_n} 条 + "
           f"patch 示例 {len(rules) - baseline_n} 条，config 哈希 {cfg_hash[:12]}…）")
     print(f"✓ 生成记录 {REPORT_PATH.relative_to(ROOT)}")
+    print(f"✓ 新档案风险默认值 {RISK_DEFAULTS_PATH.relative_to(ROOT)}（config 同源）")
     return 0
 
 

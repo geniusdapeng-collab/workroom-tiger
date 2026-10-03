@@ -82,7 +82,7 @@ test("产品身份、端口与固定下载资产名保持一致", () => {
   assert.equal(product.desktop.portOffset, 610);
   assert.equal(product.release.appId, "com.geniusdapeng.workroomtiger");
   assert.equal(product.release.artifactPrefix, "Workroom.Tiger");
-  assert.equal(product.release.workflow, ".github/workflows/build-desktop.yml");
+  assert.equal(product.release.workflow, ".cnb.yml");
   assert.match(builder, /productName: 老虎全球资产管理系统/u);
   assert.match(builder, /workloomPortOffset: 610/u);
   assert.match(builder, /artifactName: "Workroom\.Tiger-\$\{os\}-\$\{arch\}\.\$\{ext\}"/u);

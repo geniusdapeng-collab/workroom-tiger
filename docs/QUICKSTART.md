@@ -2,10 +2,12 @@
 
 > 两条使用路径：**A. 交易内核单用**（Python，开箱即用）｜**B. 全栈**（内核 + WorkLoom 治理底座，适合团队/机构）。
 
+桌面 Agent 可以通过 [Tiger 研究 CLI/MCP](TIGER-AGENT-API.md) 调用实际日频、盘前、盘中、US 回测/WFA 与只读复盘，或指定 scanner/mrs/risk/review 员工。它为每个作业隔离账本和输出目录，返回步骤轨迹与文件 SHA；默认模型关闭会显式降级，研究回执的本地校验不等于治理数据库同步。
+
 ## A. 交易内核单用（5 分钟）
 
 ```bash
-git clone https://github.com/workloom-ai/workroom-tiger.git
+git clone https://cnb.cool/workloom-ai/workroom-tiger.git
 cd workroom-tiger
 bash scripts/setup.sh        # 装依赖 + 冒烟测试 + 环境自检
 ```
@@ -82,7 +84,7 @@ python3 main.py --market hk --mode daily --html     # 港股（轻仓验证期 0
 bash scripts/stack_setup.sh
 ```
 
-脚本完成：依赖安装 → PostgreSQL 17 容器 → 迁移 → 演示种子 + **trading bundle 种子**（37 个岗位 preset、19 条三层围栏规则、10 个官方技能、7 个三市/夜班/WFA 触发器）→ 内核事件入库 → 启动指引。
+脚本完成：依赖安装 → PostgreSQL 17 容器 → 迁移 → 演示种子 + **trading bundle 种子**（岗位 preset、三层围栏规则、官方技能、三市/夜班/WFA 触发器）→ 内核事件入库 → 启动指引。岗位清单数量以实际目录为准；研究 API 的定向员工为 scanner/mrs/risk/review，完整日频管线另外执行其 21 个注册步骤。
 
 > 数量口径以可执行产物为准，不在文档里手工维护第二份：preset/围栏/技能来自
 > `governance/bundles/trading/{presets,fences,skills}` 与 `bundle.json#provides`，

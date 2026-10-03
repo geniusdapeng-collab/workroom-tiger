@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from . import config
 
 
+def finite_score(value, upper: float = 10.0) -> bool:
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value) and 0 <= value <= upper)
+
+
 def main_pool_eligible(shs: float, breadth: float,
                        shs_main: float | None = None) -> bool:
     """主线入池（白皮书§5.3 硬规则）：SHS ≥ 阈值 且 广度 ≥ 60%（有证据）。
@@ -22,13 +27,30 @@ def main_pool_eligible(shs: float, breadth: float,
     无广度证据 = 无推进证据。
     """
     th = shs_main if shs_main is not None else config.SHS_MAIN_POOL
-    return (shs >= th and not math.isnan(breadth)
+    return (finite_score(shs) and finite_score(breadth, 100.0)
+            and shs >= th
             and breadth >= config.BREADTH_HEALTHY)
 
 
 def sub_pool_eligible(shs: float, shs_sub: float | None = None) -> bool:
     th = shs_sub if shs_sub is not None else config.SHS_SUB_POOL
-    return shs >= th
+    return finite_score(shs) and shs >= th
+
+
+def classify_sector_pools(sectors, *, shs_main: float | None = None,
+                          shs_sub: float | None = None,
+                          max_main: int | None = None) -> tuple[set[str], set[str]]:
+    """Pick the strongest main sectors, then eligible remaining sub sectors."""
+    maximum = config.MAIN_POOL_MAX if max_main is None else max_main
+    ranked = sorted(sectors, key=lambda s: s.shs if finite_score(s.shs) else -1,
+                    reverse=True)
+    main: set[str] = set()
+    for sector in ranked:
+        if len(main) < maximum and main_pool_eligible(sector.shs, sector.breadth, shs_main):
+            main.add(sector.etf)
+    sub = {sector.etf for sector in ranked if sector.etf not in main
+           and sub_pool_eligible(sector.shs, shs_sub)}
+    return main, sub
 
 
 @dataclass
@@ -42,7 +64,8 @@ def pass_gates(mrs_star: float, shs: float, tss_final: float,
                in_main: bool, in_sub: bool, chain_hot: bool,
                mrs_gate: float | None = None, shs_sub: float | None = None,
                tss_gate: float | None = None, light_tss: float | None = None,
-               mrs_light_lo: float | None = None) -> GateDecision:
+               mrs_light_lo: float | None = None,
+               mrs_block: float | None = None) -> GateDecision:
     """三分数联动开仓判定（白皮书§9.2 / 附录 B.1，单一口径）：
 
     标准做多：MRS* ≥ mrs_gate 且（入主线池，或链处热区且 SHS ≥ 次主线）且 TSS ≥ tss_gate
@@ -54,6 +77,11 @@ def pass_gates(mrs_star: float, shs: float, tss_final: float,
     light_tss = light_tss if light_tss is not None else config.LIGHT_PROBE["tss"]
     mrs_light_lo = (mrs_light_lo if mrs_light_lo is not None
                     else config.LIGHT_PROBE["mrs_lo"])
+    mrs_block = config.MRS_GATE_BLOCK if mrs_block is None else mrs_block
+    if not all(finite_score(v) for v in (mrs_star, shs, tss_final)):
+        return GateDecision(False, False, "Non-finite or out-of-range score")
+    if mrs_star < mrs_block:
+        return GateDecision(False, False, "MRS block threshold forbids new positions")
 
     mrs_light = mrs_light_lo <= mrs_star < mrs_gate
     standard = (mrs_star >= mrs_gate

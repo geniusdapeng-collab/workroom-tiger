@@ -23,11 +23,35 @@ import os
 import re
 from typing import Any, Protocol
 
+from ..data_safety import (InvalidJSON, ensure_finite_tree, finite_timestamp,
+                           http_status, safe_diagnostic, safe_origin,
+                           strict_json_loads)
 from ..redline import LLMUnavailable
 
 log = logging.getLogger("llm.client")
 
 DEFAULT_MODEL = os.environ.get("KIMI_CHAT_MODEL", "kimi-k2.5")
+
+
+class _SafeLLMUnavailable(LLMUnavailable):
+    """An internal failure containing only deterministic, safe diagnostics."""
+
+
+def _prompt(user: str, schema_hint: dict) -> str:
+    try:
+        ensure_finite_tree(schema_hint)
+        schema = json.dumps(schema_hint, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        raise _SafeLLMUnavailable("LLM 请求结构无效") from None
+    return (f"{user}\n\n"
+            "严格只输出 JSON（不要 markdown 代码块、不要解释），结构遵循："
+            + schema)
+
+
+def _request_numbers(max_tokens: int, temperature: float) -> None:
+    if (type(max_tokens) is not int or max_tokens <= 0 or
+            type(temperature) not in (int, float) or finite_timestamp(temperature) is None):
+        raise _SafeLLMUnavailable("LLM 请求数值无效") from None
 
 
 class LLMClient(Protocol):
@@ -52,22 +76,20 @@ class KimiGatewayClient:
         if self._client is None:
             try:
                 from agent_gw import AgentGwClient
-            except ImportError as e:
-                raise LLMUnavailable(f"agent-gw SDK 未安装: {e}")
+            except ImportError:
+                raise _SafeLLMUnavailable("agent-gw SDK 未安装") from None
             try:
                 self._client = AgentGwClient(timeout=self.timeout)
             except Exception as e:  # 无配置文件 / 无 key
-                raise LLMUnavailable(f"agent-gw 初始化失败: {e}")
+                raise _SafeLLMUnavailable(
+                    f"agent-gw 初始化失败: {safe_diagnostic(e).summary}") from None
         return self._client
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
                       max_tokens: int = 1200, temperature: float = 0.2) -> dict:
-        prompt = (
-            f"{user}\n\n"
-            "严格只输出 JSON（不要 markdown 代码块、不要解释），结构遵循："
-            f"{json.dumps(schema_hint, ensure_ascii=False)}"
-        )
-        last_err: Exception | None = None
+        prompt = _prompt(user, schema_hint)
+        _request_numbers(max_tokens, temperature)
+        last_diagnostic = "UpstreamError"
         for attempt in range(self.max_retries + 1):
             try:
                 resp = self._gw().chat_completion(
@@ -78,16 +100,18 @@ class KimiGatewayClient:
                 )
                 text = self._extract_text(resp)
                 return self._parse_json(text)
-            except LLMUnavailable:
+            except _SafeLLMUnavailable:
                 raise
             except Exception as e:
-                last_err = e
-                log.info("LLM 第 %d 次尝试失败: %s", attempt + 1, e)
-        raise LLMUnavailable(f"chat_completion 失败: {last_err}")
+                last_diagnostic = safe_diagnostic(e).summary
+                log.info("LLM 第 %d 次尝试失败: %s", attempt + 1, last_diagnostic)
+        raise _SafeLLMUnavailable(f"chat_completion 失败: {last_diagnostic}") from None
 
     @staticmethod
     def _extract_text(resp: Any) -> str:
         try:
+            if isinstance(resp, dict):
+                ensure_finite_tree(resp)
             choices = resp.get("choices") if isinstance(resp, dict) else None
             if choices is None and hasattr(resp, "choices"):
                 choices = resp.choices
@@ -95,30 +119,38 @@ class KimiGatewayClient:
             msg = ch0.get("message") if isinstance(ch0, dict) else ch0.message
             content = msg.get("content") if isinstance(msg, dict) else msg.content
             if isinstance(content, list):  # 分段 content
-                content = "".join(seg.get("text", "") if isinstance(seg, dict)
-                                  else getattr(seg, "text", "") for seg in content)
-            if not content:
-                raise ValueError("空 content")
-            return str(content)
+                segments = [seg.get("text", "") if isinstance(seg, dict)
+                            else getattr(seg, "text", "") for seg in content]
+                if any(not isinstance(segment, str) for segment in segments):
+                    raise ValueError("无效 content")
+                content = "".join(segments)
+            if not isinstance(content, str) or not content:
+                raise ValueError("无效 content")
+            return content
         except Exception as e:
-            raise LLMUnavailable(f"响应结构无法解析: {e}")
+            raise _SafeLLMUnavailable(
+                f"响应结构无法解析: {safe_diagnostic(e).summary}") from None
 
     @staticmethod
     def _parse_json(text: str) -> dict:
+        if not isinstance(text, str):
+            raise _SafeLLMUnavailable("LLM 输出非 JSON 文本") from None
         t = text.strip()
         t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.MULTILINE).strip()
         try:
-            obj = json.loads(t)
+            obj = strict_json_loads(t)
         except json.JSONDecodeError:
             m = re.search(r"\{.*\}", t, flags=re.DOTALL)
             if not m:
-                raise LLMUnavailable("LLM 输出非 JSON")
+                raise _SafeLLMUnavailable("LLM 输出非 JSON") from None
             try:
-                obj = json.loads(m.group(0))
-            except json.JSONDecodeError as e:
-                raise LLMUnavailable(f"LLM JSON 解析失败: {e}")
+                obj = strict_json_loads(m.group(0))
+            except (ValueError, TypeError, RecursionError, OverflowError):
+                raise _SafeLLMUnavailable("LLM JSON 解析失败或含非有限数值") from None
+        except (InvalidJSON, ValueError, TypeError, RecursionError, OverflowError):
+            raise _SafeLLMUnavailable("LLM JSON 解析失败或含非有限数值") from None
         if not isinstance(obj, dict):
-            raise LLMUnavailable("LLM 输出不是 JSON 对象")
+            raise _SafeLLMUnavailable("LLM 输出不是 JSON 对象") from None
         return obj
 
 
@@ -146,16 +178,15 @@ class OpenAICompatClient:
                 "OpenAI 兼容端点未配置（需要 LLM_BASE_URL 与 LLM_MODEL）")
 
     def describe(self) -> str:
-        return f"openai-compat:{self.model}@{self.base_url}"
+        model = self.model if re.fullmatch(r"[A-Za-z0-9._:/+\-]{1,128}", self.model) else "configured-model"
+        description = f"openai-compat:{model}@{safe_origin(self.base_url)}"
+        return description.replace(self.api_key, "[redacted]") if self.api_key else description
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
                       max_tokens: int = 1200, temperature: float = 0.2) -> dict:
         import requests
-        prompt = (
-            f"{user}\n\n"
-            "严格只输出 JSON（不要 markdown 代码块、不要解释），结构遵循："
-            f"{json.dumps(schema_hint, ensure_ascii=False)}"
-        )
+        prompt = _prompt(user, schema_hint)
+        _request_numbers(max_tokens, temperature)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -164,22 +195,24 @@ class OpenAICompatClient:
                                 {"role": "user", "content": prompt}],
                    "max_tokens": max_tokens, "temperature": temperature,
                    "stream": False}
-        last_err: Exception | None = None
+        last_diagnostic = "UpstreamError"
         for attempt in range(self.max_retries + 1):
             try:
                 r = requests.post(f"{self.base_url}/chat/completions",
                                   json=payload, headers=headers,
                                   timeout=self.timeout)
-                if r.status_code != 200:
-                    raise LLMUnavailable(f"端点返回 {r.status_code}: {r.text[:200]}")
+                status = http_status(r.status_code)
+                if status != 200:
+                    message = f"端点返回 HTTP {status}" if status is not None else "端点返回无效 HTTP 状态"
+                    raise _SafeLLMUnavailable(message) from None
                 text = KimiGatewayClient._extract_text(r.json())
                 return KimiGatewayClient._parse_json(text)
-            except LLMUnavailable:
+            except _SafeLLMUnavailable:
                 raise
             except Exception as e:
-                last_err = e
-                log.info("LLM(api) 第 %d 次尝试失败: %s", attempt + 1, e)
-        raise LLMUnavailable(f"openai-compat 调用失败: {last_err}")
+                last_diagnostic = safe_diagnostic(e).summary
+                log.info("LLM(api) 第 %d 次尝试失败: %s", attempt + 1, last_diagnostic)
+        raise _SafeLLMUnavailable(f"openai-compat 调用失败: {last_diagnostic}") from None
 
 
 # ---------------------------------------------------------------- 本地 Agent 模型
@@ -218,32 +251,57 @@ class LocalAgentClient(OpenAICompatClient):
         # 2) Ollama
         try:
             r = requests.get("http://localhost:11434/api/tags", timeout=1.5)
-            models = (r.json().get("models") or []) if r.status_code == 200 else []
+            status = http_status(r.status_code)
+            if status == 200:
+                payload = r.json()
+                ensure_finite_tree(payload)
+                if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+                    raise ValueError("Invalid local model listing")
+                models = payload.get("models") or []
+            else:
+                log.debug("本地 Ollama 探测返回状态: %s", status)
+                models = []
             if models:
-                c = cls._build("http://localhost:11434/v1",
-                               models[0].get("name") or models[0].get("model"))
+                model = models[0].get("name") or models[0].get("model")
+                if not isinstance(model, str) or not model.strip():
+                    raise ValueError("Invalid local model identifier")
+                c = cls._build("http://localhost:11434/v1", model)
                 cls._cache = (now, c)
                 return c
-        except Exception:
-            pass
+            log.debug("本地 Ollama 探测未发现模型")
+        except Exception as e:
+            log.debug("本地 Ollama 探测失败: %s", safe_diagnostic(e).summary)
 
         # 3) LM Studio
         try:
             r = requests.get("http://localhost:1234/v1/models", timeout=1.5)
-            data = (r.json().get("data") or []) if r.status_code == 200 else []
+            status = http_status(r.status_code)
+            if status == 200:
+                payload = r.json()
+                ensure_finite_tree(payload)
+                if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+                    raise ValueError("Invalid local model listing")
+                data = payload.get("data") or []
+            else:
+                log.debug("本地 LM Studio 探测返回状态: %s", status)
+                data = []
             if data:
-                c = cls._build("http://localhost:1234/v1",
-                               data[0].get("id"))
+                model = data[0].get("id")
+                if not isinstance(model, str) or not model.strip():
+                    raise ValueError("Invalid local model identifier")
+                c = cls._build("http://localhost:1234/v1", model)
                 cls._cache = (now, c)
                 return c
-        except Exception:
-            pass
+            log.debug("本地 LM Studio 探测未发现模型")
+        except Exception as e:
+            log.debug("本地 LM Studio 探测失败: %s", safe_diagnostic(e).summary)
 
         # 4) OPENAI_BASE_URL
         base = os.environ.get("OPENAI_BASE_URL")
         if base and os.environ.get("OPENAI_MODEL"):
+            configured_key = os.environ.get("OPENAI_API_KEY")
             c = cls._build(base.rstrip("/"), os.environ["OPENAI_MODEL"],
-                           api_key=os.environ.get("OPENAI_API_KEY"))
+                           configured_key)
             cls._cache = (now, c)
             return c
 
@@ -275,12 +333,12 @@ def default_client() -> LLMClient:
         c = KimiGatewayClient()
         c._gw()  # 触发一次初始化探测（无 key/SDK 即 LLMUnavailable）
         return c
-    except LLMUnavailable:
-        pass
+    except LLMUnavailable as e:
+        log.debug("默认 LLM Gateway 探测不可用: %s", safe_diagnostic(e).summary)
     if os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL"):
         return OpenAICompatClient()
     try:
         return LocalAgentClient.detect()
-    except LLMUnavailable:
-        pass
+    except LLMUnavailable as e:
+        log.debug("默认本地 LLM 探测不可用: %s", safe_diagnostic(e).summary)
     return KimiGatewayClient()  # 最终走原路径，由其抛出标准 LLMUnavailable

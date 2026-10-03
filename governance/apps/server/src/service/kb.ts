@@ -12,9 +12,14 @@
  */
 import { createHash } from "node:crypto";
 import type pg from "pg";
-import { guardedFetchText, scoreChunkFallback, tokenizeQuery } from "@workloom/base/service-kb";
+import {
+  guardedFetchText,
+  scoreChunkFallback,
+  tokenizeQuery,
+  type KbSearchLexicon,
+} from "@workloom/base/service-kb";
 import { ensureServiceSchema, indexChunks } from "./store.js";
-import { serviceTx, svcQuery } from "./events.js";
+import { appendEventOn, serviceTx, svcQuery } from "./events.js";
 import type { LlmCall } from "./llm.js";
 
 let seq = 0;
@@ -74,6 +79,10 @@ export async function upsertDocumentOn(
   },
 ): Promise<{ documentId: string; version: number; chunks: number }> {
   await ensureServiceSchema();
+  // 同工作区的标题/来源 URL 更新共享一把事务锁，避免两个正文都写成同一版本。
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`kb-upsert:${input.workspaceId}`]);
+  const collection = await client.query("SELECT 1 FROM kb_collections WHERE workspace_id=$1 AND id=$2", [input.workspaceId, input.collectionId]);
+  if (!collection.rowCount) throw new Error("知识集合不存在或无权访问");
   const hash = createHash("sha256").update(input.contentMd).digest("hex");
   // 同内容指纹幂等（H8：UNIQUE(workspace_id,hash)）：已存在则直接复用，不建版不重切
   const sameHash = await client.query(
@@ -86,7 +95,7 @@ export async function upsertDocumentOn(
   }
   const exist = await client.query(
     `SELECT id, version FROM kb_documents
-     WHERE workspace_id=$1 AND (title=$2 OR ($3::text IS NOT NULL AND source_url=$3)) LIMIT 1`,
+     WHERE workspace_id=$1 AND (title=$2 OR ($3::text IS NOT NULL AND source_url=$3)) LIMIT 1 FOR UPDATE`,
     [input.workspaceId, input.title, input.sourceUrl ?? null],
   );
   let documentId: string;
@@ -95,7 +104,7 @@ export async function upsertDocumentOn(
     documentId = String(exist.rows[0].id);
     version = Number(exist.rows[0].version) + 1;
     await client.query(
-      `UPDATE kb_documents SET collection_id=$3, source_kind=$4, source_url=$5, content_md=$6, version=$7, hash=$8
+      `UPDATE kb_documents SET collection_id=$3, source_kind=$4, source_url=$5, content_md=$6, version=$7, hash=$8, status='pending_review'
        WHERE workspace_id=$1 AND id=$2`,
       [input.workspaceId, documentId, input.collectionId, input.sourceKind, input.sourceUrl ?? null, input.contentMd, version, hash],
     );
@@ -242,10 +251,10 @@ export async function crawlAndStructure(input: {
   if (input.llm) {
     try {
       md = await input.llm(
-        `把以下网页内容结构化为住客服务 FAQ（Markdown，二级标题为问题，正文为答案，不要编造原文没有的信息）：\n\n${text.slice(0, 6000)}`,
+        `把以下网页内容结构化为当前业务的客户服务常见问答（Markdown，二级标题为问题，正文为答案，不要编造原文没有的信息）：\n\n${text.slice(0, 6000)}`,
       );
     } catch (err) {
-      console.warn("[service-c] KB 抓取 LLM 结构化失败，降级直存原文：", err instanceof Error ? err.message : err);
+      console.warn("[service-c] KB 抓取模型结构化失败，降级保存待审原文；供应商错误正文不进入日志");
       md = `# ${url}\n\n${text.slice(0, 8000)}`;
       degraded = true;
     }
@@ -303,9 +312,21 @@ export async function diffScan(input: { workspaceId: string; sourceId: string })
  * 检索（H4 修复全表扫描）：SQL 侧候选召回（content/heading ILIKE ANY 关键词数组，LIMIT 100），
  * JS 侧与 base 一致的 2-gram 切词（tokenizeQuery）+ scoreChunkFallback 精排（score 归一化 0..1）。
  */
-export async function searchKB(input: { workspaceId: string; query: string; limit?: number }): Promise<KbHit[]> {
+export async function searchKB(input: {
+  workspaceId: string;
+  query: string;
+  limit?: number;
+  /**
+   * MC-111：相关性下限（0..1）。默认 0 = 保持既有「score>0 即命中」口径（P22 知识库检索面
+   * 需要宽召回，让操作者看到候选）；ask 事实面注入时必须给下限，避免 2-gram 噪声 FAQ
+   * 冒充「系统事实」（详见 packages/runtime/src/ask.ts#ASK_KB_MIN_SCORE）。
+   */
+  minScore?: number;
+  /** 由已验证活动 Bundle 选择的适配器注入；省略时基座不理解行业词义。 */
+  lexicon?: KbSearchLexicon;
+}): Promise<KbHit[]> {
   await ensureServiceSchema();
-  const terms = tokenizeQuery(input.query);
+  const terms = tokenizeQuery(input.query, input.lexicon);
   if (terms.length === 0) return [];
   const patterns = terms.map((t) => `%${t}%`);
   const rows = await svcQuery<{ document_id: string; heading: string; content: string; title: string }>(
@@ -320,9 +341,86 @@ export async function searchKB(input: { workspaceId: string; query: string; limi
   return rows
     .map((x) => ({
       content: x.content, heading: x.heading, documentTitle: x.title, documentId: x.document_id,
-      score: scoreChunkFallback(input.query, { heading: x.heading, content: x.content }),
+      score: scoreChunkFallback(input.query, { heading: x.heading, content: x.content }, input.lexicon),
     }))
-    .filter((x) => x.score > 0)
+    .filter((x) => x.score > 0 && x.score >= (input.minScore ?? 0))
     .sort((a, b) => b.score - a.score)
     .slice(0, input.limit ?? 5);
+}
+
+/**
+ * MC-110 接线：审批台对 `kb.publish` 审批的裁决 → 知识库状态联动（与
+ * apps/server/src/trpc/router.ts#activateFenceRuleAfterApproval 同范式）。
+ *
+ * 覆盖两类行：
+ *  ① 修复前遗留的幽灵 pending（动作已执行、审批仍在待办）与未来任何来源的 kb.publish 待审：
+ *     approve/edit → 文档置 active（幂等）；reject → 文档退回 pending_review（驳回即退出客户问答检索范围）；
+ *  ② 非 kb.publish 审批 → 返回 null，不触碰知识库（保持既有语义）。
+ *
+ * 幂等：重复回调（审批已终态、文档状态已一致）不重复写事件；非 pending/未知状态不动。
+ */
+export async function applyKbPublishAfterApproval(
+  scope: { workspaceId: string },
+  approvalId: string,
+): Promise<{ documentId: string; status: "active" | "pending_review"; changed: boolean } | null> {
+  await ensureServiceSchema();
+  return serviceTx(scope.workspaceId, async (client, sc) => {
+    const r = await client.query<{
+      status: string; action: string | null; document_id: string | null;
+      event_version: string | null; event_hash: string | null;
+      snapshot: { after?: { documentId?: string; version?: number; content_sha256?: string }; expires_at?: string };
+      decided_by: string | null; gesture: { type?: string; edited_after?: { version?: number; content_sha256?: string } } | null;
+    }>(
+      `SELECT a.status,
+              a.snapshot, a.decided_by, a.gesture,
+              e.payload->'decision'->>'action' AS action,
+              COALESCE(e.payload->'decision'->'after'->>'documentId', e.payload->'object'->>'id') AS document_id,
+              e.payload->'decision'->'after'->>'version' AS event_version,
+              e.payload->'decision'->'after'->>'content_sha256' AS event_hash
+         FROM approvals a
+         LEFT JOIN biz_events e ON e.event_id = a.event_id AND e.workspace_id = a.workspace_id
+        WHERE a.approval_id=$1 AND a.workspace_id=$2`,
+      [approvalId, scope.workspaceId],
+    );
+    const row = r.rows[0];
+    if (!row || row.action !== "kb.publish" || !row.document_id) return null;
+    const approved = row.status === "approved" || row.status === "edited";
+    const rejected = row.status === "rejected";
+    if (!approved && !rejected) return null; // pending/expired：等裁决，不动文档
+    const reviewed = row.snapshot?.after;
+    const expires = row.snapshot?.expires_at;
+    if (!row.decided_by || !reviewed || !Number.isInteger(reviewed.version) || !reviewed.content_sha256
+      || !/^[a-f0-9]{64}$/.test(reviewed.content_sha256)
+      || reviewed.documentId !== row.document_id || String(reviewed.version) !== row.event_version
+      || reviewed.content_sha256 !== row.event_hash
+      || (expires !== undefined && (!Number.isFinite(Date.parse(expires)) || Date.parse(expires) <= Date.now()))
+      || (row.status === "approved" && row.gesture?.type !== "approve")
+      || (row.status === "edited" && (row.gesture?.type !== "edit"
+        || row.gesture.edited_after?.version !== reviewed.version
+        || row.gesture.edited_after?.content_sha256 !== reviewed.content_sha256))
+      || (rejected && row.gesture?.type !== "reject")) return null;
+    const doc = (await client.query<{ version: number; hash: string }>(
+      "SELECT version,hash FROM kb_documents WHERE workspace_id=$1 AND id=$2 FOR UPDATE",
+      [scope.workspaceId, row.document_id])).rows[0];
+    if (!doc || doc.version !== reviewed.version || doc.hash !== reviewed.content_sha256) return null;
+    const target: "active" | "pending_review" = approved ? "active" : "pending_review";
+    const upd = await client.query<{ id: string }>(
+      `UPDATE kb_documents SET status=$3
+        WHERE workspace_id=$1 AND id=$2 AND status <> $3
+        RETURNING id`,
+      [scope.workspaceId, row.document_id, target],
+    );
+    if (!upd.rows[0]) return { documentId: row.document_id, status: target, changed: false };
+    await appendEventOn(client, sc, { id: "review-console", type: "system" }, {
+      objectType: "kb_document", objectId: row.document_id,
+      action: approved ? "kb.publish" : "kb.publish.revoke",
+      after: { documentId: row.document_id, version: doc.version, content_sha256: doc.hash, status: target, approvalId },
+      basis: [
+        approved
+          ? `审批 ${approvalId} 通过：文档进入客户问答检索范围`
+          : `审批 ${approvalId} 驳回：文档退回待审、即刻退出客户问答检索范围（MC-110）`,
+      ],
+    });
+    return { documentId: row.document_id, status: target, changed: true };
+  });
 }

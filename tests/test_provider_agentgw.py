@@ -106,7 +106,8 @@ def test_fallback_chain_ends_at_agentgw(monkeypatch):
     monkeypatch.setattr("trading_system.providers.stooq.StooqProvider.ohlcv",
                         lambda self, *a, **k: (_ for _ in ()).throw(RuntimeError("timeout")))
     sentinel = pd.DataFrame({"Open": [1], "High": [1], "Low": [1],
-                             "Close": [1], "Volume": [1]})
+                             "Close": [1], "Volume": [1]},
+                            index=pd.DatetimeIndex(["2026-09-29"]))
     fake_ag = type("AG", (), {"name": "agentgw", "ohlcv": lambda self, *a, **k: sentinel})()
     monkeypatch.setattr(pl, "_channel_chain", lambda: [fake_ag])
     out = pl._single_with_fallback(_Broken(), "ohlcv", "SPY", days=5)

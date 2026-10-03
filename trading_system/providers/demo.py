@@ -131,8 +131,10 @@ class DemoProvider(DataProvider):
     def ohlcv(self, ticker: str, days: int = 400) -> pd.DataFrame:
         p = self._personality(ticker)
         rng = np.random.default_rng(_seed(ticker, "px2"))
-        n = days
-        idx = _bday_index(n)
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= self.N_REF:
+            raise ValueError(f"Demo history length must be in [1,{self.N_REF}]")
+        n, m = days, self.N_REF
+        idx = _bday_index(m)
 
         # 固定 N_REF 长度生成完整路径，再取尾部 n 根、以全路径首根为定价锚
         # —— 任何 days 请求下同一日期的价格完全一致（v5.4 一致性修复）。
@@ -141,19 +143,23 @@ class DemoProvider(DataProvider):
         else:
             full = 100 * self._gen_path(ticker, self.N_REF, p["drift"], p["vol"])
         base_price = 8 + (_seed(ticker, "base") % 39200) / 100.0
-        close = (full / full[0] * base_price)[-n:]
+        close = full / full[0] * base_price
 
-        intraday = np.abs(rng.normal(0, p["vol"] * 0.8, n))
+        intraday = np.abs(rng.normal(0, p["vol"] * 0.8, m))
         high = close * (1 + intraday)
-        low = close * (1 - np.abs(rng.normal(0, p["vol"] * 0.8, n)))
-        open_ = np.roll(close, 1) * (1 + rng.normal(0, p["vol"] * 0.3, n))
+        low = close * (1 - np.abs(rng.normal(0, p["vol"] * 0.8, m)))
+        open_ = np.roll(close, 1) * (1 + rng.normal(0, p["vol"] * 0.3, m))
         open_[0] = close[0]
+        # Generate the full OHLC path before slicing; a synthetic gap belongs
+        # inside the bar, so both Open and Close must lie in its envelope.
+        high = np.maximum(high, open_)
+        low = np.minimum(low, open_)
         base_vol = 2_000_000 + _seed(ticker, "vol") % 40_000_000
-        volume = (base_vol * (1 + rng.normal(0, 0.25, n))).clip(min=200_000)
+        volume = (base_vol * (1 + rng.normal(0, 0.25, m))).clip(min=200_000)
 
         df = pd.DataFrame({"Open": open_, "High": high, "Low": low,
                            "Close": close, "Volume": volume}, index=idx)
-        return self._normalize_ohlcv(df)
+        return self._normalize_ohlcv(df).tail(n)
 
     def _yield_series(self, symbol: str, days: int) -> pd.Series:
         # US 回归纪律：TNX 种子保持 _seed("TNX") 不变（序列与改造前逐点一致）

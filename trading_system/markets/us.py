@@ -33,6 +33,10 @@ class USMarket(MarketSpec):
     # ---- 合规：无个股涨跌停追单限制；Kill Switch/事件折扣由 L4 既有机制执行 ----
     def check_order(self, side, ticker, price, prev_close, trade_date,
                     buy_date=None, name="", vcm_cooling=False) -> ComplianceVerdict:
+        common = super().check_order(side, ticker, price, prev_close, trade_date,
+                                     buy_date, name, vcm_cooling)
+        if not common.allowed:
+            return common
         return ComplianceVerdict(
             True, "US 无个股涨跌停（LULD 熔断标记披露）；Kill Switch/事件折扣走 L4 既有机制",
             "US_OK")

@@ -77,7 +77,8 @@ def test_demo_options_deterministic():
 def test_journal_log_settle_stats(tmp_path):
     from trading_system.data_models import MRSResult, PipelineResult, TradePick
     from trading_system.journal import Journal
-    from trading_system.providers.demo import DemoProvider
+    from types import SimpleNamespace
+    import pandas as pd
 
     j = Journal(tmp_path / "journal.json")
     pick = TradePick(ticker="NVDA", tss_final=7.8, tos=4.0, entry_template="A",
@@ -90,8 +91,15 @@ def test_journal_log_settle_stats(tmp_path):
     assert j.log_picks(result) == 1
     assert j.log_picks(result) == 0          # 同日同票去重
 
-    settled = j.settle(DemoProvider())
+    # A fixed observed tape matches the declared signal and stop. A random
+    # demo tape can correctly void a mismatched $100 reference after a split.
+    dates = pd.bdate_range("2026-07-20", "2026-07-29")
+    frame = pd.DataFrame({"Open": 100., "High": 101., "Low": 99., "Close": 100.}, index=dates)
+    frame.loc["2026-07-23", "Low"] = 95.
+    provider = SimpleNamespace(ohlcv=lambda *args, **kwargs: frame)
+    settled = j.settle(provider, as_of="2026-07-29")
     stats = j.stats()
+    assert settled == 1 and stats["closed"] == 1
     assert stats["closed"] + stats["open"] == 1
     if stats["closed"]:
         rec = j.records[0]

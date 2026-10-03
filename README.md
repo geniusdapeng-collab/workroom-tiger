@@ -364,3 +364,5 @@ Apache-2.0。
 本仓内置桌面 Agent 入口：`node scripts/workloom-agent.mjs list`（能力清单）与
 `node scripts/workloom-agent-mcp.mjs`（stdio MCP）。接入步骤、本仓可用能力与安全边界见
 [`docs/AGENT-CLIENTS.md`](docs/AGENT-CLIENTS.md)。
+
+研究执行使用 `scripts/tiger-agent.mjs` / `scripts/tiger-agent-mcp.mjs`：六个实际管线模式、四个 Python 员工，按作业隔离状态并验证产物 SHA；模型透传与数据覆盖不足显式降级。安装包使用自带运行时路径，详见 [`docs/TIGER-AGENT-API.md`](docs/TIGER-AGENT-API.md)。

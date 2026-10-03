@@ -26,7 +26,8 @@ def _pick(ticker="AAA", shares=100, stop=90.0, risk=1000.0):
 
 
 def _result(action="BUY", picks=(), cap=1.0):
-    mrs = SimpleNamespace(position_cap=(0.0, cap))
+    mrs = SimpleNamespace(position_cap=(0.0, cap), mrs_star=8.0,
+                          allow_new_positions=True, shock=False)
     return SimpleNamespace(action=action, picks=list(picks), mrs=mrs)
 
 
@@ -37,7 +38,7 @@ def _engine(tmp_path, name="sim_portfolio.json") -> SimEngine:
 def _run_roundtrip(eng, adv):
     """信号 → T+1 成交（含摩擦）→ 止损出场。返回 closed 记录。"""
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"),
+    eng.step("2026-07-29", _result("BUY"),
              lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0, adv=adv))
     eng.step("2026-07-30", _result("AVOID"),
              lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0, adv=adv))
@@ -50,15 +51,16 @@ def test_three_column_identity(tmp_path):
     closed = _run_roundtrip(eng, adv=600_000_000)          # ≥$500M → 滑点5bp+佣金10bp
     # 入场：100 × (1+15bp) = 100.15；出场：90 × (1−15bp) = 89.865
     assert eng.state["positions"] == []
-    assert closed["gross_pnl"] == pytest.approx(-1000.0)   # (90−100)×100
-    assert closed["pnl_usd"] == pytest.approx(-1028.5)     # 净亏 = 毛亏 − 摩擦
-    assert closed["friction_cost"] == pytest.approx(28.5)
+    assert closed["shares"] == 78  # floor(800/(100.15-90))，客户默认0.8%风险比计划1000更严
+    assert closed["gross_pnl"] == pytest.approx(-780.0)
+    assert closed["pnl_usd"] == pytest.approx(-802.23)
+    assert closed["friction_cost"] == pytest.approx(22.23)
     # 恒等式：毛 − 摩擦 = 净
     assert closed["gross_pnl"] - closed["friction_cost"] == \
         pytest.approx(closed["pnl_usd"])
-    # R 双口径：risk_usd=1000 → 毛 -1.0R / 净 -1.03R（四舍五入后恒等）
-    assert closed["gross_r"] == pytest.approx(-1.0)
-    assert closed["net_r"] == pytest.approx(-1.03)
+    # R按实际78股×10.15初始风险归一；计划1000只是上限。
+    assert closed["gross_r"] == pytest.approx(-.9852)
+    assert closed["net_r"] == pytest.approx(-1.0133)
     assert closed["net_r"] == closed["r_multiple"]         # net_r 即原 R 口径
     # stats 三栏汇总同恒等式
     st = eng.stats()
@@ -81,20 +83,18 @@ def test_smaller_adv_costs_more_in_ledger(tmp_path):
     big = _run_roundtrip(_engine(tmp_path, "a.json"), adv=600_000_000)
     small = _run_roundtrip(_engine(tmp_path, "b.json"), adv=10_000_000)
     assert small["friction_cost"] > big["friction_cost"]     # 小 ADV 摩擦更大
-    assert big["gross_pnl"] == small["gross_pnl"]            # 毛口径与 ADV 无关
+    # 摩擦改变可成交股数；每股毛损益仍保持相同路径。
+    assert big["gross_pnl"] / big["shares"] == small["gross_pnl"] / small["shares"]
 
 
 # ---------------------------------------------------------------- ③ 摩擦永不为负
 def test_friction_never_negative_on_winning_trade(tmp_path):
     eng = _engine(tmp_path)
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"),
+    eng.step("2026-07-29", _result("BUY"),
              lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0,
                            adv=50_000_000))
-    # 时间止损小幅盈利出场：持仓满 7 日记账日，收盘 101.3 低于成本×1.01
-    # （入场净价 100×1.0035=100.35，101.3 < 100.35×1.01=101.35 → 触发）
-    eng.state["equity_curve"] = [
-        {"date": f"2026-08-{d:02d}", "equity": 100_000.0} for d in range(1, 10)]
+    # 超过7个真实交易日即按收盘出场，漏跑/浮盈均不延后时间纪律。
     eng.step("2026-08-10", _result("AVOID"),
              lambda t: Bar(open=100.8, high=101.6, low=100.5, close=101.3,
                            adv=50_000_000))
@@ -118,7 +118,7 @@ def test_unknown_adv_falls_back_to_legacy_10bp(tmp_path):
     assert friction_bps(0.0) == config.COST_BPS              # ADV 未知 → v6.0 口径
     eng = _engine(tmp_path)
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"),
+    eng.step("2026-07-29", _result("BUY"),
              lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0))
     pos = eng.state["positions"][0]
     assert pos["entry_price"] == 100.1                       # 与 v6.0 完全一致

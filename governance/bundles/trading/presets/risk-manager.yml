@@ -11,6 +11,7 @@ fence_bindings: [R-T1, R-T2, R-T5, R-T6, R-T9, R-T10, R-T11, R-T12, R-T13]
 coverage: []
 skills: []
 tools:
+  - { name: tiger.risk.run, access: read, desc: 调用真实 Python 风控官，实际客户风险覆盖层与产物快照一致才交付 }
   - { name: market.quote.read, access: read, desc: 读取候选报价 }
   - { name: portfolio.state.read, access: read, desc: 读取组合当前敞口 }
 prompt:

@@ -17,6 +17,8 @@ from ..chains import CHAINS, chain_name_zh
 from ..data_models import (
     ChainState, MRSResult, SectorScore, StockCandidate, TradePick,
 )
+from ..parameters import GateParams, holding_limit, risk_limits_for, tighten_risk_limits
+from ..position_sizing import size_position
 from .base import BaseAgent
 
 
@@ -27,13 +29,21 @@ class RiskManagerAgent(BaseAgent):
     def __init__(self, provider, account_usd: float = 100_000,
                  max_picks: int = config.MAX_PICKS_DEFAULT):
         super().__init__(provider)
+        if isinstance(account_usd, bool) or not isinstance(account_usd, (int, float)) or not math.isfinite(account_usd) or account_usd <= 0:
+            raise ValueError("Account equity must be finite and positive")
+        if isinstance(max_picks, bool) or not isinstance(max_picks, int) or max_picks < 1:
+            raise ValueError("max_picks must be a positive integer")
         self.account = account_usd
         self.max_picks = max_picks
 
     def execute(self, context: dict) -> list[TradePick]:
-        from ..gate import pass_gates
+        from ..gate import finite_score, pass_gates
 
         mrs: MRSResult = context["mrs"]
+        params = tighten_risk_limits(context.get("gate_params"), context.get("risk_limits"))
+        context["gate_params"] = params
+        context["risk_limits"] = risk_limits_for(params)
+        context["gross_cap"] = 0.0
         sectors: list[SectorScore] = context.get("sectors", [])
         candidates: list[StockCandidate] = context.get("watchlist", [])
         chain_map: dict[str, ChainState] = context.get("chain_map", {})
@@ -56,7 +66,8 @@ class RiskManagerAgent(BaseAgent):
                 f"（D7：满 {grad.get('required')} 笔结算且 DSR 过关才开放标准通道）")
 
         # ---- 闸门（MRS*<4.0 或 Kill Switch 触发 → 禁新开仓）----
-        if not mrs.allow_new_positions:
+        if (not mrs.allow_new_positions or mrs.shock or not finite_score(mrs.mrs_star)
+                or mrs.mrs_star < params.mrs_block):
             context["action"] = "AVOID"
             if mrs.shock:
                 view = (f"Kill Switch 触发：{mrs.shock_reason} — 停止新开仓，"
@@ -75,7 +86,13 @@ class RiskManagerAgent(BaseAgent):
         trade_date = context.get("trade_date")
         day_factor, day_notes = (cal.day_discount(trade_date) if cal else (1.0, []))
         notes.extend(day_notes)
-        gross_cap = round(mrs.position_cap[1] * day_factor, 4)
+        if (not finite_score(day_factor, 1.0)
+                or not isinstance(mrs.position_cap, (list, tuple))
+                or len(mrs.position_cap) != 2
+                or not all(finite_score(v, 1.0) for v in mrs.position_cap)
+                or mrs.position_cap[0] > mrs.position_cap[1]):
+            raise ValueError("Gross cap and event discount must be finite valid fractions")
+        gross_cap = min(mrs.position_cap[1], params.gross_cap) * day_factor
 
         # ---- 主线归属判定：候选股所属板块/产业链是否命中主线池 ----
         def sector_shs(etf: str) -> float:
@@ -88,7 +105,7 @@ class RiskManagerAgent(BaseAgent):
         # 每个放行标的的判定要素全透传（报告层"决策依据"直接消费，禁止反推）
         rationale: dict[str, dict] = {}
         light_probe = config.LIGHT_PROBE
-        mrs_light = light_probe["mrs_lo"] <= mrs.mrs_star < config.OPEN_LONG["mrs"]
+        mrs_light = params.mrs_light_lo <= mrs.mrs_star < params.mrs_gate
 
         for c in candidates:
             # 所属板块 SHS：优先产业链映射 ETF，其次 chain ETF，最后中性
@@ -103,7 +120,10 @@ class RiskManagerAgent(BaseAgent):
 
             # 放行判定（v6.0：与回测共用 gate.pass_gates 单一实现）
             decision = pass_gates(mrs.mrs_star, shs, c.tss_final,
-                                  in_main, in_sub, chain_hot)
+                                  in_main, in_sub, chain_hot, mrs_gate=params.mrs_gate,
+                                  shs_sub=params.shs_sub, tss_gate=params.tss_gate,
+                                  light_tss=params.light_tss, mrs_light_lo=params.mrs_light_lo,
+                                  mrs_block=params.mrs_block)
             if not decision.passed:
                 continue
             standard = decision.standard
@@ -112,9 +132,11 @@ class RiskManagerAgent(BaseAgent):
             entry = c.price
             verdict = None
             if spec is not None:
+                from ..exit_engine import previous_session_close
                 sdf = context["market_data"].get("stock_ohlcv", {}).get(c.ticker)
-                prev_close = (float(sdf["Close"].iloc[-2])
-                              if sdf is not None and len(sdf) >= 2 else entry)
+                prev_close = (previous_session_close(sdf.index, sdf["Close"].values,
+                              context.get("trade_date"), spec)
+                              if sdf is not None and len(sdf) else 0.0)
                 verdict = spec.check_order("buy", c.ticker, entry, prev_close,
                                            context.get("trade_date"))
                 compliance.append({"ticker": c.ticker, "side": "buy",
@@ -124,7 +146,7 @@ class RiskManagerAgent(BaseAgent):
                                  f"（{verdict.rule_id}，围栏前置）")
                     continue
 
-            size_ratio = 1.0 if standard else sum(light_probe["size_ratio"]) / 2
+            size_ratio = 1.0 if standard else params.light_size
             # D7 轻仓通道：未达标市场强制轻仓 ×0.3-0.4（覆盖标准/轻仓通道）
             if grad_forced:
                 size_ratio = round(sum(config.MARKET_LIGHT_SIZE) / 2, 4)
@@ -133,32 +155,33 @@ class RiskManagerAgent(BaseAgent):
             event_note = ""
             if cal:
                 ev_factor, event_note = cal.pick_adjustment(c.ticker, trade_date)
+                if not finite_score(ev_factor, 1.0):
+                    raise ValueError("Event size discount must be finite and in [0,1]")
                 size_ratio = round(size_ratio * ev_factor, 4)
+            if size_ratio <= 0:
+                continue
 
             # TOS 排序分（归一化 0-10）
             c.tos = round(mrs.mrs_star * shs * c.tss_final * c.c_liq / 100, 2)
 
             # R 仓位反推（v6.0：结构化止损价优先，正则仅作历史数据兜底）
             stop = c.stop_price if c.stop_price > 0 else self._stop_price(c)
-            risk_per_share = abs(entry - stop)
-            if risk_per_share <= 0:
+            if (not all(math.isfinite(v) and v > 0 for v in (entry, stop, c.c_liq))
+                    or not math.isfinite(c.atr_pct) or c.atr_pct < 0 or stop >= entry):
+                notes.append(f"风险字段无效：{c.ticker} 未放行")
                 continue
-            r_usd = self.account * config.RISK_R_PCT * size_ratio
-            shares = int(r_usd / risk_per_share)
+            size = size_position(self.account, entry, stop, size_ratio,
+                                 risk_r_pct=params.risk_r_pct,
+                                 max_single_position_pct=params.max_single_position_pct)
+            risk_per_share = entry - stop
+            r_usd = size.risk
+            shares = size.shares
             if shares <= 0:
                 continue
-            position_usd = shares * entry
-            position_pct = position_usd / self.account
-            capped = False
-            if position_pct > config.MAX_SINGLE_POSITION_PCT:
-                capped = True
-                shares = int(self.account * config.MAX_SINGLE_POSITION_PCT / entry)
-                position_usd = shares * entry
-                position_pct = position_usd / self.account
+            position_usd, position_pct, capped = size.notional, size.position_pct, size.capped
 
             # v6.0 ATR 档位化时间止损（白皮书§10.3 资金效率口径）
-            time_stop = next((d for cap_atr, d in config.TIME_STOP_BY_ATR
-                              if c.atr_pct <= cap_atr), config.TIME_STOP_DAYS[1])
+            time_stop = holding_limit(c.atr_pct, params)
 
             mode = "标准做多" if standard else "轻仓试错"
             if grad_forced:
@@ -172,13 +195,15 @@ class RiskManagerAgent(BaseAgent):
                 "tss_final": c.tss_final,
                 "size_ratio": round(size_ratio, 4),
                 "event_note": event_note,
-                "account": self.account, "r_pct": config.RISK_R_PCT,
+                "account": self.account, "r_pct": params.risk_r_pct,
                 "r_usd": round(r_usd, 2),
+                "risk_budget_usd": round(size.budget, 2),
                 "entry": round(entry, 2), "stop": round(stop, 2),
                 "risk_per_share": round(risk_per_share, 4),
                 "shares": shares, "position_pct": round(position_pct, 4),
                 "position_capped": capped,
-                "max_single_pct": config.MAX_SINGLE_POSITION_PCT,
+                "max_single_pct": params.max_single_position_pct,
+                "risk_limits": risk_limits_for(params),
                 "time_stop_days": time_stop,
                 "tos": c.tos,
                 # S4：市场合规与轻仓通道毕业状态（全透传，报告层直接消费）
@@ -188,37 +213,37 @@ class RiskManagerAgent(BaseAgent):
                 # 轻仓试错通道下，MRS 轻仓区（5.5-6.0）或次主线池（SHS 7.0-7.5）
                 # 即为对应门的合法通过路径，否则会出现"被放行但门未过"的记录矛盾。
                 "gate": {
-                    "mrs": {"value": mrs.mrs_star, "threshold": config.OPEN_LONG["mrs"],
-                            "threshold_probe_light": light_probe["mrs_lo"],
-                            "ok": bool(mrs.mrs_star >= config.OPEN_LONG["mrs"]
+                    "mrs": {"value": mrs.mrs_star, "threshold": params.mrs_gate,
+                            "threshold_probe_light": params.mrs_light_lo,
+                            "ok": bool(mrs.mrs_star >= params.mrs_gate
                                        or (decision.passed and not standard and mrs_light))},
                     "shs": {"value": shs, "main_pool": bool(in_main),
-                            "hot_channel": bool(chain_hot and shs >= config.SHS_SUB_POOL),
-                            "threshold_main": config.SHS_MAIN_POOL,
-                            "threshold_hot": config.SHS_SUB_POOL,
+                            "hot_channel": bool(chain_hot and shs >= params.shs_sub),
+                            "threshold_main": params.shs_main,
+                            "threshold_hot": params.shs_sub,
                             "ok": bool(in_main
-                                       or (chain_hot and shs >= config.SHS_SUB_POOL)
+                                       or (chain_hot and shs >= params.shs_sub)
                                        or (decision.passed and not standard and in_sub))},
-                    "tss": {"value": c.tss_final, "threshold": config.OPEN_LONG["tss"],
-                            "threshold_probe": light_probe["tss"],
-                            "ok": c.tss_final >= (config.OPEN_LONG["tss"] if standard
-                                                  else light_probe["tss"])},
+                    "tss": {"value": c.tss_final, "threshold": params.tss_gate,
+                            "threshold_probe": params.light_tss,
+                            "ok": c.tss_final >= (params.tss_gate if standard else params.light_tss)},
                 },
             }
-            card = self._trade_card(c, mrs, shs, entry, stop, shares, size_ratio, mode)
+            card = self._trade_card(c, mrs, shs, entry, stop, shares, size_ratio, mode,
+                                    time_stop=time_stop, protect_r=params.profit_protect_r)
             if event_note:
                 card += f"\n  事件折扣: {event_note}"
             picks.append(TradePick(
                 ticker=c.ticker, tss_final=c.tss_final, tos=c.tos,
-                entry_template=c.entry_template, entry_price=round(entry, 2),
-                stop_price=round(stop, 2), shares=shares,
-                position_pct=round(position_pct, 4), risk_usd=round(r_usd, 0),
+                entry_template=c.entry_template, entry_price=round(entry, 4),
+                stop_price=round(stop, 4), shares=shares,
+                position_pct=round(position_pct, 4), risk_usd=round(r_usd, 4),
                 chain=c.chain_id, sector=etf, card=card,
                 time_stop_days=time_stop, event_note=event_note,
             ))
 
         picks.sort(key=lambda p: p.tos, reverse=True)
-        picks = picks[: self.max_picks]
+        picks = picks[: min(self.max_picks, params.max_picks)]
 
         # ---- v6.0 组合层风控（白皮书§9/§10：仓位是风险预算的机器执行）----
         # 1) 产业链敞口上限：单链累计风险 ≤ MAX_CHAIN_RISK_PCT×账户
@@ -238,7 +263,7 @@ class RiskManagerAgent(BaseAgent):
         picks = chain_limited
 
         # 2) 总敞口执行：计划市值合计 ≤ Gross Cap（MRS* 上限 × 事件折扣）
-        if config.ENFORCE_GROSS_CAP and gross_cap > 0:
+        if gross_cap < 1:
             total, gross_limited = 0.0, []
             for p in picks:
                 if total + p.position_pct > gross_cap + 1e-9:
@@ -254,7 +279,9 @@ class RiskManagerAgent(BaseAgent):
         kept = {p.ticker for p in picks}
         rationale = {t: info for t, info in rationale.items() if t in kept}
 
-        if mrs.mrs_star < config.MRS_GATE_LIGHT:
+        all_light = bool(picks) and all(
+            not rationale[p.ticker]["standard"] or grad_forced for p in picks)
+        if mrs.mrs_star < params.mrs_gate or all_light:
             action, view = "HOLD", "轻仓试探区 — 只做最高质量结构，严格止损，减少隔夜"
         else:
             action, view = "BUY", "可按推荐仓位建仓（分批 40/40/20）"
@@ -285,7 +312,8 @@ class RiskManagerAgent(BaseAgent):
     @staticmethod
     def _trade_card(c: StockCandidate, mrs: MRSResult, shs: float,
                     entry: float, stop: float, shares: int,
-                    size_ratio: float, mode: str) -> str:
+                    size_ratio: float, mode: str, *, time_stop: int,
+                    protect_r: float) -> str:
         """交易计划卡（投资者业务语言；内部评分参数不外显）。"""
         risk_pct = abs(entry - stop) / entry * 100
         tpl = {"A": "突破后回踩确认", "B": "收缩后放量启动",
@@ -299,7 +327,7 @@ class RiskManagerAgent(BaseAgent):
             f"  关键位: {c.key_level:.2f} ｜ 入场参考: {entry:.2f} ｜ 止损: {stop:.2f}（-{risk_pct:.1f}%，跌破无条件离场）\n"
             f"  计划股数: {shares} 股\n"
             f"  加仓纪律: 结构确认后加二仓（再创高且不放异常巨量）\n"
-            f"  时间纪律: 入场后 5-7 个交易日未推进或跑输板块 → 降仓/换股\n"
-            f"  盈利保护: 浮盈达到两倍风险后，止损上移至成本线/最近结构支撑\n"
+            f"  时间纪律: 入场日起第 {time_stop} 个交易日按收盘平仓（漏跑不顺延）\n"
+            f"  盈利保护: 盘中高点达到 {protect_r:g} 倍初始风险，下一根K止损上移至初始 +0.5R\n"
             f"  证伪条件: {c.stop_plan}"
         )

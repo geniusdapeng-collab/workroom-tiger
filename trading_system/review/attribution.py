@@ -8,17 +8,17 @@
   - 违规六条命中即标记并计数，进复盘纪要与治理事件。
 
 违规六条（附录D）：
-  V1 MRS不允许却开仓     mrs_star < MRS_GATE_BLOCK(4.0) 仍入场
+  V1 MRS不允许却开仓     mrs_star < 信号记录的禁开仓阈值（默认4.0）仍入场
   V2 非主线交易          无主线板块归属且无产业链归属仍入场
   V3 禁追高条件下追高    当日快照标记禁追高（广度<40 仅权重拉动）仍入场
   V4 财报前未降仓        当日快照财报名单内标的仍以标准仓入场（未 ×0.5/回避）
   V5 触发止损不执行      持仓浮动 R ≤ -1R（已穿止损）仍未平仓
-  V6 ≥2R未保护          浮动/已实现 ≥2R 但未启动盈利保护
+  V6 未启动盈利保护      浮动/已实现达到信号记录的保护阈值（默认2R）仍未保护
 """
 
 from __future__ import annotations
 
-from .. import config
+from ..parameters import GateParams
 
 # 违规六条代码表（附录D 顺序固定，报告与治理事件共用同一口径）
 VIOLATIONS: dict[str, str] = {
@@ -27,7 +27,7 @@ VIOLATIONS: dict[str, str] = {
     "V3": "禁追高条件下追高",
     "V4": "财报前未降仓",
     "V5": "触发止损不执行",
-    "V6": "≥2R未保护",
+    "V6": "达到保护阈值未保护",
 }
 
 # 出场类型归一（exit_engine note → 附录D 出场分类）
@@ -39,18 +39,19 @@ _EXIT_TYPES = (
 )
 
 
-def mrs_band(mrs_star) -> str:
-    """MRS* 区间归属（信号来源层的环境维）。"""
+def mrs_band(mrs_star, params: GateParams | None = None) -> str:
+    """MRS* band uses the immutable thresholds recorded with the signal."""
+    params = params or GateParams()
     if mrs_star is None:
         return "未知"
     m = float(mrs_star)
     if m >= 8.0:
         return "强共振(≥8)"
-    if m >= config.OPEN_LONG["mrs"]:
-        return "可交易(6-8)"
-    if m >= config.MRS_GATE_BLOCK:
-        return "轻仓区(4-6)"
-    return "禁开仓(<4)"
+    if m >= params.mrs_gate:
+        return f"可交易({params.mrs_gate:g}-8)"
+    if m >= params.mrs_block:
+        return f"轻仓区({params.mrs_block:g}-{params.mrs_gate:g})"
+    return f"禁开仓(<{params.mrs_block:g})"
 
 
 def exit_type(rec: dict) -> str:
@@ -72,6 +73,14 @@ def _entered(rec: dict) -> bool:
     return rec.get("status") in ("closed", "open") and rec.get("entry") is not None
 
 
+def _parameters(rec: dict) -> GateParams:
+    if "gate_params" not in rec:
+        return GateParams()
+    if not isinstance(rec["gate_params"], dict):
+        raise ValueError("Review parameter snapshot must be an object")
+    return GateParams(**rec["gate_params"])
+
+
 def detect_violations(rec: dict, snapshot: dict | None = None) -> list[str]:
     """对单条落账记录做违规六条检测，返回命中的违规代码列表。
 
@@ -84,9 +93,10 @@ def detect_violations(rec: dict, snapshot: dict | None = None) -> list[str]:
     if not _entered(rec):
         return hits                                   # 作废/未入场不判违规
     snap = snapshot or {}
+    params = _parameters(rec)
 
     mrs_star = rec.get("mrs_star")
-    if mrs_star is not None and float(mrs_star) < config.MRS_GATE_BLOCK:
+    if mrs_star is not None and float(mrs_star) < params.mrs_block:
         hits.append("V1")
     if not rec.get("sector") and not rec.get("chain"):
         hits.append("V2")
@@ -102,7 +112,7 @@ def detect_violations(rec: dict, snapshot: dict | None = None) -> list[str]:
         live = float(r_live) if r_live is not None else float(rec.get("r") or 0.0)
         if rec.get("status") == "closed" and rec.get("r") is not None:
             live = float(rec["r"])
-        if live >= config.PROFIT_PROTECT_R:
+        if live >= params.profit_protect_r:
             hits.append("V6")
     return hits
 
@@ -118,7 +128,7 @@ def attribute_record(rec: dict, snapshot: dict | None = None) -> dict:
         "status": rec.get("status"),
         # 信号来源层
         "signal_layer": {
-            "mrs_band": mrs_band(rec.get("mrs_star")),
+            "mrs_band": mrs_band(rec.get("mrs_star"), _parameters(rec)),
             "sector": rec.get("sector") or "（无主线归属）",
             "chain": rec.get("chain") or "（无链归属）",
             "template": rec.get("template") or "无",

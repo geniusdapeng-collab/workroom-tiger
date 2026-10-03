@@ -6,7 +6,7 @@ overrides:
   # @workloom/ui 不在 npm registry（README 记录为 CNB Release 制品），
   # override 落后一版时，任何重新解析依赖（pnpm 11+ 忽略 package.json#pnpm.overrides、
   # 或 pnpm install 非 frozen）都会去 registry 找不存在的包而 404 / 锁文件校验失败。
-  "@workloom/ui@0.1.14": "https://cnb.cool/workloom-ai/workloom-im/-/releases/download/ui-v0.1.14/workloom-ui-0.1.14.tgz"
+  "@workloom/ui@0.1.17": "https://cnb.cool/workloom-ai/workloom-im/-/releases/download/ui-v0.1.17/workloom-ui-0.1.17.tgz"
 onlyBuiltDependencies:
   - electron-winstaller
   - esbuild

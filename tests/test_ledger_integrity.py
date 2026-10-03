@@ -54,7 +54,7 @@ def test_failed_replace_preserves_previous_ledger(tmp_path, monkeypatch, ledger)
         instance.save()
 
     assert path.read_bytes() == previous
-    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name, path.name + ".lock"]
 
 
 def test_non_finite_value_does_not_replace_simulator_ledger(tmp_path):
@@ -68,4 +68,4 @@ def test_non_finite_value_does_not_replace_simulator_ledger(tmp_path):
         instance.save()
 
     assert path.read_bytes() == previous
-    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name, path.name + ".lock"]

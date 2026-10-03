@@ -23,13 +23,38 @@ from __future__ import annotations
 import json
 import logging
 import math
+from datetime import date
 from pathlib import Path
 
 from . import config
+from .ledger_io import file_transaction, read_json_strict, write_json_atomic
 
 logger = logging.getLogger(__name__)
 
 _WILSON_Z = 1.96     # 95% 置信区间
+
+
+def validate_accounting_rows(records, *, journal: bool = True) -> None:
+    """Reject corrupt accounting evidence before deriving a report or sample file."""
+    if not isinstance(records, list):
+        raise ValueError("Accounting records must be an array")
+    for row in records:
+        if (not isinstance(row, dict) or not isinstance(row.get("date"), str)
+                or not isinstance(row.get("ticker"), str) or not row["ticker"]):
+            raise ValueError("Accounting record identity is invalid")
+        date.fromisoformat(row["date"])
+        if journal and row.get("status") not in ("open", "closed", "void"):
+            raise ValueError("Accounting record status is invalid")
+        for name in ("r", "tss_final", "mrs_star"):
+            value = row.get(name)
+            if value is None:
+                continue
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or name != "r" and not 0 <= value <= 10):
+                raise ValueError(f"Accounting record {name} must be a finite valid number")
+        if not journal and not isinstance(row.get("win"), bool):
+            raise ValueError("Calibration sample outcome must be boolean")
 
 
 def wilson_interval(wins: int, n: int, z: float = _WILSON_Z) -> tuple[float, float]:
@@ -55,12 +80,22 @@ class CalibrationLayer:
         self.min_samples = (config.CALIBRATION_MIN_SAMPLES
                             if min_samples is None else min_samples)
         self.buckets = buckets or list(config.CALIBRATION_BUCKETS)
+        if (isinstance(self.min_samples, bool) or not isinstance(self.min_samples, int)
+                or self.min_samples < 1):
+            raise ValueError("Calibration minimum samples must be a positive integer")
+        if (not isinstance(self.buckets, (list, tuple)) or any(
+                not isinstance(pair, (list, tuple)) or len(pair) != 2
+                or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                       or not math.isfinite(v) for v in pair)
+                or not pair[0] < pair[1] for pair in self.buckets)):
+            raise ValueError("Calibration buckets must have finite increasing boundaries")
 
     # ------------------------------------------------------------ 样本库
 
     def collect_samples(self, records: list[dict]) -> list[dict]:
         """从 journal 记录提取校准样本。【只读已结算记录】：
         status=="closed" 且 r 非空（未结算/作废/悬挂一律不进入样本库）。"""
+        validate_accounting_rows(records)
         samples: list[dict] = []
         seen: set[tuple] = set()
         for rec in records:
@@ -79,27 +114,27 @@ class CalibrationLayer:
         return samples
 
     def save_samples(self, samples: list[dict]) -> None:
-        self.samples_path.parent.mkdir(parents=True, exist_ok=True)
-        self.samples_path.write_text(
-            json.dumps(samples, ensure_ascii=False, indent=1), encoding="utf-8")
+        validate_accounting_rows(samples, journal=False)
+        with file_transaction(self.samples_path):
+            write_json_atomic(self.samples_path, samples, indent=1)
 
     # ------------------------------------------------------------ 摘要
 
     def run(self) -> dict:
         """读 journal → 更新样本库（落盘）→ 输出校准摘要。"""
-        records: list[dict] = []
-        if self.journal_path.exists():
+        with file_transaction(self.journal_path), file_transaction(self.samples_path):
             try:
-                records = json.loads(self.journal_path.read_text(encoding="utf-8"))
-            except Exception as exc:
-                logger.warning("校准层读取 journal 失败（按空样本处理）: %s", exc)
+                records = read_json_strict(self.journal_path)
+            except FileNotFoundError:
                 records = []
-        samples = self.collect_samples(records if isinstance(records, list) else [])
-        self.save_samples(samples)
-        return self.summarize(samples)
+            samples = self.collect_samples(records)
+            summary = self.summarize(samples)
+            write_json_atomic(self.samples_path, samples, indent=1)
+            return summary
 
     def summarize(self, samples: list[dict]) -> dict:
         """分桶统计 + 样本门槛降级 + 单调性检测。"""
+        validate_accounting_rows(samples, journal=False)
         n = len(samples)
         bucket_stats = []
         for lo, hi in self.buckets:

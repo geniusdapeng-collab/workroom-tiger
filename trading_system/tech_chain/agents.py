@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -28,6 +29,7 @@ from ..llm.prompts import (RISK_SCHEMA, RISK_USER_TMPL, SENTIMENT_SCHEMA,
                            SENTIMENT_USER_TMPL, SYSTEM_ANALYST)
 from ..redline import ExecutionTracer, Passthrough, llm_guard
 from ..search.models import CleanDocument
+from ..semantic_values import finite_number, object_rows, text_list
 from .universe import TECH_SUBCHAINS
 
 log = logging.getLogger("tech_chain.agents")
@@ -94,12 +96,13 @@ class TechChainMonitorAgent:
         if df is None or len(df) < win + 1:
             return None
         c = df["Close"].to_numpy(dtype=float)
-        if c[-win - 1] <= 0:
+        if not all(math.isfinite(v) and v > 0 for v in (c[-1], c[-win - 1])):
             return None
         return float(c[-1] / c[-win - 1] - 1.0)
 
     def execute(self, tracer: ExecutionTracer | None = None,
-                prefetched: dict[str, pd.DataFrame] | None = None) -> list[ChainMonitorRow]:
+                prefetched: dict[str, pd.DataFrame] | None = None,
+                as_of: str | None = None) -> list[ChainMonitorRow]:
         import time
         tickers = sorted({t for c in TECH_SUBCHAINS.values()
                           for l in c["links"].values() for t in l})
@@ -129,6 +132,10 @@ class TechChainMonitorAgent:
                         data[t] = self.provider.ohlcv(t, days=90)
                     except Exception:
                         continue
+        if as_of is not None:
+            cutoff = pd.Timestamp(as_of)
+            data = {ticker: frame[frame.index <= cutoff] for ticker, frame in data.items()
+                    if isinstance(frame, pd.DataFrame) and isinstance(frame.index, pd.DatetimeIndex)}
         rows: list[ChainMonitorRow] = []
         for cid, spec in TECH_SUBCHAINS.items():
             row = ChainMonitorRow(chain_id=cid)
@@ -141,6 +148,8 @@ class TechChainMonitorAgent:
                     m20 = self._mom(df, 20)
                     m60 = self._mom(df, 60)
                     c = df["Close"].to_numpy(dtype=float)
+                    if not np.isfinite(c[-20:]).all() or (c[-20:] <= 0).any():
+                        continue
                     sma20 = float(np.mean(c[-20:]))
                     if m20 is not None:
                         moms20.append(m20)
@@ -174,12 +183,15 @@ class CycleLinkageAgent:
     def __init__(self, provider):
         self.provider = provider
 
-    def execute(self, tracer: ExecutionTracer | None = None) -> list[GlobalLinkageRow]:
+    def execute(self, tracer: ExecutionTracer | None = None,
+                as_of: str | None = None) -> list[GlobalLinkageRow]:
         import time
         rows: list[GlobalLinkageRow] = []
         deadline = time.time() + 45.0
         try:
             spy = self.provider.ohlcv("SPY", days=90)
+            if as_of is not None:
+                spy = spy[spy.index <= pd.Timestamp(as_of)]
         except Exception:
             spy = None
         spy_m20 = TechChainMonitorAgent._mom(spy, 20) if spy is not None else None
@@ -190,6 +202,8 @@ class CycleLinkageAgent:
                 break
             try:
                 df = self.provider.ohlcv(t, days=90)
+                if as_of is not None:
+                    df = df[df.index <= pd.Timestamp(as_of)]
             except Exception as e:
                 log.info("联动标的 %s 拉取失败: %s", t, e)
                 continue
@@ -219,17 +233,19 @@ class ChainSentimentAgent:
                 user=SENTIMENT_USER_TMPL.format(docs=payload),
                 schema_hint=SENTIMENT_SCHEMA, max_tokens=2000)
             rows: dict[str, SentimentRow] = {}
-            for item in out.get("chains", []):
-                cid = str(item.get("chain_id") or "")
-                if cid not in TECH_SUBCHAINS:
+            for item in object_rows(out, "chains"):
+                cid = item.get("chain_id")
+                if not isinstance(cid, str) or cid not in TECH_SUBCHAINS:
                     continue
-                rows[cid] = SentimentRow(
-                    chain_id=cid,
-                    heat=_clamp(item.get("heat"), 0, 10),
-                    sentiment_score=_clamp(item.get("sentiment_score"), -1, 1),
-                    narrative_change=item.get("narrative_change"),
-                    key_drivers=[str(x) for x in (item.get("key_drivers") or [])][:5],
-                    degraded=False)
+                heat = _clamp(item.get("heat"), 0, 10)
+                score = _clamp(item.get("sentiment_score"), -1, 1)
+                change = item.get("narrative_change")
+                drivers = text_list(item.get("key_drivers"), 5)
+                if heat is None or score is None or drivers is None or change not in (None, "improving", "stable", "deteriorating"):
+                    continue
+                rows[cid] = SentimentRow(chain_id=cid, heat=heat, sentiment_score=score,
+                                         narrative_change=change, key_drivers=drivers,
+                                         degraded=False)
             return rows or None  # 空 → llm_guard 走透传
 
         return llm_guard("tech.sentiment", _run, fallback_payload=docs, tracer=tracer)
@@ -254,18 +270,28 @@ class ChainRiskAgent:
                 user=RISK_USER_TMPL.format(docs=payload),
                 schema_hint=RISK_SCHEMA, max_tokens=2000)
             alerts: list[RiskAlert] = []
-            for a in out.get("alerts", []):
+            for a in object_rows(out, "alerts"):
                 sev = _clamp(a.get("severity"), 1, 10)
-                if sev is None:
+                transmission = text_list(a.get("transmission"), 6)
+                evidence_ids = text_list(a.get("evidence_ids"), 6)
+                cid, link, kind = a.get("chain_id", "unknown"), a.get("link", "unknown"), a.get("type", "other")
+                headline = a.get("headline_zh", "")
+                known_ids = {doc.raw.doc_id for doc in docs}
+                if (sev is None or transmission is None or evidence_ids is None
+                        or cid not in (*TECH_SUBCHAINS, "unknown")
+                        or link not in ("upstream", "midstream", "downstream", "unknown")
+                        or kind not in ("supply_chain", "policy", "patent", "capacity", "other")
+                        or not isinstance(headline, str)
+                        or any(doc_id not in known_ids for doc_id in evidence_ids)):
                     continue
                 alerts.append(RiskAlert(
                     severity=sev,
-                    chain_id=str(a.get("chain_id") or "unknown"),
-                    link=str(a.get("link") or "unknown"),
-                    type=str(a.get("type") or "other"),
-                    headline_zh=str(a.get("headline_zh") or ""),
-                    transmission=[str(x) for x in (a.get("transmission") or [])][:6],
-                    evidence_ids=[str(x) for x in (a.get("evidence_ids") or [])][:6],
+                    chain_id=cid,
+                    link=link,
+                    type=kind,
+                    headline_zh=headline,
+                    transmission=transmission,
+                    evidence_ids=evidence_ids,
                 ))
             return alerts if alerts else None
 
@@ -273,7 +299,4 @@ class ChainRiskAgent:
 
 
 def _clamp(v, lo, hi) -> float | None:
-    try:
-        return max(lo, min(hi, float(v)))
-    except (TypeError, ValueError):
-        return None
+    return finite_number(v, lo, hi)

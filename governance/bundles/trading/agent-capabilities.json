@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "workloom.agent-capabilities/v1",
+  "bundleId": "trading",
+  "capabilities": [
+    {
+      "id": "trading.repo.status",
+      "version": "1.0.0",
+      "title": "读取本仓自述",
+      "description": "读取本仓 product.manifest 摘要与 bundles/docs/脚本计数；只读，不访问服务端。",
+      "operation": "read",
+      "risk": "low",
+      "dataMode": "unverified",
+      "transport": { "kind": "local", "module": "bundles/trading/capabilities/repo.mjs", "export": "repoStatus" },
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "id": "trading.repo.docs",
+      "version": "1.0.0",
+      "title": "读取文档索引",
+      "description": "列出 docs/*.md 与一级标题（最多 60 条），供 Agent 找文档；符号链接一律拒绝。",
+      "operation": "read",
+      "risk": "low",
+      "dataMode": "unverified",
+      "transport": { "kind": "local", "module": "bundles/trading/capabilities/repo.mjs", "export": "repoDocs" },
+      "inputSchema": {
+        "type": "object",
+        "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 60 } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "trading.bundle.summary",
+      "version": "1.0.0",
+      "title": "读取行业包概览",
+      "description": "读取真实 trading 行业包的版本、来源目录、skills/fences/pipelines/presets/library 计数与围栏规则样例；只读。",
+      "operation": "read",
+      "risk": "low",
+      "dataMode": "unverified",
+      "transport": { "kind": "local", "module": "bundles/trading/capabilities/repo.mjs", "export": "bundleSummary" },
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "id": "trading.repo.readiness",
+      "version": "1.0.0",
+      "title": "检查接入就绪度（不执行）",
+      "description": "检查治理目录的 Node、依赖、运行时资产、MCP 入口与 DSH pin；可选密钥只检查已注入环境是否存在，不读用户密钥文件、不回显值。",
+      "operation": "preview",
+      "risk": "low",
+      "dataMode": "unverified",
+      "transport": { "kind": "local", "module": "bundles/trading/capabilities/repo.mjs", "export": "repoReadiness" },
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    }
+  ]
+}

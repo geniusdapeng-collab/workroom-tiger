@@ -1,0 +1,17 @@
+{
+  "account": {
+    "base_currency": "USD",
+    "gross_cap_pct": 0.9,
+    "markets": [
+      "us"
+    ],
+    "max_position_per_ticker_pct": 0.2,
+    "risk_per_trade_pct": 0.008,
+    "stage": "paper"
+  },
+  "schemaVersion": "trading.risk-defaults/v1",
+  "source": {
+    "path": "trading_system/config.py",
+    "sha256": "deb5f8a9a59d52f4cf8a12c91d5a2de83c939173c01bceae4f1d44de8657bbf1"
+  }
+}

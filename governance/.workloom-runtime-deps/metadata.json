@@ -60,7 +60,7 @@
     },
     {
       "path": "product.manifest.json",
-      "sha256": "793ee1ff8e0def98b2ca6da08f6334d36c483b8c33fa67937a9f0b5cd4192eaa"
+      "sha256": "27b21085e57829ca39c84f66deb093b7eca9941f5da0e665cf2636d1b0ef1084"
     },
     {
       "path": "scripts/pack-nm-merge.mjs",

@@ -17,6 +17,7 @@ import pandas as pd
 
 from .. import config
 from ..data_models import SectorScore
+from ..parameters import GateParams
 from ..indicators import (
     aggregate, breadth_above_sma, last, percentile_rank, pct_change_n,
     rs_line, score_from_quantile, score_sector_macro, score_sector_r20,
@@ -59,19 +60,20 @@ class SectorAgent(BaseAgent):
         # v5.4 修复：广度【缺失】（NaN，如 IWM/XLRE 无产业链成分映射）旧代码
         # 视同通过——"广度≥60%"硬条件形同虚设。白皮书口径：无广度证据不得进
         # 主线池，降入次主线（观察/轻仓）并在证据中披露。
-        main_count = 0
+        from ..gate import classify_sector_pools
+        params = context.get("gate_params") or GateParams()
+        main, sub = classify_sector_pools(results, shs_main=params.shs_main,
+                                         shs_sub=params.shs_sub)
         for s in results:
-            if s.shs >= config.SHS_MAIN_POOL and not math.isnan(s.breadth) \
-                    and s.breadth >= config.BREADTH_HEALTHY:
-                if main_count < config.MAIN_POOL_MAX:
-                    s.in_main_pool = True
-                    main_count += 1
-            elif s.shs >= config.SHS_SUB_POOL:
-                s.in_sub_pool = True
-                if s.shs >= config.SHS_MAIN_POOL and math.isnan(s.breadth):
+            s.in_main_pool = s.etf in main
+            s.in_sub_pool = s.etf in sub
+            if s.in_sub_pool:
+                if s.shs >= params.shs_main and not math.isfinite(s.breadth):
                     s.evidence.append(
-                        f"{s.etf} SHS≥{config.SHS_MAIN_POOL} 但广度数据缺失 → "
+                        f"{s.etf} SHS≥{params.shs_main} 但广度数据缺失 → "
                         "不进主线池（白皮书：主线入池需广度≥60% 证据），降次主线")
+                elif s.shs >= params.shs_main:
+                    s.evidence.append("主线名额或广度条件未满足，保留次主线资格")
 
         context["sectors"] = results
         context["sector_map"] = {s.etf: s for s in results}
@@ -120,7 +122,7 @@ class SectorAgent(BaseAgent):
         c_flow = score_from_quantile(breadth / 100) if not math.isnan(breadth) else None
 
         s_flow = aggregate({"A": a_flow, "B": b_flow, "C": c_flow},
-                           {"A": 0.45, "B": 0.25, "C": 0.30})
+                           config.SHS_FLOW_AGG)
         evidence.append(
             f"{etf} 资金动量: RS斜率分位{q:.2f}→{a_flow}分; R20={r20:+.1%}→{b_flow}分; {breadth_note}→{c_flow}分 ⇒ S_flow={s_flow}"
         )

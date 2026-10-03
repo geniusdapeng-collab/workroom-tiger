@@ -67,15 +67,16 @@ def premarket_plan(result) -> str:
 
 
 def monitor_once(watch: list[dict], provider,
-                 triggered: set | None = None) -> list[dict]:
+                 triggered: set | None = None, *, quote_fetcher=None) -> list[dict]:
     """单轮巡检。triggered 用于跨轮去重（元素为 'TICKER:LEVEL'）。"""
     # v5.4：报价走降级链（yahoo 限流时 stooq/服务端通道接管），
     # 不再因单源失败静默丢警报；报价时效（实时/延时/收盘）随警报披露。
     from .pipeline import quote_with_fallback
+    fetch_quote = quote_fetcher if quote_fetcher is not None else quote_with_fallback
     triggered = triggered if triggered is not None else set()
     alerts: list[dict] = []
     for w in watch:
-        q = quote_with_fallback(provider, w["ticker"])
+        q = fetch_quote(provider, w["ticker"])
         if not q or not q.get("price"):
             continue
         if q.get("stale"):
@@ -108,12 +109,12 @@ def monitor_once(watch: list[dict], provider,
 
 
 def monitor_loop(watch: list[dict], provider, interval_s: int = 300,
-                 cycles: int = 12, on_alert=None) -> list[dict]:
+                 cycles: int = 12, on_alert=None, *, quote_fetcher=None) -> list[dict]:
     """定时轮询（默认 5 分钟 × 12 轮 = 1 小时）。on_alert 回调用于实时输出。"""
     triggered: set = set()
     all_alerts: list[dict] = []
     for i in range(cycles):
-        alerts = monitor_once(watch, provider, triggered)
+        alerts = monitor_once(watch, provider, triggered, quote_fetcher=quote_fetcher)
         for a in alerts:
             logger.info("[触发] %s", a["msg"])
             if on_alert:

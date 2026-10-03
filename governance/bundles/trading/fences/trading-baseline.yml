@@ -5,7 +5,7 @@
 # DSL 求值语义（对齐 hotel 围栏）：match 命中后求值 when 表达式（沙箱，禁任意代码）；
 #   命中 → 按 level 判定；block 优先于 review 优先于 auto（deny 优先并集求值）；
 #   写类动作无任何规则命中 → 按 default_level 处理；求值异常 → 按 block（宁可错杀）。
-# 生成记录：config 哈希 8aa83046b3da924a118ad96c76dd06dfde90db35334dd885acdbf6ad8c498040 · 基线规则 15 条 · 生成时间 2026-08-30T09:03:29+00:00
+# 生成记录：config 哈希 660aac662d69337330fe2ec16d32db27b4ca9149e333da68ff29f29f3d68cd73 · 基线规则 15 条 · 生成时间 2026-10-02T17:49:55+00:00
 version: trading-baseline/v1
 default_level: review
 rules:
@@ -63,7 +63,7 @@ rules:
       object_types: [signal, position]
       actions: [position.open]
     when: "params.channel == 'light' && (params.mrs < 5.5 || params.mrs >= 6.0 || params.tss < 7.8)"
-    note: 轻仓通道 MRS*∈[5.5,6.0) 且 TSS_final≥7.8
+    note: 轻仓通道 MRS*∈[5.5,6) 且 TSS_final≥7.8
 
   # source: config.MAX_CHAIN_RISK_PCT=0.03
   - rule_id: R-T5
@@ -98,7 +98,7 @@ rules:
     when: "context.market == 'cn' && params.same_day_buy == true"
     note: A股当日买入不得当日卖出
 
-  # source: config.CN_LIMIT_MAIN=0.1 / config.CN_LIMIT_STAR_CHINEXT=0.2 / config.CN_LIMIT_ST=0.05 + config.HK_VCM_SYMBOLS（80 只）
+  # source: config.CN_LIMIT_MAIN=0.1 / config.CN_LIMIT_STAR_CHINEXT=0.2 / config.CN_LIMIT_ST=0.1 + config.HK_VCM_SYMBOLS（80 只）
   - rule_id: R-T8
     name: 涨跌停/VCM 冷静期追单
     level: block
@@ -129,7 +129,7 @@ rules:
       object_types: [signal, position]
       actions: [position.open]
     when: "params.mrs < 4.0"
-    note: MRS*<4.0 禁止新开波段仓（除对冲白名单）——刻意不赚的钱
+    note: MRS*<4 禁止新开波段仓（除对冲白名单）——刻意不赚的钱
 
   # source: config.MRS_GATE_LIGHT=6.0
   - rule_id: R-T11
@@ -140,11 +140,11 @@ rules:
       object_types: [signal, position]
       actions: [position.open]
     when: "params.mrs < 6.0 && params.channel == 'standard'"
-    note: MRS*<6.0 只许轻仓试探，按标准仓放行即越线
+    note: MRS*<6 只许轻仓试探，按标准仓放行即越线
 
   # source: config.LIGHT_PROBE.size_ratio=(0.3, 0.4)
   - rule_id: R-T12
-    name: 轻仓通道仓位未×0.30–0.40
+    name: 轻仓通道仓位未×0.3–0.4
     level: block
     is_baseline: true
     match:
@@ -162,7 +162,7 @@ rules:
       object_types: [position]
       actions: [position.hold, position.adjust]
     when: "params.profit_r >= 2.0 && params.protect_active != true"
-    note: 浮盈 ≥2R 启动盈利保护（止损上移 +0.5R，白皮书§10）
+    note: 浮盈 ≥2R 启动盈利保护；保护动作以本轮内核记录为准（白皮书§10）
 
   # source: 白皮书§12 诚实失败纪律（新鲜度闸门；无 config 数值参数）
   - rule_id: R-T14

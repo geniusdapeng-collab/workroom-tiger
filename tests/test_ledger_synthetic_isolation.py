@@ -185,9 +185,10 @@ def test_live_ledger_gate_fails_closed(tmp_path):
 # ---------------------------------------------------------------- ⑤ 文案口径
 
 def test_philosophy_tab_uses_registry_count():
+    from trading_system.parameters import GateParams
     from trading_system.report_html import _philosophy_tab
 
-    html = _philosophy_tab()
+    html = _philosophy_tab(market_name="美股", params=GateParams())
     assert f"{len(STEP_REGISTRY)} 个注册环节" in html
     assert "17 个注册环节" not in html                    # 漂移口径不得复活
 

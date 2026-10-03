@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 PURGE_TARGETS = (
     os.path.join("cache", "search"),
     os.path.join("cache", "universe_full.json"),
+    os.path.join("cache", "universe_cn.json"),
+    os.path.join("cache", "universe_hk.json"),
     os.path.join("cache", "frames_*"),
     # v6.3 S3：可信度/交叉验证缓存的指定落盘位置（当前实现为内存态、随进程
     # 结束消亡；一旦未来落盘必须放在本目录，零基线每轮必清，绝不跨轮复用）
@@ -54,40 +56,99 @@ WHITELIST = (
 )
 
 
-def purge_run_state(base_dir: str = ".") -> dict:
-    """清除上一轮运行残留。返回 {path: "removed"|"absent"|"kept(whitelist)"}。
+# Approval evidence and options samples are persistent accounting artifacts.
+# Their subtrees are preserved even if a caller put them inside a cache target.
+WHITELIST_DIRS = ("review_proposals", "review_executions", "options_hist")
 
-    只清除 PURGE_TARGETS 列出的路径；白名单内文件即使同名也跳过。
-    每轮生产运行（daily/premarket）在 pipeline 启动前调用。
+
+def run_directory(base_dir: str | Path) -> Path:
+    """Validate the selected namespace without creating or following a symlink."""
+    root = Path(os.path.abspath(base_dir))
+    for component in (root, *root.parents):
+        if component.is_symlink():
+            raise ValueError(f"Run directory cannot contain a symlink: {component}")
+    if root.exists() and not root.is_dir():
+        raise ValueError(f"Run directory must be a directory: {root}")
+    return root
+
+
+def run_path(base_dir: str | Path, *parts: str) -> Path:
+    """Resolve a path owned by one run, rejecting traversal and symlink aliases."""
+    root = run_directory(base_dir)
+    path = Path(os.path.abspath(root.joinpath(*parts)))
+    if not path.is_relative_to(root):
+        raise ValueError(f"Path escapes the selected run directory: {path}")
+    for component in (path, *path.parents):
+        if component.is_symlink():
+            raise ValueError(f"Run path cannot contain a symlink: {component}")
+        if component == root:
+            break
+    return path
+
+
+def _protected(path: Path) -> bool:
+    return (path.name in WHITELIST or path.name in WHITELIST_DIRS
+            or path.name.endswith(".lock")
+            and path.name[:-5] in (*WHITELIST, ".review-state"))
+
+
+def purge_run_state(base_dir: str = ".") -> dict:
+    """Remove volatile inputs in one namespace, preserving accounting evidence.
+
+    Validate every target before deletion. Unexpected symlinks or I/O failures
+    are explicit failures; a failed deletion must never be reported as success.
     """
-    report: dict[str, str] = {}
-    import glob as _glob
-    for rel in PURGE_TARGETS:
-        path = os.path.join(base_dir, rel)
-        name = os.path.basename(path)
-        if name in WHITELIST:
-            report[rel] = "kept(whitelist)"
-            continue
-        if "*" in rel:                      # 通配目标（如 cache/frames_*）
-            matches = _glob.glob(path)
-            for m in matches:
-                if os.path.isdir(m):
-                    shutil.rmtree(m, ignore_errors=True)
-                elif os.path.isfile(m):
-                    os.remove(m)
-            if matches:
-                logger.info("零基线: 清除 %s（%d 个匹配）", rel, len(matches))
-            report[rel] = f"removed({len(matches)} files)" if matches else "absent"
-            continue
-        if os.path.isdir(path):
-            n = len(os.listdir(path))
-            shutil.rmtree(path, ignore_errors=True)
-            report[rel] = f"removed({n} files)"
-            logger.info("零基线: 清除 %s（%d 个文件）", rel, n)
-        elif os.path.isfile(path):
-            os.remove(path)
-            report[rel] = "removed(1 files)"
-            logger.info("零基线: 清除 %s", rel)
+    root = run_directory(base_dir)
+    targets = []
+    for relative in PURGE_TARGETS:
+        if "*" in relative:
+            parent, pattern = Path(relative).parent, Path(relative).name
+            directory = run_path(root, str(parent))
+            matches = sorted(directory.glob(pattern)) if directory.exists() else []
         else:
-            report[rel] = "absent"
+            target = run_path(root, relative)
+            matches = [target] if target.exists() else []
+        targets.append((relative, matches))
+
+    def preflight(path):
+        if _protected(path):
+            return
+        run_path(root, str(path.relative_to(root)))
+        if path.is_dir():
+            for child in sorted(path.iterdir()):
+                preflight(child)
+
+    for _, paths in targets:
+        for path in paths:
+            preflight(path)
+
+    def remove(path):
+        if _protected(path):
+            return 0, True
+        run_path(root, str(path.relative_to(root)))
+        if path.is_dir():
+            removed, kept = 0, False
+            for child in sorted(path.iterdir()):
+                count, preserved = remove(child)
+                removed += count
+                kept = kept or preserved
+            if not kept:
+                path.rmdir()
+            return removed, kept
+        path.unlink()
+        return 1, False
+
+    report = {}
+    for relative, paths in targets:
+        removed, kept = 0, False
+        for path in paths:
+            count, preserved = remove(path)
+            removed += count
+            kept = kept or preserved
+        if kept:
+            status = f"removed({removed} files); kept(whitelist)"
+        else:
+            status = f"removed({removed} files)" if paths else "absent"
+        report[relative] = status
+        logger.info("Zero baseline: %s %s", relative, status)
     return report

@@ -29,16 +29,20 @@ class _FakeStooq:
     name = "stooq"
 
     def ohlcv(self, ticker, days=400):
-        return pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+        index = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=3)
+        return pd.DataFrame({"Close": [100.0, 101.0, 102.0]}, index=index)
 
     def tnx_yield(self, days=400):
-        return pd.Series([4.1, 4.2])
+        index = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=2)
+        return pd.Series([4.1, 4.2], index=index)
 
     def vix(self, days=400):
-        return pd.Series([15.0, 16.0])
+        index = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=2)
+        return pd.Series([15.0, 16.0], index=index)
 
     def vix9d(self, days=400):
-        return pd.Series([14.0, 15.0])
+        index = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=2)
+        return pd.Series([14.0, 15.0], index=index)
 
 
 def test_single_fallback_to_stooq(monkeypatch):

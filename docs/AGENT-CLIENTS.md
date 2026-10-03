@@ -4,6 +4,8 @@
 > 先 `list` 看到能力 → 再 `invoke` 读一条真实状态 → 最后把 stdio MCP 挂进客户端。
 > 本仓 `bundle = trading`，能力前缀 `trading`。
 
+Tiger 研究执行入口见 [TIGER-AGENT-API.md](TIGER-AGENT-API.md)：实际内核六模式、四个员工、逐产物 SHA 回执与受控工作区。下面的公共 `workloom-agent` 入口继续提供只读/预览能力。
+
 ---
 
 ## 1. 五分钟接入（四条命令，均可直接复制）
@@ -21,7 +23,7 @@ node scripts/workloom-agent.mjs describe trading.repo.status
 printf '%s' '{}' | node scripts/workloom-agent.mjs invoke trading.repo.status --input-file -
 
 # ④ MCP 冒烟（stdio JSON-RPC：initialize + tools/list）
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n' \
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n' \
   | node scripts/workloom-agent-mcp.mjs
 ```
 
@@ -40,12 +42,11 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 | `trading.repo.status` | 只读 | 本仓自述：product.manifest 摘要 + bundles/docs/脚本计数 |
 | `trading.repo.docs` | 只读 | `docs/*.md` 索引（文件名 + 一级标题），给 Agent 找文档 |
 | `trading.bundle.summary` | 只读 | 默认行业包概览：skills / fences / pipelines / presets 计数 |
-| `trading.repo.readiness` | 预览 | 接入就绪度：Node、依赖、运行时资产、密钥文件、MCP 入口、dsh-gate pin |
+| `trading.repo.readiness` | 预览 | 接入就绪度：治理目录的 Node、依赖、运行时资产、可选模型环境存在性、MCP 入口、dsh-gate pin；不读密钥文件 |
 
 
 
-> 想要"执行类"能力（写数据、发布、出片）？按基座纪律：**必须走服务端过程 + `idempotencyKey` + 围栏/审批**，
-> 且本地模块不允许 execute（loader 硬约束）。本仓当前只登记只读/预览能力。
+公共 loader 的本地模块不允许 execute（硬约束）；治理写动作继续走服务端过程、幂等与围栏/审批。Tiger 自有研究 API 使用独立受控工作区，只执行研究/模拟，不批准调参、不写券商订单；六模式与四员工的实际范围见 [执行合同](TIGER-AGENT-API.md)。
 
 ---
 
@@ -77,9 +78,7 @@ WORKLOOM_PRODUCT_ROOT = "/abs/path/to/workroom-tiger"
 # WORKLOOM_C_TOKEN = "<C 端令牌>"                             # 仅 C 端能力，与 B 端令牌不可互换
 ```
 
-> **核实状态（如实标注）**：`[mcp_servers.<name>]` + `command/args/cwd/env/startup_timeout_sec` 的写法取自
-> 本机正在使用的 Codex 配置实例；撰写时 `learn.chatgpt.com` / `developers.openai.com` 直连超时或 403，
-> 未能对照官方文档二次核实——落地前请按当前 Codex 版本官方文档确认键名。
+`[mcp_servers.<name>]`、command/args/cwd/env/startup_timeout_sec 已对照 [OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp)。运行研究内核时还应设置工具超时，完整例子见 [Tiger 研究 API](TIGER-AGENT-API.md)。
 
 ---
 

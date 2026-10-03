@@ -17,6 +17,7 @@ import pandas as pd
 
 from .. import config
 from ..data_models import DimensionScore, MRSResult
+from ..parameters import risk_limits_for, tighten_risk_limits
 from ..indicators import (
     aggregate, breadth_above_sma, last, pct_change_n,
     score_breadth200, score_drawdown_from_high, score_from_quantile,
@@ -33,6 +34,9 @@ class MRSAgent(BaseAgent):
 
     def execute(self, context: dict) -> MRSResult:
         p = self.provider
+        params = tighten_risk_limits(context.get("gate_params"), context.get("risk_limits"))
+        context["gate_params"] = params
+        context["risk_limits"] = risk_limits_for(params)
 
         # S4 多市场：基准组（指数/利率/波动率）由市场规格映射；CN/HK 免费源
         # 不可得维度为 None → 该维记缺失走"剔除再归一化"（D2，不钉中性分）。
@@ -64,9 +68,9 @@ class MRSAgent(BaseAgent):
         mrs_star = round(mrs_raw * k, 2)
 
         # 仓位上限（白皮书附录 B.2 档位表单一口径）
-        cap = self._position_cap(mrs_star)
+        cap = tuple(min(value, params.gross_cap) for value in self._position_cap(mrs_star))
         regime = self._regime(mrs_star)
-        allow = mrs_star >= config.MRS_GATE_BLOCK
+        allow = mrs_star >= params.mrs_block
 
         # ---- v6.0 三重现实折扣的机器执行（白皮书§4.5/§10.4，此前仅有文档）----
         shock, shock_reason = self._detect_shock(spy, vix, labels["index"], labels["vol"])

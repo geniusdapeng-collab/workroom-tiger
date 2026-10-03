@@ -2,10 +2,11 @@
 
 ① 生成确定性：同 config 同 YAML（规则语义逐条一致）；
 ② config 改动 → --check 报漂移；
-③ 16 条基线规则全覆盖且 level=block，且每条带 config 来源注释（无手写阈值）。
+③ 16 条基线含 paper 自治 auto 1 条与 block 15 条，每条带来源注释（无手写阈值）。
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -36,7 +37,7 @@ def test_generation_deterministic():
 
 
 def test_baseline_rules_full_coverage_block():
-    """16 条基线规则全覆盖、全部 level=block、每条带 source 注释。"""
+    """paper 自治窗口与 15 条阻断规则均在基线，每条带 source 注释。"""
     gen = _load_gen()
     rules = gen.build_rules()
     baseline = [r for r in rules if r["is_baseline"]]
@@ -76,7 +77,53 @@ def test_check_detects_drift_on_config_change(monkeypatch, tmp_path):
     fence = tmp_path / "trading-baseline.yml"
     fence.write_text(text, encoding="utf-8")
     monkeypatch.setattr(gen, "FENCE_PATH", fence)
+    defaults_path = tmp_path / "risk-defaults.json"
+    defaults_path.write_text(gen.render_risk_defaults(), encoding="utf-8")
+    monkeypatch.setattr(gen, "RISK_DEFAULTS_PATH", defaults_path)
     assert gen.check() == 0          # 无漂移
     # 改 config 阈值（单票上限 20%→15%）→ 必须报漂移
     monkeypatch.setattr(config, "MAX_SINGLE_POSITION_PCT", 0.15)
     assert gen.check() == 1
+
+
+def test_customer_seed_risk_defaults_derive_from_kernel(monkeypatch):
+    """客户新档案与围栏读取同一内核阈值；改配置即改变派生资产。"""
+    gen = _load_gen()
+    from trading_system import config
+    monkeypatch.setattr(config, "RISK_R_PCT", 0.003)
+    monkeypatch.setattr(config, "MAX_SINGLE_POSITION_PCT", 0.12)
+    monkeypatch.setattr(config, "MRS_POSITION_CAP", [(0, 10, "test", 0.55)])
+    defaults = gen.build_risk_defaults()
+    assert defaults["schemaVersion"] == "trading.risk-defaults/v1"
+    assert defaults["account"]["risk_per_trade_pct"] == 0.003
+    assert defaults["account"]["max_position_per_ticker_pct"] == 0.12
+    assert defaults["account"]["gross_cap_pct"] == 0.55
+    assert defaults["source"]["path"] == "trading_system/config.py"
+    assert len(defaults["source"]["sha256"]) == 64
+
+
+def test_risk_defaults_check_catches_independent_asset_tamper(monkeypatch, tmp_path):
+    """围栏未变时，客户默认阈值漂移也要阻断生成门禁。"""
+    gen = _load_gen()
+    fence = tmp_path / "trading-baseline.yml"
+    defaults_path = tmp_path / "risk-defaults.json"
+    fence.write_text(gen.render_yaml(gen.build_rules(), "H", "T"), encoding="utf-8")
+    defaults = gen.build_risk_defaults()
+    defaults_path.write_text(json.dumps(defaults), encoding="utf-8")
+    monkeypatch.setattr(gen, "FENCE_PATH", fence)
+    monkeypatch.setattr(gen, "RISK_DEFAULTS_PATH", defaults_path)
+    assert gen.check() == 0
+    defaults["account"]["risk_per_trade_pct"] = 0.99
+    defaults_path.write_text(json.dumps(defaults), encoding="utf-8")
+    assert gen.check() == 1
+
+
+def test_risk_defaults_reject_nonfinite_or_permissive_kernel_values(monkeypatch):
+    """配置破损不能发出看似有效的 JSON 默认风控。"""
+    import pytest
+    gen = _load_gen()
+    from trading_system import config
+    for invalid in (float("nan"), float("inf"), 0, -1, 1.01):
+        monkeypatch.setattr(config, "RISK_R_PCT", invalid)
+        with pytest.raises(ValueError, match="risk_per_trade_pct"):
+            gen.build_risk_defaults()

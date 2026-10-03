@@ -15,7 +15,10 @@ test("桌面交易种子满足游客进场的工作区、成员与唯一 Bundle 
   assert.match(seed, /bundle_id, is_example/u);
   assert.match(seed, /MEM-T001/u);
   assert.match(seed, /INSERT INTO bundle_installs/u);
-  assert.match(seed, /bundle_id<>'trading' AND status='active'/u);
-  assert.match(seed, /'trading',[\s\S]*'active'/u);
-  assert.match(seed, /ON CONFLICT \(id\) DO UPDATE SET bundle_id='trading', status='active'/u);
+  assert.doesNotMatch(seed, /SET status='inactive'/u);
+  assert.doesNotMatch(seed, /DO UPDATE SET bundle_id='trading', status='active'/u);
+  const defaults = JSON.parse(readFileSync(resolve(governanceRoot, "bundles/trading/schemas/risk-defaults.json"), "utf8"));
+  assert.equal(defaults.schemaVersion, "trading.risk-defaults/v1");
+  assert.equal(defaults.account.stage, "paper");
+  assert.ok(defaults.account.risk_per_trade_pct > 0 && defaults.account.risk_per_trade_pct <= 1);
 });

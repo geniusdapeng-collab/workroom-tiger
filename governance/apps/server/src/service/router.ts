@@ -8,19 +8,30 @@
  * 全部写操作落五元事件；LLM 调用走 model-router（llm.ts，缺 key 自动降级）。
  */
 import { z } from "zod";
+import type pg from "pg";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router, scopeOf, writeProcedure } from "../trpc/context.js";
+import { GESTURE_WEIGHT } from "@workloom/shared";
+import {
+  actionProcedure,
+  navigationPermissionProcedure,
+  navigationPermissionWriteProcedure,
+  protectedProcedure,
+  router,
+  scopeOf,
+  writeProcedure,
+} from "../trpc/context.js";
 import {
   createCollectionOn, listCollections, listDocuments, setDocumentStatusOn, upsertDocumentOn,
   registerSiteSourceOn, crawlAndStructure, diffScan, searchKB,
 } from "./kb.js";
-import { assignTicketOn, advanceTicketOn, completeTicketOn, listTickets, slaScanOn, ticketTimeline } from "./ticket.js";
+import { ServiceHttpError, assignTicketOn, advanceTicketOn, completeTicketOn, listTickets, slaScanOn, ticketTimeline } from "./ticket.js";
 import { pushMessage } from "./channels.js";
 import { appendEventOn, serviceTx, svcQuery } from "./events.js";
 import { llmCall } from "./llm.js";
 import { ensureServiceSchema } from "./store.js";
+import { memberAccessGrants } from "./access-authority.js";
 import {
-  activeInstall, clearBundle, clearPreview, generateStaffing,
+  activeInstall, clearBundle, clearPreview, confirmAndAssembleStaffing, customizationStatus, generateStaffing,
   onboardingExam, rollbackSnapshot,
 } from "./bundle.js";
 import {
@@ -30,8 +41,9 @@ import {
 import {
   getSettings as evalGetSettings, latestReport as evalLatestReport,
   listAnswers as evalListAnswers, listExams as evalListExams,
+  listCandidateResults as evalListCandidateResults,
   listQuestions as evalListQuestions, runExam as evalRunExam,
-  seedQuestionsIfEmpty as evalSeedQuestions, setPromotionGate as evalSetPromotionGate,
+  seedQuestionsIfEmpty as evalSeedQuestions, setPromotionGateOn as evalSetPromotionGateOn,
 } from "./eval.js";
 import {
   listTools as devListTools, refreshTools as devRefreshTools,
@@ -48,12 +60,123 @@ import {
   remember as secRemember, forget as secForget, chat as secChat,
 } from "./secretary.js";
 
+/**
+ * MC-112：服务层语义错误映射。
+ *
+ * 服务层用 ServiceHttpError 表达 404/409/503 等**契约**语义（与 C 端网关 fail() 同一口径），
+ * 但 tRPC 过程里直接抛出会被兜成 INTERNAL_SERVER_ERROR：客户端只看到「服务内部错误（已记录，ref=…）」
+ * （MC-206 脱敏之后连原文都拿不到），把「工单状态机非法迁移」这类可判定语义伪装成服务故障。
+ * 这里在写过程外层统一收敛成对应的 tRPC 码；非语义错误原样抛出（5xx 仍走 errorFormatter 脱敏 + ref）。
+ */
+function toTrpcServiceError(err: unknown): never {
+  if (err instanceof ServiceHttpError) {
+    const code =
+      err.status === 403 ? "FORBIDDEN" :
+      err.status === 404 ? "NOT_FOUND" :
+      err.status === 409 ? "CONFLICT" :
+      err.status === 503 ? "SERVICE_UNAVAILABLE" :
+      err.status >= 500 ? "INTERNAL_SERVER_ERROR" : "BAD_REQUEST";
+    throw new TRPCError({ code, message: err.message });
+  }
+  throw err;
+}
+
+/**
+ * tRPC v11 的中间件不会收到下游抛出的异常（callRecursive 把异常收敛成 `{ok:false,error}` 结果），
+ * 因此必须检查 `next()` 的返回值，从 `error.cause` 取回原始错误再映射语义码。
+ */
+function remapServiceErrorResult(result: { ok: boolean; error?: unknown }): void {
+  if (result.ok) return;
+  const cause = (result.error as { cause?: unknown } | null | undefined)?.cause;
+  if (cause) toTrpcServiceError(cause); // 命中 ServiceHttpError 即抛语义码；其余错误原样放行
+}
+
+/** 写过程基座：workspace.write 守卫 + 服务层语义错误映射 */
+const svcWriteProcedure = writeProcedure.use(async ({ next }) => {
+  const result = await next();
+  remapServiceErrorResult(result);
+  return result;
+});
+
+/** 审批语义写过程基座：approval.decide 守卫 + 服务层语义错误映射（知识库发布 = 逐条人审动作） */
+const svcApprovalProcedure = actionProcedure("approval.decide").use(async ({ next }) => {
+  const result = await next();
+  remapServiceErrorResult(result);
+  return result;
+});
+
+/**
+ * 知识文档「发布」留痕（MC-110 单一实现点）：文档置 active + kb.publish 五元事件 +
+ * **已裁决**审批行（approved + decided_by/decided_at），三写同一 COMMIT（调用方自带 serviceTx）。
+ *
+ * 修复前的断面（真机实测）：先把文档置 active，再 INSERT 一条 status='pending' 的 kb.publish 审批——
+ * 审批台里出现「动作已执行却仍在待办」的幽灵条目，且在该行上点驳回不回滚任何东西
+ * （approval=rejected 而文档仍 active、检索仍命中），审批台/知识库/客户问答三面互相矛盾。
+ * 现在：待审区的「批准生效」就是**逐条人审动作本身**（INV-4：发布必须人审），审批行按既有
+ * 三手势口径直接落 approved（gesture/decided_by/decided_at 齐备）——审批台显示为一条带决策人的
+ * 完成记录，而不是待办；撤回走知识库「停用」（同样写事件留痕）。
+ * 返回 null 表示文档不存在或已是 active（调用方按幂等处理）。
+ */
+async function publishKbDocumentInTx(
+  client: pg.PoolClient,
+  sc: { tenantId: string; workspaceId: string },
+  actor: { memberNo: string },
+  documentId: string,
+): Promise<{ eventId: string; approvalId: string; deduped: boolean } | null> {
+  const doc = await client.query<{ title: string; version: number; hash: string; status: string }>(
+    `SELECT title,version,hash,status FROM kb_documents
+      WHERE workspace_id=$1 AND id=$2 FOR UPDATE`,
+    [sc.workspaceId, documentId],
+  );
+  const row = doc.rows[0];
+  if (!row) return null;
+  if (!/^[a-f0-9]{64}$/.test(row.hash)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "文档缺少有效正文摘要，不能沿用旧审批发布" });
+  if (row.status === "active") {
+    const prior = await client.query<{ event_id: string; approval_id: string }>(
+      `SELECT e.event_id,a.approval_id FROM biz_events e
+        JOIN approvals a ON a.event_id=e.event_id AND a.workspace_id=e.workspace_id
+        WHERE e.workspace_id=$1 AND e.payload->'decision'->>'action'='kb.publish'
+          AND e.payload->'object'->>'id'=$2 AND a.status IN ('approved','edited')
+          AND e.payload->'decision'->'after'->>'version'=$3
+          AND e.payload->'decision'->'after'->>'content_sha256'=$4
+        ORDER BY e.seq DESC LIMIT 1`, [sc.workspaceId, documentId, String(row.version), row.hash]);
+    if (prior.rows[0]) return { eventId: prior.rows[0].event_id, approvalId: prior.rows[0].approval_id, deduped: true };
+  }
+  await setDocumentStatusOn(client, { workspaceId: sc.workspaceId, documentId, status: "active" });
+  const ev = await appendEventOn(client, sc, { id: actor.memberNo, type: "human" }, {
+    objectType: "kb_document", objectId: documentId, action: "kb.publish",
+    after: { documentId, title: row.title, version: row.version, content_sha256: row.hash, status: "active", approved_by: actor.memberNo },
+    basis: [
+      "待审区逐条人审后发布：文档进入客户问答检索范围（INV-4）",
+      "审批记录与文档生效同一 COMMIT 落库（MC-110：不再产生「已执行却待办」的幽灵条目）",
+    ],
+  });
+  const approvalId = `apr-${ev.eventId.toLowerCase()}`;
+  await client.query(
+    `INSERT INTO approvals (approval_id, tenant_id, workspace_id, event_id, channel, status, gesture, decided_by, decided_at, snapshot)
+     VALUES ($1,$2,$3,$4,'inapp','approved',$5,$6,now(),$7)
+     ON CONFLICT (event_id, channel) DO NOTHING`,
+    [
+      approvalId, sc.tenantId, sc.workspaceId, ev.eventId,
+      JSON.stringify({ type: "approve", weight: GESTURE_WEIGHT.approve, reason_text: "待审区「批准生效」（逐条人审）" }),
+      actor.memberNo,
+      JSON.stringify({
+        after: { documentId, version: row.version, content_sha256: row.hash, fence_action: "kb.publish" },
+        post_hoc: true,
+        high_risk: false,
+        basis: "批准动作的当场留痕（不可回滚）；撤回请走知识库「停用」，同样写事件留痕（MC-110）",
+      }),
+    ],
+  );
+  return { eventId: ev.eventId, approvalId, deduped: false };
+}
+
 const kbRouter = router({
   listCollections: protectedProcedure.query(async ({ ctx }) => {
     return { collections: await listCollections({ workspaceId: scopeOf(ctx.identity).workspaceId }) };
   }),
 
-  createCollection: writeProcedure
+  createCollection: svcWriteProcedure
     .input(z.object({ name: z.string().min(1).max(80), description: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
@@ -74,7 +197,7 @@ const kbRouter = router({
       return { documents: await listDocuments({ workspaceId: scopeOf(ctx.identity).workspaceId, collectionId: input?.collectionId }) };
     }),
 
-  upsertDocument: writeProcedure
+  upsertDocument: svcWriteProcedure
     .input(z.object({
       collectionId: z.string().min(1),
       title: z.string().min(1).max(200),
@@ -94,21 +217,36 @@ const kbRouter = router({
       });
     }),
 
-  setStatus: writeProcedure
+  setStatus: svcWriteProcedure
     .input(z.object({ documentId: z.string(), status: z.enum(["active", "pending_review", "disabled"]) }))
+    .use(({ ctx, input, next }) => {
+      const grants = memberAccessGrants({ role: ctx.identity.role, plan: ctx.identity.plan,
+        guest: ctx.identity.memberNo === "GUEST", permissions: ctx.memberPermissions });
+      if (input.status === "active" && !grants.actionPermissions.includes("approval.decide")) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "知识文档启用需要逐条人审权限" });
+      }
+      return next();
+    })
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       return serviceTx(scope.workspaceId, async (client, sc) => {
+        if (input.status === "active") {
+          const r = await publishKbDocumentInTx(client, sc, { memberNo: ctx.identity.memberNo }, input.documentId);
+          if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "文档不存在或无权访问" });
+          return { ok: true, status: "active", ...r };
+        }
+        const exists = await client.query("SELECT 1 FROM kb_documents WHERE workspace_id=$1 AND id=$2 FOR UPDATE", [scope.workspaceId, input.documentId]);
+        if (!exists.rowCount) throw new TRPCError({ code: "NOT_FOUND", message: "文档不存在或无权访问" });
         await setDocumentStatusOn(client, { workspaceId: scope.workspaceId, documentId: input.documentId, status: input.status });
         await appendEventOn(client, sc, { id: ctx.identity.memberNo, type: "human" }, {
           objectType: "kb_document", objectId: input.documentId, action: "kb.document.status",
           after: { status: input.status },
         });
-        return { ok: true };
+        return { ok: true, status: input.status, eventId: null, approvalId: null, deduped: false };
       });
     }),
 
-  registerSite: writeProcedure
+  registerSite: svcWriteProcedure
     .input(z.object({ url: z.string().url() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
@@ -122,7 +260,7 @@ const kbRouter = router({
     }),
 
   /** 立即抓取（LLM 经 model-router 注入；缺 key 降级直存，degraded:true） */
-  crawlNow: writeProcedure
+  crawlNow: svcWriteProcedure
     .input(z.object({ sourceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
@@ -136,7 +274,7 @@ const kbRouter = router({
       return r;
     }),
 
-  diffScan: writeProcedure
+  diffScan: svcWriteProcedure
     .input(z.object({ sourceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
@@ -169,31 +307,30 @@ const kbRouter = router({
     return { documents: rows };
   }),
 
-  /** 批准生效：文档状态 + 五元事件 + approvals 行 三写同一 COMMIT（围栏动作 'kb.publish'，审批台可见） */
-  approveDocument: writeProcedure
+  /**
+   * 批准生效（MC-110）：文档状态 + 五元事件 + approvals 行 三写同一 COMMIT（围栏动作 'kb.publish'，审批台可见）。
+   * 审批行直接落 approved（逐条人审的当场留痕），不再产生「已执行却待办」的幽灵条目；重复点击幂等。
+   */
+  approveDocument: svcApprovalProcedure
     .input(z.object({ documentId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       return serviceTx(scope.workspaceId, async (client, sc) => {
-        const doc = await client.query(
-          `UPDATE kb_documents SET status='active'
-           WHERE workspace_id=$1 AND id=$2 RETURNING title, version`,
+        const cur = await client.query<{ status: string }>(
+          `SELECT status FROM kb_documents WHERE workspace_id=$1 AND id=$2`,
           [scope.workspaceId, input.documentId],
         );
-        if (!doc.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: `文档不存在：${input.documentId}` });
-        const ev = await appendEventOn(client, sc, { id: ctx.identity.memberNo, type: "human" }, {
-          objectType: "kb_document", objectId: input.documentId, action: "kb.publish",
-          after: { title: (doc.rows[0] as Record<string, unknown>).title, version: (doc.rows[0] as Record<string, unknown>).version, status: "active" },
-        });
-        // 联动 approvals 审批台（approvals INSERT 范式：UNIQUE(event_id, channel) 冲突丢弃，L5.3）
-        await client.query(
-          `INSERT INTO approvals (approval_id, tenant_id, workspace_id, event_id, channel, status, snapshot)
-           VALUES ($1,$2,$3,$4,'inapp','pending',$5)
-           ON CONFLICT (event_id, channel) DO NOTHING`,
-          [`apr-${ev.eventId.toLowerCase()}`, sc.tenantId, sc.workspaceId, ev.eventId,
-           JSON.stringify({ after: { documentId: input.documentId, fence_action: "kb.publish" }, high_risk: false })],
-        );
-        return { ok: true, eventId: ev.eventId };
+        const row = cur.rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `文档不存在：${input.documentId}` });
+        if (row.status !== "pending_review" && row.status !== "active") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `文档当前为「${row.status}」，不在待审状态——请在知识库文档抽屉中直接启用/停用`,
+          });
+        }
+        const r = await publishKbDocumentInTx(client, sc, { memberNo: ctx.identity.memberNo }, input.documentId);
+        if (!r) throw new TRPCError({ code: "NOT_FOUND", message: `文档不存在：${input.documentId}` });
+        return { ok: true, status: "active", ...r };
       });
     }),
 });
@@ -211,22 +348,28 @@ const ticketsRouter = router({
       return { timeline: await ticketTimeline({ workspaceId: scopeOf(ctx.identity).workspaceId, ticketId: input.ticketId }) };
     }),
 
-  assign: writeProcedure
+  assign: svcWriteProcedure
     .input(z.object({ ticketId: z.string(), dept: z.string().optional(), assignee: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       const t = await serviceTx(scope.workspaceId, async (client, sc) => {
-        const t2 = await assignTicketOn(client, { workspaceId: scope.workspaceId, ...input });
-        await appendEventOn(client, sc, { id: ctx.identity.memberNo, type: "human" }, {
-          objectType: "ticket", objectId: t2.id, action: "service.ticket.assign",
-          after: { dept: t2.dept, assignee: t2.assignee },
-        });
-        return t2;
+        const { ticket, changed } = await assignTicketOn(client, { workspaceId: scope.workspaceId, ...input });
+        /**
+         * MC-112：同值重复派单是幂等 no-op（`changed:false`）——不再往事件账本写一条语义相同的人工动作；
+         * 真正的改派（部门/受理人变化）仍逐条留痕，供工单时间线与审计下钻。
+         */
+        if (changed) {
+          await appendEventOn(client, sc, { id: ctx.identity.memberNo, type: "human" }, {
+            objectType: "ticket", objectId: ticket.id, action: "service.ticket.assign",
+            after: { dept: ticket.dept, assignee: ticket.assignee },
+          });
+        }
+        return ticket;
       });
       return { ticket: t };
     }),
 
-  advance: writeProcedure
+  advance: svcWriteProcedure
     .input(z.object({
       ticketId: z.string(), action: z.string().min(1).max(40),
       detail: z.record(z.string(), z.unknown()).optional(),
@@ -248,7 +391,7 @@ const ticketsRouter = router({
     }),
 
   /** 完结：结果通知 C 端（pushMessage；无真实通道 mock:true） */
-  complete: writeProcedure
+  complete: svcWriteProcedure
     .input(z.object({ ticketId: z.string(), result: z.string().min(1).max(1000) }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
@@ -273,7 +416,7 @@ const ticketsRouter = router({
     }),
 
   /** SLA 扫描（超时升级；演示手动触发，生产挂定时器） */
-  slaScan: writeProcedure.mutation(async ({ ctx }) => {
+  slaScan: svcWriteProcedure.mutation(async ({ ctx }) => {
     const scope = scopeOf(ctx.identity);
     const r = await serviceTx(scope.workspaceId, async (client, sc) => {
       const r2 = await slaScanOn(client, { workspaceId: scope.workspaceId });
@@ -363,13 +506,20 @@ const evalRouter = router({
       const ws = scopeOf(ctx.identity).workspaceId;
       return { answers: await evalListAnswers(ws, input.examId) };
     }),
+  /** 定制上岗考逐候选答卷（岗位、四维成绩、技能/工具真实安装状态） */
+  candidateResults: protectedProcedure
+    .input(z.object({ examId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const ws = scopeOf(ctx.identity).workspaceId;
+      return { candidates: await evalListCandidateResults(ws, input.examId) };
+    }),
   /** 题库（含结构×维度双标签） */
   listQuestions: protectedProcedure.query(async ({ ctx }) => {
     const ws = scopeOf(ctx.identity).workspaceId;
     return { questions: await evalListQuestions(ws) };
   }),
   /** 开考（手动/变更触发；P0 同步执行） */
-  runExam: writeProcedure
+  runExam: actionProcedure("exam.run")
     .input(z.object({
       examType: z.enum(["on-change", "weekly", "onboarding"]).default("weekly"),
       subjectScope: z.array(z.string()).optional(),
@@ -380,7 +530,7 @@ const evalRouter = router({
       return { exam: r.exam, wrongCount: r.answers.filter((a) => !a.passed).length };
     }),
   /** 播种示例题库（空库时） */
-  seedQuestions: writeProcedure.mutation(async ({ ctx }) => {
+  seedQuestions: actionProcedure("exam.run").mutation(async ({ ctx }) => {
     const ws = scopeOf(ctx.identity).workspaceId;
     return { seeded: await evalSeedQuestions(ws) };
   }),
@@ -390,12 +540,12 @@ const evalRouter = router({
     return { settings: await evalGetSettings(ws) };
   }),
   /** 卡晋升授权开关（默认关；开启即留痕——授权动作写事件库） */
-  setPromotionGate: writeProcedure
+  setPromotionGate: actionProcedure("exam.run")
     .input(z.object({ enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       const settings = await serviceTx(scope.workspaceId, async (client, sc) => {
-        const s = await evalSetPromotionGate(scope.workspaceId, input.enabled);
+        const s = await evalSetPromotionGateOn(client, scope.workspaceId, input.enabled);
         await appendEventOn(client, sc, { id: ctx.identity.memberNo, type: "human" }, {
           objectType: "eval_settings", objectId: scope.workspaceId,
           action: input.enabled ? "eval.promotion_gate.enable" : "eval.promotion_gate.disable",
@@ -413,7 +563,7 @@ const evalRouter = router({
  */
 const aipmRouter = router({
   /** 仓库脉搏：真实 GitHub API（repos 如 ["org/repo"]） */
-  githubPulse: protectedProcedure
+  githubPulse: writeProcedure
     .input(z.object({ repos: z.array(z.string()).min(1).max(8) }))
     .mutation(async ({ ctx, input }) => {
       return aipmGithubPulse(scopeOf(ctx.identity).workspaceId, input.repos);
@@ -442,35 +592,108 @@ const aipmRouter = router({
  * 行业装配机制（V4 §3/§6/§7）：清空预览/一键清空/快照回滚/编制生成/上岗考
  * 全部写操作五元事件留痕；清空红线：快照未成功禁止执行。
  */
+// Bundle 服务的旧实现用普通 Error 表达门禁语义。只允许这些完整常量穿过
+// 客户端边界；DB/SDK 未知错误既不回传正文，也不附带原始 cause。
+const safeStaffingFailureMessages = new Set([
+  "编制草案不存在或不属于当前工作区",
+  "重复确认的版本或哈希与已装配记录不一致",
+  "当前是模拟骨架预览，不能装配上岗；请先接入真实模型并重新生成",
+  "草案内容或哈希已变化，请重新生成并再次确认",
+  "当前已有待考装配，请先完成现有流程或重新生成草案",
+  "待考的定制装配不存在",
+  "页面中的装配哈希已过期，请刷新后重试",
+  "逐岗位上岗考正在进行，请等待完成；超过 10 分钟后可安全重试",
+  "候选装配缺少草案、版本或哈希，已拒绝继续",
+  "候选装配清单哈希不一致，可能已被修改，已拒绝激活",
+  "候选装配缺少员工或围栏资产",
+  "候选数字员工与装配清单不一致，已拒绝激活",
+  "候选围栏与装配清单不一致，已拒绝激活",
+  "已激活装配的资格考试记录缺失",
+  "已激活装配的资格考试不是已通过的逐岗位上岗考",
+  "已激活装配的逐岗位考试证据不完整或包含未通过岗位",
+  "考试结束后找不到候选装配，未执行激活",
+  "考试期间候选装配版本或哈希发生变化，未执行激活",
+  "考试记录缺失，未执行激活",
+  "考试记录绑定的版本或哈希与当前装配不一致，未执行激活",
+]);
+
+function staffingFailure(error: unknown, fallback: string): TRPCError {
+  const message = error instanceof Error && safeStaffingFailureMessages.has(error.message)
+    ? error.message : fallback;
+  return new TRPCError({ code: "PRECONDITION_FAILED", message });
+}
+
 const bundleRouter = router({
   /** 当前装配台账 */
   activeInstall: protectedProcedure.query(async ({ ctx }) => {
     return { install: await activeInstall(scopeOf(ctx.identity).workspaceId) };
+  }),
+  /** 定制向导恢复态（刷新/重开后从服务端事实继续） */
+  customizationStatus: protectedProcedure.query(async ({ ctx }) => {
+    return customizationStatus(scopeOf(ctx.identity).workspaceId);
   }),
   /** 清空预览（明示范围：将卸什么/将留什么） */
   clearPreview: protectedProcedure.query(async ({ ctx }) => {
     return clearPreview(scopeOf(ctx.identity).workspaceId);
   }),
   /** 一键清空（快照→台账卸载→留痕；30 天可回滚） */
-  clear: writeProcedure.mutation(async ({ ctx }) => {
+  clear: actionProcedure("bundle.manage").mutation(async ({ ctx }) => {
     return clearBundle(scopeOf(ctx.identity).workspaceId, { id: ctx.identity.memberNo, type: "human" });
   }),
   /** 快照回滚 */
-  rollback: writeProcedure
+  rollback: actionProcedure("bundle.manage")
     .input(z.object({ snapshotId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       return rollbackSnapshot(scopeOf(ctx.identity).workspaceId, input.snapshotId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** L3 编制生成（草案先行，人审才装配） */
-  generateStaffing: writeProcedure
+  generateStaffing: actionProcedure("bundle.manage")
     .input(z.object({ industryText: z.string().min(4).max(2000) }))
     .mutation(async ({ ctx, input }) => {
-      return generateStaffing(scopeOf(ctx.identity).workspaceId, input.industryText);
+      try {
+        return await generateStaffing(
+          scopeOf(ctx.identity).workspaceId,
+          input.industryText,
+          { id: ctx.identity.memberNo, type: "human" },
+        );
+      } catch (error) {
+        throw staffingFailure(error, "编制生成暂时不可用，请稍后重试");
+      }
     }),
-  /** 上岗考（exam 门禁：达标才 activated） */
-  onboardingExam: writeProcedure.mutation(async ({ ctx }) => {
-    return onboardingExam(scopeOf(ctx.identity).workspaceId);
-  }),
+  /** 人审确认 → 原子形成 staged 候选；此时员工/围栏仍不可运行 */
+  confirmAndAssembleStaffing: actionProcedure("bundle.manage")
+    .input(z.object({
+      draftId: z.string().min(1).max(100),
+      expectedDraftHash: z.string().regex(/^[a-f0-9]{64}$/),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await confirmAndAssembleStaffing(
+          scopeOf(ctx.identity).workspaceId,
+          input,
+          { id: ctx.identity.memberNo, type: "human" },
+        );
+      } catch (error) {
+        throw staffingFailure(error, "编制确认失败，请刷新状态后重试");
+      }
+    }),
+  /** 上岗考绑定 staged 版本/哈希；达标后才在服务端事务内激活 */
+  onboardingExam: actionProcedure("bundle.manage")
+    .input(z.object({
+      installId: z.string().min(1).max(120),
+      expectedAssemblyHash: z.string().regex(/^[a-f0-9]{64}$/),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await onboardingExam(
+          scopeOf(ctx.identity).workspaceId,
+          input,
+          { id: ctx.identity.memberNo, type: "human" },
+        );
+      } catch (error) {
+        throw staffingFailure(error, "上岗考暂时不可用，请稍后重试");
+      }
+    }),
 });
 
 /**
@@ -479,15 +702,15 @@ const bundleRouter = router({
  */
 const devtoolsRouter = router({
   /** 设备台账（含未安装适配器的指引——真运行态纪律） */
-  tools: protectedProcedure.query(async ({ ctx }) => {
+  tools: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListTools(scopeOf(ctx.identity).workspaceId);
   }),
   /** 重新探测本机机床（PATH 扫描+版本握手） */
-  refreshTools: writeProcedure.mutation(async ({ ctx }) => {
+  refreshTools: navigationPermissionWriteProcedure("ai-pm.development.read").mutation(async ({ ctx }) => {
     return devRefreshTools(scopeOf(ctx.identity).workspaceId, { id: ctx.identity.memberNo, type: "human" });
   }),
   /** 客户自行接入新机床（声明式标准协议 YAML 落盘+热加载） */
-  addCustomTool: writeProcedure
+  addCustomTool: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({
       tool_key: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
       display_name: z.string().min(1).max(100),
@@ -507,10 +730,10 @@ const devtoolsRouter = router({
       return devSaveCustomTool(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 仓库白名单 */
-  repos: protectedProcedure.query(async ({ ctx }) => {
+  repos: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListRepos(scopeOf(ctx.identity).workspaceId);
   }),
-  registerRepo: writeProcedure
+  registerRepo: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({
       name: z.string().min(1).max(100), path: z.string().min(1).max(500),
       baselineBranch: z.string().max(100).optional(), allowedDirs: z.array(z.string()).max(20).optional(),
@@ -518,16 +741,16 @@ const devtoolsRouter = router({
     .mutation(async ({ ctx, input }) => {
       return devRegisterRepo(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
-  setRepoStatus: writeProcedure
+  setRepoStatus: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ repoId: z.string(), status: z.enum(["active", "disabled"]) }))
     .mutation(async ({ ctx, input }) => {
       return devSetRepoStatus(scopeOf(ctx.identity).workspaceId, input.repoId, input.status, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 任务单（S2） */
-  tasks: protectedProcedure.query(async ({ ctx }) => {
+  tasks: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListTasks(scopeOf(ctx.identity).workspaceId);
   }),
-  createTask: writeProcedure
+  createTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({
       prdRef: z.string().max(300).optional(), repoId: z.string(),
       title: z.string().min(1).max(200), prdSummary: z.string().min(1).max(8000),
@@ -540,48 +763,48 @@ const devtoolsRouter = router({
       return devCreateTask(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S2 拆解确认（确认才进 S3） */
-  confirmTask: writeProcedure
+  confirmTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return devConfirmTask(scopeOf(ctx.identity).workspaceId, input.taskId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S3 派发（异步：立即返回 sessionId，会话后台跑） */
-  dispatchTask: writeProcedure
+  dispatchTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return devDispatchTask(scopeOf(ctx.identity).workspaceId, input.taskId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S5 打回（一句话意见回灌重排） */
-  rejectTask: writeProcedure
+  rejectTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string(), note: z.string().min(1).max(1000) }))
     .mutation(async ({ ctx, input }) => {
       return devRejectTask(scopeOf(ctx.identity).workspaceId, input.taskId, input.note, { id: ctx.identity.memberNo, type: "human" });
     }),
-  cancelTask: writeProcedure
+  cancelTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return devCancelTask(scopeOf(ctx.identity).workspaceId, input.taskId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S5 批准 → S6 版本台账（合并/tag/changelog/release 一气落库） */
-  approveRelease: writeProcedure
+  approveRelease: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string(), version: z.string().max(40).optional(), changelog: z.string().max(4000).optional() }))
     .mutation(async ({ ctx, input }) => {
       return devApproveRelease(scopeOf(ctx.identity).workspaceId, input.taskId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 任务详情（会话/变更集/围栏留痕） */
-  taskDetail: protectedProcedure
+  taskDetail: navigationPermissionProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {
       return devTaskDetail(scopeOf(ctx.identity).workspaceId, input.taskId);
     }),
   /** 会话事件流（增量轮询） */
-  sessionEvents: protectedProcedure
+  sessionEvents: navigationPermissionProcedure("ai-pm.development.read")
     .input(z.object({ sessionId: z.string(), afterSeq: z.number().int().min(0).default(0) }))
     .query(async ({ ctx, input }) => {
       return devSessionEvents(scopeOf(ctx.identity).workspaceId, input.sessionId, input.afterSeq);
     }),
   /** 版本台账（时间线） */
-  releases: protectedProcedure.query(async ({ ctx }) => {
+  releases: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListReleases(scopeOf(ctx.identity).workspaceId);
   }),
 });

@@ -234,6 +234,7 @@ async function pythonCall(options, args, request, { signal, timeoutMs = 30_000, 
   let stopReason = null;
   let spawnFailed = false;
   let terminationFailed = false;
+  let closed = false;
   let stopPromise;
   const terminateTree = async () => {
     if (!child.pid) return;
@@ -266,7 +267,9 @@ async function pythonCall(options, args, request, { signal, timeoutMs = 30_000, 
     kill("SIGKILL");
   };
   const stop = (reason) => {
-    if (stopReason || child.exitCode !== null) return;
+    // The group leader can exit while a descendant still owns its stdio.
+    // Only close ends this call; exitCode does not end our stop obligation.
+    if (stopReason || closed) return;
     stopReason = reason;
     stopPromise = terminateTree().catch(() => {
       terminationFailed = true;
@@ -294,7 +297,7 @@ async function pythonCall(options, args, request, { signal, timeoutMs = 30_000, 
       // resolved by the child's JSON outcome; other input failures stop it.
       if (error.code !== "EPIPE") stop("input_failure");
     });
-    child.on("close", (code) => resolveCall({ code }));
+    child.on("close", (code) => { closed = true; resolveCall({ code }); });
     child.stdin.end(request ? JSON.stringify(request) : undefined);
     if (signal?.aborted) abort();
   });

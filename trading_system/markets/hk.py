@@ -12,12 +12,19 @@
 
 from __future__ import annotations
 
-from .. import config
-from .base import ComplianceVerdict, MarketSpec, _parse_dates
+import math
+from datetime import date
 
-# 港交所最小价位表（价位下限, 最小价位）
+from .. import config
+from .base import ComplianceVerdict, MarketSpec, _d, _parse_dates
+
+# Equity/REIT/warrant spread table; each cap is INCLUSIVE. ETPs, debt,
+# ETOs and structured products require their own rules and are not covered.
+# HKEX Phase 1: 2025-08-04; Phase 2: 2026-08-03.
+# https://www.hkex.com.hk/Services/Trading/Securities/Overview/Trading-Mechanism/Reduction-of-Minimum-Spreads?sc_lang=en
 _HK_TICK_TABLE = [
-    (0.25, 0.001), (0.50, 0.005), (10.00, 0.010), (20.00, 0.020),
+    (0.25, 0.001), (0.50, 0.005), (10.00, 0.005), (20.00, 0.010),
+    (50.00, 0.020),
     (100.00, 0.050), (200.00, 0.100), (500.00, 0.200),
     (1000.00, 0.500), (2000.00, 1.000), (5000.00, 2.000),
     (9995.00, 5.000),
@@ -37,10 +44,20 @@ class HKMarket(MarketSpec):
 
     # ---------------------------------------------------------------- 交易规则
 
-    def min_tick(self, price: float) -> float:
-        """港交所价位表：价格越低最小价位越小。"""
-        for cap, tick in _HK_TICK_TABLE:
-            if price < cap:
+    def min_tick(self, price: float, trade_date=None, security_type="equity") -> float:
+        """Use the spread table effective on a date, preserving upper bounds."""
+        if security_type not in ("equity", "reit", "equity_warrant"):
+            raise ValueError("This spread table does not apply to the requested security type")
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or not 0.01 <= price <= 9995:
+            raise ValueError("HK equity price must be finite and in [0.01,9995]")
+        day = _d(trade_date) if trade_date is not None else date.today()
+        table = list(_HK_TICK_TABLE)
+        if day < date(2026, 8, 3):
+            table[2] = (10.0, 0.01)
+        if day < date(2025, 8, 4):
+            table[3], table[4] = (20.0, 0.02), (50.0, 0.05)
+        for cap, tick in table:
+            if price <= cap:
                 return tick
         return 5.0
 
@@ -51,6 +68,10 @@ class HKMarket(MarketSpec):
 
     def check_order(self, side, ticker, price, prev_close, trade_date,
                     buy_date=None, name="", vcm_cooling=False) -> ComplianceVerdict:
+        common = super().check_order(side, ticker, price, prev_close, trade_date,
+                                     buy_date, name, vcm_cooling)
+        if not common.allowed:
+            return common
         # ③ VCM 冷静期标的追单 → 拒绝
         if vcm_cooling and self.in_vcm(ticker):
             return ComplianceVerdict(

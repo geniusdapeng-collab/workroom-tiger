@@ -12,11 +12,17 @@
     "appId": "com.geniusdapeng.workroomtiger",
     "channel": "stable",
     "artifactPrefix": "Workroom.Tiger",
-    "workflow": ".github/workflows/build-desktop.yml",
+    "workflow": ".cnb.yml",
     "website": "apps/site"
   },
   "desktop": {
-    "portOffset": 610
+    "portOffset": 610,
+    "industryPacker": "scripts/pack-tiger-kernel.mjs",
+    "nativeBuilders": {
+      "mac": "scripts/build-tiger-desktop-native.sh",
+      "win": "scripts/build-tiger-desktop-native.ps1"
+    },
+    "smokeRunner": "scripts/tiger-desktop-smoke.mjs"
   },
   "clients": {
     "bPc": { "enabled": true, "entry": "apps/web" },

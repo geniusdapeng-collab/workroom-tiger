@@ -11,59 +11,123 @@ from __future__ import annotations
 import glob
 import json
 import math
+import logging
+from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from ..ledger_io import read_json_strict
+
+log = logging.getLogger(__name__)
+
+
+def _finite(value, *, positive=False):
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value) and (value > 0 if positive else value >= 0))
+
+
+def _state(out_dir: str):
+    path = Path(out_dir) / "sim_portfolio.json"
+    if not path.exists():
+        return None
+    value = read_json_strict(path)
+    if not isinstance(value, dict) or not isinstance(value.get("equity_curve", []), list):
+        raise ValueError("Invalid portfolio ledger shape")
+    curve = value.get("equity_curve", [])
+    for point in curve:
+        if not isinstance(point, dict) or not _finite(point.get("equity"), positive=True):
+            raise ValueError("Invalid portfolio NAV")
+        date.fromisoformat(point["date"])
+    dates = [point["date"] for point in curve]
+    if dates != sorted(set(dates)):
+        raise ValueError("Portfolio dates must be unique and strictly increasing")
+    if not _finite(value.get("cash", 0)):
+        raise ValueError("Invalid portfolio cash")
+    return value
 
 
 # ---------------------------------------------------------------- 组合风险官
 @dataclass
 class PortfolioRiskView:
-    total_equity: float
+    total_equity: float | None
     by_market: dict = field(default_factory=dict)      # mid -> equity
     concentration: dict = field(default_factory=dict)  # mid -> 占比
     gross_cap: float = 0.90
-    over_cap: bool = False
+    over_cap: bool | None = None
+    gross_exposure: float | None = None
+    by_currency: dict = field(default_factory=dict)
+    market_currency: dict = field(default_factory=dict)
+    market_gross: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"total_equity": self.total_equity, "by_market": self.by_market,
                 "concentration": self.concentration, "gross_cap": self.gross_cap,
-                "over_cap": self.over_cap, "notes": self.notes}
+                "over_cap": self.over_cap, "gross_exposure": self.gross_exposure,
+                "by_currency": self.by_currency, "market_currency": self.market_currency,
+                "market_gross": self.market_gross, "notes": self.notes}
 
 
 class PortfolioRiskOfficer:
     def __init__(self, gross_cap: float = 0.90):
+        if not _finite(gross_cap) or gross_cap > 1:
+            raise ValueError("Portfolio gross cap must be a finite fraction")
         self.gross_cap = gross_cap
 
     @staticmethod
     def _equity(out_dir: str) -> float | None:
-        f = Path(out_dir) / "sim_portfolio.json"
-        if not f.exists():
-            return None
         try:
-            s = json.loads(f.read_text())
-            curve = s.get("equity_curve") or []
-            return float(curve[-1]["equity"]) if curve else float(s.get("cash", 0))
-        except Exception:
+            state = _state(out_dir)
+            if state is None:
+                return None
+            curve = state.get("equity_curve", [])
+            return curve[-1]["equity"] if curve else state.get("cash", 0)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            log.warning("Invalid portfolio ledger %s: %s", out_dir, exc)
             return None
 
     def view(self, out_dirs: dict[str, str]) -> PortfolioRiskView:
-        by, notes = {}, []
-        for mid, d in out_dirs.items():
-            eq = self._equity(d)
-            if eq is not None:
-                by[mid] = round(eq, 2)
-            else:
-                notes.append(f"{mid}: 净值数据缺失（如实披露）")
-        total = round(sum(by.values()), 2)
-        conc = {m: round(v / total, 4) for m, v in by.items()} if total else {}
-        # 集中度提示：单一市场占比 >60% 时显性标注（提示非否决）
-        for m, c in conc.items():
-            if c > 0.60:
-                notes.append(f"{m} 配置占比 {c:.0%} >60%——集中度提示（非否决，供配置官参考）")
-        return PortfolioRiskView(total_equity=total, by_market=by,
-                                 concentration=conc, gross_cap=self.gross_cap,
-                                 over_cap=False, notes=notes)
+        by, notes, currencies, market_gross, gross_amounts = {}, [], {}, {}, {}
+        for mid, directory in out_dirs.items():
+            try:
+                state = _state(directory)
+                if state is None:
+                    raise ValueError("净值数据缺失")
+                curve = state.get("equity_curve", [])
+                equity = curve[-1]["equity"] if curve else state.get("cash", 0)
+                if not _finite(equity, positive=True) or state.get("cash", 0) > equity:
+                    raise ValueError("净值或现金关系无效")
+                currency = state.get("currency") or {"us": "USD", "cn": "CNY", "hk": "HKD"}.get(mid)
+                if not isinstance(currency, str) or currency not in ("USD", "CNY", "HKD"):
+                    raise ValueError("账户本币缺失或无效")
+                if not state.get("currency"):
+                    notes.append(f"{mid}: 旧账无货币字段，按市场本币 {currency} 披露")
+                by[mid], currencies[mid] = round(equity, 4), currency
+                gross = equity - state.get("cash", 0)
+                gross_amounts[mid], market_gross[mid] = gross, round(gross / equity, 6)
+                if market_gross[mid] > self.gross_cap + 1e-9:
+                    notes.append(f"{mid}: 已观察到本市场总敞口 {market_gross[mid]:.1%} 超上限 {self.gross_cap:.1%}")
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                notes.append(f"{mid}: {exc}（如实披露，未参与合计）")
+        by_currency = {}
+        for mid, equity in by.items():
+            currency = currencies[mid]
+            by_currency[currency] = round(by_currency.get(currency, 0) + equity, 4)
+        same_currency = len(by_currency) == 1
+        total = sum(by.values()) if same_currency else None
+        gross = sum(gross_amounts.values()) / total if total else None
+        concentration = {mid: round(equity / total, 4) for mid, equity in by.items()} if total else {}
+        if len(by_currency) > 1:
+            notes.append("跨币种账户没有同一时点的 FX 证据：仅按本币分账，组合金额、集中度与组合总敞口均未核算")
+        for mid, fraction in concentration.items():
+            if fraction > .60:
+                notes.append(f"{mid} 配置占比 {fraction:.0%} >60%——集中度提示（非否决）")
+        return PortfolioRiskView(total_equity=round(total, 4) if total is not None else None,
+                                 by_market=by, concentration=concentration, gross_cap=self.gross_cap,
+                                 over_cap=(gross > self.gross_cap + 1e-9) if gross is not None else None,
+                                 gross_exposure=round(gross, 6) if gross is not None else None,
+                                 by_currency=by_currency, market_currency=currencies,
+                                 market_gross=market_gross, notes=notes)
 
 
 # ---------------------------------------------------------------- 收益稳定官
@@ -76,13 +140,16 @@ class StabilityReport:
     days_below_high: int
     verdict: str                 # 稳定 | 关注 | 告警
     notes: list = field(default_factory=list)
+    dates: list = field(default_factory=list)
+    nav: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"days": self.days, "total_return": self.total_return,
                 "max_drawdown": self.max_drawdown,
                 "sharpe_rolling": self.sharpe_rolling,
                 "days_below_high": self.days_below_high,
-                "verdict": self.verdict, "notes": self.notes}
+                "verdict": self.verdict, "notes": self.notes, "dates": self.dates,
+                "nav": self.nav, "portfolio_basis": "各市场本币净值分别归一为1、等权合成，不代表跨币种金额收益"}
 
 
 class ReturnSteward:
@@ -95,29 +162,42 @@ class ReturnSteward:
         self.below_high_warn_days = below_high_warn_days
 
     @staticmethod
-    def _curve(out_dir: str) -> list[float]:
-        f = Path(out_dir) / "sim_portfolio.json"
-        if not f.exists():
-            return []
+    def _curve(out_dir: str) -> list[dict]:
         try:
-            s = json.loads(f.read_text())
-            return [float(p["equity"]) for p in (s.get("equity_curve") or [])]
-        except Exception:
+            state = _state(out_dir)
+            return state.get("equity_curve", []) if state else []
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            log.warning("Invalid portfolio curve %s: %s", out_dir, exc)
             return []
 
     def assess(self, out_dirs: dict[str, str]) -> StabilityReport:
-        # 组合日净值 = 三市当日净值加总（按日期对齐，缺失日沿用前值）
-        curves = {m: self._curve(d) for m, d in out_dirs.items()}
-        curves = {m: c for m, c in curves.items() if c}
-        notes: list = []
+        curves, notes = {}, []
+        for mid, directory in out_dirs.items():
+            curve = self._curve(directory)
+            if curve:
+                curves[mid] = curve
+            else:
+                notes.append(f"{mid}: 无有效净值曲线，未参与稳定性统计")
         if not curves:
             return StabilityReport(days=0, total_return=0.0, max_drawdown=0.0,
                                    sharpe_rolling=None, days_below_high=0,
-                                   verdict="关注", notes=["无净值曲线数据（积累中，不作结论）"])
-        n = min(len(c) for c in curves.values())
-        series = [sum(c[i] for c in curves.values()) for i in range(n)]
-        base = series[0] if series else 1.0
-        total_ret = (series[-1] / base - 1.0) if base else 0.0
+                                   verdict="关注", notes=["无净值曲线数据（积累中，不作结论）"] + notes)
+        # Start only once every participating account has an observed NAV.
+        # On asynchronous exchange sessions retain the latest observed value.
+        start = max(curve[0]["date"] for curve in curves.values())
+        dates = sorted({point["date"] for curve in curves.values() for point in curve if point["date"] >= start})
+        cursors = {mid: 0 for mid in curves}
+        latest, bases, series = {}, {}, []
+        for day in dates:
+            for mid, curve in curves.items():
+                while cursors[mid] < len(curve) and curve[cursors[mid]]["date"] <= day:
+                    latest[mid] = curve[cursors[mid]]["equity"]
+                    cursors[mid] += 1
+                bases.setdefault(mid, latest[mid])
+            series.append(sum(latest[mid] / bases[mid] for mid in curves) / len(curves))
+        n = len(series)
+        notes.append("组合按日期并集对齐、缺失日沿用已观察前值；各市场本币净值分别归一后等权合成，不合计不同货币金额")
+        total_ret = series[-1] / series[0] - 1.0
         # 最大回撤
         peak, mdd, below_high = series[0], 0.0, 0
         for v in series:
@@ -153,4 +233,5 @@ class ReturnSteward:
             verdict = "关注" if verdict == "稳定" else verdict
         return StabilityReport(days=n, total_return=round(total_ret, 4),
                                max_drawdown=round(mdd, 4), sharpe_rolling=sharpe,
-                               days_below_high=below_high, verdict=verdict, notes=notes)
+                               days_below_high=below_high, verdict=verdict, notes=notes,
+                               dates=dates, nav=series)

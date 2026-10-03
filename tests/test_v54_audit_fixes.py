@@ -296,8 +296,12 @@ def test_wfa_fold_all_invalid_falls_back_to_default():
         f.date = d
         frames.append(f)
 
-    def fake_run_backtest(frames, panel, params=None):
+    def fake_run_backtest(frames, panel, params=None, *, sample_end=None,
+                          account_usd=100_000):
+        assert sample_end == frames[-1].date
+        assert account_usd == 100_000
         return {"n_trades": 0, "port_sharpe": 0.0, "expectancy_r": 0.0,
+                "port_dates": [str(frame.date.date()) for frame in frames],
                 "port_returns": [0.0] * len(frames), "trades": [],
                 "win_rate": 0.0, "port_max_dd": 0.0}
 

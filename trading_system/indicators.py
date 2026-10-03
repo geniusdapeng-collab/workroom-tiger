@@ -394,14 +394,21 @@ def aggregate(scores: dict[str, float | None], weights: dict[str, float],
     全缺失时回退中性 5 分。
     """
     avail = {k: v for k, v in scores.items()
-             if v is not None and not (isinstance(v, float) and math.isnan(v))}
+             if (k in weights and not isinstance(v, bool) and isinstance(v, (int, float))
+                 and math.isfinite(v) and 0 <= v <= 10
+                 and isinstance(weights[k], (int, float)) and not isinstance(weights[k], bool)
+                 and math.isfinite(weights[k]) and weights[k] > 0)}
     if not avail:
         return config.NEUTRAL_SCORE
     if renormalize:
         wsum = sum(weights[k] for k in avail)
+        if not math.isfinite(wsum) or wsum <= 0:
+            return config.NEUTRAL_SCORE
         val = sum(weights[k] * avail[k] for k in avail) / wsum
     else:
         total_w = sum(weights.values())
+        if not math.isfinite(total_w) or total_w <= 0:
+            return config.NEUTRAL_SCORE
         val = sum(avail.get(k, config.NEUTRAL_SCORE) * w
                   for k, w in weights.items()) / total_w
     return round(max(0.0, min(10.0, val)), 2)

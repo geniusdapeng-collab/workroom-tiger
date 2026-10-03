@@ -24,12 +24,14 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
 import pandas as pd
 
 from . import config
+from .parameters import (GateParams, risk_limits_for, tighten_risk_limits,
+                         validate_tuned_params)
 from .agents import ChainCycleAgent, MRSAgent, SectorAgent, TSSAgent
 from .agents.chain_cycle_agent import chain_bonus
 from .agents.risk_manager_agent import RiskManagerAgent
@@ -49,24 +51,6 @@ _MIN_HISTORY = int(config.SCAN_MIN_HISTORY_DAYS * 0.6)   # 与扫描器一致 15
 # ============================================================
 
 @dataclass
-class GateParams:
-    """闸门参数（WFA 调优对象）。"""
-    mrs_block: float = config.MRS_GATE_BLOCK
-    mrs_gate: float = config.OPEN_LONG["mrs"]
-    mrs_light_lo: float = config.LIGHT_PROBE["mrs_lo"]
-    shs_main: float = config.SHS_MAIN_POOL
-    shs_sub: float = config.SHS_SUB_POOL
-    tss_gate: float = config.OPEN_LONG["tss"]
-    light_tss: float = config.LIGHT_PROBE["tss"]
-    light_size: float = sum(config.LIGHT_PROBE["size_ratio"]) / 2
-    max_picks: int = config.MAX_PICKS_DEFAULT
-    time_stop: int = config.TIME_STOP_DAYS[1]
-    profit_protect_r: float = config.PROFIT_PROTECT_R
-    cost_bps: float = config.COST_BPS    # v6.0：交易成本（净口径回测/调参）
-    use_ics: bool = True                 # False → 产业链加成消融
-
-
-@dataclass
 class CandidateSnap:
     ticker: str
     tss_raw: float            # 加成前 TSS
@@ -78,6 +62,7 @@ class CandidateSnap:
     template: str
     entry_ref: float
     stop: float
+    atr_pct: float = 0.0
 
 
 @dataclass
@@ -94,6 +79,7 @@ class DayFrame:
     regime: str
     sectors: list[SectorSnap] = field(default_factory=list)
     candidates: list[CandidateSnap] = field(default_factory=list)
+    gross_cap: float | None = None
 
 
 # ============================================================
@@ -245,17 +231,19 @@ class _Panel:
 # ============================================================
 
 def _frame_cache_path(provider_name: str, universe: list[str], days: int,
-                      signal_days: int, top_n: int):
+                      signal_days: int, top_n: int, *, cache_dir=None):
     import hashlib
     from pathlib import Path
     key = hashlib.md5("|".join(sorted(universe)).encode()).hexdigest()[:10]
     today = pd.Timestamp.today().strftime("%Y%m%d")
-    return Path(config.CACHE_DIR) / f"frames_{provider_name}_{key}_{days}_{signal_days}_{top_n}_{today}.pkl"
+    name = f"frames_{provider_name}_{key}_{days}_{signal_days}_{top_n}_{today}.pkl"
+    from .state import run_path
+    return run_path(cache_dir if cache_dir is not None else config.CACHE_DIR, name)
 
 
 def collect_day_frames(provider, universe: list[str], days: int = 460,
                        signal_days: int = 260, top_n: int = config.SCAN_TOP_N,
-                       use_cache: bool = True
+                       use_cache: bool = True, *, cache_dir=None
                        ) -> tuple[list[DayFrame], "_Panel", dict]:
     """逐日驱动真实 Agent，产出 DayFrame 序列。
 
@@ -264,7 +252,7 @@ def collect_day_frames(provider, universe: list[str], days: int = 460,
     """
     from .pipeline import _batch_with_fallback
 
-    cache_path = _frame_cache_path(provider.name, universe, days, signal_days, top_n)
+    cache_path = _frame_cache_path(provider.name, universe, days, signal_days, top_n, cache_dir=cache_dir)
     if use_cache and cache_path.exists():
         import pickle
         try:
@@ -383,6 +371,7 @@ def collect_day_frames(provider, universe: list[str], days: int = 460,
                 sector_etf=etf, chain_id=cid or "", chain_hot=bool(ch and ch.hot),
                 template=c.entry_template, entry_ref=row["price"],
                 stop=stop_extract(c),
+                atr_pct=c.atr_pct,
             ))
 
         frames.append(DayFrame(
@@ -390,6 +379,7 @@ def collect_day_frames(provider, universe: list[str], days: int = 460,
             sectors=[SectorSnap(etf=s.etf, shs=s.shs, breadth=s.breadth)
                      for s in sectors],
             candidates=snaps,
+            gross_cap=mrs.position_cap[1],
         ))
 
     logger.info("DayFrame 采集完成: %d 个信号日", len(frames))
@@ -424,6 +414,9 @@ class Trade:
     entry_i: int = -1
     exit_i: int = -1
     day_returns: dict = field(default_factory=dict)   # master_i → 当日组合收益贡献
+    shares: int = 0
+    risk: float = 0.0
+    chain_id: str = ""
 
     @property
     def win(self) -> bool:
@@ -431,7 +424,8 @@ class Trade:
 
 
 def _simulate_trade(panel: _Panel, col: int, i_sig: int, stop0: float,
-                    params: GateParams) -> tuple[int, int, float, float, float, dict] | None:
+                    params: GateParams, *, sample_end=None, market=None
+                    ) -> tuple[int, int, float, float, float, dict] | None:
     """从信号次日开盘仿真到止损/保护/时间止损。
 
     v6.0：出场判定统一调用 exit_engine.simulate_trade（与 journal 结算同一实现，
@@ -439,16 +433,24 @@ def _simulate_trade(panel: _Panel, col: int, i_sig: int, stop0: float,
 
     返回 (entry_i, exit_i, entry_raw, exit_price_net, r_net, day_returns) 或 None。
     """
-    from .exit_engine import cost_adj_buy, simulate_trade
+    from .exit_engine import cost_adj_buy, cost_adj_sell, simulate_trade
+    from .markets import get_market
+
+    market = market or get_market("us")
+    if not math.isfinite(stop0) or stop0 <= 0:
+        return None
 
     o, h, l_, c = (panel.open.values[:, col], panel.high.values[:, col],
                    panel.low.values[:, col], panel.close.values[:, col])
     n = len(panel.dates)
+    if sample_end is not None:
+        n = int(panel.dates.searchsorted(pd.Timestamp(sample_end), side="right"))
+    o, h, l_, c = (values[:n] for values in (o, h, l_, c))
 
     # 入场：信号日后第一个有效交易日开盘（最多等 3 日）
     entry_i, entry_raw = -1, float("nan")
     for j in range(i_sig + 1, min(i_sig + 4, n)):
-        if not math.isnan(o[j]):
+        if math.isfinite(o[j]) and o[j] > 0 and market.is_trading_day(panel.dates[j]):
             entry_i, entry_raw = j, float(o[j])
             break
     if entry_i < 0 or entry_raw <= stop0:
@@ -457,7 +459,8 @@ def _simulate_trade(panel: _Panel, col: int, i_sig: int, stop0: float,
     res = simulate_trade(o, h, l_, c, entry_i, stop0,
                          time_stop=params.time_stop,
                          protect_r=params.profit_protect_r,
-                         cost_bps=params.cost_bps)
+                         cost_bps=params.cost_bps, dates=panel.dates[:n],
+                         market=market, ticker=panel.tickers[col])
     if res is None or res.void:
         return None
     if res.exit_i >= 0:
@@ -465,8 +468,7 @@ def _simulate_trade(panel: _Panel, col: int, i_sig: int, stop0: float,
     else:
         # 数据耗尽未出场：引擎的 exit_price 是未扣成本的最新收盘，
         # 这里统一为净价，保证 r 与 exit_price 严格自洽
-        from .exit_engine import cost_adj_sell
-        exit_i = min(entry_i + params.time_stop - 1, n - 1)
+        exit_i = res.last_i
         exit_price_net = cost_adj_sell(res.exit_price, params.cost_bps)
 
     # 组合日收益贡献（净口径：入场按含成本价）
@@ -475,10 +477,10 @@ def _simulate_trade(panel: _Panel, col: int, i_sig: int, stop0: float,
     prev = entry_net
     for j in range(entry_i, exit_i + 1):
         cj = float(c[j])
-        if math.isnan(cj):
+        if not math.isfinite(cj) or cj <= 0:
             continue                                   # 停牌日：持仓不动
-        if j == exit_i and res.exit_i >= 0:
-            day_ret[j] = res.exit_price / prev - 1.0
+        if j == exit_i:
+            day_ret[j] = exit_price_net / prev - 1.0
         else:
             day_ret[j] = cj / prev - 1.0
             prev = cj
@@ -489,24 +491,21 @@ def _gate_day(frame: DayFrame, params: GateParams) -> list[tuple[CandidateSnap, 
     """单日闸门（v6.0：与生产 RiskManagerAgent 共用 gate.py 单一实现，
     参数化阈值）——v5.4 前此处与生产各自维护一份判定，已经发生漂移。
     返回 [(snap, mode, tos)]。"""
-    from .gate import main_pool_eligible, pass_gates, sub_pool_eligible
+    from .gate import classify_sector_pools, finite_score, pass_gates
 
-    if frame.mrs_star < params.mrs_block:
+    if not finite_score(frame.mrs_star) or frame.mrs_star < params.mrs_block:
         return []
     # 主线/次主线池（参数化阈值，最多 2 条主线；广度缺失不得进主线池）
-    by_shs = sorted(frame.sectors, key=lambda s: s.shs, reverse=True)
-    main: set[str] = set()
-    for s in by_shs:
-        if len(main) >= config.MAIN_POOL_MAX:
-            break
-        if main_pool_eligible(s.shs, s.breadth, shs_main=params.shs_main):
-            main.add(s.etf)
-    sub = {s.etf for s in frame.sectors
-           if s.etf not in main and sub_pool_eligible(s.shs, shs_sub=params.shs_sub)}
+    main, sub = classify_sector_pools(frame.sectors, shs_main=params.shs_main,
+                                      shs_sub=params.shs_sub)
     shs_map = {s.etf: s.shs for s in frame.sectors}
 
     out = []
     for snap in frame.candidates:
+        if (not finite_score(snap.tss_raw) or not math.isfinite(snap.bonus)
+                or snap.bonus <= 0 or not math.isfinite(snap.c_liq)
+                or not 0 < snap.c_liq <= 1):
+            continue
         tss_final = min(10.0, snap.tss_raw * (snap.bonus if params.use_ics else 1.0))
         shs = shs_map.get(snap.sector_etf, config.NEUTRAL_SCORE) if snap.sector_etf else config.NEUTRAL_SCORE
         decision = pass_gates(
@@ -515,7 +514,7 @@ def _gate_day(frame: DayFrame, params: GateParams) -> list[tuple[CandidateSnap, 
             chain_hot=snap.chain_hot,
             mrs_gate=params.mrs_gate, shs_sub=params.shs_sub,
             tss_gate=params.tss_gate, light_tss=params.light_tss,
-            mrs_light_lo=params.mrs_light_lo)
+            mrs_light_lo=params.mrs_light_lo, mrs_block=params.mrs_block)
         if not decision.passed:
             continue
         tos = frame.mrs_star * shs * tss_final * snap.c_liq / 100
@@ -525,85 +524,144 @@ def _gate_day(frame: DayFrame, params: GateParams) -> list[tuple[CandidateSnap, 
 
 
 def run_backtest(frames: list[DayFrame], panel: _Panel,
-                 params: GateParams | None = None) -> dict:
-    """闸门回放 + 交易仿真 + 指标汇总。"""
-    params = params or GateParams()
+                 params: GateParams | None = None, *, sample_end=None,
+                 account_usd: float = 100_000, market=None,
+                 risk_limits: dict | None = None) -> dict:
+    """Replay inside an explicit sample, using integer shares and marked NAV.
+
+    The default sample ends on the last signal frame. A caller may extend it
+    explicitly, but WFA always supplies each fold's own final day. Unclosed
+    positions are valued at the last sample Close less liquidation cost.
+    """
+    from .exit_engine import cost_adj_buy
+    from .markets import get_market
+    from .position_sizing import integer_capacity, size_position
+
+    params = tighten_risk_limits(params, risk_limits)
+    market = market or get_market("us")
+    if isinstance(account_usd, bool) or not math.isfinite(account_usd) or account_usd <= 0:
+        raise ValueError("Account equity must be finite and positive")
+    ordered = sorted(frames, key=lambda f: f.date)
+    if len({f.date for f in ordered}) != len(ordered):
+        raise ValueError("Signal dates must be unique")
+    end = pd.Timestamp(sample_end) if sample_end is not None else (ordered[-1].date if ordered else None)
+    ordered = [f for f in ordered if end is not None and f.date <= end]
+    start = ordered[0].date if ordered else None
     col_of = {t: j for j, t in enumerate(panel.tickers)}
     date_i = {d: i for i, d in enumerate(panel.dates)}
-
     trades: list[Trade] = []
-    open_until: list[int] = []        # 未平仓交易的 exit_i（并发控制）
 
-    for frame in frames:
+    for frame in ordered:
         i_sig = date_i.get(frame.date)
-        if i_sig is None:
+        if i_sig is None or not market.is_trading_day(frame.date):
             continue
-        open_until = [x for x in open_until if x >= i_sig]
-        slots = params.max_picks - len(open_until)
+        active = [trade for trade in trades if trade.exit_i >= i_sig]
+        slots = params.max_picks - len(active)
         if slots <= 0:
             continue
-        for snap, mode, tos in _gate_day(frame, params)[:slots]:
+        gross_cap = frame.gross_cap
+        if gross_cap is None:
+            gross_cap = MRSAgent._position_cap(frame.mrs_star)[1]
+        if isinstance(gross_cap, bool) or not math.isfinite(gross_cap) or not 0 <= gross_cap <= 1:
+            raise ValueError("Frame gross cap must be finite and in [0,1]")
+        gross_cap = min(gross_cap, params.gross_cap)
+        for snap, mode, _ in _gate_day(frame, params):
+            if slots <= 0:
+                break
             col = col_of.get(snap.ticker)
-            if col is None or snap.stop >= snap.entry_ref:
+            if (col is None or any(t.ticker == snap.ticker for t in active)
+                    or not math.isfinite(snap.entry_ref) or not math.isfinite(snap.stop)
+                    or not 0 < snap.stop < snap.entry_ref):
                 continue
-            sim = _simulate_trade(panel, col, i_sig, snap.stop, params)
+            from .parameters import holding_limit
+            execution_params = replace(params, time_stop=holding_limit(snap.atr_pct, params))
+            sim = _simulate_trade(panel, col, i_sig, snap.stop, execution_params,
+                                  sample_end=end, market=market)
             if sim is None:
                 continue
             entry_i, exit_i, entry, exit_price, r_net, day_ret = sim
-            size_ratio = 1.0 if mode == "标准做多" else params.light_size
-            risk_pct = (entry - snap.stop) / entry
-            weight = min(config.RISK_R_PCT / risk_pct,
-                         config.MAX_SINGLE_POSITION_PCT) * size_ratio
-            trades.append(Trade(
+            ratio = 1.0 if mode == "标准做多" else params.light_size
+            plan = size_position(account_usd, snap.entry_ref, snap.stop, ratio,
+                                 risk_r_pct=params.risk_r_pct,
+                                 max_single_position_pct=params.max_single_position_pct)
+            entry_net = cost_adj_buy(entry, params.cost_bps)
+            shares = min(plan.shares, integer_capacity(plan.risk, entry_net - snap.stop),
+                         integer_capacity(account_usd * params.max_single_position_pct, entry_net))
+            from .position_sizing import PositionSize
+            size = PositionSize(shares, shares * entry_net, shares * entry_net / account_usd,
+                                shares * (entry_net - snap.stop), plan.budget, shares < plan.shares)
+            if size.shares <= 0:
+                continue
+            if sum(t.weight for t in active) + size.position_pct > gross_cap + 1e-9:
+                continue
+            chain_used = sum(t.risk for t in active if t.chain_id == snap.chain_id)
+            if snap.chain_id and chain_used + size.risk > account_usd * config.MAX_CHAIN_RISK_PCT + 1e-9:
+                continue
+            trade = Trade(
                 signal_date=str(frame.date.date()),
                 entry_date=str(panel.dates[entry_i].date()),
                 exit_date=str(panel.dates[exit_i].date()),
                 ticker=snap.ticker, template=snap.template or "无", mode=mode,
-                entry=round(entry, 2), stop0=round(snap.stop, 2),
-                exit_price=round(exit_price, 2),
-                r=round(r_net, 3),
-                weight=round(weight, 4), entry_i=entry_i, exit_i=exit_i,
-                day_returns=day_ret,
-            ))
-            open_until.append(exit_i)
+                entry=entry, stop0=snap.stop, exit_price=exit_price,
+                r=r_net, weight=size.position_pct, entry_i=entry_i, exit_i=exit_i,
+                day_returns=day_ret, shares=size.shares, risk=size.risk,
+                chain_id=snap.chain_id,
+            )
+            trades.append(trade)
+            active.append(trade)
+            slots -= 1
 
-    # ---- 组合日收益 ----
-    frame_dates = {f.date for f in frames}
-    port_ret = []
-    for i, d in enumerate(panel.dates):
-        if d not in frame_dates:
+    # Accounting NAV covers every available date in the sample, including days
+    # without a signal frame. Cash/share flows include both one-sided costs.
+    cash, previous_equity = account_usd, account_usd
+    held: list[Trade] = []
+    marks: dict[str, float] = {}
+    port_ret, port_dates, equity = [], [], [1.0]
+    for i, day in enumerate(panel.dates):
+        if start is None or day < start or day > end:
             continue
-        r_day = 0.0
-        for t in trades:
-            if t.entry_i <= i <= t.exit_i:
-                r_day += t.weight * t.day_returns.get(i, 0.0)
-        port_ret.append(r_day)
+        for trade in trades:
+            if trade.entry_i == i:
+                cash -= trade.shares * cost_adj_buy(trade.entry, params.cost_bps)
+                marks[trade.ticker] = trade.entry
+                held.append(trade)
+        for trade in held:
+            value = float(panel.close.iloc[i, col_of[trade.ticker]])
+            if math.isfinite(value) and value > 0:
+                marks[trade.ticker] = value
+        exiting = [trade for trade in held if trade.exit_i == i]
+        for trade in exiting:
+            cash += trade.shares * trade.exit_price
+        held = [trade for trade in held if trade not in exiting]
+        current_equity = cash + sum(trade.shares * marks[trade.ticker] for trade in held)
+        port_ret.append(current_equity / previous_equity - 1.0)
+        port_dates.append(str(day.date()))
+        equity.append(current_equity / account_usd)
+        previous_equity = current_equity
 
-    rs = [t.r for t in trades]
-    wins = [r for r in rs if r > 0]
-    losses = [r for r in rs if r <= 0]
-    equity = list(np.cumprod([1 + r for r in port_ret])) if port_ret else [1.0]
+    rs = [trade.r for trade in trades]
+    wins, losses = [r for r in rs if r > 0], [r for r in rs if r <= 0]
     by_template: dict[str, list[float]] = {}
-    for t in trades:
-        by_template.setdefault(t.template, []).append(t.r)
-
+    for trade in trades:
+        by_template.setdefault(trade.template, []).append(trade.r)
     return {
-        "params": params,
-        "n_days": len(frames),
-        "n_trades": len(trades),
-        "trades": trades,
+        "params": params, "n_days": len(ordered), "n_trades": len(trades), "trades": trades,
+        "sample_start": str(start.date()) if start is not None else None,
+        "sample_end": str(end.date()) if end is not None else None,
+        "account_usd": account_usd,
+        "risk_limits": risk_limits_for(params),
         "win_rate": round(len(wins) / len(rs), 4) if rs else 0.0,
         "avg_r": round(float(np.mean(rs)), 3) if rs else 0.0,
         "expectancy_r": round(float(np.mean(rs)), 3) if rs else 0.0,
-        "profit_factor": round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else (float("inf") if wins else 0.0),
-        "total_r": round(sum(rs), 2),
-        "port_total_return": round(equity[-1] - 1, 4),
+        "profit_factor": (round(sum(wins) / abs(sum(losses)), 2) if sum(losses) else None) if wins else 0.0,
+        "total_r": round(sum(rs), 2), "port_total_return": round(equity[-1] - 1, 4),
         "port_sharpe": round(annualized_sharpe(port_ret), 2),
         "port_max_dd": round(max_drawdown(equity), 4),
-        "port_returns": port_ret,
-        "by_template": {k: {"n": len(v), "win_rate": round(sum(1 for x in v if x > 0) / len(v), 3),
-                            "avg_r": round(float(np.mean(v)), 3)}
+        "port_returns": port_ret, "port_dates": port_dates,
+        "by_template": {k: {"n": len(v), "win_rate": round(sum(x > 0 for x in v) / len(v), 3),
+                              "avg_r": round(float(np.mean(v)), 3)}
                         for k, v in sorted(by_template.items())},
+        "valuation_note": "样本末仍持有的仓位按末个有效收盘减卖出成本估值；历史期权缺失使用中性维度。",
     }
 
 
@@ -622,6 +680,10 @@ DEFAULT_GRID: list[dict] = [
 def make_folds(frames: list[DayFrame], train: int = 126, test: int = 63,
                step: int = 63) -> list[tuple[list[DayFrame], list[DayFrame]]]:
     """滚动窗口折（非锚定）：[train 126d][test 63d]，每次前移 63d。"""
+    if any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in (train, test, step)):
+        raise ValueError("WFA train/test/step must be positive integers")
+    if any(a.date >= b.date for a, b in zip(frames, frames[1:])):
+        raise ValueError("WFA signal dates must be strictly increasing")
     folds = []
     i = 0
     while i + train + test <= len(frames):
@@ -633,32 +695,49 @@ def make_folds(frames: list[DayFrame], train: int = 126, test: int = 63,
 def run_wfa(frames: list[DayFrame], panel: _Panel,
             grid: list[dict] | None = None,
             train: int = 126, test: int = 63, step: int = 63,
-            min_trades: int = 5) -> dict:
+            min_trades: int = 5, *, base_params: GateParams | None = None,
+            account_usd: float = 100_000, risk_limits: dict | None = None) -> dict:
     """真实滚动 WFA：每折在样本内选参，样本外验证，汇总 OOS + DSR。
 
     返回 {folds, oos_aggregate, dsr, recommended_params, grid_size, detail}。
     """
-    grid = grid or DEFAULT_GRID
+    import json
+    base_params = tighten_risk_limits(base_params, risk_limits)
+    if isinstance(account_usd, bool) or not isinstance(account_usd, (int, float)) or not math.isfinite(account_usd) or account_usd <= 0:
+        raise ValueError("WFA account equity must be finite and positive")
+    grid = DEFAULT_GRID if grid is None else grid
+    if not grid:
+        raise ValueError("WFA grid cannot be empty")
+    for override in grid:
+        if override:
+            validate_tuned_params(override)
+        elif not isinstance(override, dict):
+            raise ValueError("WFA grid entries must be parameter objects")
+        tighten_risk_limits(replace(base_params, **override), risk_limits_for(base_params))
     folds = make_folds(frames, train, test, step)
     if not folds:
-        return {"error": f"信号日不足（{len(frames)} < {train + test}），无法 WFA"}
+        return {"error": f"信号日不足（{len(frames)} < {train + test}），无法 WFA",
+                "base_params": asdict(base_params), "risk_limits": risk_limits_for(base_params),
+                "account_usd": account_usd}
 
     fold_rows = []
-    oos_returns: list[float] = []
-    oos_trade_rs: list[float] = []
+    daily_oos: dict[str, float] = {}
+    trade_oos: dict[tuple[str, str, str], float] = {}
     chosen: list[dict] = []
     trial_srs: list[float] = []
 
     for fi, (train_frames, test_frames) in enumerate(folds):
         best_params, best_sr, best_row = None, -9.0, None
         for g in grid:
-            p = replace(GateParams(), **g)
-            res = run_backtest(train_frames, panel, p)
+            p = tighten_risk_limits(replace(base_params, **g), risk_limits_for(base_params))
+            res = run_backtest(train_frames, panel, p, sample_end=train_frames[-1].date,
+                               account_usd=account_usd)
             sr = res["port_sharpe"] if res["n_trades"] >= min_trades else -9.0
             trial_srs.append(sr if sr > -9 else 0.0)
             if sr > best_sr or (sr == best_sr and best_row is not None
                                 and res["expectancy_r"] > best_row["expectancy_r"]):
-                best_params, best_sr, best_row = g, sr, res
+                best_params = ({**g, **risk_limits_for(p)} if g else {})
+                best_sr, best_row = sr, res
         # v5.4 修复：整折所有网格组合交易数都不足 min_trades 时，best_params
         # 保持 None，旧代码 replace(GateParams(), **None) 直接 TypeError 崩溃。
         # 诚实做法：该折回退理论默认参数并在折明细中披露，绝不硬造"最优"。
@@ -667,15 +746,21 @@ def run_wfa(frames: list[DayFrame], panel: _Panel,
             best_params, best_sr = {}, None
             logger.warning("WFA fold %d: 样本内全部网格组合交易数不足 %d，"
                            "回退默认参数（已披露）", fi + 1, min_trades)
-        oos = run_backtest(test_frames, panel, replace(GateParams(), **best_params))
-        oos_returns.extend(oos["port_returns"])
-        oos_trade_rs.extend([t.r for t in oos["trades"]])
+        execution_params = tighten_risk_limits(replace(base_params, **best_params),
+                                               risk_limits_for(base_params))
+        oos = run_backtest(test_frames, panel, execution_params,
+                           sample_end=test_frames[-1].date, account_usd=account_usd)
+        daily_oos.update(zip(oos["port_dates"], oos["port_returns"]))
+        for trade in oos["trades"]:
+            trade_oos[(trade.ticker, trade.signal_date, trade.entry_date)] = trade.r
         chosen.append(best_params)
         fold_rows.append({
             "fold": fi + 1,
             "train": f"{train_frames[0].date.date()}~{train_frames[-1].date.date()}",
             "test": f"{test_frames[0].date.date()}~{test_frames[-1].date.date()}",
             "is_params": best_params, "is_sharpe": best_sr,
+            "gate_params": asdict(execution_params),
+            "risk_limits": risk_limits_for(execution_params),
             "is_trades": best_row["n_trades"] if best_row else 0,
             "is_expectancy": best_row["expectancy_r"] if best_row else None,
             "is_fallback_default": fold_fallback,
@@ -690,6 +775,9 @@ def run_wfa(frames: list[DayFrame], panel: _Panel,
                     oos["win_rate"] * 100, oos["expectancy_r"])
 
     # ---- OOS 汇总 ----
+    oos_dates = sorted(daily_oos)
+    oos_returns = [daily_oos[day] for day in oos_dates]
+    oos_trade_rs = list(trade_oos.values())
     n = len(oos_trade_rs)
     wins = [r for r in oos_trade_rs if r > 0]
     losses = [r for r in oos_trade_rs if r <= 0]
@@ -718,7 +806,7 @@ def run_wfa(frames: list[DayFrame], panel: _Panel,
         "win_rate": round(len(wins) / n, 4) if n else 0.0,
         "expectancy_r": round(float(np.mean(oos_trade_rs)), 3) if n else 0.0,
         "profit_factor": round(sum(wins) / abs(sum(losses)), 2)
-            if losses and sum(losses) != 0 else (float("inf") if wins else 0.0),
+            if losses and sum(losses) != 0 else (None if wins else 0.0),
         "sharpe": round(oos_sharpe, 2),
         "max_dd": round(max_drawdown(equity), 4),
     }
@@ -727,11 +815,11 @@ def run_wfa(frames: list[DayFrame], panel: _Panel,
     rec = dict(chosen[-1]) if chosen else {}
     scored: dict[str, list[float]] = {}
     for row in fold_rows:
-        key = str(sorted(row["is_params"].items()))
+        key = json.dumps(row["is_params"], sort_keys=True)
         scored.setdefault(key, []).append(row["oos_expectancy"])
     if scored:
         best_key = max(scored, key=lambda k: (sum(scored[k]) / len(scored[k])))
-        rec = dict(eval(best_key))
+        rec = json.loads(best_key)
     if oos_agg["expectancy_r"] <= 0 or dsr < 0.5:
         rec = {}                                 # 样本外不显著 → 不覆盖默认
 
@@ -739,61 +827,100 @@ def run_wfa(frames: list[DayFrame], panel: _Panel,
         "folds": fold_rows,
         "n_folds": len(folds),
         "grid_size": len(grid),
+        "account_usd": account_usd,
+        "base_params": asdict(base_params),
+        "risk_limits": risk_limits_for(base_params),
         "oos_aggregate": oos_agg,
+        "oos_dates": oos_dates,
+        "oos_returns": oos_returns,
+        "overlap_note": "重叠测试窗同一日期只计一次，采用当日最新已完成训练折的回放值。",
         "dsr": round(dsr, 4),
         "dsr_note": (f"DSR={dsr:.3f}（N={len(grid)}×{len(folds)}={len(grid) * len(folds)} 次试验校正）"
                      + (" ≥0.95 统计显著" if dsr >= 0.95 else
                         " 0.5~0.95 弱显著" if dsr >= 0.5 else " <0.5 不显著，建议保持默认参数")),
         "recommended_params": rec,
-        "recommended_note": ("样本外期望为正且通过校正 → 写入 tuned_params.json"
+        "recommended_note": ("样本外期望为正且通过校正 → 生成待审批参数提案"
                              if rec else "样本外不显著 → 保持理论默认参数"),
     }
 
 
 def save_tuned_params(wfa: dict, path: str = "tuned_params.json") -> str | None:
-    """WFA 推荐参数落盘（pipeline 启动时加载覆盖默认闸门）。"""
-    import json
-    from datetime import datetime
+    """Create a review proposal; research never activates tuned parameters."""
+    from pathlib import Path
+    from .review.monthly import generate_proposal
     if not wfa.get("recommended_params"):
         return None
-    blob = {
-        "tuned_at": datetime.now().isoformat(timespec="seconds"),
-        "params": wfa["recommended_params"],
-        "oos_aggregate": wfa["oos_aggregate"],
-        "dsr": wfa["dsr"],
-        "n_folds": wfa["n_folds"],
-        "grid_size": wfa["grid_size"],
-    }
-    with open(path, "w") as f:
-        json.dump(blob, f, ensure_ascii=False, indent=2)
-    return path
+    destination = Path(path).absolute().parent / "review_proposals"
+    proposal = generate_proposal(wfa, str(destination))
+    return str(destination / f"{proposal.proposal_id}.json")
 
 
-def apply_tuned_params(path: str = "tuned_params.json") -> dict | None:
-    """读取调优参数并覆盖 config 闸门（返回应用的参数，无文件/无效返回 None）。
+def apply_tuned_params(path: str = "tuned_params.json", *, as_of: str | None = None) -> dict | None:
+    """Return validated overrides from an approved effect without global writes.
 
-    v6.4 次日生效纪律（S6 复盘审批流）：blob 含 effective_from 时，生效日
-    之前一律不加载（返回 None）——approve 当日的运行绝不偷跑新参数。
+    Active copy, immutable effect, execution receipt and approved proposal must
+    agree. Orphan effects, edited snapshots and pre-effective runs fail closed.
     """
+    import hashlib
     import json
-    import os
-    if not os.path.exists(path):
+    from datetime import date
+    from pathlib import Path
+    from .ledger_io import file_digest, read_json_strict
+
+    active = Path(path).absolute()
+    if not active.exists():
         return None
     try:
-        blob = json.load(open(path))
-        eff = blob.get("effective_from")
-        if eff:
-            from datetime import datetime
-            if str(eff) > datetime.now().strftime("%Y-%m-%d"):
-                return None          # 次日生效：生效日前拒绝加载
-        p = blob.get("params", {})
-        applied = {}
-        if "mrs_gate" in p:
-            config.OPEN_LONG["mrs"] = float(p["mrs_gate"]); applied["mrs_gate"] = p["mrs_gate"]
-        if "shs_main" in p:
-            config.SHS_MAIN_POOL = float(p["shs_main"]); applied["shs_main"] = p["shs_main"]
-        if "tss_gate" in p:
-            config.OPEN_LONG["tss"] = float(p["tss_gate"]); applied["tss_gate"] = p["tss_gate"]
-        return applied or None
-    except Exception:
+        if active.is_symlink():
+            raise ValueError("Tuned parameters cannot be a symlink")
+        blob = read_json_strict(active)
+        if not isinstance(blob, dict) or blob.get("status") != "approved":
+            return None
+        effective = date.fromisoformat(blob["effective_from"])
+        run_date = date.fromisoformat(as_of) if as_of is not None else date.today()
+        if run_date < effective:
+            return None
+        params = validate_tuned_params(blob.get("params"))
+        proposal_id, execution_id = blob["proposal_id"], blob["execution_id"]
+        # Validate filenames before following references stored in an artifact.
+        import re
+        for identifier in (proposal_id, execution_id):
+            if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", identifier):
+                raise ValueError("Invalid reviewed effect identity")
+        root = active.parent.resolve()
+        receipt_path = root / "review_executions" / f"{execution_id}.json"
+        effect_path = root / "review_executions" / f"{execution_id}.effect.json"
+        intent_path = root / "review_executions" / f"{execution_id}.intent.json"
+        proposal_path = Path(blob["proposal_path"])
+        if (str(receipt_path) != blob.get("receipt_path")
+                or proposal_path.name != f"{proposal_id}.json"
+                or not proposal_path.resolve().is_relative_to(root)
+                or any(p.is_symlink() for p in (receipt_path, effect_path, intent_path, proposal_path))
+                or receipt_path.parent.is_symlink()):
+            raise ValueError("Reviewed artifacts must remain in the same output directory")
+        receipt, proposal = read_json_strict(receipt_path), read_json_strict(proposal_path)
+        intent = read_json_strict(intent_path)
+        if (not isinstance(intent, dict) or receipt != intent.get("receipt")
+                or file_digest(receipt_path) != hashlib.sha256(json.dumps(
+                    intent["receipt"], ensure_ascii=False, indent=2,
+                    allow_nan=False).encode("utf-8")).hexdigest()):
+            raise ValueError("Approval receipt differs from its prepared execution")
+        for key in ("proposal_id", "execution_id", "preimage_sha256", "parameters_sha256", "status", "effective_from"):
+            if receipt.get(key) != blob.get(key) or proposal.get(key) != blob.get(key):
+                raise ValueError("Approval receipt does not match its effect and proposal")
+        digest = receipt.get("tuned_sha256")
+        if (file_digest(active) != digest or file_digest(effect_path) != digest
+                or file_digest(proposal_path) != receipt.get("proposal_sha256")
+                or proposal.get("tuned_sha256") != digest
+                or receipt.get("tuned_path") != str(effect_path)
+                or proposal.get("tuned_path") != str(effect_path)
+                or params != proposal.get("grid_result", {}).get("recommended_params")):
+            raise ValueError("Approved immutable effect or parameter bytes changed")
+        raw = json.dumps(params, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+        if hashlib.sha256(raw).hexdigest() != blob.get("parameters_sha256"):
+            raise ValueError("Approved parameters differ from the reviewed digest")
+        return params
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        logger.warning("Rejected tuned parameters %s: %s", active, exc)
         return None

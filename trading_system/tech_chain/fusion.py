@@ -15,6 +15,7 @@ fusion 是确定性合成（规则保留区：权重固定、无歧义）。
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 from ..redline import ExecutionTracer, Passthrough
@@ -24,6 +25,11 @@ from .universe import SUBCHAIN_TO_MAIN, TECH_SUBCHAINS
 log = logging.getLogger("tech_chain.fusion")
 
 W_MOM, W_GLOBAL, W_SENT, W_RISK = 0.40, 0.25, 0.20, 0.15
+
+
+def _finite(value) -> bool:
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value))
 
 
 @dataclass
@@ -54,7 +60,7 @@ class TechChainSignal:
 
 def _score_momentum(row: ChainMonitorRow) -> float | None:
     """链 20 日动量 → 0..10。-10%→0 分，0→5 分，+10%→10 分（线性截断）。"""
-    if row.chain_mom20 is None:
+    if not _finite(row.chain_mom20):
         return None
     return max(0.0, min(10.0, 5.0 + row.chain_mom20 * 50.0))
 
@@ -62,7 +68,7 @@ def _score_momentum(row: ChainMonitorRow) -> float | None:
 def _score_global(cid: str, linkage: list[GlobalLinkageRow]) -> float | None:
     """该链全球龙头的 20 日相对强度 → 0..10。"""
     leaders = TECH_SUBCHAINS[cid]["global_leaders"]
-    vals = [r.rs_vs_spy for r in linkage if r.ticker in leaders and r.rs_vs_spy is not None]
+    vals = [r.rs_vs_spy for r in linkage if r.ticker in leaders and _finite(r.rs_vs_spy)]
     if not vals:
         return None
     avg = sum(vals) / len(vals)
@@ -70,9 +76,11 @@ def _score_global(cid: str, linkage: list[GlobalLinkageRow]) -> float | None:
 
 
 def _score_sentiment(row: SentimentRow | None) -> float | None:
-    if row is None or row.degraded or row.sentiment_score is None:
+    if (not isinstance(row, SentimentRow) or row.degraded or not _finite(row.sentiment_score)
+            or not -1 <= row.sentiment_score <= 1 or not _finite(row.heat)
+            or not 0 <= row.heat <= 10):
         return None
-    heat = row.heat if row.heat is not None else 5.0
+    heat = row.heat
     # 情感方向 × 热度加权：强情感+高热度=极值，高热度+中性=中性
     return max(0.0, min(10.0, 5.0 + row.sentiment_score * (heat / 10.0) * 5.0))
 
@@ -82,6 +90,8 @@ def _risk_penalty(cid: str, alerts: list[RiskAlert]) -> tuple[float | None, floa
     mine = [a for a in alerts if a.chain_id == cid or a.chain_id == "unknown"]
     if not mine:
         return 10.0, 0.0
+    if any(not _finite(a.severity) or not 1 <= a.severity <= 10 for a in mine):
+        return None, 0.0
     top = max(a.severity for a in mine)
     return max(0.0, 10.0 - top), top
 
@@ -89,7 +99,7 @@ def _risk_penalty(cid: str, alerts: list[RiskAlert]) -> tuple[float | None, floa
 def _transmission_graph(row: ChainMonitorRow) -> dict[str, dict[str, float]]:
     """相邻环节动量差 → 传导强度 0..1（上游强、中游未动=传导中游进行中）。"""
     order = ["upstream", "midstream", "downstream"]
-    moms = {l.link: l.mom20 for l in row.links if l.mom20 is not None}
+    moms = {l.link: l.mom20 for l in row.links if _finite(l.mom20)}
     graph: dict[str, dict[str, float]] = {}
     for a, b in zip(order, order[1:]):
         if a in moms and b in moms:
@@ -110,12 +120,16 @@ class TechChainFusionAgent:
                 tracer: ExecutionTracer | None = None) -> list[TechChainSignal]:
         sent_map: dict[str, SentimentRow] = {}
         sent_degraded = isinstance(sentiment, Passthrough)
-        if not sent_degraded:
+        if not sent_degraded and isinstance(sentiment, dict):
             sent_map = sentiment
+        else:
+            sent_degraded = True
         alert_list: list[RiskAlert] = []
         risk_degraded = isinstance(alerts, Passthrough)
-        if not risk_degraded:
+        if not risk_degraded and isinstance(alerts, list) and all(isinstance(a, RiskAlert) for a in alerts):
             alert_list = alerts
+        else:
+            risk_degraded = True
 
         mon_map = {r.chain_id: r for r in monitor}
         signals: list[TechChainSignal] = []
@@ -150,7 +164,7 @@ class TechChainFusionAgent:
                 degraded.append("tech.sentiment")
 
             s_risk, risk_level = _risk_penalty(cid, alert_list)
-            if risk_degraded:
+            if risk_degraded or s_risk is None:
                 degraded.append("tech.risk")
             else:
                 parts["risk"] = (s_risk, W_RISK)
@@ -179,7 +193,8 @@ class TechChainFusionAgent:
                 alerts=[{"severity": a.severity, "type": a.type,
                          "headline_zh": a.headline_zh, "link": a.link,
                          "transmission": a.transmission}
-                        for a in alert_list if a.chain_id in (cid, "unknown")],
+                        for a in alert_list if a.chain_id in (cid, "unknown")
+                        and _finite(a.severity) and 1 <= a.severity <= 10],
                 transmission=_transmission_graph(row) if row else {},
                 bonus_hint=round(bonus, 3),
                 leading_link=row.leading_link if row else None,
@@ -193,6 +208,8 @@ def signals_to_bonus_map(signals: list[TechChainSignal]) -> dict[str, float]:
     """主引擎接入点：主链 id（semis/ai_compute）→ 乘性加成（取子链最强）。"""
     out: dict[str, float] = {}
     for s in signals:
+        if not _finite(s.bonus_hint) or not 0.90 <= s.bonus_hint <= 1.15:
+            continue
         cur = out.get(s.main_chain, 1.0)
         # 同一主链下多条子链：取偏离 1.0 最远者（最强信号优先）
         out[s.main_chain] = (s.bonus_hint
