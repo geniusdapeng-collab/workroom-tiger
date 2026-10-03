@@ -21,8 +21,10 @@ import {
 } from "@workloom/base/tenancy";
 import { gatewayAppend, gatewayAppendOnClient, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
 import { makeReadableId } from "@workloom/shared";
-import { capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
+import { actionProcedure, capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
 import { accountsRouter } from "./accounts-router.js";
+import { overlayRouter } from "./overlay-router.js";
+import { bundledServiceFrontAvailable, resolveServiceFrontPublication } from "../service/service-front-publication.js";
 import {
   ApprovalError,
   batchApprove,
@@ -37,7 +39,7 @@ import { routedLlmCall, resetLlmAssembly } from "../service/llm.js";
 import { creditsRouter, modelFeedbackRouter } from "./credits-router.js";
 import { runRouterReviewBeat } from "@workloom/base/model-router";
 import {
-  loadCharter, parseCharter, transition, defaultCharter,
+  loadCharter, parseCharter, charterSchema, transition, defaultCharter,
   runBriefingBeat, runQueueBeat, runDeviationBeat, runBreakerBeat, buildScorecard,
   runOutcomeReviewBeat, runHrReviewBeat, runBoardPackBeat, runOrgScanBeat, applyReplacement,
   buildFloor,
@@ -54,10 +56,13 @@ import {
 } from "@workloom/base/night-shift";
 import {
   activateRuleVersion,
-  confirmDryRun,
+  checkCandidateAgainstBaseline,
+  confirmDryRunOnTx,
   createDryRun,
   fenceActivationFromProposal,
-  fenceRuleRowId,
+  loadActiveRulesInTx,
+  nextRuleRowIdentity,
+  type RuleRowIdentity,
 } from "@workloom/base/fence-engine";
 import { MAX_CONCURRENT_THREADS, PLAN_TIERS } from "@workloom/shared";
 import {
@@ -131,6 +136,10 @@ import {
   resolveAuthoritativeClientAccess,
 } from "../service/access-authority.js";
 import {
+  getWizardDraft,
+  saveWizardDraft,
+  assignWizardDraft,
+  completeWizardDraft,
   replayWelcome,
   saveWelcomeProgress,
   welcomeProgress,
@@ -142,6 +151,9 @@ import {
   disableMemory,
   editMemoryContent,
   getFeedbackEnums,
+  previewMemoryImpact,
+  reactivateMemory,
+  restoreMemories,
   recallMemoriesByMember,
   runMemoryMinerBeat,
 } from "@workloom/base/evolve";
@@ -260,6 +272,53 @@ const onboardingRouter = router({
     memberId: ctx.identity.memberId,
     memberNo: ctx.identity.memberNo,
     role: ctx.identity.role,
+  })),
+
+  /** 标准落地向导草稿：显式版本号防多人覆盖，payload 白名单不接收密钥和文档正文。 */
+  wizardDraft: protectedProcedure.query(({ ctx }) => getWizardDraft(ctx.identity.workspaceId)),
+
+  saveWizardDraft: writeProcedure
+    .input(z.object({
+      expectedVersion: z.number().int().min(0),
+      currentStep: z.number().int().min(0).max(4),
+      payload: z.object({
+        provider: z.string().max(40).optional(),
+        baseUrl: z.string().max(200).optional(),
+        model: z.string().max(80).optional(),
+        businessName: z.string().max(60).optional(),
+        industry: z.string().max(40).optional(),
+        note: z.string().max(300).optional(),
+        siteUrl: z.string().max(500).optional(),
+        documentTitle: z.string().max(120).optional(),
+        testQuestion: z.string().max(500).optional(),
+      }).strict(),
+    }))
+    .mutation(({ ctx, input }) => saveWizardDraft(ctx.identity.workspaceId, {
+      memberId: ctx.identity.memberId,
+      memberNo: ctx.identity.memberNo,
+      role: ctx.identity.role,
+    }, input)),
+
+  assignWizardDraft: writeProcedure
+    .input(z.object({ memberId: z.string().min(1), expectedVersion: z.number().int().min(1) }))
+    .mutation(({ ctx, input }) => assignWizardDraft(ctx.identity.workspaceId, {
+      memberId: ctx.identity.memberId,
+      memberNo: ctx.identity.memberNo,
+      role: ctx.identity.role,
+    }, input)),
+
+  completeWizardDraft: writeProcedure
+    .input(z.object({ expectedVersion: z.number().int().min(1) }))
+    .mutation(({ ctx, input }) => completeWizardDraft(ctx.identity.workspaceId, {
+      memberId: ctx.identity.memberId,
+      memberNo: ctx.identity.memberNo,
+      role: ctx.identity.role,
+    }, input.expectedVersion)),
+
+  /** C 端发布结果必须来自部署环境、工作区路由和渠道接入事实。 */
+  serviceFrontPublication: protectedProcedure.query(({ ctx }) => resolveServiceFrontPublication({
+    workspaceId: ctx.identity.workspaceId,
+    bundledClientAvailable: bundledServiceFrontAvailable(),
   })),
 
   /** 运行态总览（P0 横幅/落地向导同一事实源）：数据模式 + LLM 装配 + 工作区规模 */
@@ -737,29 +796,36 @@ const threadsRouter = router({
 
   /** 运行/续跑线程（replay 断点续跑幂等，E3.3/H-5；按线程模式分流：ask 应答 / agent 逐步确认 / quest 自主执行） */
   run: capabilityWriteProcedure("quest")
-    .input(z.object({ threadId: z.string(), goal: z.string(), presetKey: z.string().default("pricing-agent") }))
+    .input(z.object({ threadId: z.string(), goal: z.string().optional(), presetKey: z.string().default("pricing-agent") }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       const app = getAppPool();
       const client = await app.connect();
       let mode: "ask" | "agent" | "quest" = "quest";
+      let runGoal = "";
       try {
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
-        const t = await client.query<{ mode: string }>(`SELECT mode FROM threads WHERE id=$1 AND workspace_id=$2`, [input.threadId, scope.workspaceId]);
+        const t = await client.query<{ mode: string; title: string }>(`SELECT mode, title FROM threads WHERE id=$1 AND workspace_id=$2`, [input.threadId, scope.workspaceId]);
+        if (!t.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "任务不存在或无权访问" });
+        runGoal = input.goal ?? t.rows[0].title;
         await client.query("COMMIT");
         if (t.rows[0]?.mode === "ask" || t.rows[0]?.mode === "agent") mode = t.rows[0].mode;
       } catch (err) {
-        await client.query("ROLLBACK").catch(() => undefined);
+        try {
+          await client.query("ROLLBACK");
+        } catch (rollbackError) {
+          throw new AggregateError([err, rollbackError], "读取续跑线程失败且事务回滚失败");
+        }
         throw err;
       } finally {
         client.release();
       }
       if (mode === "ask") {
-        return runAsk(app, getGatewayPool(), scope, { threadId: input.threadId, goal: input.goal, presetKey: input.presetKey, llmCall: llmCall("ask-synthesize", scope) });
+        return runAsk(app, getGatewayPool(), scope, { threadId: input.threadId, goal: runGoal, presetKey: input.presetKey, llmCall: llmCall("ask-synthesize", scope) });
       }
       return runQuest(app, getGatewayPool(), scope, {
-        threadId: input.threadId, goal: input.goal, presetKey: input.presetKey, mode, llmCall: llmCall("quest-plan", scope),
+        threadId: input.threadId, goal: runGoal, presetKey: input.presetKey, mode, llmCall: llmCall("quest-plan", scope),
       });
     }),
 });
@@ -1624,10 +1690,14 @@ const fenceRouter = router({
         ruleId: z.string(), name: z.string(), level: z.enum(["auto", "review", "block"]),
         objectTypes: z.array(z.string()), actions: z.array(z.string()), when: z.string(),
       }),
+      /**
+       * MC-103：基线 when 改写的显式放行位。when 语义无法静态证明不放严，默认一律拒绝；
+       * 客户在 dry-run 回放 + 人工确认（L2.4）后显式传 true，放行事实写进提案事件（H-3 留痕）。
+       */
+      allowWhenChange: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
-      await confirmDryRun(getAppPool(), scope, input.dryRunId);
       // 规则草稿进 pending_approval（激活须审批事件 ID，activateRuleVersion 在 P4 手势后调用——E1 已接线，见下方 decide/batchApprove）
       // D16（#1/A）：规则草稿行、提案事件、审批行三者同一事务同一 COMMIT
       const app = getAppPool();
@@ -1637,22 +1707,85 @@ const fenceRouter = router({
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-        const rowId = fenceRuleRowId(input.rule.ruleId, scope.workspaceId);
-        await client.query(
-          `INSERT INTO fence_rules (id, rule_id, version, workspace_id, name, level, match_spec, action, is_baseline, status, created_by)
-           VALUES ($1,$2,'v-next',$3,$4,$5,$6,$7,false,'pending_approval',$8)
-           ON CONFLICT (id) DO NOTHING`,
-          [rowId, input.rule.ruleId, scope.workspaceId, input.rule.name, input.rule.level,
-           JSON.stringify({ object_types: input.rule.objectTypes, actions: input.rule.actions, when: input.rule.when }),
-           JSON.stringify({ result: input.rule.level }), ctx.identity.memberNo],
+        // MC-103：dry-run 必须属于本次提案的同一条规则——此前只按 id 确认，可以把任意一条
+        // 自己名下的 dry-run 拿来给另一条规则的提案背书（回放证据与提案内容脱钩）。
+        const drRow = await client.query<{ rule_id: string; status: string }>(
+          `SELECT rule_id, status FROM fence_dry_runs WHERE id=$1 AND workspace_id=$2 FOR UPDATE`,
+          [input.dryRunId, scope.workspaceId],
         );
+        const dryRun = drRow.rows[0];
+        if (!dryRun) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `dry-run ${input.dryRunId} 不存在或不属于当前工作区` });
+        }
+        if (dryRun.rule_id !== input.rule.ruleId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `dry-run ${input.dryRunId} 回放的是规则 ${dryRun.rule_id}，与本次提案 ${input.rule.ruleId} 不一致（禁止借用他条规则的确认）`,
+          });
+        }
+        if (dryRun.status !== "pending") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `dry-run ${input.dryRunId} 状态为 ${dryRun.status}，仅 pending 可确认` });
+        }
+        // HP-02：提案入口即做基线单调守卫——同 rule_id 的基线规则只可加严
+        //（level 不降 / when 不变 / 覆盖集不收窄）。修复前该守卫只在测试里被调用，
+        // 工作区可以把一条 block 基线规则"升级"成 review/恒假条件。
+        // MC-109：锚点取同 rule_id 最严 active 行（含客户覆盖行），首次自定义后仍然生效。
+        const activeBaseline = await loadActiveRulesInTx(client, scope);
+        const guard = checkCandidateAgainstBaseline(activeBaseline, {
+          rule_id: input.rule.ruleId, version: "v-next", name: input.rule.name,
+          level: input.rule.level, is_baseline: false,
+          objectTypes: input.rule.objectTypes, actions: input.rule.actions, when: input.rule.when,
+        }, { allowWhenChange: input.allowWhenChange === true });
+        if (!guard.ok) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `围栏基线只可加严，本次变更被拒：${guard.violations.map((v) => v.reason).join("；")}`,
+          });
+        }
+        // MC-102：行 ID 带版本号（v<该 rule_id 历史最大 + 1>），同 rule_id 的第 N 次提案落在新行上。
+        // ON CONFLICT 只覆盖"并发提案先占了同一版本号"这一种情况——重算版本重试，绝不静默丢弃提案内容
+        //（修复前固定 vnext 后缀 + DO NOTHING：第二次提案审批通过但规则行从未更新）。
+        let identity: RuleRowIdentity | null = null;
+        for (let attempt = 0; attempt < 5 && !identity; attempt += 1) {
+          const candidate = await nextRuleRowIdentity(client, scope, input.rule.ruleId);
+          const inserted = await client.query(
+            `INSERT INTO fence_rules (id, rule_id, version, workspace_id, name, level, match_spec, action, is_baseline, status, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,'pending_approval',$9)
+             ON CONFLICT (id) DO NOTHING`,
+            [candidate.rowId, input.rule.ruleId, candidate.version, scope.workspaceId, input.rule.name, input.rule.level,
+             JSON.stringify({ object_types: input.rule.objectTypes, actions: input.rule.actions, when: input.rule.when }),
+             JSON.stringify({ result: input.rule.level }), ctx.identity.memberNo],
+          );
+          if (inserted.rowCount === 1) identity = candidate;
+        }
+        if (!identity) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `规则 ${input.rule.ruleId} 的提案行版本连续冲突，未落地；请重试（未写入任何变更）`,
+          });
+        }
+        // dry-run 确认与提案行/事件/审批行同一事务：被守卫拒绝的提案不消耗 pending 态，
+        // 客户修正后可用同一 dryRunId 重试（修复前先确认后守卫，拒一次就再也确认不了）。
+        await confirmDryRunOnTx(client, scope, input.dryRunId);
         ev = await gatewayAppendOnClient(client, {
           ...scope, actor: { id: ctx.identity.memberNo, type: "human" },
         }, {
           who: { type: "human", id: ctx.identity.memberNo },
           context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
           object: { type: "staff", id: input.rule.ruleId },
-          decision: { action: "fence.rule.propose", after: { ...input.rule, dryRunId: input.dryRunId } },
+          // 提案事件携带本行 ID/版本与基线锚点事实：审批通过后按此行激活（MC-102），
+          // allowWhenChange 放行事实一并留痕（MC-103/H-3）。
+          decision: {
+            action: "fence.rule.propose",
+            after: {
+              ...input.rule,
+              dryRunId: input.dryRunId,
+              ruleRowId: identity.rowId,
+              version: identity.version,
+              inheritedBaseline: identity.inheritedBaseline,
+              ...(input.allowWhenChange === true ? { allowWhenChange: true } : {}),
+            },
+          },
           rule_impact: [],
         });
         // E1 联调接线（PF.5/F2.4）：围栏变更提案进 P4 决断队列——高危（不可批量采纳，须逐条手势，F5.4/G6）
@@ -1662,11 +1795,15 @@ const fenceRouter = router({
            VALUES ($1,$2,$3,$4,'inapp','pending',$5)
            ON CONFLICT (event_id, channel) DO NOTHING`,
           [`apr-${ev.eventId.toLowerCase()}`, scope.tenantId, scope.workspaceId, ev.eventId,
-           JSON.stringify({ after: input.rule, high_risk: true })],
+           JSON.stringify({ after: input.rule, ruleRowId: identity.rowId, version: identity.version, high_risk: true })],
         );
         await client.query("COMMIT");
       } catch (err) {
-        await client.query("ROLLBACK").catch(() => undefined);
+        try {
+          await client.query("ROLLBACK");
+        } catch (rollbackError) {
+          throw new AggregateError([err, rollbackError], "围栏提案失败且事务回滚失败");
+        }
         throw err;
       } finally {
         client.release();
@@ -2339,11 +2476,7 @@ const captainRouter = router({
   grant: capabilityWriteProcedure("quest")
     .input(z.object({
       clauses: z.array(z.string()),
-      autonomy: z.object({
-        price_band: z.tuple([z.number(), z.number()]),
-        procurement_cap: z.number(),
-        campaign_cap: z.number(),
-      }),
+      autonomy: charterSchema.shape.autonomy,
       shadowDays: z.number().int().min(1).max(14).default(3),
       trialDays: z.number().int().min(3).max(30).default(7),
       identityConfirmed: z.boolean(), // §12.2 第⑤步身份核验（演示环境布尔确认）
@@ -2765,6 +2898,39 @@ const memoryRouter = router({
       );
     }),
 
+  /** 停用/来源清算前读取真实影响关系；无引用时返回空数组而非推测。 */
+  impact: protectedProcedure
+    .input(z.object({
+      memoryId: z.string().optional(),
+      memberId: z.string().optional(),
+    }).refine((input) => Boolean(input.memoryId) !== Boolean(input.memberId), "必须且只能指定一条记忆或一名来源成员"))
+    .query(async ({ ctx, input }) => {
+      return previewMemoryImpact(getAppPool(), scopeOf(ctx.identity), {
+        memoryIds: input.memoryId ? [input.memoryId] : undefined,
+        sourceMemberId: input.memberId,
+      });
+    }),
+
+  /** 回收区单条重新启用，恢复本身写独立校准事件。 */
+  reactivate: actionProcedure("memory.manage")
+    .input(z.object({ memoryId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return reactivateMemory(
+        getAppPool(), getGatewayPool(), scopeOf(ctx.identity),
+        { memberNo: ctx.identity.memberNo }, input.memoryId,
+      );
+    }),
+
+  /** 撤销最近一批来源清算；只恢复请求中仍处于回收区的本工作区记忆。 */
+  restore: actionProcedure("memory.manage")
+    .input(z.object({ memoryIds: z.array(z.string()).min(1).max(50) }))
+    .mutation(async ({ ctx, input }) => {
+      return restoreMemories(
+        getAppPool(), getGatewayPool(), scopeOf(ctx.identity),
+        { memberNo: ctx.identity.memberNo }, input.memoryIds,
+      );
+    }),
+
   /** 来源人一键清算（D24 修订 2：成员离任/换岗，作废其手势沉淀的偏好记忆） */
   recallBySource: writeProcedure
     .input(z.object({ memberId: z.string() }))
@@ -2820,6 +2986,7 @@ export const appRouter = router({
   credits: creditsRouter,
   modelFeedback: modelFeedbackRouter,
   memory: memoryRouter,
+  overlay: overlayRouter,
   evolution: evolutionRouter,
 });
 

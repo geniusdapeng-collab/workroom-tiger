@@ -20,7 +20,7 @@ import { appendEventOn, serviceTx, svcQuery } from "./events.js";
 import { llmCall } from "./llm.js";
 import { ensureServiceSchema } from "./store.js";
 import {
-  activeInstall, clearBundle, clearPreview, generateStaffing,
+  activeInstall, clearBundle, clearPreview, confirmAndAssembleStaffing, customizationStatus, generateStaffing,
   onboardingExam, rollbackSnapshot,
 } from "./bundle.js";
 import {
@@ -447,6 +447,10 @@ const bundleRouter = router({
   activeInstall: protectedProcedure.query(async ({ ctx }) => {
     return { install: await activeInstall(scopeOf(ctx.identity).workspaceId) };
   }),
+  /** 定制向导恢复态（刷新/重开后从服务端事实继续） */
+  customizationStatus: protectedProcedure.query(async ({ ctx }) => {
+    return customizationStatus(scopeOf(ctx.identity).workspaceId);
+  }),
   /** 清空预览（明示范围：将卸什么/将留什么） */
   clearPreview: protectedProcedure.query(async ({ ctx }) => {
     return clearPreview(scopeOf(ctx.identity).workspaceId);
@@ -465,12 +469,50 @@ const bundleRouter = router({
   generateStaffing: writeProcedure
     .input(z.object({ industryText: z.string().min(4).max(2000) }))
     .mutation(async ({ ctx, input }) => {
-      return generateStaffing(scopeOf(ctx.identity).workspaceId, input.industryText);
+      try {
+        return await generateStaffing(
+          scopeOf(ctx.identity).workspaceId,
+          input.industryText,
+          { id: ctx.identity.memberNo, type: "human" },
+        );
+      } catch (error) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: error instanceof Error ? error.message : String(error) });
+      }
     }),
-  /** 上岗考（exam 门禁：达标才 activated） */
-  onboardingExam: writeProcedure.mutation(async ({ ctx }) => {
-    return onboardingExam(scopeOf(ctx.identity).workspaceId);
-  }),
+  /** 人审确认 → 原子形成 staged 候选；此时员工/围栏仍不可运行 */
+  confirmAndAssembleStaffing: writeProcedure
+    .input(z.object({
+      draftId: z.string().min(1).max(100),
+      expectedDraftHash: z.string().regex(/^[a-f0-9]{64}$/),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await confirmAndAssembleStaffing(
+          scopeOf(ctx.identity).workspaceId,
+          input,
+          { id: ctx.identity.memberNo, type: "human" },
+        );
+      } catch (error) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: error instanceof Error ? error.message : String(error) });
+      }
+    }),
+  /** 上岗考绑定 staged 版本/哈希；达标后才在服务端事务内激活 */
+  onboardingExam: writeProcedure
+    .input(z.object({
+      installId: z.string().min(1).max(120),
+      expectedAssemblyHash: z.string().regex(/^[a-f0-9]{64}$/),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await onboardingExam(
+          scopeOf(ctx.identity).workspaceId,
+          input,
+          { id: ctx.identity.memberNo, type: "human" },
+        );
+      } catch (error) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: error instanceof Error ? error.message : String(error) });
+      }
+    }),
 });
 
 /**
