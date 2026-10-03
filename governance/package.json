@@ -72,6 +72,7 @@
     "test:tiger-agent": "node --test --test-concurrency=1 ../scripts/tiger-agent.test.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^24.0.0",
     "concurrently": "^9.1.0",
     "jsdom": "^30.0.1",
