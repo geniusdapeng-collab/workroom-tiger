@@ -21,7 +21,7 @@
     "demo": "TOOL_UNVERIFIED_RATE=0 tsx --env-file=.env scripts/demo.ts",
     "doctor": "bash scripts/doctor.sh",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm test:governance && pnpm test:reset-safety && pnpm test:payload-boundary && pnpm test:release-assets && pnpm test:desktop-bootstrap && pnpm test:tiger-native && pnpm -r --if-present test && pnpm test:oss",
     "db:verify-chain": "tsx --env-file=.env scripts/verify-chain.ts",
     "suite": "TOOL_UNVERIFIED_RATE=0 tsx --env-file=.env scripts/suite.ts",
     "release:gate": "tsx --env-file=.env scripts/release-gate.ts",
@@ -59,7 +59,17 @@
     "bundle:seal": "tsx scripts/bundle-governance.mts --refresh-digests",
     "bundle:release": "tsx scripts/bundle-governance.mts --refresh-digests --release",
     "projections:generate": "tsx scripts/generate-client-projections.mts --write",
-    "projections:check": "tsx scripts/generate-client-projections.mts"
+    "projections:check": "tsx scripts/generate-client-projections.mts",
+    "test:governance": "node --test --test-concurrency=1 scripts/delivery/*.test.mjs scripts/acceptance/fleet-run.test.mjs scripts/acceptance/lib/environment-safety.test.mjs scripts/acceptance/lib/outcome-contract.test.mjs scripts/acceptance/lib/live/budget.test.mjs scripts/acceptance/lib/live/live-truth.test.mjs scripts/acceptance/lib/live/providers.test.mjs scripts/acceptance/lib/live/usage.test.mjs scripts/acceptance/lib/live/audit.test.mjs scripts/acceptance/lib/live/providers-http.test.mjs scripts/capability-status.test.mjs scripts/oss-inventory.test.mjs scripts/oss-watch.test.mjs scripts/tools/provision-safety.test.mjs sync/direct-push.test.mjs scripts/acceptance/lib/live/product.test.mjs scripts/acceptance/lib/live/media-negative.test.mjs scripts/acceptance/lib/live/live-cli.test.mjs scripts/acceptance/outcome.test.mjs scripts/acceptance/lib/profile-contract.test.mjs scripts/acceptance/profile-check.test.mjs scripts/ui-release-registration.test.mjs scripts/acceptance/lib/live/dsh-process.test.mjs scripts/acceptance/lib/live/live-cli-wire.test.mjs sync/fanout-safety.test.mjs scripts/acceptance/lib/client-identity.test.mjs scripts/acceptance/lib/live/safety.test.mjs",
+    "test:media": "node --test --test-concurrency=1 scripts/acceptance/lib/live/media-decoder.test.mjs scripts/acceptance/lib/live/live-cli-browser.test.mjs",
+    "test:reset-safety": "node --test scripts/reset-safety.test.mjs",
+    "test:payload-boundary": "node --test scripts/product-runtime.test.mjs scripts/payload-policy.test.mjs scripts/pack-nm-merge.test.mjs scripts/runtime-deps-lock.test.mjs apps/desktop/electron/payload-integrity.test.cjs scripts/payload-integrity.test.mjs",
+    "test:release-assets": "node --test scripts/release-assets.test.mjs",
+    "test:desktop-bootstrap": "node --test apps/desktop/electron/*.test.cjs scripts/desktop-bootstrap-db.test.mjs scripts/payload-integrity.test.mjs scripts/vite-product.test.mjs",
+    "test:oss": "node --test scripts/oss-inventory.test.mjs",
+    "runtime:deps:verify": "node scripts/runtime-deps-lock.mjs verify",
+    "test:tiger-native": "node --test --test-concurrency=1 scripts/tiger-desktop-delivery.test.mjs scripts/proposal-bridge.test.mjs scripts/desktop-workflow-path.test.mjs scripts/unsigned-desktop-release.test.mjs scripts/desktop-guest-seed.test.mjs scripts/agent-capabilities.test.mjs",
+    "test:tiger-agent": "node --test --test-concurrency=1 ../scripts/tiger-agent.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

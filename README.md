@@ -321,7 +321,7 @@ pnpm setup && pnpm preview:all
 1. 进仓先读 [`governance/README.md`](governance/README.md)；全量能力清单见 `governance/docs/capability-map.md`；
 2. **首启必跑 `pnpm preview:all`**（governance 目录下），未完成视为环境初始化未完成；
 3. **一键能力巡游 `pnpm agent:tour`**：环境 + 数据 + 服务 + 浏览器四层自检；
-4. **本仓自带「操作电脑」能力**（`governance/packages/base/computer-use/`，65 动作三层感知：L1 浏览器 DOM 级 / L2 全 GUI 语义树 / L3 截图像素级，不依赖任何沙箱）：`pnpm computer:preflight && pnpm computer:smoke` 即验；可装到生产专用工作站，HTTP / MCP 远程驱动见 `governance/docs/computer-use-production.md`；
+4. **操作电脑入口**位于 `governance/packages/base/computer-use/`，包含浏览器 DOM、GUI 语义树与截图感知；先运行 `pnpm computer:preflight && pnpm computer:smoke` 核对本机依赖、权限和执行结果。目录存在不能代替运行验收，HTTP / MCP 接入见 `governance/docs/computer-use-production.md`；
 5. **验证纪律**：改完代码必跑 `pnpm suite`；发布前必跑 `pnpm release:gate`；改事件 / 号源后跑 `pnpm db:verify-chain`；UI 改动必须用浏览器能力实际打开页面截图核对。
 
 ---
@@ -366,3 +366,5 @@ Apache-2.0。
 [`docs/AGENT-CLIENTS.md`](docs/AGENT-CLIENTS.md)。
 
 研究执行使用 `scripts/tiger-agent.mjs` / `scripts/tiger-agent-mcp.mjs`：六个实际管线模式、四个 Python 员工，按作业隔离状态并验证产物 SHA；模型透传与数据覆盖不足显式降级。安装包使用自带运行时路径，详见 [`docs/TIGER-AGENT-API.md`](docs/TIGER-AGENT-API.md)。
+
+`list` 证明仓内接口声明可发现；可调用性与结果验证须按实际环境、提交和运行回执分别取证。治理壳的自动导览见 `governance/docs/capabilities.auto.md`，缺少独立运行证据的条目保持“未验证”。模拟运行结果不得标成真实交易或客户生产通过。
