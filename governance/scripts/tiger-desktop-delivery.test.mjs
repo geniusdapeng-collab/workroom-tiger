@@ -616,3 +616,178 @@ test("MC197 rejects a workspace directory alias with a complete matching launche
   assert.notEqual(realpathSync(returned.artifactRoot), returned.artifactRoot);
   assert.throws(() => verifyJobArtifacts(alias, returned, receiptOptions(item.receipt)), /path alias/u);
 });
+
+// MC199 exercises the production checker as a real subprocess. These are local
+// source-policy fixtures; no fixture claims a native build or installed App run.
+import { spawnSync as mc199SpawnChecker } from "node:child_process";
+
+const mc199Governance = resolve(import.meta.dirname, "..");
+const mc199Repository = resolve(mc199Governance, "..");
+const mc199Checker = join(mc199Governance, "scripts/verify-product-content.mjs");
+const mc199Lanes = [
+  { branch: "main", event: "push", candidate: false },
+  { branch: "**", event: "api_trigger_tiger_native_candidate", candidate: true },
+];
+
+function mc199ProductFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), "tiger-native-policy-product-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // Copy real non-native contract inputs instead of reimplementing their checks.
+  // The fixture is a flat, non-Git product export, so native command paths are
+  // relative to this export and optional website/seed inputs are absent.
+  for (const file of ["product.manifest.json", "package.json", "electron-builder.yml",
+    "apps/web/package.json", "apps/webb/package.json", "apps/webc/package.json",
+    "scripts/build-tiger-desktop-native.sh", "scripts/build-tiger-desktop-native.ps1", "scripts/tiger-desktop-smoke.mjs",
+    "apps/web/src/components/welcomeScripts.ts", "apps/web/src/voice/VoiceEngine.ts",
+    "apps/web/src/components/Floor3D.tsx", "apps/web/src/components/Stage3D.tsx", "apps/web/src/components/CeremonyStage.tsx"]) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), readFileSync(join(mc199Governance, file)));
+  }
+  mkdirSync(join(root, "bundles/trading"), { recursive: true });
+  writeFileSync(join(root, "bundles/trading/bundle.json"), JSON.stringify({ bundle_id: "trading", version: "0.1.0",
+    description: "Isolated source-policy fixture; no business or native runtime claim", workloom: { provides: {} } }));
+  const workflow = YAML.parse(readFileSync(join(mc199Repository, ".cnb.yml"), "utf8"));
+  for (const lane of mc199Lanes) for (const platform of ["mac", "win"]) {
+    const job = mc199NativeJob({ workflow }, lane, platform);
+    for (const stage of job.stages) stage.script = stage.script.replaceAll("governance/scripts/", "scripts/")
+      .replaceAll("governance\\scripts\\", "scripts\\");
+  }
+  return { root, workflow };
+}
+
+function mc199NativeName(lane, platform) {
+  return `tiger-${platform === "mac" ? "mac" : "windows"}-native-${lane.candidate ? "candidate" : "release"}`;
+}
+
+function mc199NativeJob(item, lane, platform) {
+  const job = item.workflow[lane.branch][lane.event].find((entry) => entry?.name === mc199NativeName(lane, platform));
+  assert.ok(job, "fixture must select the real named native job");
+  return job;
+}
+
+function mc199CheckProduct(item) {
+  writeFileSync(join(item.root, ".cnb.yml"), YAML.stringify(item.workflow));
+  const environment = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(item.root) };
+  delete environment.NODE_TEST_CONTEXT;
+  delete environment.GIT_DIR;
+  delete environment.GIT_WORK_TREE;
+  const actual = mc199SpawnChecker(process.execPath, [mc199Checker], { cwd: item.root, env: environment,
+    encoding: "utf8", timeout: 10000, maxBuffer: 2 * 1024 * 1024 });
+  assert.equal(actual.error, undefined, "the actual checker must launch and finish");
+  assert.equal(actual.signal, null, "the actual checker must finish without a signal");
+  return actual;
+}
+
+for (const [name, mutate] of [
+  ["the published separated source, candidate and production lanes", () => {}],
+  ["reordered source and native jobs", (item) => {
+    item.workflow["**"].pull_request.reverse();
+    for (const lane of mc199Lanes) item.workflow[lane.branch][lane.event].reverse();
+  }],
+  ["extra required runner tags on both native platforms", (item) => {
+    for (const lane of mc199Lanes) for (const platform of ["mac", "win"]) mc199NativeJob(item, lane, platform).runner.tags.push("fixture-native");
+  }],
+]) test(`MC199 actual product checker accepts ${name}`, (t) => {
+  const item = mc199ProductFixture(t); mutate(item);
+  const actual = mc199CheckProduct(item);
+  assert.equal(actual.status, 0, actual.stderr);
+  assert.match(actual.stdout, /产品内容完整性检查通过/u);
+});
+
+const mc199NativeMutations = [
+  ["a missing platform job", (item, lane, platform) => {
+    item.workflow[lane.branch][lane.event] = item.workflow[lane.branch][lane.event].filter((job) => job.name !== mc199NativeName(lane, platform));
+  }],
+  ["duplicate native platform jobs", (item, lane, platform) => {
+    const duplicate = structuredClone(mc199NativeJob(item, lane, platform)); duplicate.name += "-duplicate";
+    item.workflow[lane.branch][lane.event].push(duplicate);
+  }],
+  ["a wrong runner tag", (item, lane, platform) => { mc199NativeJob(item, lane, platform).runner.tags = ["linux"]; }],
+  ["a non-array runner tag declaration", (item, lane, platform) => { mc199NativeJob(item, lane, platform).runner.tags = "mac,arm64,windows"; }],
+  ["a non-group runner namespace", (item, lane, platform) => { mc199NativeJob(item, lane, platform).runner.namespace = "project"; }],
+  ["a missing runner", (item, lane, platform) => { delete mc199NativeJob(item, lane, platform).runner; }],
+  ["a Docker override on a native runner", (item, lane, platform) => { mc199NativeJob(item, lane, platform).docker = { image: "fixture/never-executed" }; }],
+  ["missing stages", (item, lane, platform) => { delete mc199NativeJob(item, lane, platform).stages; }],
+  ["an empty stage list", (item, lane, platform) => { mc199NativeJob(item, lane, platform).stages = []; }],
+  ["a non-array stage declaration", (item, lane, platform) => { mc199NativeJob(item, lane, platform).stages = { script: "fixture" }; }],
+  ["an extra null stage", (item, lane, platform) => { mc199NativeJob(item, lane, platform).stages.push(null); }],
+  ["an extra empty stage", (item, lane, platform) => { mc199NativeJob(item, lane, platform).stages.push({ name: "empty fixture", script: " " }); }],
+  ["a wrong builder entry", (item, lane, platform) => {
+    const stage = mc199NativeJob(item, lane, platform).stages[0];
+    stage.script = stage.script.replaceAll("build-tiger-desktop-native", "build-other-desktop-native");
+  }],
+  ["a builder in a different directory", (item, lane, platform) => {
+    const stage = mc199NativeJob(item, lane, platform).stages[0];
+    stage.script = stage.script.replaceAll("scripts/", "foreign/scripts/").replaceAll("scripts\\", "foreign\\scripts\\");
+  }],
+  ["a builder filename with an extra suffix", (item, lane, platform) => {
+    const stage = mc199NativeJob(item, lane, platform).stages[0];
+    stage.script = stage.script.replace(platform === "mac" ? ".sh " : ".ps1 ", platform === "mac" ? ".sh.backup " : ".ps1.backup ");
+  }],
+  ["a builder entry mentioned only in a comment", (item, lane, platform) => {
+    const stage = mc199NativeJob(item, lane, platform).stages[0];
+    stage.script = stage.script.split("\n").map((line) => /build-tiger-desktop-native/u.test(line) ? `# ${line}` : line).join("\n");
+  }],
+  ["a builder entry mentioned only as output", (item, lane, platform) => {
+    mc199NativeJob(item, lane, platform).stages[0].script = platform === "mac"
+      ? `echo scripts/build-tiger-desktop-native.sh fixture${lane.candidate ? " --candidate" : ""}`
+      : `Write-Output scripts/build-tiger-desktop-native.ps1${lane.candidate ? " -Candidate" : ""}`;
+  }],
+];
+
+for (const lane of mc199Lanes) for (const platform of ["mac", "win"]) {
+  const label = `${lane.branch}/${lane.event}/${platform}`;
+  for (const [name, mutate] of mc199NativeMutations) test(`MC199 actual product checker rejects ${label} ${name}`, (t) => {
+    const item = mc199ProductFixture(t); mutate(item, lane, platform);
+    const actual = mc199CheckProduct(item);
+    assert.equal(actual.status, 1, actual.stdout);
+    assert.ok(actual.stderr.includes(`CNB ${lane.branch}/${lane.event} 缺少必需的 ${platform} 原生桌面门禁`), actual.stderr);
+  });
+  for (const target of ["job", "stage"]) for (const [key, value] of [
+    ["allow_failure", true], ["allowFailure", true], ["if", "$FIXTURE_BYPASS"],
+    ["allow_failure", false], ["allowFailure", false], ["if", false],
+  ]) test(`MC199 actual product checker rejects ${label} ${target} ${key}=${String(value)}`, (t) => {
+    const item = mc199ProductFixture(t), job = mc199NativeJob(item, lane, platform);
+    (target === "job" ? job : job.stages[0])[key] = value;
+    const actual = mc199CheckProduct(item);
+    assert.equal(actual.status, 1, actual.stdout);
+    assert.ok(actual.stderr.includes(`CNB ${lane.branch}/${lane.event} 缺少必需的 ${platform} 原生桌面门禁`), actual.stderr);
+  });
+  test(`MC199 actual product checker rejects ${label} the wrong candidate mode`, (t) => {
+    const item = mc199ProductFixture(t), job = mc199NativeJob(item, lane, platform);
+    const flag = platform === "mac" ? "--candidate" : "-Candidate";
+    job.stages[0].script = lane.candidate ? job.stages[0].script.replace(` ${flag}`, "") : job.stages[0].script.trimEnd() + ` ${flag}\n`;
+    const actual = mc199CheckProduct(item);
+    assert.equal(actual.status, 1, actual.stdout);
+    assert.ok(actual.stderr.includes(`CNB ${lane.branch}/${lane.event} 缺少必需的 ${platform} 原生桌面门禁`), actual.stderr);
+  });
+}
+
+for (const lane of mc199Lanes) test(`MC199 actual product checker rejects ${lane.branch}/${lane.event}/mac a missing arm64 tag`, (t) => {
+  const item = mc199ProductFixture(t); mc199NativeJob(item, lane, "mac").runner.tags = ["mac"];
+  const actual = mc199CheckProduct(item);
+  assert.equal(actual.status, 1);
+  assert.ok(actual.stderr.includes(`CNB ${lane.branch}/${lane.event} 缺少必需的 mac 原生桌面门禁`), actual.stderr);
+});
+
+for (const [name, mutate] of [
+  ["missing source gates", (item) => { item.workflow["**"].pull_request.pop(); }],
+  ["duplicate source gates", (item) => { item.workflow["**"].pull_request.push(structuredClone(item.workflow["**"].pull_request[0])); }],
+  ["native jobs restored to source PRs", (item) => { item.workflow["**"].pull_request.push(structuredClone(mc199NativeJob(item, mc199Lanes[1], "mac"))); }],
+  ["an optional source gate", (item) => { item.workflow["**"].pull_request[0].allow_failure = true; }],
+  ["a conditional source stage", (item) => { item.workflow["**"].pull_request[0].stages[0].if = "$FIXTURE_BYPASS"; }],
+]) test(`MC199 actual product checker rejects ${name}`, (t) => {
+  const item = mc199ProductFixture(t); mutate(item);
+  const actual = mc199CheckProduct(item);
+  assert.equal(actual.status, 1, actual.stdout);
+  assert.match(actual.stderr, /CNB \*\*\/pull_request 必须仅包含必需的 py-gate、oss-gate、protocol-gate 源码门禁/u);
+});
+
+test("MC199 actual product checker rejects a false PowerShell candidate switch", (t) => {
+  const item = mc199ProductFixture(t), lane = mc199Lanes[1];
+  const stage = mc199NativeJob(item, lane, "win").stages[0];
+  stage.script = stage.script.replace(" -Candidate", " -Candidate:$false");
+  const actual = mc199CheckProduct(item);
+  assert.equal(actual.status, 1);
+  assert.ok(actual.stderr.includes("CNB **/api_trigger_tiger_native_candidate 缺少必需的 win 原生桌面门禁"), actual.stderr);
+});
