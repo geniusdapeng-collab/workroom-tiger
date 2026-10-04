@@ -791,3 +791,54 @@ test("MC199 actual product checker rejects a false PowerShell candidate switch",
   assert.equal(actual.status, 1);
   assert.ok(actual.stderr.includes("CNB **/api_trigger_tiger_native_candidate 缺少必需的 win 原生桌面门禁"), actual.stderr);
 });
+
+test("MC203 native Mac compression retains Windows and Linux archive path behavior", async () => {
+  const { buildSignedTarPlan } = await import("./build-tiger-desktop.mjs");
+  assert.equal(typeof buildSignedTarPlan, "function");
+  assert.deepEqual(buildSignedTarPlan("/build/payload", "/build/release/payload.tar.gz", "darwin"), {
+    cwd: "/build/release", args: ["-czf", "payload.tar.gz", "--options", "gzip:compression-level=1", "-C", "../payload", "."],
+  });
+  assert.deepEqual(buildSignedTarPlan("D:\\build\\payload", "D:\\build\\release\\payload.tar.gz", "win32", win32),
+    buildTarPlan("D:\\build\\payload", "D:\\build\\release\\payload.tar.gz", win32));
+  assert.throws(() => buildSignedTarPlan("C:\\payload", "D:\\release\\payload.tar.gz", "win32", win32), /同一个卷/u);
+  assert.deepEqual(buildSignedTarPlan("/build/payload", "/build/release/payload.tar.gz", "linux"),
+    buildTarPlan("/build/payload", "/build/release/payload.tar.gz"));
+});
+
+test("MC203 actual signed gzip preserves the indexed bytes in paths with spaces and Unicode", (t) => {
+  const f = archiveFixture(t);
+  const oldPayload = f.payload;
+  f.payload = join(f.root, "payload 客户 目录");
+  renameSync(oldPayload, f.payload);
+  f.archive = join(f.root, "release 客户 目录", "载荷.tar.gz");
+  mkdirSync(dirname(f.archive));
+  const signedBytes = Buffer.from(JSON.stringify({ bundle_id: "trading", signature: "signed MC203 fixture manifest" }));
+  const result = archiveSignedPayload({ ...archiveOptions(f), signBundles: () => {
+    writeFileSync(join(f.payload, "runtime/bundles/trading/bundle.json"), signedBytes);
+  } });
+  const bytes = readFileSync(f.archive);
+  assert.deepEqual([...bytes.subarray(0, 3)], [0x1f, 0x8b, 8]);
+  // libarchive marks actual level-1 output with XFL=4. This checks the archive
+  // produced by the native tar process, in addition to the command plan.
+  if (process.platform === "darwin") assert.equal(bytes[8], 4, "the actual Mac archive must use fast gzip");
+  assert.equal(result.payloadSha256, hash(bytes));
+  assert.equal(result.signedArchiveVerified, true);
+  const extracted = join(f.root, "extracted 客户 目录"); mkdirSync(extracted);
+  const tar = process.platform === "win32" ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe") : "/usr/bin/tar";
+  execFileSync(tar, ["-xzf", f.archive], { cwd: extracted, timeout: 300000 });
+  assert.deepEqual(readFileSync(join(extracted, "runtime/bundles/trading/bundle.json")), signedBytes);
+  assert.deepEqual(f.integrity.verifyPayloadIntegrity(extracted, { expectedProductId: "workroom-tiger", expectedVersion: "1.0.0" }), result.payloadIntegrity);
+  assert.equal(readdirSync(dirname(f.archive)).some((name) => name.startsWith(".tiger-archive-check-")), false);
+});
+
+test("MC203 a tar launch failure removes the stale archive and cannot issue a receipt", (t) => {
+  const f = archiveFixture(t);
+  writeFileSync(f.archive, "stale previous archive");
+  assert.throws(() => archiveSignedPayload({ ...archiveOptions(f),
+    tar: join(f.root, "missing-tar-executable"), signBundles: () => {
+      writeFileSync(join(f.payload, "runtime/bundles/trading/bundle.json"), JSON.stringify({ bundle_id: "trading", signature: "signed failure fixture" }));
+    },
+  }), (error) => error.code === "ENOENT");
+  assert.equal(existsSync(f.archive), false);
+  assert.equal(readdirSync(dirname(f.archive)).some((name) => name.startsWith(".tiger-archive-check-")), false);
+});

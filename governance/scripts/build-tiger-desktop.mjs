@@ -21,6 +21,14 @@ export function buildTarPlan(payload, archive, pathApi = { dirname, basename, re
   return { cwd, args: ["-czf", pathApi.basename(archive), "-C", payloadArg.replaceAll("\\", "/") || ".", "."] };
 }
 
+/** Native Mac payloads use fast gzip within the existing archive deadline. */
+export function buildSignedTarPlan(payload, archive, platform = process.platform, pathApi) {
+  const plan = buildTarPlan(payload, archive, pathApi);
+  return platform === "darwin" ? { ...plan,
+    args: [...plan.args.slice(0, 2), "--options", "gzip:compression-level=1", ...plan.args.slice(2)],
+  } : plan;
+}
+
 /** Sign first, re-index the changed bundle manifests, then verify the bytes in the actual tar. */
 export function archiveSignedPayload({ payload, archive, productId, version, productManifestSha256, signBundles,
   tar = process.platform === "win32" ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe") : "/usr/bin/tar" }) {
@@ -43,7 +51,7 @@ export function archiveSignedPayload({ payload, archive, productId, version, pro
             && (current.bytes !== entry.bytes || current.sha256 !== entry.sha256);
         })) throw new Error("行业包签名改变了允许范围之外的不可变载荷");
     mkdirSync(dirname(archive), { recursive: true });
-    const plan = buildTarPlan(payload, archive);
+    const plan = buildSignedTarPlan(payload, archive);
     execFileSync(tar, plan.args, { cwd: plan.cwd, stdio: "inherit", timeout: 300000 });
     checkRoot = mkdtempSync(join(dirname(archive), ".tiger-archive-check-"));
     const relativeArchive = relative(checkRoot, archive);
