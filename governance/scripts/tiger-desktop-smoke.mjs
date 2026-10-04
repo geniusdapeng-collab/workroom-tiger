@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { StringDecoder } from "node:string_decoder";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertKernelPayload } from "./pack-tiger-kernel.mjs";
@@ -160,7 +160,10 @@ export function verifyJobArtifacts(workspace, receipt, options = {}) {
   assert.ok(options !== null && typeof options === "object" && !Array.isArray(options), "artifact verification options must be an object");
   const { expectedMode = null, requirePipelineArtifacts = false } = options;
   assert.equal(typeof requirePipelineArtifacts, "boolean", "requirePipelineArtifacts must be a boolean");
+  const requireLauncherIntegrity = Object.hasOwn(options, "requireLauncherIntegrity") ? options.requireLauncherIntegrity : false;
+  assert.equal(typeof requireLauncherIntegrity, "boolean", "requireLauncherIntegrity must be a boolean");
   if (requirePipelineArtifacts) assert.ok(["daily", "premarket"].includes(expectedMode), "requirePipelineArtifacts requires a daily or premarket expectedMode");
+  assert.ok(receipt !== null && typeof receipt === "object" && !Array.isArray(receipt), "receipt must be an object");
   assert.equal(receipt.schemaVersion, "tiger.agent-receipt/v1");
   assert.ok(["succeeded", "degraded"].includes(receipt.status));
   assert.equal(receipt.integrityVerified, true);
@@ -174,8 +177,24 @@ export function verifyJobArtifacts(workspace, receipt, options = {}) {
   const stored = readFileSync(join(job, "receipt.json"));
   const completion = JSON.parse(readFileSync(join(job, "completion.json"), "utf8"));
   assert.equal(completion.receiptSha256, sha(stored), "completion must bind the immutable receipt");
-  assert.deepEqual(JSON.parse(stored), receipt);
+  const canonical = JSON.parse(stored);
+  assert.ok(canonical !== null && typeof canonical === "object" && !Array.isArray(canonical), "canonical receipt must be an object");
+  const launcherFields = ["artifactRoot", "launcherIntegrityVerified", "replayed"];
+  assert.ok(launcherFields.every((field) => !Object.hasOwn(canonical, field)), "canonical receipt must not contain launcher-only fields");
+  assert.ok(Reflect.ownKeys(receipt).every((field) => Object.hasOwn(canonical, field) || launcherFields.includes(field)), "receipt contains an unknown launcher field");
+  const returnedCanonical = Object.fromEntries(Object.keys(canonical).map((field) => {
+    assert.ok(Object.hasOwn(receipt, field), `receipt is missing canonical field: ${field}`);
+    return [field, receipt[field]];
+  }));
+  assert.deepEqual(canonical, returnedCanonical, "returned canonical fields must match the immutable receipt");
   const artifacts = join(job, "artifacts");
+  if (requireLauncherIntegrity || launcherFields.some((field) => Object.hasOwn(receipt, field))) {
+    assert.ok(Object.hasOwn(receipt, "artifactRoot") && Object.hasOwn(receipt, "launcherIntegrityVerified"), "launcher must supply artifactRoot and launcherIntegrityVerified together");
+    assert.equal(receipt.launcherIntegrityVerified, true, "launcher integrity must be verified");
+    assert.equal(receipt.artifactRoot, resolve(artifacts), "launcher artifactRoot must be the canonical job artifacts directory");
+    assert.equal(realpathSync(artifacts), receipt.artifactRoot, "launcher artifactRoot must not use a path alias");
+    if (Object.hasOwn(receipt, "replayed")) assert.equal(receipt.replayed, true, "launcher replay disclosure must be true");
+  }
   for (const entry of receipt.artifacts) {
     const file = resolve(artifacts, entry.name);
     assert.ok(file.startsWith(artifacts + sep), "artifact must remain inside the job");
@@ -271,7 +290,7 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
   const cli = await execute(node, [join(kernel, "scripts", "tiger-agent.mjs"), "--workspace", workspace, "run", "--json", JSON.stringify(request)],
     { environment, cwd: workspace, label: "packaged CLI daily pipeline", codes: [0, 10] });
   const cliReceipt = JSON.parse(cli.stdout.trim());
-  const cliCheck = verifyJobArtifacts(workspace, cliReceipt, { expectedMode: request.mode, requirePipelineArtifacts: true });
+  const cliCheck = verifyJobArtifacts(workspace, cliReceipt, { expectedMode: request.mode, requirePipelineArtifacts: true, requireLauncherIntegrity: true });
   writeFileSync(join(output, "cli-receipt.json"), JSON.stringify(cliReceipt, null, 2) + "\n");
   const sourceJob = { jobId: cliReceipt.jobId, resultSha256: cliReceipt.resultSha256 };
   const cliModes = { daily: cliCheck }, cliModeReceipts = { daily: cliReceipt };
@@ -285,7 +304,7 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
       "run", "--json", JSON.stringify(selected)], { environment, cwd: workspace, label: `packaged CLI ${mode}`, codes: [0, 10] });
     const receipt = JSON.parse(executed.stdout.trim());
     assert.equal(receipt.mode, mode);
-    cliModes[mode] = verifyJobArtifacts(workspace, receipt, { expectedMode: mode, requirePipelineArtifacts: mode === "premarket" });
+    cliModes[mode] = verifyJobArtifacts(workspace, receipt, { expectedMode: mode, requirePipelineArtifacts: mode === "premarket", requireLauncherIntegrity: true });
     cliModeReceipts[mode] = receipt;
   }
   writeFileSync(join(output, "cli-mode-receipts.json"), JSON.stringify(cliModeReceipts, null, 2) + "\n");
@@ -306,8 +325,8 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
   assert.ok(frame(2).result.tools.some((tool) => tool.name === "tiger.pipeline.run"));
   assert.equal(frame(3).result.isError, false);
   assert.equal(frame(4).result.isError, false);
-  const mcpCheck = verifyJobArtifacts(workspace, frame(3).result.structuredContent, { expectedMode: toolRequest.mode, requirePipelineArtifacts: true });
-  const employeeCheck = verifyJobArtifacts(workspace, frame(4).result.structuredContent);
+  const mcpCheck = verifyJobArtifacts(workspace, frame(3).result.structuredContent, { expectedMode: toolRequest.mode, requirePipelineArtifacts: true, requireLauncherIntegrity: true });
+  const employeeCheck = verifyJobArtifacts(workspace, frame(4).result.structuredContent, { requireLauncherIntegrity: true });
   assert.equal(frame(4).result.structuredContent.employee, "mrs");
   writeFileSync(join(output, "mcp-frames.json"), JSON.stringify(frames, null, 2) + "\n");
   const employees = { mrs: employeeCheck };
@@ -326,7 +345,7 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
     for (const id of [1, 2, 3]) assert.equal(frames_.filter((item) => item.id === id).length, 1);
     const reply = frames_.find((item) => item.id === 3).result;
     assert.equal(reply.isError, false); assert.equal(reply.structuredContent.employee, employee);
-    employees[employee] = verifyJobArtifacts(workspace, reply.structuredContent);
+    employees[employee] = verifyJobArtifacts(workspace, reply.structuredContent, { requireLauncherIntegrity: true });
     writeFileSync(join(output, `mcp-${employee}-frames.json`), JSON.stringify(frames_, null, 2) + "\n");
   }
   const result = { schemaVersion: "tiger.desktop-smoke/v1", target: nativeTarget, emptyPath: true,

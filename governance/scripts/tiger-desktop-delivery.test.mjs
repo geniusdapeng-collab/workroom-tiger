@@ -426,3 +426,193 @@ test("a failed signing operation cannot leave a previous release archive at the 
   assert.throws(() => archiveSignedPayload({ ...archiveOptions(f), signBundles: () => { throw new Error("signer failed fixture"); } }), /signer failed/u);
   assert.equal(existsSync(f.archive), false);
 });
+
+import { realpathSync, renameSync, symlinkSync } from "node:fs";
+import { normalizeRequest, verifyReceipt } from "../../scripts/tiger-agent-runtime.mjs";
+
+const receiptCases = [
+  ...["daily", "premarket", "intraday", "backtest", "tune", "review"].map((mode) => ({ operation: "pipeline", mode })),
+  ...["scanner", "mrs", "risk", "review"].map((employee) => ({ operation: "employee", employee })),
+];
+const receiptOptions = ({ mode }, requireLauncherIntegrity = true) => ({
+  ...(mode ? { expectedMode: mode, requirePipelineArtifacts: ["daily", "premarket"].includes(mode) } : {}), requireLauncherIntegrity,
+});
+const canonicalFixtureJson = (value) => value === null || typeof value !== "object" ? JSON.stringify(value)
+  : Array.isArray(value) ? `[${value.map(canonicalFixtureJson).join(",")}]`
+    : `{${Object.keys(value).filter((key) => value[key] !== null).sort().map((key) => `${JSON.stringify(key)}:${canonicalFixtureJson(value[key])}`).join(",")}}`;
+
+function fullCanonicalReceiptFixture(t, selected = { operation: "pipeline", mode: "daily" }, status = "degraded") {
+  const item = fixture();
+  // The real launcher rejects symlink aliases. macOS tmpdir can start with
+  // /var; use the actual directory for this launcher integration fixture.
+  item.workspace = realpathSync(item.workspace);
+  item.job = join(item.workspace, "jobs", "local", item.receipt.jobId);
+  t.after(() => rmSync(item.workspace, { recursive: true, force: true }));
+  const needsSource = ["intraday", "review"].includes(selected.mode) || selected.employee === "review";
+  const request = normalizeRequest({ ...selected, idempotencyKey: item.receipt.jobId,
+    environment: "simulation", provider: "demo", llmMode: "disabled", maxPicks: 2,
+    ...(needsSource ? { sourceJob: { jobId: "fixture-source001", resultSha256: "1".repeat(64) } } : {}) });
+  const gateParams = { ...request.riskLimits, max_picks: request.maxPicks };
+  const pipeline = ["daily", "premarket"].includes(selected.mode);
+  const role = selected.operation === "employee" && selected.employee !== "review" ? "employee-result"
+    : pipeline ? "pipeline-result" : ["backtest", "tune"].includes(selected.mode) ? "research-result" : "source-result";
+  // These ordinary JSON/HTML/event byte fixtures do not claim a Python run,
+  // model invocation, packaged installation or genuine business result.
+  const result = pipeline ? { raw: { risk_limits: request.riskLimits, gate_params: gateParams } }
+    : { riskLimits: request.riskLimits, gateParams };
+  const payload = { who: { type: "agent", id: "ordinary-fixture" }, context: { stage: "simulation" },
+    object: { type: "report", id: item.receipt.jobId }, decision: { action: "fixture.completed" }, rule_impact: [] };
+  const event = { payload, prev_hash: "GENESIS", hash: hash("GENESIS" + canonicalFixtureJson(payload)) };
+  const artifacts = [];
+  for (const [name, entryRole, mediaType, content] of [
+    ["result.json", role, "application/json", JSON.stringify(result) + "\n"],
+    ["report.html", "output", "text/html", "<!doctype html><p>simulation ordinary fixture</p>\n"],
+    ["governance_events.jsonl", "governance-events", "application/x-ndjson", JSON.stringify(event) + "\n"],
+  ]) {
+    const bytes = Buffer.from(content);
+    writeFileSync(join(item.job, "artifacts", name), bytes);
+    artifacts.push({ name, role: entryRole, mediaType, bytes: bytes.length, sha256: hash(bytes) });
+  }
+  item.receipt = { schemaVersion: "tiger.agent-receipt/v1", jobId: request.idempotencyKey, idempotencyKey: request.idempotencyKey,
+    inputSha256: hash(canonicalFixtureJson(request)), operation: selected.operation, requestedRiskLimits: request.riskLimits,
+    ...(selected.mode ? { mode: selected.mode } : { employee: selected.employee }),
+    environment: request.environment, provider: request.provider, market: request.market, dataMode: "synthetic", status,
+    startedAt: "2026-10-01T00:00:00.000+00:00", finishedAt: "2026-10-01T00:00:01.000+00:00", exitCode: status === "degraded" ? 10 : 0,
+    sourceCommit: null, kernelDigest: hash("ordinary fixture kernel"), configDigest: hash("ordinary fixture config"),
+    stepTrace: Array.from({ length: pipeline ? 21 : 2 }, (_, index) => ({ step: `fixture-stage-${index + 1}`, status: "executed", ms: 0, note: "ordinary fixture" })),
+    degradedSteps: status === "degraded" ? ["fixture-disabled-model"] : [], artifacts,
+    summary: { fixture: true, detail: { source: "ordinary local bytes" } }, integrityVerified: true, governanceSynced: false,
+    receipt: { synced: true, scope: "local-kernel", meaning: "Ordinary fixture; no server synchronization" },
+    permissions: { brokerOrders: false, approvals: false, parameterApplication: false },
+    resultSha256: artifacts[0].sha256, resultArtifact: { name: artifacts[0].name, role }, riskLimits: request.riskLimits, gateParams };
+  writeFileSync(join(item.job, "request.json"), JSON.stringify({ request, inputSha256: item.receipt.inputSha256 }));
+  persistReceipt(item);
+  return item;
+}
+
+async function fullLauncherReceipt(item, replayed = false) {
+  return verifyReceipt({ workspace: item.workspace, tenant: "local" }, { ...item.receipt, ...(replayed ? { replayed: true } : {}) });
+}
+
+for (const selected of receiptCases) {
+  const name = `${selected.operation} ${selected.mode ?? selected.employee}`;
+  for (const status of ["succeeded", "degraded"]) test(`MC197 ${name} binds every full canonical field and actual launcher field for ${status}`, async (t) => {
+    const item = fullCanonicalReceiptFixture(t, selected, status);
+    const storedBefore = readFileSync(join(item.job, "receipt.json"));
+    const completionBefore = readFileSync(join(item.job, "completion.json"));
+    const canonicalCheck = verifyJobArtifacts(item.workspace, item.receipt, receiptOptions(selected, false));
+    const returned = await fullLauncherReceipt(item);
+    assert.equal(returned.artifactRoot, join(item.job, "artifacts"));
+    assert.equal(returned.launcherIntegrityVerified, true);
+    assert.deepEqual(Object.keys(returned).filter((key) => !Object.hasOwn(item.receipt, key)).sort(), ["artifactRoot", "launcherIntegrityVerified"]);
+    const actual = verifyJobArtifacts(item.workspace, returned, receiptOptions(selected));
+    assert.deepEqual(actual, canonicalCheck);
+    assert.deepEqual(readFileSync(join(item.job, "receipt.json")), storedBefore);
+    assert.deepEqual(readFileSync(join(item.job, "completion.json")), completionBefore);
+  });
+
+  test(`MC197 ${name} rejects missing or altered canonical fields in a complete launcher response`, async (t) => {
+    const item = fullCanonicalReceiptFixture(t, selected);
+    const returned = await fullLauncherReceipt(item);
+    for (const field of Object.keys(item.receipt)) {
+      const missing = structuredClone(returned); delete missing[field];
+      assert.throws(() => verifyJobArtifacts(item.workspace, missing, receiptOptions(selected)), `missing canonical ${field}`);
+      const changed = structuredClone(returned); changed[field] = { tampered: field };
+      assert.throws(() => verifyJobArtifacts(item.workspace, changed, receiptOptions(selected)), `altered canonical ${field}`);
+    }
+  });
+}
+
+test("MC197 complete canonical helper compatibility never satisfies required launcher integrity", (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  assert.equal(verifyJobArtifacts(item.workspace, item.receipt, receiptOptions(item.receipt, false)).artifacts, 3);
+  assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, receiptOptions(item.receipt)), /launcher/u);
+});
+
+for (const flag of ["true", 1, null, undefined]) test(`MC197 requires a boolean launcher option for ${String(flag)}`, (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, { expectedMode: "daily", requirePipelineArtifacts: true,
+    requireLauncherIntegrity: flag }), /requireLauncherIntegrity/u);
+});
+
+for (const [name, mutate] of [
+  ["artifactRoot without a launcher integrity flag", (r) => { delete r.launcherIntegrityVerified; }],
+  ["launcher integrity flag without artifactRoot", (r) => { delete r.artifactRoot; }],
+  ["false launcher integrity", (r) => { r.launcherIntegrityVerified = false; }],
+  ["string launcher integrity", (r) => { r.launcherIntegrityVerified = "true"; }],
+  ["numeric launcher integrity", (r) => { r.launcherIntegrityVerified = 1; }],
+  ["null launcher integrity", (r) => { r.launcherIntegrityVerified = null; }],
+  ["undefined launcher integrity", (r) => { r.launcherIntegrityVerified = undefined; }],
+  ["a relative artifactRoot", (r) => { r.artifactRoot = "artifacts"; }],
+  ["another job artifactRoot", (r, f) => { r.artifactRoot = join(f.workspace, "jobs", "local", "different001", "artifacts"); }],
+  ["another workspace artifactRoot", (r, f) => { r.artifactRoot = join(f.workspace, "outside", "jobs", "local", r.jobId, "artifacts"); }],
+  ["a root with a dot segment", (r) => { r.artifactRoot += "/."; }],
+  ["a root with a parent segment", (r) => { r.artifactRoot += "/../artifacts"; }],
+  ["a root with a trailing separator", (r) => { r.artifactRoot += "/"; }],
+  ["a URL artifactRoot", (r) => { r.artifactRoot = "file:///fixture/artifacts"; }],
+  ["a null artifactRoot", (r) => { r.artifactRoot = null; }],
+  ["an object artifactRoot", (r) => { r.artifactRoot = { path: r.artifactRoot }; }],
+  ["an unknown returned launcher field", (r) => { r.launcherReceiptVerified = true; }],
+  ["an extra nested canonical field", (r) => { r.summary.detail.unbound = true; }],
+  ["an altered risk snapshot", (r) => { r.riskLimits.gross_cap /= 2; }],
+  ["an altered parameter snapshot", (r) => { r.gateParams.max_picks += 1; }],
+  ["an altered local receipt scope", (r) => { r.receipt.scope = "server"; }],
+  ["a false replay flag", (r) => { r.replayed = false; }],
+  ["a string replay flag", (r) => { r.replayed = "true"; }],
+  ["a null replay flag", (r) => { r.replayed = null; }],
+  ["a replay flag with no launcher pair", (r) => { delete r.artifactRoot; delete r.launcherIntegrityVerified; r.replayed = true; }],
+]) test(`MC197 rejects ${name} even when launcher integrity is optional`, async (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  const returned = structuredClone(await fullLauncherReceipt(item));
+  mutate(returned, item);
+  assert.throws(() => verifyJobArtifacts(item.workspace, returned, receiptOptions(item.receipt, false)));
+});
+
+for (const field of ["artifactRoot", "launcherIntegrityVerified", "replayed"]) test(`MC197 rejects canonical disk pollution with launcher-only ${field}`, (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  item.receipt[field] = field === "artifactRoot" ? join(item.job, "artifacts") : true;
+  persistReceipt(item);
+  assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, receiptOptions(item.receipt, false)), /canonical.*launcher|launcher-only/u);
+});
+
+test("MC197 accepts only the actual launcher's true replay disclosure with its complete verified pair", async (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  const returned = await fullLauncherReceipt(item, true);
+  assert.equal(returned.replayed, true);
+  assert.equal(Object.hasOwn(JSON.parse(readFileSync(join(item.job, "receipt.json"), "utf8")), "replayed"), false);
+  assert.equal(verifyJobArtifacts(item.workspace, returned, receiptOptions(item.receipt)).artifacts, 3);
+});
+
+for (const [name, corrupt] of [
+  ["completion", (f) => { writeFileSync(join(f.job, "completion.json"), JSON.stringify({ receiptSha256: "0".repeat(64) })); }],
+  ["stored canonical receipt", (f) => { writeFileSync(join(f.job, "receipt.json"), "{}"); }],
+  ["artifact byte count", (f) => { writeFileSync(join(f.job, "artifacts", "report.html"), "short"); }],
+  ["same-length artifact hash", (f) => { writeFileSync(join(f.job, "artifacts", "report.html"), Buffer.alloc(f.receipt.artifacts[1].bytes, 120)); }],
+]) test(`MC197 does not trust a true launcher flag after ${name} corruption`, async (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  const returned = await fullLauncherReceipt(item);
+  corrupt(item);
+  assert.throws(() => verifyJobArtifacts(item.workspace, returned, receiptOptions(item.receipt)));
+});
+
+test("MC197 rejects an artifact directory alias with a complete matching launcher pair", async (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  const returned = await fullLauncherReceipt(item);
+  const artifacts = join(item.job, "artifacts"), actual = join(item.job, "actual-artifacts");
+  renameSync(artifacts, actual);
+  symlinkSync(actual, artifacts, process.platform === "win32" ? "junction" : "dir");
+  assert.equal(returned.artifactRoot, artifacts);
+  assert.notEqual(realpathSync(artifacts), artifacts);
+  assert.throws(() => verifyJobArtifacts(item.workspace, returned, receiptOptions(item.receipt)), /path alias/u);
+});
+
+test("MC197 rejects a workspace directory alias with a complete matching launcher pair", async (t) => {
+  const item = fullCanonicalReceiptFixture(t);
+  const returned = await fullLauncherReceipt(item);
+  const alias = item.workspace + "-alias";
+  symlinkSync(item.workspace, alias, process.platform === "win32" ? "junction" : "dir");
+  t.after(() => rmSync(alias, { recursive: true, force: true }));
+  returned.artifactRoot = join(alias, "jobs", "local", returned.jobId, "artifacts");
+  assert.notEqual(realpathSync(returned.artifactRoot), returned.artifactRoot);
+  assert.throws(() => verifyJobArtifacts(alias, returned, receiptOptions(item.receipt)), /path alias/u);
+});
