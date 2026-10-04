@@ -18,6 +18,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import numpy as np
@@ -370,7 +371,7 @@ def run_pipeline(
     # 扫描过滤/合规规则/轻仓毕业门槛全部来自 spec（参数 single source = config）。
     from .markets import get_market
     spec = get_market(market)
-    trade_date = trade_date or spec.prev_trading_day(datetime.now().date()).isoformat()
+    trade_date = trade_date or spec.prev_trading_day(datetime.now(ZoneInfo(spec.timezone)).date()).isoformat()
     datetime.strptime(trade_date, "%Y-%m-%d")
     _RUN_DIAGNOSTICS.get().as_of = trade_date
     bmk = spec.benchmarks

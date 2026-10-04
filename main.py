@@ -310,11 +310,13 @@ def _intraday(args, provider) -> None:
     # 触发，等于用过期的地图开车（数据时效性红线）。
     import re as _re
     from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
     from trading_system.markets import get_market
     m = _re.search(r"result_(\d{4})-?(\d{2})-?(\d{2})", os.path.basename(latest))
     if m:
         rpt_date = _dt.strptime("".join(m.groups()), "%Y%m%d").date()
-        earliest = get_market(args.market).prev_trading_day(_dt.now().date())
+        spec = get_market(args.market)
+        earliest = spec.prev_trading_day(_dt.now(ZoneInfo(spec.timezone)).date())
         if rpt_date < earliest:
             raise SystemExit(
                 f"最新日报为 {rpt_date}（最近交易日 {earliest}）——入场/止损参考价已过期，"
