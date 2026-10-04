@@ -134,9 +134,10 @@
         if ($LASTEXITCODE -ne 0) { throw "无法读取构建 commit" }
         & .\governance\scripts\build-tiger-desktop-native.ps1 -Version "0.1.0-$revision" -Candidate
 
-# Native jobs deliberately have no allow_failure/optional bypass. CNB group runners and
-# signing secrets must be configured by the organization. A missing/offline runner or
-# missing credential fails the gate; Linux tests alone cannot authorize a desktop release.
+# Native jobs have no allow_failure bypass. Source PRs run the Linux gates; native
+# candidates run on the explicit api_trigger_tiger_native_candidate event. Production
+# builds on main still require both native runners, signing, notarization and smoke.
+# Missing runners or credentials remain failed native builds and cannot prove delivery.
 main:
   push:
     - *py_gate
@@ -150,6 +151,7 @@ main:
     - *py_gate
     - *oss_gate
     - *protocol_gate
+  api_trigger_tiger_native_candidate:
     - *desktop_mac_candidate
     - *desktop_win_candidate
 

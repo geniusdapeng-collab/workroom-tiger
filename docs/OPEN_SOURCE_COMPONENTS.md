@@ -235,7 +235,7 @@
 | `@deepseek-ai/dsh-workflow-worker-thread` | 0.1.2-rc.1（声明） | ^0.1.2-rc.1 | 生产 | governance/vendor/dsh/package.json | 0.0.1-rc.3（历史记录；未核实或已过期） |
 | `@deepseek-ai/schemastery` | 3.18.2（声明） | ^3.18.2 | 生产 | governance/vendor/dsh/package.json | 3.18.2（历史记录；未核实或已过期） |
 | `@hono/node-server` | 2.1.1 | 2.1.1 | 生产 | governance/.workloom-runtime-deps/package.json、governance/apps/server/package.json | 2.1.1（历史记录；未核实或已过期） |
-| `@playwright/test` | 1.63.0 | 1.63.0 | 开发 | governance/apps/web/package.json | 1.63.0（历史记录；未核实或已过期） |
+| `@playwright/test` | 1.63.0 | 1.63.0 | 开发 | governance/apps/web/package.json、governance/package.json | 1.63.0（历史记录；未核实或已过期） |
 | `@react-three/drei` | 10.7.8 | ^10.7.8 | 生产 | governance/apps/web/package.json | 10.7.8（历史记录；未核实或已过期） |
 | `@react-three/fiber` | 9.7.0 | ^9.7.0 | 生产 | governance/apps/web/package.json | 9.7.0（历史记录；未核实或已过期） |
 | `@react-three/postprocessing` | 3.1.1 | ^3.1.1 | 生产 | governance/apps/web/package.json | 3.1.1（历史记录；未核实或已过期） |

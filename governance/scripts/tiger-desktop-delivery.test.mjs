@@ -112,14 +112,17 @@ test("Windows tar arguments use relative paths instead of a drive interpreted as
   assert.throws(() => buildTarPlan("C:\\payload", "D:\\release\\payload.tar.gz", win32), /同一个卷/u);
 });
 
-test("CNB requires both native platforms for production and candidate triggers", () => {
+test("CNB keeps source PR gates and requires both native platforms for explicit candidates and production", () => {
   const governance = resolve(import.meta.dirname, "..");
   const repository = resolve(governance, "..");
   const product = JSON.parse(readFileSync(join(repository, "product.manifest.json"), "utf8"));
   assert.deepEqual(JSON.parse(readFileSync(join(governance, "product.manifest.json"), "utf8")), product);
   assert.equal(product.release.workflow, ".cnb.yml");
   const workflow = YAML.parse(readFileSync(join(repository, product.release.workflow), "utf8"));
-  for (const [branch, event, candidate] of [["main", "push", false], ["**", "pull_request", true]]) {
+  const sourceJobs = workflow["**"].pull_request;
+  assert.deepEqual(sourceJobs.map((job) => job.name).sort(), ["oss-gate", "protocol-gate", "py-gate"]);
+  assert.ok(sourceJobs.every((job) => !job.runner?.namespace && !job.allow_failure && !job.allowFailure && !job.if));
+  for (const [branch, event, candidate] of [["main", "push", false], ["**", "api_trigger_tiger_native_candidate", true]]) {
     const jobs = workflow[branch][event];
     for (const [platform, tags] of [["mac", ["mac", "arm64"]], ["win", ["windows"]]]) {
       const matches = jobs.filter((job) => job.runner?.namespace === "group" && tags.every((tag) => job.runner.tags.includes(tag)));
