@@ -181,7 +181,7 @@
 | `@deepseek-ai/dsh-workflow-worker-thread` | 0.1.2-rc.1（声明） | ^0.1.2-rc.1 | 生产 | vendor/dsh/package.json | —（未扫描） |
 | `@deepseek-ai/schemastery` | 3.18.2（声明） | ^3.18.2 | 生产 | vendor/dsh/package.json | —（未扫描） |
 | `@hono/node-server` | 2.1.1（声明） | 2.1.1 | 生产 | .workloom-runtime-deps/package.json、apps/server/package.json | —（未扫描） |
-| `@playwright/test` | 1.63.0（声明） | 1.63.0 | 开发 | apps/web/package.json | —（未扫描） |
+| `@playwright/test` | 1.63.0 | 1.63.0 | 开发 | apps/web/package.json、package.json | —（未扫描） |
 | `@react-three/drei` | 10.7.8（声明） | ^10.7.8 | 生产 | apps/web/package.json | —（未扫描） |
 | `@react-three/fiber` | 9.7.0（声明） | ^9.7.0 | 生产 | apps/web/package.json | —（未扫描） |
 | `@react-three/postprocessing` | 3.1.1（声明） | ^3.1.1 | 生产 | apps/web/package.json | —（未扫描） |
@@ -223,7 +223,7 @@
 | `typescript` | 5.9.0 / 7.0.2 | ^5.9.0 / ^7.0.2 | 开发 | apps/server/package.json、apps/web/package.json、apps/webb/package.json 等 10 处 | —（未扫描） |
 | `typescript-governance → npm:typescript` | 5.9.3 | npm:typescript@5.9.3 | 开发 | package.json | —（未扫描） |
 | `vite` | 8.3.0（声明） | 8.3.0 | 开发/生产 | .workloom-runtime-deps/package.json、apps/web/package.json、apps/webb/package.json 等 4 处 | —（未扫描） |
-| `vitest` | 4.1.11 / 5.0.1 | ^4.1.11 / ^5.0.1 | 开发 | apps/webb/package.json、package.json、packages/base/package.json 等 6 处 | —（未扫描） |
+| `vitest` | 4.1.11 / 5.0.1 | 4.1.11 / ^4.1.11 / ^5.0.1 | 开发/生产 | .workloom-runtime-deps/package.json、apps/webb/package.json、package.json 等 7 处 | —（未扫描） |
 | `ws` | 8.21.0（声明） | 8.21.0 | 开发 | vendor/dsh/package.json | —（未扫描） |
 | `yaml` | 2.9.0 | 2.9.0 | 开发/生产 | .workloom-runtime-deps/package.json、package.json、packages/base/package.json | —（未扫描） |
 | `yaml-governance → npm:yaml` | 2.9.0 | npm:yaml@2.9.0 | 开发 | package.json | —（未扫描） |
