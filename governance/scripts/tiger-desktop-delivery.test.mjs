@@ -70,6 +70,121 @@ test("an altered completion digest cannot be reported as passed", () => {
   } finally { rmSync(item.workspace, { recursive: true }); }
 });
 
+function persistReceipt(item) {
+  writeFileSync(join(item.job, "receipt.json"), JSON.stringify(item.receipt));
+  writeFileSync(join(item.job, "completion.json"), JSON.stringify({ receiptSha256: hash(readFileSync(join(item.job, "receipt.json"))) }));
+}
+
+function pipelineReceiptFixture(t, mode, status = "degraded") {
+  const item = fixture();
+  t.after(() => rmSync(item.workspace, { recursive: true, force: true }));
+  Object.assign(item.receipt, { mode, status,
+    stepTrace: Array.from({ length: 21 }, (_, index) => ({ step: `fixture-stage-${index + 1}`, status: "executed" })),
+    degradedSteps: status === "degraded" ? ["fixture-disabled-model"] : [] });
+  // Ordinary local byte fixtures exercise the helper's integrity and mode
+  // contract; these files do not claim a Python run or a packaged installation.
+  for (const [name, role, mediaType, content] of [
+    ["result.json", "pipeline-result", "application/json", '{"environment":"simulation","fixture":true}\n'],
+    ["report.html", "output", "text/html", "<!doctype html><p>simulation fixture</p>\n"],
+    ["governance_events.jsonl", "governance-events", "application/x-ndjson", '{"environment":"simulation","fixture":true}\n'],
+  ]) {
+    const bytes = Buffer.from(content);
+    writeFileSync(join(item.job, "artifacts", name), bytes);
+    item.receipt.artifacts.push({ name, role, mediaType, bytes: bytes.length, sha256: hash(bytes) });
+  }
+  persistReceipt(item);
+  return item;
+}
+
+const pipelineVerification = (expectedMode) => ({ expectedMode, requirePipelineArtifacts: true });
+for (const mode of ["daily", "premarket"]) {
+  for (const status of ["succeeded", "degraded"]) test(`mode-aware ${mode} accepts an intact ${status} pipeline receipt`, (t) => {
+    const item = pipelineReceiptFixture(t, mode, status);
+    const actual = verifyJobArtifacts(item.workspace, item.receipt, pipelineVerification(mode));
+    assert.equal(actual.status, status); assert.equal(actual.stages, 21); assert.equal(actual.artifacts, 4);
+    assert.deepEqual(actual.degradedSteps, item.receipt.degradedSteps);
+  });
+
+  test(`mode-aware ${mode} accepts disclosed pipeline stages beyond the minimum`, (t) => {
+    const item = pipelineReceiptFixture(t, mode);
+    item.receipt.stepTrace.push({ step: "fixture-extension-stage", status: "executed" });
+    persistReceipt(item);
+    assert.equal(verifyJobArtifacts(item.workspace, item.receipt, pipelineVerification(mode)).stages, 22);
+  });
+
+  for (const [name, mutate] of [
+    ["an incomplete stage trace", (f) => { f.receipt.stepTrace.pop(); }],
+    ["a missing pipeline result", (f) => { f.receipt.artifacts.find((a) => a.role === "pipeline-result").role = "output"; }],
+    ["a missing HTML report", (f) => { f.receipt.artifacts.find((a) => a.mediaType === "text/html").mediaType = "text/plain"; }],
+    ["missing governance events", (f) => { f.receipt.artifacts.find((a) => a.role === "governance-events").role = "output"; }],
+    ["missing degraded-step disclosure", (f) => { f.receipt.degradedSteps = []; }],
+    ["a live environment", (f) => { f.receipt.environment = "live"; }],
+    ["broker-order permissions", (f) => { f.receipt.permissions.brokerOrders = true; }],
+    ["approval permissions", (f) => { f.receipt.permissions.approvals = true; }],
+    ["parameter-application permissions", (f) => { f.receipt.permissions.parameterApplication = true; }],
+    ["a false server-sync claim", (f) => { f.receipt.governanceSynced = true; }],
+    ["an altered artifact byte count", (f) => { f.receipt.artifacts[0].bytes += 1; }],
+    ["an escaped artifact path", (f) => { f.receipt.artifacts[0].name = "../outside.txt"; }],
+  ]) test(`mode-aware ${mode} rejects ${name} after a valid receipt completion`, (t) => {
+    const item = pipelineReceiptFixture(t, mode);
+    mutate(item); persistReceipt(item);
+    assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, pipelineVerification(mode)));
+  });
+
+  test(`mode-aware ${mode} rejects artifact changes that retain the declared byte count`, (t) => {
+    const item = pipelineReceiptFixture(t, mode);
+    const artifact = item.receipt.artifacts[0];
+    writeFileSync(join(item.job, "artifacts", artifact.name), Buffer.alloc(artifact.bytes, 120));
+    assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, pipelineVerification(mode)), /artifact changed/u);
+  });
+
+  test(`mode-aware ${mode} rejects an altered completion digest`, (t) => {
+    const item = pipelineReceiptFixture(t, mode);
+    writeFileSync(join(item.job, "completion.json"), JSON.stringify({ receiptSha256: "0".repeat(64) }));
+    assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, pipelineVerification(mode)), /immutable receipt/u);
+  });
+
+  test(`mode-aware ${mode} rejects a returned receipt that differs from the bound disk receipt`, (t) => {
+    const item = pipelineReceiptFixture(t, mode);
+    const returned = { ...item.receipt, kernelDigest: "0".repeat(64) };
+    assert.throws(() => verifyJobArtifacts(item.workspace, returned, pipelineVerification(mode)));
+  });
+}
+
+for (const mode of ["daily", "premarket", "intraday", "backtest", "tune", "review"]) {
+  test(`mode-aware ${mode} rejects a different returned mode with valid local bytes`, (t) => {
+    const differentMode = mode === "daily" ? "premarket" : "daily";
+    const item = pipelineReceiptFixture(t, differentMode);
+    assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, {
+      expectedMode: mode, requirePipelineArtifacts: ["daily", "premarket"].includes(mode),
+    }), /receipt mode/u);
+  });
+
+  test(`mode-aware ${mode} rejects a missing returned mode with valid local bytes`, (t) => {
+    const item = pipelineReceiptFixture(t, mode);
+    delete item.receipt.mode; persistReceipt(item);
+    assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, {
+      expectedMode: mode, requirePipelineArtifacts: ["daily", "premarket"].includes(mode),
+    }), /receipt mode/u);
+  });
+}
+
+for (const mode of ["intraday", "backtest", "tune", "review"]) test(`mode-aware ${mode} verifies its receipt without daily pipeline requirements`, (t) => {
+  const item = fixture(); t.after(() => rmSync(item.workspace, { recursive: true, force: true }));
+  item.receipt.mode = mode; persistReceipt(item);
+  const actual = verifyJobArtifacts(item.workspace, item.receipt, { expectedMode: mode });
+  assert.equal(actual.artifacts, 1); assert.equal(actual.stages, 0);
+});
+
+for (const [name, options] of [["the legacy true flag", true], ["the legacy false flag", false], ["null", null],
+  ["an array", []], ["a string flag", "daily"], ["a nonboolean pipeline flag", { expectedMode: "daily", requirePipelineArtifacts: "true" }],
+  ["pipeline requirements without a requested mode", { requirePipelineArtifacts: true }]]) {
+  test(`mode-aware verification rejects ${name} instead of skipping its checks`, (t) => {
+    const item = pipelineReceiptFixture(t, "daily");
+    assert.throws(() => verifyJobArtifacts(item.workspace, item.receipt, options), /options|requirePipelineArtifacts|expectedMode/u);
+  });
+}
+
 test("smoke timeout terminates an uncooperative child and returns a failure", async () => {
   const started = Date.now();
   await assert.rejects(execute(process.execPath, ["-e", 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'], {

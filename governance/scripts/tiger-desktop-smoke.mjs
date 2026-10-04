@@ -156,7 +156,11 @@ export async function verifyRunningDesktop({ supportDir, ports, build, advertise
   return { identity, installState: installed.installState, serverVerified: true, webVerified: true, processObservedAlive: true };
 }
 
-export function verifyJobArtifacts(workspace, receipt, pipeline = false) {
+export function verifyJobArtifacts(workspace, receipt, options = {}) {
+  assert.ok(options !== null && typeof options === "object" && !Array.isArray(options), "artifact verification options must be an object");
+  const { expectedMode = null, requirePipelineArtifacts = false } = options;
+  assert.equal(typeof requirePipelineArtifacts, "boolean", "requirePipelineArtifacts must be a boolean");
+  if (requirePipelineArtifacts) assert.ok(["daily", "premarket"].includes(expectedMode), "requirePipelineArtifacts requires a daily or premarket expectedMode");
   assert.equal(receipt.schemaVersion, "tiger.agent-receipt/v1");
   assert.ok(["succeeded", "degraded"].includes(receipt.status));
   assert.equal(receipt.integrityVerified, true);
@@ -164,6 +168,7 @@ export function verifyJobArtifacts(workspace, receipt, pipeline = false) {
   assert.equal(receipt.provider, "demo");
   assert.equal(receipt.governanceSynced, false);
   assert.deepEqual(receipt.permissions, { approvals: false, brokerOrders: false, parameterApplication: false });
+  if (expectedMode !== null) assert.equal(receipt.mode, expectedMode, "receipt mode must match the requested mode");
   assert.match(receipt.jobId, /^[A-Za-z0-9][A-Za-z0-9_-]{7,79}$/u);
   const job = join(workspace, "jobs", "local", receipt.jobId);
   const stored = readFileSync(join(job, "receipt.json"));
@@ -178,8 +183,7 @@ export function verifyJobArtifacts(workspace, receipt, pipeline = false) {
     assert.equal(content.length, entry.bytes);
     assert.equal(sha(content), entry.sha256, `artifact changed: ${entry.name}`);
   }
-  if (pipeline) {
-    assert.equal(receipt.mode, "daily");
+  if (requirePipelineArtifacts) {
     assert.ok(receipt.stepTrace.length >= 21, "all registered pipeline stages must be disclosed");
     assert.ok(receipt.artifacts.some((entry) => entry.role === "pipeline-result"));
     assert.ok(receipt.artifacts.some((entry) => entry.mediaType === "text/html"));
@@ -267,7 +271,7 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
   const cli = await execute(node, [join(kernel, "scripts", "tiger-agent.mjs"), "--workspace", workspace, "run", "--json", JSON.stringify(request)],
     { environment, cwd: workspace, label: "packaged CLI daily pipeline", codes: [0, 10] });
   const cliReceipt = JSON.parse(cli.stdout.trim());
-  const cliCheck = verifyJobArtifacts(workspace, cliReceipt, true);
+  const cliCheck = verifyJobArtifacts(workspace, cliReceipt, { expectedMode: request.mode, requirePipelineArtifacts: true });
   writeFileSync(join(output, "cli-receipt.json"), JSON.stringify(cliReceipt, null, 2) + "\n");
   const sourceJob = { jobId: cliReceipt.jobId, resultSha256: cliReceipt.resultSha256 };
   const cliModes = { daily: cliCheck }, cliModeReceipts = { daily: cliReceipt };
@@ -281,7 +285,7 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
       "run", "--json", JSON.stringify(selected)], { environment, cwd: workspace, label: `packaged CLI ${mode}`, codes: [0, 10] });
     const receipt = JSON.parse(executed.stdout.trim());
     assert.equal(receipt.mode, mode);
-    cliModes[mode] = verifyJobArtifacts(workspace, receipt, mode === "premarket");
+    cliModes[mode] = verifyJobArtifacts(workspace, receipt, { expectedMode: mode, requirePipelineArtifacts: mode === "premarket" });
     cliModeReceipts[mode] = receipt;
   }
   writeFileSync(join(output, "cli-mode-receipts.json"), JSON.stringify(cliModeReceipts, null, 2) + "\n");
@@ -302,7 +306,7 @@ export async function smokeDesktop({ buildFile, payloadRoot, outputRoot, render 
   assert.ok(frame(2).result.tools.some((tool) => tool.name === "tiger.pipeline.run"));
   assert.equal(frame(3).result.isError, false);
   assert.equal(frame(4).result.isError, false);
-  const mcpCheck = verifyJobArtifacts(workspace, frame(3).result.structuredContent, true);
+  const mcpCheck = verifyJobArtifacts(workspace, frame(3).result.structuredContent, { expectedMode: toolRequest.mode, requirePipelineArtifacts: true });
   const employeeCheck = verifyJobArtifacts(workspace, frame(4).result.structuredContent);
   assert.equal(frame(4).result.structuredContent.employee, "mrs");
   writeFileSync(join(output, "mcp-frames.json"), JSON.stringify(frames, null, 2) + "\n");
