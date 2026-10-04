@@ -1,10 +1,13 @@
 """official 官方宏观源（FRED DGS10 / CBOE VIX·VIX9D）测试。
 
 纪律：真实源、不编造——数据异常必须抛错（由降级链处理），绝不出假数。
-网络相关用例全部 mock；真实连通性仅做可选 smoke（CI 无外网时跳过）。
+网络相关用例全部 mock；真实连通性仅做显式 opt-in smoke。
+RUN_TIGER_LIVE_MACRO_TESTS=1 时真实请求失败或数据不足仍必须失败。
 """
 
 from __future__ import annotations
+
+import os
 
 import pandas as pd
 import pytest
@@ -84,7 +87,10 @@ def test_base_dispatch_rate_and_vol(monkeypatch):
         p.rate_yield_for("CN10Y")  # 非美符号→走 OHLCV→明确抛错
 
 
-@pytest.mark.skipif(not OfficialMacroProvider.available(), reason="无外网")
+@pytest.mark.skipif(
+    os.environ.get("RUN_TIGER_LIVE_MACRO_TESTS") != "1",
+    reason="可选真实宏观源 smoke：设置 RUN_TIGER_LIVE_MACRO_TESTS=1 显式启用",
+)
 def test_smoke_real_fred_cboe():
     p = OfficialMacroProvider()
     assert len(p.tnx_yield()) >= 30

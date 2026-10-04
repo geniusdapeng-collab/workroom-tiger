@@ -11,6 +11,8 @@
 
 .py-gate: &py_gate
   name: py-gate
+  env:
+    RUN_TIGER_LIVE_MACRO_TESTS: "0"
   docker:
     image: python:3.12-bookworm
   stages:
@@ -23,13 +25,34 @@
     - name: 交易内核测试（pytest）
       script: |
         set -eu
-        python -m pytest -q
+        export RUN_TIGER_LIVE_MACRO_TESTS=0
+        python -m pytest -q -rs
 
     - name: 内核红线自检（21 环节注册表与围栏生成物）
       script: |
         set -eu
+        export RUN_TIGER_LIVE_MACRO_TESTS=0
         python -c "import trading_system.redline as r; assert len(r.STEP_REGISTRY) >= 21, len(r.STEP_REGISTRY); print('STEP_REGISTRY', len(r.STEP_REGISTRY))"
         python -m pytest -q tests/test_gen_fences.py
+
+.tiger-live-macro: &tiger_live_macro
+  name: tiger-live-macro
+  env:
+    RUN_TIGER_LIVE_MACRO_TESTS: "1"
+  docker:
+    image: python:3.12-bookworm
+  stages:
+    - name: 依赖安装
+      script: |
+        set -eu
+        python -V
+        pip install --quiet -r requirements.txt
+
+    - name: FRED 与 CBOE 真实宏观源 smoke（必需）
+      script: |
+        set -eu
+        export RUN_TIGER_LIVE_MACRO_TESTS=1
+        python -m pytest -q -rs tests/test_provider_official.py::test_smoke_real_fred_cboe
 
 .protocol-gate: &protocol_gate
   name: protocol-gate
@@ -151,6 +174,8 @@ main:
     - *py_gate
     - *oss_gate
     - *protocol_gate
+  api_trigger_tiger_live_macro:
+    - *tiger_live_macro
   api_trigger_tiger_native_candidate:
     - *desktop_mac_candidate
     - *desktop_win_candidate

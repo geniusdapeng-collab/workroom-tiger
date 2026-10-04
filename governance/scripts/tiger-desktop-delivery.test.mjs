@@ -142,6 +142,31 @@ test("CNB keeps source PR gates and requires both native platforms for explicit 
   }
 });
 
+test("CNB separates optional source macro smoke from mandatory opt-in live data checks", () => {
+  const repository = resolve(import.meta.dirname, "../..");
+  const workflow = YAML.parse(readFileSync(join(repository, ".cnb.yml"), "utf8"));
+  const source = workflow["**"].pull_request;
+  const python = source.find((job) => job.name === "py-gate");
+  assert.equal(python.env.RUN_TIGER_LIVE_MACRO_TESTS, "0");
+  const sourceTest = python.stages.find((stage) => stage.name === "交易内核测试（pytest）");
+  assert.ok(sourceTest.script.split("\n").includes("export RUN_TIGER_LIVE_MACRO_TESTS=0"));
+  assert.ok(sourceTest.script.split("\n").includes("python -m pytest -q -rs"));
+  const live = workflow["**"].api_trigger_tiger_live_macro;
+  assert.equal(live.length, 1);
+  assert.equal(live[0].name, "tiger-live-macro");
+  assert.equal(live[0].env.RUN_TIGER_LIVE_MACRO_TESTS, "1");
+  assert.deepEqual(live[0].docker, python.docker);
+  assert.deepEqual(live[0].stages[0], python.stages[0]);
+  assert.equal(live[0].stages.length, 2);
+  const checks = [live[0], ...live[0].stages];
+  assert.ok(checks.every((item) => !item.allow_failure && !item.allowFailure && !item.if));
+  const script = live[0].stages[1].script;
+  assert.deepEqual(script.trim().split("\n"), ["set -eu", "export RUN_TIGER_LIVE_MACRO_TESTS=1",
+    "python -m pytest -q -rs tests/test_provider_official.py::test_smoke_real_fred_cboe"]);
+  assert.ok(!source.some((job) => job.name === live[0].name));
+  assert.ok(!workflow.main.push.some((job) => job.name === live[0].name));
+});
+
 test("interactive smoke verifies while the child is alive, then releases the same instance", async () => {
   const instance = "11111111-1111-4111-8111-111111111111";
   const program = `const readline=require('node:readline');const lines=readline.createInterface({input:process.stdin});
