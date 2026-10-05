@@ -49,11 +49,11 @@
     - name: 协议门禁（提交规范 + 并发冲突）
       script: |
         set -eu
-        node --test governance/scripts/ci/protocol-rules.test.mjs
-        node governance/scripts/ci/verify-commit-msg.mjs --self-test
-        node governance/scripts/ci/verify-lock-conflict.mjs --self-test
-        node governance/scripts/ci/verify-commit-msg.mjs
-        node governance/scripts/ci/verify-lock-conflict.mjs
+        node --test scripts/ci/protocol-rules.test.mjs
+        node scripts/ci/verify-commit-msg.mjs --self-test
+        node scripts/ci/verify-lock-conflict.mjs --self-test
+        node scripts/ci/verify-commit-msg.mjs
+        node scripts/ci/verify-lock-conflict.mjs
 
     - name: 交付证据、预算与行业配置回归
       script: |
@@ -110,3 +110,7 @@ $:
             set -eu
             node scripts/oss-inventory.mjs --self-test
             node scripts/oss-watch-ci.mjs --exit-zero
+include:
+  - scripts/delivery/cnb.yml
+  - scripts/delivery/bootstrap-cnb.yml
+  - scripts/delivery/install-cnb.yml
