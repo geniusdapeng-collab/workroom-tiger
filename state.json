@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 119,
+  "revision": 121,
   "tasks": {
     "79": {
       "number": 79,
@@ -59,7 +59,7 @@
     },
     "80": {
       "number": 80,
-      "status": "waiting_ci",
+      "status": "aligning",
       "firstSeen": 1791313500413,
       "attempts": {},
       "headSha": "924ae6e1cdfb2dab4fe2174bded479dff9c2c5b7",
@@ -313,8 +313,12 @@
       ],
       "ciSince": 1791313500413,
       "updatedAt": 1791316217323,
-      "alignmentCount": 0,
-      "alignmentIntent": null,
+      "alignmentCount": 1,
+      "alignmentIntent": {
+        "headSha": "924ae6e1cdfb2dab4fe2174bded479dff9c2c5b7",
+        "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "at": 1791316217323
+      },
       "developerReview": null,
       "alignment": {
         "sha": "924ae6e1cdfb2dab4fe2174bded479dff9c2c5b7",
@@ -6882,6 +6886,36 @@
       },
       "previous": "0ef55659724ef809aed8cdafc85554f48f27f04c4006e8a1602ab01d3115379b",
       "digest": "aff1aca52afdb5393f923b30917697cd242c32a8023b175dc50e286affb5296e"
+    },
+    {
+      "sequence": 120,
+      "at": "2026-10-06T19:50:17.323Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "aligning",
+          "alignmentCount": 1,
+          "alignmentIntent": {
+            "headSha": "924ae6e1cdfb2dab4fe2174bded479dff9c2c5b7",
+            "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+            "at": 1791316217323
+          },
+          "developerReview": null
+        }
+      },
+      "previous": "aff1aca52afdb5393f923b30917697cd242c32a8023b175dc50e286affb5296e",
+      "digest": "cdfa35b4c7d4ba43f0c455c1862b194839cc477de2a36cc83e4bc257c39f3e44"
+    },
+    {
+      "sequence": 121,
+      "at": "2026-10-06T19:50:31.328Z",
+      "kind": "transaction",
+      "data": {
+        "id": "14629c52-8b4d-4d90-8c6e-cbab0eb9c702"
+      },
+      "previous": "cdfa35b4c7d4ba43f0c455c1862b194839cc477de2a36cc83e4bc257c39f3e44",
+      "digest": "93e5056aa789114f689c904678469eddf57b8c49159c71c8da214e9b8dd34bed"
     }
   ]
 }
