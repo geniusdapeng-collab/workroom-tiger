@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 244,
+  "revision": 246,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791328513338,
+      "updatedAt": 1791328812235,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791329113338,
+      "blockedUntil": 1791329412235,
       "candidate": null,
-      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -12190,6 +12190,31 @@
       },
       "previous": "1655f23b38de5eaabe1d483a7afe22a610180f1ea05dbcd901c8552d95efc1e5",
       "digest": "90f5e52942962c058c8045237667fb8b5c3b0271db09f9a095477125a8fec297"
+    },
+    {
+      "sequence": 245,
+      "at": "2026-10-06T23:20:12.235Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791329412235
+        }
+      },
+      "previous": "90f5e52942962c058c8045237667fb8b5c3b0271db09f9a095477125a8fec297",
+      "digest": "e06ba5d0b215a1f2083712803d9942f2f3b40d63d8bfc528dc2f3e6368624e2a"
+    },
+    {
+      "sequence": 246,
+      "at": "2026-10-06T23:20:20.548Z",
+      "kind": "transaction",
+      "data": {
+        "id": "60a8784e-f832-4c1a-88fb-f659b27e8780"
+      },
+      "previous": "e06ba5d0b215a1f2083712803d9942f2f3b40d63d8bfc528dc2f3e6368624e2a",
+      "digest": "9dd059ac37fcc8abdef64a28d9047c1c6dc1740cf2bb67f79a6d3578da8b7689"
     }
   ]
 }
