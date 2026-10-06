@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 88,
+  "revision": 90,
   "tasks": {
     "79": {
       "number": 79,
@@ -1890,7 +1890,7 @@
           "protocol": 6
         }
       },
-      "updatedAt": 1791313500413,
+      "updatedAt": 1791314043514,
       "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
       "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
       "branch": "chore/protocol-onboarding-delivery-ce550811eb106006-f64046fdb10c",
@@ -5865,6 +5865,45 @@
       },
       "previous": "bc7d9928a11020757f6e9d7426b757d585f5e732e5dc15f3fc09ba23b1839b61",
       "digest": "d4444be6735527af4ee00e2ded093474fe72a2cc7c729cf634ec56fb8498ce0e"
+    },
+    {
+      "sequence": 89,
+      "at": "2026-10-06T19:14:03.514Z",
+      "kind": "task",
+      "data": {
+        "number": 85,
+        "patch": {
+          "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+          "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+          "branch": "chore/protocol-onboarding-delivery-ce550811eb106006-f64046fdb10c",
+          "intent": {
+            "taskId": "T-2026-1006-6375",
+            "ready": true,
+            "dependsOn": [],
+            "releases": []
+          },
+          "originalBody": "原仓必需检查保留，新增 Codex 审查回执 和交付回归。安装范围及四问见 Issue #84 [T-2026-1006-6375]。\n\n<!-- delivery-install:ce550811eb1060060ecbe14e14f027961810848bd8d0f564829e4f164612d22f -->\n\n<!-- workloom-delivery\n{\n  \"task_id\": \"T-2026-1006-6375\",\n  \"ready\": true,\n  \"depends_on\": [],\n  \"releases\": []\n}\n-->",
+          "files": [
+            ".workloom-delivery-install.json",
+            "scripts/delivery/git-state.mjs",
+            "scripts/delivery/queue.test.mjs"
+          ],
+          "status": "waiting_ci",
+          "ciSince": 1791313500413
+        }
+      },
+      "previous": "d4444be6735527af4ee00e2ded093474fe72a2cc7c729cf634ec56fb8498ce0e",
+      "digest": "4920763fa171587de364b90d1662127caa240551af9cabf11ab2a01e6641a000"
+    },
+    {
+      "sequence": 90,
+      "at": "2026-10-06T19:14:08.516Z",
+      "kind": "transaction",
+      "data": {
+        "id": "db7e0e27-0693-40c4-9189-deb1726703ce"
+      },
+      "previous": "4920763fa171587de364b90d1662127caa240551af9cabf11ab2a01e6641a000",
+      "digest": "64b5e22e825b3de6205abeae2ee43c2db83650abb4be9d11ecab1cdf6f35728c"
     }
   ]
 }
