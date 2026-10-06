@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 66,
+  "revision": 68,
   "tasks": {
     "79": {
       "number": 79,
@@ -55,7 +55,7 @@
     },
     "80": {
       "number": 80,
-      "status": "waiting_ci",
+      "status": "aligning",
       "firstSeen": 1791313500413,
       "attempts": {},
       "headSha": "b5f62060e9661d3dd9dc35b2a980b3fe6859d4d1",
@@ -308,7 +308,14 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791313500413,
-      "updatedAt": 1791313500413
+      "updatedAt": 1791313500413,
+      "alignmentCount": 1,
+      "alignmentIntent": {
+        "headSha": "b5f62060e9661d3dd9dc35b2a980b3fe6859d4d1",
+        "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "at": 1791313500413
+      },
+      "developerReview": null
     },
     "82": {
       "number": 82,
@@ -5375,6 +5382,36 @@
       },
       "previous": "096a96790fb08ac1c63b4517757a236734534d0e6e583dbbce6ed0d48a512f31",
       "digest": "ab2748755dab436ea8fcfc78f3fa8dc903f06eba40423c5ad7119a6145752e4f"
+    },
+    {
+      "sequence": 67,
+      "at": "2026-10-06T19:05:00.413Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "aligning",
+          "alignmentCount": 1,
+          "alignmentIntent": {
+            "headSha": "b5f62060e9661d3dd9dc35b2a980b3fe6859d4d1",
+            "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "at": 1791313500413
+          },
+          "developerReview": null
+        }
+      },
+      "previous": "ab2748755dab436ea8fcfc78f3fa8dc903f06eba40423c5ad7119a6145752e4f",
+      "digest": "6659383af7eda50ad587c25043b97c88641cb1c9eed4260f67e486e37deae8fb"
+    },
+    {
+      "sequence": 68,
+      "at": "2026-10-06T19:05:03.375Z",
+      "kind": "transaction",
+      "data": {
+        "id": "170fa4ea-12eb-4ade-8f76-269e7417200a"
+      },
+      "previous": "6659383af7eda50ad587c25043b97c88641cb1c9eed4260f67e486e37deae8fb",
+      "digest": "1c4073b0d451874230e0e2acc3e216ff1ffa344dc6f98d2e36615772b6fd8337"
     }
   ]
 }
