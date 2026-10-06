@@ -279,7 +279,7 @@
 | `vite` | 8.3.0 | 8.3.0 | 开发/生产 | governance/.workloom-runtime-deps/package.json、governance/apps/web/package.json、governance/apps/webb/package.json 等 4 处 | 8.3.0（历史记录；未核实或已过期） |
 | `vitest` | 4.1.11 / 5.0.1 | 4.1.11 / ^4.1.11 / ^5.0.1 | 开发/生产 | governance/.workloom-runtime-deps/package.json、governance/apps/webb/package.json、governance/package.json 等 7 处 | 5.0.1（历史记录；未核实或已过期） |
 | `ws` | 8.21.0（声明） | 8.21.0 | 开发 | governance/vendor/dsh/package.json | 8.21.3（历史记录；未核实或已过期） |
-| `yaml` | 2.9.0 | 2.9.0 | 开发/生产 | governance/.workloom-runtime-deps/package.json、governance/package.json、governance/packages/base/package.json | 2.9.1（历史记录；未核实或已过期） |
+| `yaml` | 2.9.0 | 2.9.0 | 开发/生产 | governance/.workloom-runtime-deps/package.json、governance/package.json、governance/packages/base/package.json 等 4 处 | 2.9.1（历史记录；未核实或已过期） |
 | `yaml-governance → npm:yaml` | 2.9.0 | npm:yaml@2.9.0 | 开发 | governance/package.json | 2.9.1（历史记录；未核实或已过期） |
 | `zod` | 4.6.5 | 4.6.5 / ^4.6.5 | 生产 | governance/.workloom-runtime-deps/package.json、governance/apps/server/package.json、governance/packages/base/package.json 等 6 处 | 4.6.5（历史记录；未核实或已过期） |
 
