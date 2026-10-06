@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 113,
+  "revision": 115,
   "tasks": {
     "79": {
       "number": 79,
@@ -6522,6 +6522,35 @@
       },
       "previous": "faad28f45cd5733256b61576f9e125095d3f33b434598c400c3cc1326604966c",
       "digest": "163683e84f4a5b723e27e5aa9cc1fdcac4f3d10365c66be8bf8e40935eb6e054"
+    },
+    {
+      "sequence": 114,
+      "at": "2026-10-06T19:25:39.635Z",
+      "kind": "installation_updated",
+      "data": {
+        "installer": 85,
+        "merge": {
+          "sha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sourceSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+          "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+          "checkSha": "6a8fe93cf71ff729999f38367165670095d1e69c",
+          "mergedBy": "cnb.dYiF05kxAGA",
+          "verifiedAt": "2026-10-06T19:25:35.695Z"
+        },
+        "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578"
+      },
+      "previous": "163683e84f4a5b723e27e5aa9cc1fdcac4f3d10365c66be8bf8e40935eb6e054",
+      "digest": "4d084152126628bcf09102dc3269a1a5f10330e7c8bd57f14ed29ebe2238d983"
+    },
+    {
+      "sequence": 115,
+      "at": "2026-10-06T19:25:38.816Z",
+      "kind": "transaction",
+      "data": {
+        "id": "install-updated:85:5fc58513363f535de66ba7c4f4b7df1d7daa5578"
+      },
+      "previous": "4d084152126628bcf09102dc3269a1a5f10330e7c8bd57f14ed29ebe2238d983",
+      "digest": "b7e26f74e509078581400c15e785990de5121b4d161215b26c7da8e291bd3064"
     }
   ]
 }
