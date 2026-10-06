@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 81,
+  "revision": 86,
   "tasks": {
     "79": {
       "number": 79,
@@ -2053,14 +2053,34 @@
         "marker": "delivery-origin:85:fd0e373c6236b26018a5cc188ec7a25d32d28e5b:f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
         "at": 1791313500413
       }
+    },
+    "86": {
+      "number": 86,
+      "status": "developing",
+      "firstSeen": 1791313522461,
+      "attempts": {},
+      "admission": {
+        "number": 86,
+        "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+        "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "filesHash": "7d9d594424ecc8b2fa088ea1928230b39fbcfa4352d81ac7446e6b2eeafa5a9b",
+        "scopes": [
+          "protocol"
+        ],
+        "owner": "admission/pr-86",
+        "generation": {
+          "protocol": 8
+        }
+      },
+      "updatedAt": 1791313522461
     }
   },
   "leases": {
     "protocol": {
       "owner": null,
-      "generation": 7,
-      "acquiredAt": 1791313513856,
-      "expiresAt": 1791313513856
+      "generation": 8,
+      "acquiredAt": 1791313522461,
+      "expiresAt": 1791313522461
     },
     "migrations": {
       "owner": null,
@@ -5710,6 +5730,93 @@
       },
       "previous": "f565df487483c3a4b10ff88051da282c4f3a0caed2b4eaf25ce32b4fc88b2343",
       "digest": "03a4e89efa827fb95de2bac26bbe5f41d7aa6216aa95e8f4cc4f667b9d9fbf4a"
+    },
+    {
+      "sequence": 82,
+      "at": "2026-10-06T19:05:22.461Z",
+      "kind": "lease_acquire",
+      "data": {
+        "scopes": [
+          "protocol"
+        ],
+        "owner": "admission/pr-86",
+        "generation": {
+          "protocol": 8
+        }
+      },
+      "previous": "03a4e89efa827fb95de2bac26bbe5f41d7aa6216aa95e8f4cc4f667b9d9fbf4a",
+      "digest": "17e080195651ca3f73a8c0e794226b686ec3b93bbd05890e7218ac63e6a9d29d"
+    },
+    {
+      "sequence": 83,
+      "at": "2026-10-06T19:05:22.461Z",
+      "kind": "lease_release",
+      "data": {
+        "scopes": [
+          "protocol"
+        ],
+        "owner": "admission/pr-86",
+        "generation": {
+          "protocol": 8
+        }
+      },
+      "previous": "17e080195651ca3f73a8c0e794226b686ec3b93bbd05890e7218ac63e6a9d29d",
+      "digest": "37d4c772b351f132493cb39f03edded14d6bd94313996feaed47a4673071b743"
+    },
+    {
+      "sequence": 84,
+      "at": "2026-10-06T19:05:22.461Z",
+      "kind": "source_admitted",
+      "data": {
+        "number": 86,
+        "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+        "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "filesHash": "7d9d594424ecc8b2fa088ea1928230b39fbcfa4352d81ac7446e6b2eeafa5a9b",
+        "scopes": [
+          "protocol"
+        ],
+        "owner": "admission/pr-86",
+        "generation": {
+          "protocol": 8
+        }
+      },
+      "previous": "37d4c772b351f132493cb39f03edded14d6bd94313996feaed47a4673071b743",
+      "digest": "e4640dfc5d0bd04d211f29cf61e4d511d1e837d2dbdb0e779b6d984fe72e05b4"
+    },
+    {
+      "sequence": 85,
+      "at": "2026-10-06T19:05:22.461Z",
+      "kind": "task",
+      "data": {
+        "number": 86,
+        "patch": {
+          "admission": {
+            "number": 86,
+            "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+            "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "filesHash": "7d9d594424ecc8b2fa088ea1928230b39fbcfa4352d81ac7446e6b2eeafa5a9b",
+            "scopes": [
+              "protocol"
+            ],
+            "owner": "admission/pr-86",
+            "generation": {
+              "protocol": 8
+            }
+          }
+        }
+      },
+      "previous": "e4640dfc5d0bd04d211f29cf61e4d511d1e837d2dbdb0e779b6d984fe72e05b4",
+      "digest": "b45b3d874020250f26474fad116a4756b2405d56081a212d7394e1f4e4fd0969"
+    },
+    {
+      "sequence": 86,
+      "at": "2026-10-06T19:05:22.144Z",
+      "kind": "transaction",
+      "data": {
+        "id": "source-admit:86:fd0e373c6236b26018a5cc188ec7a25d32d28e5b:f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3"
+      },
+      "previous": "b45b3d874020250f26474fad116a4756b2405d56081a212d7394e1f4e4fd0969",
+      "digest": "c13c0671b1459d12ecd68208fb67d272ddd84a3ec5755b212c8fda14fc568739"
     }
   ]
 }
