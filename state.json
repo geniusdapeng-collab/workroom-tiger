@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 61,
+  "revision": 64,
   "tasks": {
     "79": {
       "number": 79,
@@ -1591,7 +1591,7 @@
     },
     "85": {
       "number": 85,
-      "status": "developing",
+      "status": "waiting_ci",
       "firstSeen": 1791312818920,
       "attempts": {},
       "admission": {
@@ -1607,7 +1607,154 @@
           "protocol": 6
         }
       },
-      "updatedAt": 1791312820468
+      "updatedAt": 1791313214919,
+      "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+      "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+      "branch": "chore/protocol-onboarding-delivery-ce550811eb106006-f64046fdb10c",
+      "intent": {
+        "taskId": "T-2026-1006-6375",
+        "ready": true,
+        "dependsOn": [],
+        "releases": []
+      },
+      "developerReview": {
+        "schemaVersion": 1,
+        "provider": "codex",
+        "repo": "workloom-ai/workroom-tiger",
+        "number": 85,
+        "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+        "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "policyHash": "ebe896dcaea63a5b104bddf214b5dab35cbbeeacffa7b8108fcd2c32ce97cde5",
+        "reviewedFiles": [
+          ".workloom-delivery-install.json",
+          "scripts/delivery/git-state.mjs",
+          "scripts/delivery/queue.test.mjs"
+        ],
+        "filesHash": "7d9d594424ecc8b2fa088ea1928230b39fbcfa4352d81ac7446e6b2eeafa5a9b",
+        "dependsOn": [],
+        "ciPolicyChanges": [
+          {
+            "id": "CI-001",
+            "rationale": "Current Codex completely reviewed the immutable-SHA read and direct model/API dependencies. Target bytes match the reviewed canonical base implementation. Authenticated canonical read uses branch commit SHA and decoded/text raw state, validates full repository-bound digest chain, and returns empty only after explicit 404 plus readable full-SHA main proof. Permission, malformed/foreign/corrupt content and missing raw state fail. Real Git mutation, ordinary fast-forward CAS and exact transaction recovery after lost acknowledgement remain. Only explicit ls-remote/fetch 429 receives two bounded read delays; no blind push/merge retry, platform AI or NPC call is introduced. Actual tests at this exact target source retain real bare Git CAS/lost-ack and CLI assertions."
+          },
+          {
+            "id": "CI-002",
+            "rationale": "Target bytes match the fully reviewed canonical regression. Added ten behavior tests for immutable SHA API read/decoded/text result, positive-only absence, permissions/transport/hidden main, malformed/foreign/corrupt state and bounded 429 read recovery/exhaustion/write exclusion. Actual CLI fixture derives branch SHA/state bytes from real bare Git, preserving previous CLI, six-writer CAS and lost acknowledgement coverage. Exact post-commit installed target suite passed with zero failures; one non-applicable shared UI publication case remains explicitly skipped. Original product pipelines and all hardened target adapter/checker/tests are unchanged."
+          }
+        ],
+        "ciPolicyChangesHash": "6de0a95ac44de7084d05a49c10f8365fae3c2b314f88004b0ca14e934850d330",
+        "tests": [
+          {
+            "command": "/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test scripts/delivery/queue.test.mjs scripts/ci/protocol-rules.test.mjs",
+            "exitCode": 0,
+            "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+            "finishedAt": "2026-10-06T18:57:44.859Z",
+            "result": "ared unverified release (0.120208ms)\n✔ a lease acquired by another developer during snapshot reading blocks candidate creation (0.211083ms)\n✔ a reused task id or a ready PR body cannot release a developer lease or admit a candidate (0.191625ms)\n✔ candidate body or origin mutation is rejected before sending a platform merge (0.652ms)\n✔ runner deadline uses elapsed time independently of injected lease/calendar time and preserves the exact boundary (0.161709ms)\n✔ legacy review capacity never reads paid build history and cannot block unrelated reviewed source (0.048ms)\n✔ release enqueue is idempotent by frozen source/kind/version and keeps integration separate (0.10725ms)\n✔ both UI and desktop dispatch pass the explicit frozen SHA to the whole build, independently of current branch SHA (0.465708ms)\n﹣ manual UI event and delivery dispatch use the same actual publishing job and native lock; the scheduler only launches and observes (3.84675ms) # This product has no shared UI publishing lane\n✔ release launch intent survives lost acknowledgement and forbids duplicate publication (0.436666ms)\n✔ release failures use the latest durable attempt count and park after two launches (0.20475ms)\n✔ lost release launch cannot adopt a different manual build with the same source/event (0.2085ms)\n✔ UI release verifies the real Platform API JSON decoding contract and rejects unreadable registration or different bytes (2.402375ms)\n✔ release verifies actual tag source, manifest identity and every downloaded digest (0.279042ms)\n✔ private release download authenticates only the official first request and hashes the actual redirected bytes (0.582333ms)\n✔ private release permission, unsafe redirect, empty/oversized stream and malformed manifest remain explicit failures (0.850625ms)\n✔ a release redirect loop is bounded and every later same-origin or foreign request omits the token (0.167416ms)\nℹ tests 115\nℹ suites 5\nℹ pass 114\nℹ fail 0\nℹ cancelled 0\nℹ skipped 1\nℹ todo 0\nℹ duration_ms 11288.132375\n",
+            "logPath": "/Users/mac/Documents/Codex/2026-10-05/agent-pr-pr-pr/work/account-live-install/ledger-tests/workloom-ai-workroom-tiger.txt"
+          }
+        ],
+        "reviewedAt": "2026-10-06T18:58:24.218Z",
+        "summary": "Actual current Codex review of the already-active target update. Canonical source implementation and dependencies were completely read (A origin); actual target copies match those bytes (B). The complete exact changed paths, manifest provenance/digests and zero-change repeat installation were checked. Only ledger read implementation/tests/package provenance change; original CI, business identity, isolation, stronger target checker/test bytes and aliases remain. Actual post-commit target regression and source/main/policy/file/CI IDs are bound in this receipt. No unresolved blocking finding. Requires real original machine CI and native immutable candidate ordinary two-parent integration; no first-install privileged merge, human Approve, platform model or NPC execution.",
+        "passed": true,
+        "id": "af668dc3a43a3c324024a8d496216e024f45b8d73fee79ca22b3df89b2a68003"
+      },
+      "reviewSnapshot": {
+        "repo": "workloom-ai/workroom-tiger",
+        "number": 85,
+        "pull": {
+          "number": 85,
+          "state": "open",
+          "title": "feat(base): 安装普通研发自动交付 [T-2026-1006-6375]",
+          "body": "原仓必需检查保留，新增 Codex 审查回执 和交付回归。安装范围及四问见 Issue #84 [T-2026-1006-6375]。\n\n<!-- delivery-install:ce550811eb1060060ecbe14e14f027961810848bd8d0f564829e4f164612d22f -->\n\n<!-- workloom-delivery\n{\n  \"task_id\": \"T-2026-1006-6375\",\n  \"ready\": true,\n  \"depends_on\": [],\n  \"releases\": []\n}\n-->",
+          "author": {
+            "username": "cnb.dYiF05kxAGA",
+            "nickname": "Genius",
+            "email": "XYpmztfpCvez6l8z5BBAvJ+cnb.dYiF05kxAGA@noreply.cnb.cool",
+            "is_npc": false
+          },
+          "reviewers": [],
+          "labels": [],
+          "base": {
+            "ref": "refs/heads/main",
+            "sha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "repo": {
+              "id": "2100398378181283840",
+              "name": "workroom-tiger",
+              "path": "workloom-ai/workroom-tiger",
+              "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+            }
+          },
+          "head": {
+            "ref": "refs/heads/chore/protocol-onboarding-delivery-ce550811eb106006-f64046fdb10c",
+            "sha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+            "repo": {
+              "id": "2100398378181283840",
+              "name": "workroom-tiger",
+              "path": "workloom-ai/workroom-tiger",
+              "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+            }
+          },
+          "blocked_on": "unblocked",
+          "merged_by": {
+            "is_npc": false
+          },
+          "mergeable_state": "mergeable",
+          "is_wip": false,
+          "is_merged": false,
+          "is_force_merged": false,
+          "statuses": {}
+        },
+        "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+        "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "files": [
+          ".workloom-delivery-install.json",
+          "scripts/delivery/git-state.mjs",
+          "scripts/delivery/queue.test.mjs"
+        ],
+        "intent": {
+          "taskId": "T-2026-1006-6375",
+          "ready": true,
+          "dependsOn": [],
+          "releases": []
+        },
+        "headTime": 1791312808000,
+        "mergeBase": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "checkErrors": [],
+        "checkSha": null,
+        "hasFailedChecks": false,
+        "ciPolicyChanges": [
+          {
+            "id": "CI-001",
+            "file": "scripts/delivery/git-state.mjs",
+            "before": {
+              "ref": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+              "path": "scripts/delivery/git-state.mjs",
+              "absent": false
+            },
+            "after": {
+              "ref": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+              "path": "scripts/delivery/git-state.mjs",
+              "absent": false
+            },
+            "digest": "4dd904b863c361a1f4f560bf1fcaa439240e25063a2d8b5b8468e6aa013e8138"
+          },
+          {
+            "id": "CI-002",
+            "file": "scripts/delivery/queue.test.mjs",
+            "before": {
+              "ref": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+              "path": "scripts/delivery/queue.test.mjs",
+              "absent": false
+            },
+            "after": {
+              "ref": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+              "path": "scripts/delivery/queue.test.mjs",
+              "absent": false
+            },
+            "digest": "a37627cd8f58a4e2f61a8377b1b8753a9426cbb1243890a00f4078a92d6adb1c"
+          }
+        ]
+      }
     }
   },
   "leases": {
@@ -4515,6 +4662,189 @@
       },
       "previous": "890565854595519727116d81f8c93449ec6f9e9a44b0ab4cec07aef01c9c3929",
       "digest": "0382f8d523961f13a72a3c43171c19a446a01cc19cc01c8270669c5cf8cde275"
+    },
+    {
+      "sequence": 62,
+      "at": "2026-10-06T19:00:14.919Z",
+      "kind": "developer_review",
+      "data": {
+        "number": 85,
+        "id": "af668dc3a43a3c324024a8d496216e024f45b8d73fee79ca22b3df89b2a68003",
+        "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+        "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3"
+      },
+      "previous": "0382f8d523961f13a72a3c43171c19a446a01cc19cc01c8270669c5cf8cde275",
+      "digest": "e61a181d5961bc03c4f0e7bf21b6d05b6b03bbde79121fd30039ab37047d4046"
+    },
+    {
+      "sequence": 63,
+      "at": "2026-10-06T19:00:14.919Z",
+      "kind": "task",
+      "data": {
+        "number": 85,
+        "patch": {
+          "status": "waiting_ci",
+          "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+          "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+          "branch": "chore/protocol-onboarding-delivery-ce550811eb106006-f64046fdb10c",
+          "intent": {
+            "taskId": "T-2026-1006-6375",
+            "ready": true,
+            "dependsOn": [],
+            "releases": []
+          },
+          "developerReview": {
+            "schemaVersion": 1,
+            "provider": "codex",
+            "repo": "workloom-ai/workroom-tiger",
+            "number": 85,
+            "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+            "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "policyHash": "ebe896dcaea63a5b104bddf214b5dab35cbbeeacffa7b8108fcd2c32ce97cde5",
+            "reviewedFiles": [
+              ".workloom-delivery-install.json",
+              "scripts/delivery/git-state.mjs",
+              "scripts/delivery/queue.test.mjs"
+            ],
+            "filesHash": "7d9d594424ecc8b2fa088ea1928230b39fbcfa4352d81ac7446e6b2eeafa5a9b",
+            "dependsOn": [],
+            "ciPolicyChanges": [
+              {
+                "id": "CI-001",
+                "rationale": "Current Codex completely reviewed the immutable-SHA read and direct model/API dependencies. Target bytes match the reviewed canonical base implementation. Authenticated canonical read uses branch commit SHA and decoded/text raw state, validates full repository-bound digest chain, and returns empty only after explicit 404 plus readable full-SHA main proof. Permission, malformed/foreign/corrupt content and missing raw state fail. Real Git mutation, ordinary fast-forward CAS and exact transaction recovery after lost acknowledgement remain. Only explicit ls-remote/fetch 429 receives two bounded read delays; no blind push/merge retry, platform AI or NPC call is introduced. Actual tests at this exact target source retain real bare Git CAS/lost-ack and CLI assertions."
+              },
+              {
+                "id": "CI-002",
+                "rationale": "Target bytes match the fully reviewed canonical regression. Added ten behavior tests for immutable SHA API read/decoded/text result, positive-only absence, permissions/transport/hidden main, malformed/foreign/corrupt state and bounded 429 read recovery/exhaustion/write exclusion. Actual CLI fixture derives branch SHA/state bytes from real bare Git, preserving previous CLI, six-writer CAS and lost acknowledgement coverage. Exact post-commit installed target suite passed with zero failures; one non-applicable shared UI publication case remains explicitly skipped. Original product pipelines and all hardened target adapter/checker/tests are unchanged."
+              }
+            ],
+            "ciPolicyChangesHash": "6de0a95ac44de7084d05a49c10f8365fae3c2b314f88004b0ca14e934850d330",
+            "tests": [
+              {
+                "command": "/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test scripts/delivery/queue.test.mjs scripts/ci/protocol-rules.test.mjs",
+                "exitCode": 0,
+                "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+                "finishedAt": "2026-10-06T18:57:44.859Z",
+                "result": "ared unverified release (0.120208ms)\n✔ a lease acquired by another developer during snapshot reading blocks candidate creation (0.211083ms)\n✔ a reused task id or a ready PR body cannot release a developer lease or admit a candidate (0.191625ms)\n✔ candidate body or origin mutation is rejected before sending a platform merge (0.652ms)\n✔ runner deadline uses elapsed time independently of injected lease/calendar time and preserves the exact boundary (0.161709ms)\n✔ legacy review capacity never reads paid build history and cannot block unrelated reviewed source (0.048ms)\n✔ release enqueue is idempotent by frozen source/kind/version and keeps integration separate (0.10725ms)\n✔ both UI and desktop dispatch pass the explicit frozen SHA to the whole build, independently of current branch SHA (0.465708ms)\n﹣ manual UI event and delivery dispatch use the same actual publishing job and native lock; the scheduler only launches and observes (3.84675ms) # This product has no shared UI publishing lane\n✔ release launch intent survives lost acknowledgement and forbids duplicate publication (0.436666ms)\n✔ release failures use the latest durable attempt count and park after two launches (0.20475ms)\n✔ lost release launch cannot adopt a different manual build with the same source/event (0.2085ms)\n✔ UI release verifies the real Platform API JSON decoding contract and rejects unreadable registration or different bytes (2.402375ms)\n✔ release verifies actual tag source, manifest identity and every downloaded digest (0.279042ms)\n✔ private release download authenticates only the official first request and hashes the actual redirected bytes (0.582333ms)\n✔ private release permission, unsafe redirect, empty/oversized stream and malformed manifest remain explicit failures (0.850625ms)\n✔ a release redirect loop is bounded and every later same-origin or foreign request omits the token (0.167416ms)\nℹ tests 115\nℹ suites 5\nℹ pass 114\nℹ fail 0\nℹ cancelled 0\nℹ skipped 1\nℹ todo 0\nℹ duration_ms 11288.132375\n",
+                "logPath": "/Users/mac/Documents/Codex/2026-10-05/agent-pr-pr-pr/work/account-live-install/ledger-tests/workloom-ai-workroom-tiger.txt"
+              }
+            ],
+            "reviewedAt": "2026-10-06T18:58:24.218Z",
+            "summary": "Actual current Codex review of the already-active target update. Canonical source implementation and dependencies were completely read (A origin); actual target copies match those bytes (B). The complete exact changed paths, manifest provenance/digests and zero-change repeat installation were checked. Only ledger read implementation/tests/package provenance change; original CI, business identity, isolation, stronger target checker/test bytes and aliases remain. Actual post-commit target regression and source/main/policy/file/CI IDs are bound in this receipt. No unresolved blocking finding. Requires real original machine CI and native immutable candidate ordinary two-parent integration; no first-install privileged merge, human Approve, platform model or NPC execution.",
+            "passed": true,
+            "id": "af668dc3a43a3c324024a8d496216e024f45b8d73fee79ca22b3df89b2a68003"
+          },
+          "reviewSnapshot": {
+            "repo": "workloom-ai/workroom-tiger",
+            "number": 85,
+            "pull": {
+              "number": 85,
+              "state": "open",
+              "title": "feat(base): 安装普通研发自动交付 [T-2026-1006-6375]",
+              "body": "原仓必需检查保留，新增 Codex 审查回执 和交付回归。安装范围及四问见 Issue #84 [T-2026-1006-6375]。\n\n<!-- delivery-install:ce550811eb1060060ecbe14e14f027961810848bd8d0f564829e4f164612d22f -->\n\n<!-- workloom-delivery\n{\n  \"task_id\": \"T-2026-1006-6375\",\n  \"ready\": true,\n  \"depends_on\": [],\n  \"releases\": []\n}\n-->",
+              "author": {
+                "username": "cnb.dYiF05kxAGA",
+                "nickname": "Genius",
+                "email": "XYpmztfpCvez6l8z5BBAvJ+cnb.dYiF05kxAGA@noreply.cnb.cool",
+                "is_npc": false
+              },
+              "reviewers": [],
+              "labels": [],
+              "base": {
+                "ref": "refs/heads/main",
+                "sha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+                "repo": {
+                  "id": "2100398378181283840",
+                  "name": "workroom-tiger",
+                  "path": "workloom-ai/workroom-tiger",
+                  "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+                }
+              },
+              "head": {
+                "ref": "refs/heads/chore/protocol-onboarding-delivery-ce550811eb106006-f64046fdb10c",
+                "sha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+                "repo": {
+                  "id": "2100398378181283840",
+                  "name": "workroom-tiger",
+                  "path": "workloom-ai/workroom-tiger",
+                  "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+                }
+              },
+              "blocked_on": "unblocked",
+              "merged_by": {
+                "is_npc": false
+              },
+              "mergeable_state": "mergeable",
+              "is_wip": false,
+              "is_merged": false,
+              "is_force_merged": false,
+              "statuses": {}
+            },
+            "headSha": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+            "mainSha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "files": [
+              ".workloom-delivery-install.json",
+              "scripts/delivery/git-state.mjs",
+              "scripts/delivery/queue.test.mjs"
+            ],
+            "intent": {
+              "taskId": "T-2026-1006-6375",
+              "ready": true,
+              "dependsOn": [],
+              "releases": []
+            },
+            "headTime": 1791312808000,
+            "mergeBase": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "checkErrors": [],
+            "checkSha": null,
+            "hasFailedChecks": false,
+            "ciPolicyChanges": [
+              {
+                "id": "CI-001",
+                "file": "scripts/delivery/git-state.mjs",
+                "before": {
+                  "ref": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+                  "path": "scripts/delivery/git-state.mjs",
+                  "absent": false
+                },
+                "after": {
+                  "ref": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+                  "path": "scripts/delivery/git-state.mjs",
+                  "absent": false
+                },
+                "digest": "4dd904b863c361a1f4f560bf1fcaa439240e25063a2d8b5b8468e6aa013e8138"
+              },
+              {
+                "id": "CI-002",
+                "file": "scripts/delivery/queue.test.mjs",
+                "before": {
+                  "ref": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+                  "path": "scripts/delivery/queue.test.mjs",
+                  "absent": false
+                },
+                "after": {
+                  "ref": "fd0e373c6236b26018a5cc188ec7a25d32d28e5b",
+                  "path": "scripts/delivery/queue.test.mjs",
+                  "absent": false
+                },
+                "digest": "a37627cd8f58a4e2f61a8377b1b8753a9426cbb1243890a00f4078a92d6adb1c"
+              }
+            ]
+          }
+        }
+      },
+      "previous": "e61a181d5961bc03c4f0e7bf21b6d05b6b03bbde79121fd30039ab37047d4046",
+      "digest": "695a7a4f59811433636eb5910e1f473dcb067d144d7c4449b6d36b6f1133b16c"
+    },
+    {
+      "sequence": 64,
+      "at": "2026-10-06T19:00:14.171Z",
+      "kind": "transaction",
+      "data": {
+        "id": "9df6519b-1d11-439e-88a5-064f8d2e1be9"
+      },
+      "previous": "695a7a4f59811433636eb5910e1f473dcb067d144d7c4449b6d36b6f1133b16c",
+      "digest": "973221c6e893a4001e3a95c12d53d37f6f843f0a98a59c2916404c797b601af6"
     }
   ]
 }
