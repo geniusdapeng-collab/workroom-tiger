@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 106,
+  "revision": 108,
   "tasks": {
     "79": {
       "number": 79,
-      "status": "waiting_ci",
+      "status": "aligning",
       "firstSeen": 1791310816387,
       "attempts": {},
       "headSha": "3b6b2289319fcc84c6baa737bbe5072b95d4f8ad",
@@ -34,8 +34,12 @@
       ],
       "ciSince": 1791310816387,
       "updatedAt": 1791314068519,
-      "alignmentCount": 0,
-      "alignmentIntent": null,
+      "alignmentCount": 1,
+      "alignmentIntent": {
+        "headSha": "3b6b2289319fcc84c6baa737bbe5072b95d4f8ad",
+        "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "at": 1791314068519
+      },
       "developerReview": null,
       "alignment": {
         "sha": "3b6b2289319fcc84c6baa737bbe5072b95d4f8ad",
@@ -6413,6 +6417,36 @@
       },
       "previous": "96fe456f0c49c1a37610f9e979cb6002dcd491676998c8e1cc149ee8bb847b0b",
       "digest": "f30266bbd27374351a4bf5b41a0650c271659d684edbc38dd29090b5db62bc40"
+    },
+    {
+      "sequence": 107,
+      "at": "2026-10-06T19:14:28.519Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "aligning",
+          "alignmentCount": 1,
+          "alignmentIntent": {
+            "headSha": "3b6b2289319fcc84c6baa737bbe5072b95d4f8ad",
+            "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+            "at": 1791314068519
+          },
+          "developerReview": null
+        }
+      },
+      "previous": "f30266bbd27374351a4bf5b41a0650c271659d684edbc38dd29090b5db62bc40",
+      "digest": "0001114e9e472d8c3898d49aa8fd4fc501415f57c35c091d41762422d6f55d0b"
+    },
+    {
+      "sequence": 108,
+      "at": "2026-10-06T19:14:30.211Z",
+      "kind": "transaction",
+      "data": {
+        "id": "0044ad96-e939-4a84-8ecf-4ba0a32dee68"
+      },
+      "previous": "0001114e9e472d8c3898d49aa8fd4fc501415f57c35c091d41762422d6f55d0b",
+      "digest": "5b64c01eaa224220f3dc30cbdb16b03c961a5629cb89738077d67919e4d7c475"
     }
   ]
 }
