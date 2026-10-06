@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 33,
+  "revision": 35,
   "tasks": {
     "82": {
       "number": 82,
@@ -743,7 +743,7 @@
     },
     "83": {
       "number": 83,
-      "status": "developing",
+      "status": "integrated",
       "firstSeen": 1791309334218,
       "attempts": {},
       "admission": {
@@ -759,7 +759,7 @@
           "protocol": 4
         }
       },
-      "updatedAt": 1791309338000,
+      "updatedAt": 1791310376876,
       "developerReview": {
         "schemaVersion": 1,
         "provider": "codex",
@@ -1474,6 +1474,64 @@
         "ready": true,
         "dependsOn": [],
         "releases": []
+      },
+      "headSha": "782f88739f775292cca28b1e4e88209dd78b2323",
+      "merge": {
+        "sha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+        "sourceSha": "782f88739f775292cca28b1e4e88209dd78b2323",
+        "mainSha": "c5330285b712c102b9df33a67c966c7fbb66c2b8",
+        "checkSha": "118aa235df37bff0b8bd5017aca2224ecc647573",
+        "mergedBy": "cnb.dYiF05kxAGA",
+        "verifiedAt": "2026-10-06T18:12:56.197Z"
+      },
+      "mergeSnapshot": {
+        "number": 83,
+        "pull": {
+          "number": 83,
+          "state": "open",
+          "title": "feat(base): 安装普通研发自动交付 [T-2026-1005-2456]",
+          "body": "从已激活且禁用平台 AI 的基座当前主干 2d350b7ec969abb0749f8d8d60a2212b8872e3e0 安装完整研发执行闭包。当前 Codex 会话 review、实际测试并保存准确回执；CNB/GitHub 模型审核、模型代理及 NPC 修复入口关闭。保留目标产品依赖、必需机器 CI、行业身份、业务围栏和隔离；敏感 fenced 租约、不可修改候选、真实依赖和准确 merge 双亲继续核验。\n\n安装准备账本与清单，当前会话实测交接后才能普通合入；缺真实证明保持等待，不伪造批准。任务卡 #81 [T-2026-1005-2456]。\n\n<!-- delivery-install:b470fa1e620c286a8f8a44380125c5f511a814638f0bcc491dbed50e242577bc -->\n\n<!-- workloom-delivery\n{\n  \"task_id\": \"T-2026-1005-2456\",\n  \"ready\": true,\n  \"depends_on\": [],\n  \"releases\": []\n}\n-->\n\n<!-- installer-policy-refresh:82:782f88739f775292cca28b1e4e88209dd78b2323:c5330285b712c102b9df33a67c966c7fbb66c2b8 -->\n\n同一准确源码在现行 Codex/CI 交付规则下重新执行完整独立审查与原有门禁，真实合入后关闭被替代 #82，源分支保留。",
+          "author": {
+            "username": "cnb.dYiF05kxAGA",
+            "nickname": "Genius",
+            "email": "XYpmztfpCvez6l8z5BBAvJ+cnb.dYiF05kxAGA@noreply.cnb.cool",
+            "is_npc": false
+          },
+          "reviewers": [],
+          "labels": [],
+          "base": {
+            "ref": "refs/heads/main",
+            "sha": "c5330285b712c102b9df33a67c966c7fbb66c2b8",
+            "repo": {
+              "id": "2100398378181283840",
+              "name": "workroom-tiger",
+              "path": "workloom-ai/workroom-tiger",
+              "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+            }
+          },
+          "head": {
+            "ref": "refs/heads/chore/protocol-onboarding-delivery-policy-0bbad0e99233bb647450540f",
+            "sha": "782f88739f775292cca28b1e4e88209dd78b2323",
+            "repo": {
+              "id": "2100398378181283840",
+              "name": "workroom-tiger",
+              "path": "workloom-ai/workroom-tiger",
+              "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+            }
+          },
+          "blocked_on": "unblocked",
+          "merged_by": {
+            "is_npc": false
+          },
+          "mergeable_state": "mergeable",
+          "is_wip": false,
+          "is_merged": false,
+          "is_force_merged": false,
+          "statuses": {}
+        },
+        "headSha": "782f88739f775292cca28b1e4e88209dd78b2323",
+        "mainSha": "c5330285b712c102b9df33a67c966c7fbb66c2b8",
+        "checkSha": "118aa235df37bff0b8bd5017aca2224ecc647573"
       }
     }
   },
@@ -3646,6 +3704,93 @@
       },
       "previous": "ee72261945baf8aaaa1dc31cdfb7c3dcbc8d033c36d77356403136caf33af8f1",
       "digest": "78f156bb4e05a305b197930951d332cd22cdc208fe2bc03f5a0c528de3750881"
+    },
+    {
+      "sequence": 34,
+      "at": "2026-10-06T18:12:56.876Z",
+      "kind": "task",
+      "data": {
+        "number": 83,
+        "patch": {
+          "status": "integrated",
+          "headSha": "782f88739f775292cca28b1e4e88209dd78b2323",
+          "intent": {
+            "taskId": "T-2026-1005-2456",
+            "ready": true,
+            "dependsOn": [],
+            "releases": []
+          },
+          "merge": {
+            "sha": "f64046fdb10cbd2c7cc5e2aec49c29ccc2b5f3a3",
+            "sourceSha": "782f88739f775292cca28b1e4e88209dd78b2323",
+            "mainSha": "c5330285b712c102b9df33a67c966c7fbb66c2b8",
+            "checkSha": "118aa235df37bff0b8bd5017aca2224ecc647573",
+            "mergedBy": "cnb.dYiF05kxAGA",
+            "verifiedAt": "2026-10-06T18:12:56.197Z"
+          },
+          "mergeSnapshot": {
+            "number": 83,
+            "pull": {
+              "number": 83,
+              "state": "open",
+              "title": "feat(base): 安装普通研发自动交付 [T-2026-1005-2456]",
+              "body": "从已激活且禁用平台 AI 的基座当前主干 2d350b7ec969abb0749f8d8d60a2212b8872e3e0 安装完整研发执行闭包。当前 Codex 会话 review、实际测试并保存准确回执；CNB/GitHub 模型审核、模型代理及 NPC 修复入口关闭。保留目标产品依赖、必需机器 CI、行业身份、业务围栏和隔离；敏感 fenced 租约、不可修改候选、真实依赖和准确 merge 双亲继续核验。\n\n安装准备账本与清单，当前会话实测交接后才能普通合入；缺真实证明保持等待，不伪造批准。任务卡 #81 [T-2026-1005-2456]。\n\n<!-- delivery-install:b470fa1e620c286a8f8a44380125c5f511a814638f0bcc491dbed50e242577bc -->\n\n<!-- workloom-delivery\n{\n  \"task_id\": \"T-2026-1005-2456\",\n  \"ready\": true,\n  \"depends_on\": [],\n  \"releases\": []\n}\n-->\n\n<!-- installer-policy-refresh:82:782f88739f775292cca28b1e4e88209dd78b2323:c5330285b712c102b9df33a67c966c7fbb66c2b8 -->\n\n同一准确源码在现行 Codex/CI 交付规则下重新执行完整独立审查与原有门禁，真实合入后关闭被替代 #82，源分支保留。",
+              "author": {
+                "username": "cnb.dYiF05kxAGA",
+                "nickname": "Genius",
+                "email": "XYpmztfpCvez6l8z5BBAvJ+cnb.dYiF05kxAGA@noreply.cnb.cool",
+                "is_npc": false
+              },
+              "reviewers": [],
+              "labels": [],
+              "base": {
+                "ref": "refs/heads/main",
+                "sha": "c5330285b712c102b9df33a67c966c7fbb66c2b8",
+                "repo": {
+                  "id": "2100398378181283840",
+                  "name": "workroom-tiger",
+                  "path": "workloom-ai/workroom-tiger",
+                  "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+                }
+              },
+              "head": {
+                "ref": "refs/heads/chore/protocol-onboarding-delivery-policy-0bbad0e99233bb647450540f",
+                "sha": "782f88739f775292cca28b1e4e88209dd78b2323",
+                "repo": {
+                  "id": "2100398378181283840",
+                  "name": "workroom-tiger",
+                  "path": "workloom-ai/workroom-tiger",
+                  "web_url": "https://cnb.cool/workloom-ai/workroom-tiger"
+                }
+              },
+              "blocked_on": "unblocked",
+              "merged_by": {
+                "is_npc": false
+              },
+              "mergeable_state": "mergeable",
+              "is_wip": false,
+              "is_merged": false,
+              "is_force_merged": false,
+              "statuses": {}
+            },
+            "headSha": "782f88739f775292cca28b1e4e88209dd78b2323",
+            "mainSha": "c5330285b712c102b9df33a67c966c7fbb66c2b8",
+            "checkSha": "118aa235df37bff0b8bd5017aca2224ecc647573"
+          }
+        }
+      },
+      "previous": "78f156bb4e05a305b197930951d332cd22cdc208fe2bc03f5a0c528de3750881",
+      "digest": "32d10127d522a9dca8a4aa46b74c3716246f543593fe4d7e2e1d3e340800d533"
+    },
+    {
+      "sequence": 35,
+      "at": "2026-10-06T18:12:56.197Z",
+      "kind": "transaction",
+      "data": {
+        "id": "75a26945-afda-4e7a-80ae-df1019c2c1a0"
+      },
+      "previous": "32d10127d522a9dca8a4aa46b74c3716246f543593fe4d7e2e1d3e340800d533",
+      "digest": "e4c4ab2b230c3d0c9f1076416c29cfc4b955c729fa48350ce7a3bfda6778093e"
     }
   ]
 }
