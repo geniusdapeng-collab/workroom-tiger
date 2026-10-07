@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 500,
+  "revision": 502,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791358213129,
+      "updatedAt": 1791359112097,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791358813129,
+      "blockedUntil": 1791359712097,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -21153,6 +21153,31 @@
       },
       "previous": "64250d6518c43cb98e2e86e408b87a89798ce2b07202cee47603f0916ba65e1c",
       "digest": "c4931ba2008f6ada2df1c81fdb97f3aef6d3589faed5191246857eb71d6be1c8"
+    },
+    {
+      "sequence": 501,
+      "at": "2026-10-07T07:45:12.097Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791359712097
+        }
+      },
+      "previous": "c4931ba2008f6ada2df1c81fdb97f3aef6d3589faed5191246857eb71d6be1c8",
+      "digest": "f7efe30226281acc68245f7dc482ae85b16ca34329efa973425edcf805e57599"
+    },
+    {
+      "sequence": 502,
+      "at": "2026-10-07T07:45:18.935Z",
+      "kind": "transaction",
+      "data": {
+        "id": "71813d13-7c43-451d-b959-bec90799303b"
+      },
+      "previous": "f7efe30226281acc68245f7dc482ae85b16ca34329efa973425edcf805e57599",
+      "digest": "a1c9b6c3e2ef7adaa102bec95f8bbfc699184653c9c4eaf105a78da341583c0e"
     }
   ]
 }
