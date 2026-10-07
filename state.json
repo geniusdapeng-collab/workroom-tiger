@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 828,
+  "revision": 830,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791398415370,
+      "updatedAt": 1791399615605,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791399015370,
+      "blockedUntil": 1791400215605,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -31264,6 +31264,31 @@
       },
       "previous": "16fa2c3468f9678f84871de2af803f76973a4b1926dc77052129c574314482d2",
       "digest": "52a7464627b91cce05524601392fd37b2dc7c76074386df8483a5a17c7b6fe9a"
+    },
+    {
+      "sequence": 829,
+      "at": "2026-10-07T19:00:15.605Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791400215605
+        }
+      },
+      "previous": "52a7464627b91cce05524601392fd37b2dc7c76074386df8483a5a17c7b6fe9a",
+      "digest": "94ace5ddf8347a596af61eff9b33ec710d9abaf361dac4f9a12eb0ac31a294c8"
+    },
+    {
+      "sequence": 830,
+      "at": "2026-10-07T19:00:23.119Z",
+      "kind": "transaction",
+      "data": {
+        "id": "bcc076cf-467b-4748-b09a-dcdbf787c29a"
+      },
+      "previous": "94ace5ddf8347a596af61eff9b33ec710d9abaf361dac4f9a12eb0ac31a294c8",
+      "digest": "327133efb26df1cb140b8c379f2a5a4074b7dae9a44eef46aed49fdda697bea7"
     }
   ]
 }
