@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 666,
+  "revision": 668,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791379812652,
+      "updatedAt": 1791380712786,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791380412652,
+      "blockedUntil": 1791381312786,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -25322,6 +25322,31 @@
       },
       "previous": "ecece003fca07dd9e4878c30f3518e854b83a5716e9360c959c77b7dfc21e04e",
       "digest": "48adc90ae1097d7efe482c8f5227decb70cc1efc41f96d7deb40c99862b3228c"
+    },
+    {
+      "sequence": 667,
+      "at": "2026-10-07T13:45:12.786Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791381312786
+        }
+      },
+      "previous": "48adc90ae1097d7efe482c8f5227decb70cc1efc41f96d7deb40c99862b3228c",
+      "digest": "ea1f4bc6ca08b52eb2a589124aa5174b2c2569453256f460d09babeb3ae9d11e"
+    },
+    {
+      "sequence": 668,
+      "at": "2026-10-07T13:45:20.429Z",
+      "kind": "transaction",
+      "data": {
+        "id": "d47660fc-3252-42b1-aa04-79e801da60e5"
+      },
+      "previous": "ea1f4bc6ca08b52eb2a589124aa5174b2c2569453256f460d09babeb3ae9d11e",
+      "digest": "4fb085dd87d2bac8efe163da080265f065f881155ae9149a3a0da8679eaeb43a"
     }
   ]
 }
