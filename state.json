@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 516,
+  "revision": 518,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791360912842,
+      "updatedAt": 1791361213467,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791361512842,
+      "blockedUntil": 1791361813467,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -21671,6 +21671,31 @@
       },
       "previous": "23468fadbc5191b9638f4294cacbdabd9facb98a478334ec623e5095e7aea9d8",
       "digest": "3841796963b617b8150fe27ef6b9716ab3bb017e1f082c761665bba5969a5740"
+    },
+    {
+      "sequence": 517,
+      "at": "2026-10-07T08:20:13.467Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791361813467
+        }
+      },
+      "previous": "3841796963b617b8150fe27ef6b9716ab3bb017e1f082c761665bba5969a5740",
+      "digest": "8477221edbe8ecc98e6488f588f9a4e3c3f3784119d0e51b556bce71325aaef8"
+    },
+    {
+      "sequence": 518,
+      "at": "2026-10-07T08:20:19.824Z",
+      "kind": "transaction",
+      "data": {
+        "id": "7dd8a4c1-8065-4b99-8368-6dac40e9a069"
+      },
+      "previous": "8477221edbe8ecc98e6488f588f9a4e3c3f3784119d0e51b556bce71325aaef8",
+      "digest": "2fc3c1ab1b43b91305421b79bde2af67cf044052133187de271683d42e927ded"
     }
   ]
 }
