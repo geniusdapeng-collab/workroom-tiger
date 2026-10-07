@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 742,
+  "revision": 744,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791389114658,
+      "updatedAt": 1791389712780,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791389714658,
+      "blockedUntil": 1791390312780,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -27575,6 +27575,31 @@
       },
       "previous": "4e859f80bd73cd6ce36c0f6152d50c069637a6f57e88bb8b40277666a6f3c91b",
       "digest": "6d863652b05ff2208f28fca7b34889a2592668dd6f1c431995c5388479826f3a"
+    },
+    {
+      "sequence": 743,
+      "at": "2026-10-07T16:15:12.780Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791390312780
+        }
+      },
+      "previous": "6d863652b05ff2208f28fca7b34889a2592668dd6f1c431995c5388479826f3a",
+      "digest": "dc5aa0bbf9d4adc5a5675941baaba4758e0f46921b65f05ed0be3ff406e5961d"
+    },
+    {
+      "sequence": 744,
+      "at": "2026-10-07T16:15:17.008Z",
+      "kind": "transaction",
+      "data": {
+        "id": "6f3f53ae-1dd7-4773-b49d-8f073feff023"
+      },
+      "previous": "dc5aa0bbf9d4adc5a5675941baaba4758e0f46921b65f05ed0be3ff406e5961d",
+      "digest": "90fa39e095b57e08566fdc667eb82ab05cbf9b7c34fb4672ebf752e2879a5bb0"
     }
   ]
 }
