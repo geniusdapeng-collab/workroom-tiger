@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 470,
+  "revision": 472,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791355208611,
+      "updatedAt": 1791355813514,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791355808611,
+      "blockedUntil": 1791356413514,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -19886,6 +19886,31 @@
       },
       "previous": "76b057d91ccbdd8182727a3a4aa41eb54d9a3561619c2cc1b87146e4e6cb1b2e",
       "digest": "dcab65743ba4387c210680b5c9ff6ae585b203f2394607aa18b68fec83b82f2d"
+    },
+    {
+      "sequence": 471,
+      "at": "2026-10-07T06:50:13.514Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791356413514
+        }
+      },
+      "previous": "dcab65743ba4387c210680b5c9ff6ae585b203f2394607aa18b68fec83b82f2d",
+      "digest": "015cccf2488841e193514f40d3e5e8a80c6f017336512ac79dec15b760e9b55f"
+    },
+    {
+      "sequence": 472,
+      "at": "2026-10-07T06:50:20.505Z",
+      "kind": "transaction",
+      "data": {
+        "id": "7e4c291f-071b-47be-b5b4-24ec88da8b82"
+      },
+      "previous": "015cccf2488841e193514f40d3e5e8a80c6f017336512ac79dec15b760e9b55f",
+      "digest": "e29de529e98386319fa60fd72ba83be20c266cf7639c4d1e22679cced66b0188"
     }
   ]
 }
