@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 706,
+  "revision": 708,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791385513587,
+      "updatedAt": 1791385814545,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791386113587,
+      "blockedUntil": 1791386414545,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -26489,6 +26489,31 @@
       },
       "previous": "605fbd0dec79ac56315016e7074c91438f958fc0ab45ac7e11a0cbf5e259be20",
       "digest": "0e29b9fc6896fbb0b82c7a25c013ab1139c3027bd4274776ede0de8667522504"
+    },
+    {
+      "sequence": 707,
+      "at": "2026-10-07T15:10:14.545Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791386414545
+        }
+      },
+      "previous": "0e29b9fc6896fbb0b82c7a25c013ab1139c3027bd4274776ede0de8667522504",
+      "digest": "e57b9c5ef7972b14680a5f0680c2829d8f76e9d56c6c1e701ac5975233a5558b"
+    },
+    {
+      "sequence": 708,
+      "at": "2026-10-07T15:10:20.626Z",
+      "kind": "transaction",
+      "data": {
+        "id": "95f8487b-99cf-4e22-9d8b-3a04067927d0"
+      },
+      "previous": "e57b9c5ef7972b14680a5f0680c2829d8f76e9d56c6c1e701ac5975233a5558b",
+      "digest": "227b977b8c242d93b48e0350dcd5f5c07b7b0fdf4f01ce4773582755901b2330"
     }
   ]
 }
