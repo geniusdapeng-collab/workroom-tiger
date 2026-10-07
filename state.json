@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 456,
+  "revision": 458,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791354014787,
+      "updatedAt": 1791354310913,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791354614787,
+      "blockedUntil": 1791354910913,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -19393,6 +19393,31 @@
       },
       "previous": "7b02e1bebe70f5348d15ad55926fbfabca4a75fb0865f04fb8655dcbad92d154",
       "digest": "d5dec44ff488b6ea3a5f6d875c9c5863ca0fe614ef4c39ec536f15e6419ea0ba"
+    },
+    {
+      "sequence": 457,
+      "at": "2026-10-07T06:25:10.913Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791354910913
+        }
+      },
+      "previous": "d5dec44ff488b6ea3a5f6d875c9c5863ca0fe614ef4c39ec536f15e6419ea0ba",
+      "digest": "a96aa1dfaeac6437b9f8a06b735d16e9a2bf62a3e7dd5c4112bf80266334d5c1"
+    },
+    {
+      "sequence": 458,
+      "at": "2026-10-07T06:25:22.985Z",
+      "kind": "transaction",
+      "data": {
+        "id": "8fd3a29f-4a44-44a3-8d97-dc979bd8103e"
+      },
+      "previous": "a96aa1dfaeac6437b9f8a06b735d16e9a2bf62a3e7dd5c4112bf80266334d5c1",
+      "digest": "6f10b096838b662f9f1bdf692a438f0a6543607a5b248791ac224671f27aa267"
     }
   ]
 }
