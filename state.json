@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 722,
+  "revision": 724,
   "tasks": {
     "79": {
       "number": 79,
@@ -54,15 +54,15 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791387615196,
+      "blockedUntil": 1791388227504,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Source CI is invalid: CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/git/raw/7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60/scripts/delivery/cnb.yml :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
         "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
-        "reason": "检查/评审阻断：Developer has not handed off; Source CI is invalid: CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/git/raw/7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60/scripts/delivery/cnb.yml :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n; Codex review identity differs from the exact repository/source/main/policy",
-        "at": 1791387015196
+        "reason": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+        "at": 1791387627504
       },
       "recoveryIntent": null
     },
@@ -26743,6 +26743,39 @@
       },
       "previous": "9db5c142e379b040f0d1630572ea5e516cf7f5ba854e7845225814089ee0cb25",
       "digest": "a8d7d6d3a7fbe80d451c68fb017ef6c7a541dc9c06e4a46d1672fbdfa1ef30f0"
+    },
+    {
+      "sequence": 723,
+      "at": "2026-10-07T15:40:27.504Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+          "repairRequired": {
+            "provider": "codex",
+            "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
+            "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+            "reason": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+            "at": 1791387627504
+          },
+          "recoveryIntent": null,
+          "blockedUntil": 1791388227504
+        }
+      },
+      "previous": "a8d7d6d3a7fbe80d451c68fb017ef6c7a541dc9c06e4a46d1672fbdfa1ef30f0",
+      "digest": "895c4c93253fe9a7a1820f718a20b3e3b2313567f52d07bc82450b7d979ce1d6"
+    },
+    {
+      "sequence": 724,
+      "at": "2026-10-07T15:40:36.601Z",
+      "kind": "transaction",
+      "data": {
+        "id": "8d13c783-f188-44ba-aa64-8bfbaf9b77dd"
+      },
+      "previous": "895c4c93253fe9a7a1820f718a20b3e3b2313567f52d07bc82450b7d979ce1d6",
+      "digest": "2d3f09b62cc013a464f160dc43590d4df5bbe726176e558e17e93f4d282481bf"
     }
   ]
 }
