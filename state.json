@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 712,
+  "revision": 714,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791385814545,
+      "updatedAt": 1791386412954,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791386414545,
+      "blockedUntil": 1791387012954,
       "candidate": null,
-      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -26564,6 +26564,31 @@
       },
       "previous": "937e3b37ab4ee8349fbfe4ab670fb2d10f032a35a12bd13dcf368757eba577ab",
       "digest": "26de37589bb81cac99870dba632ab8805b9c1a45af1dbc5c67b3a1e4d19ab1e2"
+    },
+    {
+      "sequence": 713,
+      "at": "2026-10-07T15:20:12.954Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791387012954
+        }
+      },
+      "previous": "26de37589bb81cac99870dba632ab8805b9c1a45af1dbc5c67b3a1e4d19ab1e2",
+      "digest": "515bd2aa42901fc9ca8a7110b503679cf3a0d94e69ae0d05babf2d2736477a9f"
+    },
+    {
+      "sequence": 714,
+      "at": "2026-10-07T15:20:21.307Z",
+      "kind": "transaction",
+      "data": {
+        "id": "b5583a69-ec68-47de-b058-64ea2faafc04"
+      },
+      "previous": "515bd2aa42901fc9ca8a7110b503679cf3a0d94e69ae0d05babf2d2736477a9f",
+      "digest": "8b4596bbafffee6ce8f005dc82b768b6dc3ebafb9c54b3264c05891f5dbeab43"
     }
   ]
 }
