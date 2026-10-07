@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 718,
+  "revision": 720,
   "tasks": {
     "79": {
       "number": 79,
@@ -54,15 +54,15 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791387012954,
+      "blockedUntil": 1791387615196,
       "candidate": null,
-      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+      "error": "检查/评审阻断：Developer has not handed off; Source CI is invalid: CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/git/raw/7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60/scripts/delivery/cnb.yml :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n; Codex review identity differs from the exact repository/source/main/policy",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
         "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
-        "reason": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
-        "at": 1791385513587
+        "reason": "检查/评审阻断：Developer has not handed off; Source CI is invalid: CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/git/raw/7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60/scripts/delivery/cnb.yml :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n; Codex review identity differs from the exact repository/source/main/policy",
+        "at": 1791387015196
       },
       "recoveryIntent": null
     },
@@ -26662,6 +26662,39 @@
       },
       "previous": "115bd0008591e814f14280fca6280232ccfb6a6449c0a80fd1903dad0d5f10b7",
       "digest": "1efe031a53a3785932e940bdf945672ffefaf0d1da456540818a1c42286a3f40"
+    },
+    {
+      "sequence": 719,
+      "at": "2026-10-07T15:30:15.196Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "检查/评审阻断：Developer has not handed off; Source CI is invalid: CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/git/raw/7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60/scripts/delivery/cnb.yml :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n; Codex review identity differs from the exact repository/source/main/policy",
+          "repairRequired": {
+            "provider": "codex",
+            "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
+            "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+            "reason": "检查/评审阻断：Developer has not handed off; Source CI is invalid: CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/git/raw/7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60/scripts/delivery/cnb.yml :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n; Codex review identity differs from the exact repository/source/main/policy",
+            "at": 1791387015196
+          },
+          "recoveryIntent": null,
+          "blockedUntil": 1791387615196
+        }
+      },
+      "previous": "1efe031a53a3785932e940bdf945672ffefaf0d1da456540818a1c42286a3f40",
+      "digest": "d0f4e881811fe5accf0a0fd7020d4bc04c36a7f698350c7131f7fef0aa477149"
+    },
+    {
+      "sequence": 720,
+      "at": "2026-10-07T15:30:22.337Z",
+      "kind": "transaction",
+      "data": {
+        "id": "7784c4e9-82fd-4095-bdc7-c83522581e8c"
+      },
+      "previous": "d0f4e881811fe5accf0a0fd7020d4bc04c36a7f698350c7131f7fef0aa477149",
+      "digest": "e830d3cdceadd40261221e1a7c4075b9f3fc89c034d61c2709c34c3f31edf3c5"
     }
   ]
 }
