@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1442,
+  "revision": 1444,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791468015885,
+      "updatedAt": 1791468614943,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791468615885,
+      "blockedUntil": 1791469214943,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -53242,6 +53242,31 @@
       },
       "previous": "ac57704fa84355044fcebc74204cc51d9d09537b4f1f3a7667e8b42b2bc64d99",
       "digest": "fd37051f1c9f2a0bd3f312b9dc4fe17e7e8359f2988fac5c494aafd69b73bb09"
+    },
+    {
+      "sequence": 1443,
+      "at": "2026-10-08T14:10:14.943Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791469214943
+        }
+      },
+      "previous": "fd37051f1c9f2a0bd3f312b9dc4fe17e7e8359f2988fac5c494aafd69b73bb09",
+      "digest": "f2ed0da3957f320ab95b1362a125ac650fa93a9caf754614ef81e0250bf1bf2c"
+    },
+    {
+      "sequence": 1444,
+      "at": "2026-10-08T14:10:30.891Z",
+      "kind": "transaction",
+      "data": {
+        "id": "021ea91f-a5ee-4558-9b0e-d352253b48ff"
+      },
+      "previous": "f2ed0da3957f320ab95b1362a125ac650fa93a9caf754614ef81e0250bf1bf2c",
+      "digest": "c4e0207e0d98df66e2a4c3948e4e25f97fe5aeca673954b1ec0a669277987f06"
     }
   ]
 }
