@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1642,
+  "revision": 1644,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791488408657,
+      "updatedAt": 1791489308282,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791489008657,
+      "blockedUntil": 1791489908282,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -61032,6 +61032,31 @@
       },
       "previous": "b24c75ac2dda5d51a7b73b37aaacea8606df254bce4da1c315cf061dbcc528d7",
       "digest": "717a65da96eb284d3abf98216955ffbdfa6bb53a9ae81d2f5dded05de8aa8dcb"
+    },
+    {
+      "sequence": 1643,
+      "at": "2026-10-08T19:55:08.282Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791489908282
+        }
+      },
+      "previous": "717a65da96eb284d3abf98216955ffbdfa6bb53a9ae81d2f5dded05de8aa8dcb",
+      "digest": "5daabd9b389c8003ce2c44b4cc91f0b31c276ffdb66c1b9a4b470cf8b95a2946"
+    },
+    {
+      "sequence": 1644,
+      "at": "2026-10-08T19:55:21.172Z",
+      "kind": "transaction",
+      "data": {
+        "id": "a0fbee15-a40e-4457-94e3-f7619011ae9a"
+      },
+      "previous": "5daabd9b389c8003ce2c44b4cc91f0b31c276ffdb66c1b9a4b470cf8b95a2946",
+      "digest": "e74b61f624da6a7c9760459e21e2be87f1280637fd1c35e998a8193f2cf97289"
     }
   ]
 }
