@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1666,
+  "revision": 1668,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791492009949,
+      "updatedAt": 1791492908261,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -61937,6 +61937,54 @@
       },
       "previous": "3398537f6b4fbd8928f79a4d8e93bd158a34bfd13e8cfb46675a0936e704f66e",
       "digest": "7a420011e8ad413f64abff4591addaba2aae8a41908d0b37fe6469676474320a"
+    },
+    {
+      "sequence": 1667,
+      "at": "2026-10-08T20:55:08.261Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
+          "mainSha": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "branch": "task/T-2026-1003-9104",
+          "intent": {
+            "taskId": "T-2026-1003-9104",
+            "dependsOn": [],
+            "releases": []
+          },
+          "originalBody": "当前 main 的行业路由仍用两参数 fenceRuleRowId 和固定 v-next，底层已有版本身份契约，导致服务端类型检查失败；修复同时消除旧固定版本提案流程的重复身份风险。本次复用基座已有版本递增、当前基线校验、同事务 dry-run 确认、事件及审批写入；保留本仓原有权限中间件，并对同一 pending dry-run 加行锁。连续提案分别落 v2/v3，失败不会消耗 pending 或留下半条事件/审批。\n\nTiger 同时补齐已存在的装配服务委托：认证操作者、草案/装配 ID 与哈希；宪章使用现有严格 ranges/caps schema，旧未知字段拒绝。行业对话消费显式适配器与 KB 词表，没有适配器时不猜酒店工具。挂载仓内已有向导续办、覆盖层及记忆恢复路由；续跑缺省读取本工作区原线程标题，跨区或缺失线程拒绝。没有改真实交易执行器、券商或资金路径。\n\n验证：本仓 server 与 web 两项类型检查通过；75 项新增/更新回归通过。围栏测试使用真实隔离 PostgreSQL、RLS 与五元事件，成员身份和写入故障由模拟夹具注入；Tiger 交易执行器仅模拟，未接实盘。覆盖重复/并发提案、跨区/错规则/非 pending 拒绝、基线拒绝后重试、完整回滚及权限。\n\n本仓扩展通用围栏及语音相关回归通过。Panda/Tiger 没有酒店夹具，因此显式排除无条件读取酒店资产的既有行业专用测试；通用根路由 PostgreSQL 回归完整执行。 不能把 allowFailure 流水线成功等同于全部业务测试通过。\n\n风险：review。本 PR 涉及围栏、事件、审批及 Tiger 授权输入，按开发协议保留 risk/review 人审；不移除风险标签，不强制合并。回滚：revert 本 PR，不改数据库 schema 或依赖。\n\n任务卡：https://cnb.cool/workloom-ai/workroom-tiger/-/issues/78\n\n变更路径：\n- `governance/apps/server/src/trpc/router.ts`\n- `governance/apps/server/src/trpc/fence-proposal.pg.test.ts`\n- `governance/apps/server/src/service/router.ts`\n- `governance/apps/server/src/service/assembly-router.test.ts`\n- `governance/apps/server/src/service/dialog.ts`\n- `governance/apps/server/src/service/dialog.test.ts`\n- `governance/apps/server/src/service/dialog-adapter.test.ts`\n- `governance/apps/server/src/industry/inspection-adapter-catalog.ts`\n- `governance/apps/server/src/trpc/captain-grant.pg.test.ts`\n- `governance/apps/server/src/service/kb.ts`\n- `governance/apps/server/src/service/kb-lexicon.test.ts`\n- `governance/apps/server/src/trpc/composition-contract.test.ts`\n- `governance/apps/server/src/trpc/thread-resume.pg.test.ts`",
+          "files": [
+            "governance/apps/server/src/industry/inspection-adapter-catalog.ts",
+            "governance/apps/server/src/service/assembly-router.test.ts",
+            "governance/apps/server/src/service/dialog-adapter.test.ts",
+            "governance/apps/server/src/service/dialog.test.ts",
+            "governance/apps/server/src/service/dialog.ts",
+            "governance/apps/server/src/service/kb-lexicon.test.ts",
+            "governance/apps/server/src/service/kb.ts",
+            "governance/apps/server/src/service/router.ts",
+            "governance/apps/server/src/trpc/captain-grant.pg.test.ts",
+            "governance/apps/server/src/trpc/composition-contract.test.ts",
+            "governance/apps/server/src/trpc/fence-proposal.pg.test.ts",
+            "governance/apps/server/src/trpc/router.ts",
+            "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
+          ],
+          "status": "parked",
+          "ciSince": 1791314068519
+        }
+      },
+      "previous": "7a420011e8ad413f64abff4591addaba2aae8a41908d0b37fe6469676474320a",
+      "digest": "30dd56fee7b89cde6ab3516a7a201c60fbb2739ee4c9ab56e9b828ad44ed24c1"
+    },
+    {
+      "sequence": 1668,
+      "at": "2026-10-08T20:55:09.658Z",
+      "kind": "transaction",
+      "data": {
+        "id": "93fb7e81-9c07-414f-a1ec-9bbcb4fd0404"
+      },
+      "previous": "30dd56fee7b89cde6ab3516a7a201c60fbb2739ee4c9ab56e9b828ad44ed24c1",
+      "digest": "89c8a8588fdff28d736af2e55ef01a0b68ec1e15d7ef97b6534aab056710c7f6"
     }
   ]
 }
