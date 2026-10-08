@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1400,
+  "revision": 1402,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791464112881,
+      "updatedAt": 1791464423032,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791464712881,
+      "blockedUntil": 1791465023032,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -51600,6 +51600,31 @@
       },
       "previous": "481fbf4cce068e2e72607053a76915adfcc8b48d980777d26c5897e028aa40cf",
       "digest": "0f906bf32aec702401398d8fcaa796f5f5da44db23ed11179f45d270c40131f5"
+    },
+    {
+      "sequence": 1401,
+      "at": "2026-10-08T13:00:23.032Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791465023032
+        }
+      },
+      "previous": "0f906bf32aec702401398d8fcaa796f5f5da44db23ed11179f45d270c40131f5",
+      "digest": "093c80a50d4f74f1c2405d159f76cb09d49deb3473512e814f15bf1acdf6e58a"
+    },
+    {
+      "sequence": 1402,
+      "at": "2026-10-08T13:00:26.242Z",
+      "kind": "transaction",
+      "data": {
+        "id": "7ad04f5f-d943-4186-bda8-851950880a66"
+      },
+      "previous": "093c80a50d4f74f1c2405d159f76cb09d49deb3473512e814f15bf1acdf6e58a",
+      "digest": "134f2abc6e895664622cdb3bb61e2480644834530a9633f2f22b06aebf14dd94"
     }
   ]
 }
