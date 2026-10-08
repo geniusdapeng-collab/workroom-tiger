@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1268,
+  "revision": 1270,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791447314516,
+      "updatedAt": 1791447915384,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791447914516,
+      "blockedUntil": 1791448515384,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -46762,6 +46762,31 @@
       },
       "previous": "df2e8b19f0324a0125dcbfbfe50c593b8f59af94f92244c7353fef006b5b507c",
       "digest": "ca2ffe307ec62427035e6c1a0938e695d0bca04dc4bdbac84fb9396b02f09021"
+    },
+    {
+      "sequence": 1269,
+      "at": "2026-10-08T08:25:15.384Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791448515384
+        }
+      },
+      "previous": "ca2ffe307ec62427035e6c1a0938e695d0bca04dc4bdbac84fb9396b02f09021",
+      "digest": "e429bc31f28c1d2b935f715684e5933c4d790302edb4654c6abd10375ff97098"
+    },
+    {
+      "sequence": 1270,
+      "at": "2026-10-08T08:25:28.257Z",
+      "kind": "transaction",
+      "data": {
+        "id": "dd6e939a-480c-44f4-853f-b7e6da885c1a"
+      },
+      "previous": "e429bc31f28c1d2b935f715684e5933c4d790302edb4654c6abd10375ff97098",
+      "digest": "b132c6f08ffca0ae21f6502746bf67015dc2b4c43ec39b83c650b3c99d120ab0"
     }
   ]
 }
