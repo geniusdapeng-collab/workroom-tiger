@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1344,
+  "revision": 1346,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791457510349,
+      "updatedAt": 1791458118920,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791458110349,
+      "blockedUntil": 1791458718920,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -49434,6 +49434,31 @@
       },
       "previous": "eb7ac543fd359c54292e7c72a5972f76c7e92b9ed96f9daa0c0323425de4898b",
       "digest": "6e925b3f2415713b36fcb105c2954cd7b36687c7083b1da0b839b0440a26041a"
+    },
+    {
+      "sequence": 1345,
+      "at": "2026-10-08T11:15:18.920Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791458718920
+        }
+      },
+      "previous": "6e925b3f2415713b36fcb105c2954cd7b36687c7083b1da0b839b0440a26041a",
+      "digest": "335ac50487db4608a4bce7884e92c1e45de42d5a8d3f42a6a379dc070cf92e43"
+    },
+    {
+      "sequence": 1346,
+      "at": "2026-10-08T11:15:21.986Z",
+      "kind": "transaction",
+      "data": {
+        "id": "1f9eff45-30a2-45cf-8d36-452d169985ec"
+      },
+      "previous": "335ac50487db4608a4bce7884e92c1e45de42d5a8d3f42a6a379dc070cf92e43",
+      "digest": "236cbbcb371cbd7bc14354c30faac0f696f0df28f0ad1ec989dbc93f7ca9e76c"
     }
   ]
 }
