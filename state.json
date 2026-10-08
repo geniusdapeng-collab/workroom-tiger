@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1412,
+  "revision": 1414,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791465311200,
+      "updatedAt": 1791465615149,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791465911200,
+      "blockedUntil": 1791466215149,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -52037,6 +52037,31 @@
       },
       "previous": "828b744b788489338e165e4594e32c1f18ef909606f93e8db417bac324d1d9e6",
       "digest": "cd4aced5788f4405e9d1a1948e2c9b75b5a2187221c16d6c483025a5f2f83e68"
+    },
+    {
+      "sequence": 1413,
+      "at": "2026-10-08T13:20:15.149Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791466215149
+        }
+      },
+      "previous": "cd4aced5788f4405e9d1a1948e2c9b75b5a2187221c16d6c483025a5f2f83e68",
+      "digest": "c3183240d2496942ccd8e31a5b39c73589934afa16ccc384f14159e8d997668c"
+    },
+    {
+      "sequence": 1414,
+      "at": "2026-10-08T13:20:19.723Z",
+      "kind": "transaction",
+      "data": {
+        "id": "6b550587-cce7-4bdc-bcaf-a5117ebf9436"
+      },
+      "previous": "c3183240d2496942ccd8e31a5b39c73589934afa16ccc384f14159e8d997668c",
+      "digest": "057a66326235361b26d4934b67046cda4335957684fddd822edadd9a78a2a132"
     }
   ]
 }
