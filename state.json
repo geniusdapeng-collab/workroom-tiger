@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1016,
+  "revision": 1018,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791420912450,
+      "updatedAt": 1791421230272,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791421512450,
+      "blockedUntil": 1791421830272,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -37337,6 +37337,31 @@
       },
       "previous": "872ce7739b1c90006abc5b771d714e6000cb67e8a2e16fc41203da77d1d9a513",
       "digest": "e8cc981e194a94207b15d69440e13848d661de98cb354ed888da3efec3334452"
+    },
+    {
+      "sequence": 1017,
+      "at": "2026-10-08T01:00:30.272Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791421830272
+        }
+      },
+      "previous": "e8cc981e194a94207b15d69440e13848d661de98cb354ed888da3efec3334452",
+      "digest": "c235d8dc0c46ded7b70fd46f7af0cc22cc794461d95d92438dfdc7319a0e10b7"
+    },
+    {
+      "sequence": 1018,
+      "at": "2026-10-08T01:00:34.466Z",
+      "kind": "transaction",
+      "data": {
+        "id": "38f74567-4842-4515-b570-d913f1cc8aff"
+      },
+      "previous": "c235d8dc0c46ded7b70fd46f7af0cc22cc794461d95d92438dfdc7319a0e10b7",
+      "digest": "387598a2b7811065fb0029b4d813af85a80dc66c8833347b86790f1364ead20b"
     }
   ]
 }
