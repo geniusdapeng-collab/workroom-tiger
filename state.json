@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1380,
+  "revision": 1382,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791461713553,
+      "updatedAt": 1791462317528,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791462313553,
+      "blockedUntil": 1791462917528,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -50776,6 +50776,31 @@
       },
       "previous": "28fd9aa74848b77b3449b32b41aea5ec99e093f074ec9a03e159256846b1c793",
       "digest": "1dd08e43906b6c02d4b5d8cb726899c3ec07b120784d91f8bf81006849ded23a"
+    },
+    {
+      "sequence": 1381,
+      "at": "2026-10-08T12:25:17.528Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791462917528
+        }
+      },
+      "previous": "1dd08e43906b6c02d4b5d8cb726899c3ec07b120784d91f8bf81006849ded23a",
+      "digest": "6710b6c36355c203bc25d64ddee208e83125f6664d9b47f378b94e57a5b48db1"
+    },
+    {
+      "sequence": 1382,
+      "at": "2026-10-08T12:25:20.715Z",
+      "kind": "transaction",
+      "data": {
+        "id": "4f291fdd-2351-46b1-963e-582fe13b7c1a"
+      },
+      "previous": "6710b6c36355c203bc25d64ddee208e83125f6664d9b47f378b94e57a5b48db1",
+      "digest": "0af2fb64479d005a7c4618246c170315a042e945fdce95f3dfd2eefab7467e3d"
     }
   ]
 }
