@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1096,
+  "revision": 1098,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791429309629,
+      "updatedAt": 1791429910501,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791429909629,
+      "blockedUntil": 1791430510501,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -39609,6 +39609,31 @@
       },
       "previous": "cd1c33d648a8c5791d5cb8d080520c818e1ea97f1cc57100d4a5af3ae3ca94fd",
       "digest": "b9a50b239ee6a87e64b6ff99439b0843b696e23742ce12c3bfd1bcb2c8f12efd"
+    },
+    {
+      "sequence": 1097,
+      "at": "2026-10-08T03:25:10.501Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791430510501
+        }
+      },
+      "previous": "b9a50b239ee6a87e64b6ff99439b0843b696e23742ce12c3bfd1bcb2c8f12efd",
+      "digest": "7f214252dc28625ba0193f90a15c041ca3a9040605e26cfb8144daf51ae8e39b"
+    },
+    {
+      "sequence": 1098,
+      "at": "2026-10-08T03:25:22.993Z",
+      "kind": "transaction",
+      "data": {
+        "id": "02b147cc-87bb-46a8-951e-2b39c5b61514"
+      },
+      "previous": "7f214252dc28625ba0193f90a15c041ca3a9040605e26cfb8144daf51ae8e39b",
+      "digest": "492a9b5a51c1ce641e97df9860c8ee7f925dd0fb29ab16548c1f77f291131bf6"
     }
   ]
 }
