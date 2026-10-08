@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1110,
+  "revision": 1112,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791431113411,
+      "updatedAt": 1791431418148,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791431713411,
+      "blockedUntil": 1791432018148,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -40040,6 +40040,31 @@
       },
       "previous": "a2b5ccfa5958dc767e01048f79250d9dfb389fc409304b56f70222f0e20a528c",
       "digest": "a472fe58ef5994aba1222c2dff9f7bdbfb91a7b01518f74e2aae31b6c75c0ac9"
+    },
+    {
+      "sequence": 1111,
+      "at": "2026-10-08T03:50:18.148Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791432018148
+        }
+      },
+      "previous": "a472fe58ef5994aba1222c2dff9f7bdbfb91a7b01518f74e2aae31b6c75c0ac9",
+      "digest": "1e7fdcd6b5b0d7b5d4e81a6b4941b1e7c86640127965a1fccb8621bb4c1cdd43"
+    },
+    {
+      "sequence": 1112,
+      "at": "2026-10-08T03:50:26.895Z",
+      "kind": "transaction",
+      "data": {
+        "id": "a837d3a6-ee3d-46e6-baee-dd1e617b383a"
+      },
+      "previous": "1e7fdcd6b5b0d7b5d4e81a6b4941b1e7c86640127965a1fccb8621bb4c1cdd43",
+      "digest": "6f04a7ecf99bb7bda4ff87e38236852d1e4536c9066f2da1bbd44ae0bd4257c1"
     }
   ]
 }
