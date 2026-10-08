@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1064,
+  "revision": 1066,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791426314178,
+      "updatedAt": 1791426621851,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791426914178,
+      "blockedUntil": 1791427221851,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -38573,6 +38573,31 @@
       },
       "previous": "eeba53deb4790981d57aaffb04e7587661c97414c031f22919281536cf60372a",
       "digest": "01e56e47e9a3a9b110765561575cbc7cf5ecd0c986110f7700cf61e0ca14161a"
+    },
+    {
+      "sequence": 1065,
+      "at": "2026-10-08T02:30:21.851Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791427221851
+        }
+      },
+      "previous": "01e56e47e9a3a9b110765561575cbc7cf5ecd0c986110f7700cf61e0ca14161a",
+      "digest": "e129feac919170de676ef91c64dc8cd3ffd94627845a999a8cae5f6ce839cba8"
+    },
+    {
+      "sequence": 1066,
+      "at": "2026-10-08T02:30:36.414Z",
+      "kind": "transaction",
+      "data": {
+        "id": "de604a11-83ce-4740-9cf4-059f56879086"
+      },
+      "previous": "e129feac919170de676ef91c64dc8cd3ffd94627845a999a8cae5f6ce839cba8",
+      "digest": "a85b5571b3720dced1d1edc36dd582da88f32d0bf049015d3eac277908c4b368"
     }
   ]
 }
