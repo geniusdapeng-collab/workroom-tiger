@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1294,
+  "revision": 1296,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791450915912,
+      "updatedAt": 1791451518030,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791451515912,
+      "blockedUntil": 1791452118030,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -47948,6 +47948,31 @@
       },
       "previous": "1e0bf2f8671fd3819729a1ee12a4cce73f5f64bee31b21042429eb966dfd4a26",
       "digest": "67b99d6e3657103784a8704a71997bb4daf7edee1e17de9b3386f5d35bb3cb5f"
+    },
+    {
+      "sequence": 1295,
+      "at": "2026-10-08T09:25:18.030Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791452118030
+        }
+      },
+      "previous": "67b99d6e3657103784a8704a71997bb4daf7edee1e17de9b3386f5d35bb3cb5f",
+      "digest": "3901bf079bf82b180a12e423e29c2aaf16c0756b6add824b8d6f9c2374782bba"
+    },
+    {
+      "sequence": 1296,
+      "at": "2026-10-08T09:25:21.326Z",
+      "kind": "transaction",
+      "data": {
+        "id": "55249999-106c-4639-8c86-1a6b74303f45"
+      },
+      "previous": "3901bf079bf82b180a12e423e29c2aaf16c0756b6add824b8d6f9c2374782bba",
+      "digest": "d6874134f35975bef142474e60d809cdbeca821226740c43ae9d99520f6fe456"
     }
   ]
 }
