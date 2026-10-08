@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1620,
+  "revision": 1622,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791486008992,
+      "updatedAt": 1791486611280,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791486608992,
+      "blockedUntil": 1791487211280,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -60152,6 +60152,31 @@
       },
       "previous": "4a78e0b063a3096d7abc810d5f9e24115a1cff8d675c344c3dc0be31ffb6972b",
       "digest": "9c301b8f7e1a2926340b26be353cb84e5e4831081ed8de67a151c5b81e96cc7f"
+    },
+    {
+      "sequence": 1621,
+      "at": "2026-10-08T19:10:11.280Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791487211280
+        }
+      },
+      "previous": "9c301b8f7e1a2926340b26be353cb84e5e4831081ed8de67a151c5b81e96cc7f",
+      "digest": "5fc4605073077514c4cd98d03faafc5f2c0c5c1f7df86e153ba3c6133fe0e0ee"
+    },
+    {
+      "sequence": 1622,
+      "at": "2026-10-08T19:10:22.302Z",
+      "kind": "transaction",
+      "data": {
+        "id": "c1d50366-2220-4cc7-b8d8-93d2ad73ccdd"
+      },
+      "previous": "5fc4605073077514c4cd98d03faafc5f2c0c5c1f7df86e153ba3c6133fe0e0ee",
+      "digest": "9249802beeef0a1e2ec11e85fdf34ae61729c603157f26236e8c355b0b3dace8"
     }
   ]
 }
