@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1440,
+  "revision": 1442,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791468015885,
+      "updatedAt": 1791468614943,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791468615885,
+      "blockedUntil": 1791469214943,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -53217,6 +53217,31 @@
       },
       "previous": "65c9f99e04826d2bc088fc7066013d492ea45cd5729de01b51cf582a3da9aac6",
       "digest": "d01fe371fd692e2ffe55595e9af3f2c16cde21b30341b0a258ac3202e129dda4"
+    },
+    {
+      "sequence": 1441,
+      "at": "2026-10-08T14:10:14.943Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791469214943
+        }
+      },
+      "previous": "d01fe371fd692e2ffe55595e9af3f2c16cde21b30341b0a258ac3202e129dda4",
+      "digest": "ac57704fa84355044fcebc74204cc51d9d09537b4f1f3a7667e8b42b2bc64d99"
+    },
+    {
+      "sequence": 1442,
+      "at": "2026-10-08T14:10:18.530Z",
+      "kind": "transaction",
+      "data": {
+        "id": "7def92c5-7379-4384-a3a8-748f2c97548c"
+      },
+      "previous": "ac57704fa84355044fcebc74204cc51d9d09537b4f1f3a7667e8b42b2bc64d99",
+      "digest": "fd37051f1c9f2a0bd3f312b9dc4fe17e7e8359f2988fac5c494aafd69b73bb09"
     }
   ]
 }
