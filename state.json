@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1052,
+  "revision": 1054,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791424821686,
+      "updatedAt": 1791425711982,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,7 +350,7 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791425421686,
+      "blockedUntil": 1791426311982,
       "candidate": null,
       "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
@@ -38136,6 +38136,31 @@
       },
       "previous": "5d2052d94e83e2edac1b8e247bb6948deecf9e9c88ddc0d6d9fa23ad89f224fe",
       "digest": "800029e85d5c8b1ab3046432e02cae65b8c2bec95ff3cc576ca8e76f0d38ddac"
+    },
+    {
+      "sequence": 1053,
+      "at": "2026-10-08T02:15:11.982Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791426311982
+        }
+      },
+      "previous": "800029e85d5c8b1ab3046432e02cae65b8c2bec95ff3cc576ca8e76f0d38ddac",
+      "digest": "8d92dc84d9431bb704e1900ef6b49124278e21401e426883dcd35abe889e5930"
+    },
+    {
+      "sequence": 1054,
+      "at": "2026-10-08T02:15:19.860Z",
+      "kind": "transaction",
+      "data": {
+        "id": "08c99290-cb38-4f11-bf27-c09753b4a882"
+      },
+      "previous": "8d92dc84d9431bb704e1900ef6b49124278e21401e426883dcd35abe889e5930",
+      "digest": "7fbaa22a14b3fffd008d7c70f74f65b816ef77ad7034fe8afce7e9bafd5a9ac9"
     }
   ]
 }
