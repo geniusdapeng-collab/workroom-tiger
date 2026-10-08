@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1322,
+  "revision": 1324,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791454521845,
+      "updatedAt": 1791455118777,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791455121845,
+      "blockedUntil": 1791455718777,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -49128,6 +49128,31 @@
       },
       "previous": "fc6cfa6fa23d4dabba8ad0a443ca682c0fb5c1b805e8d03f3bfd20a855410119",
       "digest": "d21da911c04500a99eeeecb0c386b9ab359709d98dbb4de680ff81b1ce10c3c1"
+    },
+    {
+      "sequence": 1323,
+      "at": "2026-10-08T10:25:18.777Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791455718777
+        }
+      },
+      "previous": "d21da911c04500a99eeeecb0c386b9ab359709d98dbb4de680ff81b1ce10c3c1",
+      "digest": "07d750c6230a96c7034c1c56eafa9e3aefb60ab66c856febb87e1bd4cfcf9208"
+    },
+    {
+      "sequence": 1324,
+      "at": "2026-10-08T10:25:31.707Z",
+      "kind": "transaction",
+      "data": {
+        "id": "0f6dc628-00d8-4efc-975b-c53941021150"
+      },
+      "previous": "07d750c6230a96c7034c1c56eafa9e3aefb60ab66c856febb87e1bd4cfcf9208",
+      "digest": "1edf9dab697a49c3aac3dc6158ecc0cfb0939030f58b48b2613ffa12ae922ded"
     }
   ]
 }
