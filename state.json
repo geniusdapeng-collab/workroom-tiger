@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1578,
+  "revision": 1580,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791481814519,
+      "updatedAt": 1791482112376,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791482414519,
+      "blockedUntil": 1791482712376,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -58673,6 +58673,31 @@
       },
       "previous": "cb514e477c699bfbd2ade9b3140bf92de887e48827ee9a7ef19299fb09deff65",
       "digest": "a5bd1671712fd523e6032b79b90f5bd19ae7f320ebf30cf63a36bb89b8c1eebd"
+    },
+    {
+      "sequence": 1579,
+      "at": "2026-10-08T17:55:12.376Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791482712376
+        }
+      },
+      "previous": "a5bd1671712fd523e6032b79b90f5bd19ae7f320ebf30cf63a36bb89b8c1eebd",
+      "digest": "fe6ca631135eb85fde2554d2a1886b00b9a108d5fad54f25285695818f1a4648"
+    },
+    {
+      "sequence": 1580,
+      "at": "2026-10-08T17:55:18.507Z",
+      "kind": "transaction",
+      "data": {
+        "id": "9798a81a-c5d8-47bf-a40a-f3d77b7bd682"
+      },
+      "previous": "fe6ca631135eb85fde2554d2a1886b00b9a108d5fad54f25285695818f1a4648",
+      "digest": "66643818d4e33542dd44a4272b55df37bd82281da90d489c8c88842d253b74c9"
     }
   ]
 }
