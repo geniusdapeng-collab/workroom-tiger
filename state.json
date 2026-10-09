@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1786,
+  "revision": 1788,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791504916384,
+      "updatedAt": 1791505814226,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791505516384,
+      "blockedUntil": 1791506414226,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -65756,6 +65756,31 @@
       },
       "previous": "fff3caedcb91f855ccbed767996935040ed51e40a60e4a618f7f43822a92818a",
       "digest": "e51acecf14b7131bfdd71c45ce76bf1f2d922f82b1a61a97e53902f4855b2f0f"
+    },
+    {
+      "sequence": 1787,
+      "at": "2026-10-09T00:30:14.226Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791506414226
+        }
+      },
+      "previous": "e51acecf14b7131bfdd71c45ce76bf1f2d922f82b1a61a97e53902f4855b2f0f",
+      "digest": "be96697e164ae05a9c7342ee0c4fa2cdd41d8e07b082c163d5454dee9caab84c"
+    },
+    {
+      "sequence": 1788,
+      "at": "2026-10-09T00:30:32.846Z",
+      "kind": "transaction",
+      "data": {
+        "id": "6cd0aaaf-c9c4-440c-838c-c5b163fec280"
+      },
+      "previous": "be96697e164ae05a9c7342ee0c4fa2cdd41d8e07b082c163d5454dee9caab84c",
+      "digest": "98d0b400a2ebccc2fa40733837a6f8c20c18f687482443e9bdbf563936829751"
     }
   ]
 }
