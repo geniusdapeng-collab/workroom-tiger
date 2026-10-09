@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1940,
+  "revision": 1942,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791521111653,
+      "updatedAt": 1791521713935,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791521711653,
+      "blockedUntil": 1791522313935,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -71823,6 +71823,31 @@
       },
       "previous": "2ee25d50b7dd8bc969aac1d4fa66741b8d122caa0ebd4fd1584a433448417e27",
       "digest": "8fe80fbe8367f177fa96cdef84d71bd480bd1ecdf6af6a0b0f0791e5008daf21"
+    },
+    {
+      "sequence": 1941,
+      "at": "2026-10-09T04:55:13.935Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791522313935
+        }
+      },
+      "previous": "8fe80fbe8367f177fa96cdef84d71bd480bd1ecdf6af6a0b0f0791e5008daf21",
+      "digest": "458ac284355b474e76b05d0d107789067e522b666d3e654a3eb54de09427efe6"
+    },
+    {
+      "sequence": 1942,
+      "at": "2026-10-09T04:55:25.873Z",
+      "kind": "transaction",
+      "data": {
+        "id": "8518e268-5d22-443b-9412-8dad2dde2261"
+      },
+      "previous": "458ac284355b474e76b05d0d107789067e522b666d3e654a3eb54de09427efe6",
+      "digest": "5cc0a6449dfc67f46a6c8dc8053e9056e39312043a7027897f373b3c7e997971"
     }
   ]
 }
