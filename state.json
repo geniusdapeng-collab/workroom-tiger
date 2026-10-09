@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1880,
+  "revision": 1882,
   "tasks": {
     "79": {
       "number": 79,
@@ -33,7 +33,7 @@
         "governance/apps/server/src/trpc/thread-resume.pg.test.ts"
       ],
       "ciSince": 1791314068519,
-      "updatedAt": 1791514816698,
+      "updatedAt": 1791515116227,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -54,9 +54,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791515416698,
+      "blockedUntil": 1791515716227,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "7b2c6e6fe64b7cf7bb72933d9c81a7ded3456f60",
@@ -69607,6 +69607,31 @@
       },
       "previous": "3d9e40daba88a096cd4ac4f6ba9baa51fe16a4b1cdc3a5c6e9d2a63b4b9e17df",
       "digest": "71b54aa76a93cf9c8efa6d03508d282187f08a458f41cb19c15088fef0ab6bf2"
+    },
+    {
+      "sequence": 1881,
+      "at": "2026-10-09T03:05:16.227Z",
+      "kind": "task",
+      "data": {
+        "number": 79,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/79 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791515716227
+        }
+      },
+      "previous": "71b54aa76a93cf9c8efa6d03508d282187f08a458f41cb19c15088fef0ab6bf2",
+      "digest": "6c4a3eb45062f478a7acc627f40f983071b896b8a69b24fe144bc4f6d14fd576"
+    },
+    {
+      "sequence": 1882,
+      "at": "2026-10-09T03:05:22.270Z",
+      "kind": "transaction",
+      "data": {
+        "id": "54981d15-246a-4246-b3e8-58ba486a9470"
+      },
+      "previous": "6c4a3eb45062f478a7acc627f40f983071b896b8a69b24fe144bc4f6d14fd576",
+      "digest": "451a1eeebac139f481b678d9c4b53b025612321628e0f181fdd33536483aca2b"
     }
   ]
 }
