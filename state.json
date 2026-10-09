@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 2024,
+  "revision": 2026,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791531031902,
+      "updatedAt": 1791531320939,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791531631902,
+      "blockedUntil": 1791531920939,
       "candidate": null,
-      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80 :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -74626,6 +74626,31 @@
       },
       "previous": "3f00ef80dd3a48670e56ac7eb4f27ebe6542b5514127363dc1a94a96451a2820",
       "digest": "b8809579d6b2e5886f93b4738b91b1d23f08e9bada11141f7d6d5d611346f9c0"
+    },
+    {
+      "sequence": 2025,
+      "at": "2026-10-09T07:35:20.939Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791531920939
+        }
+      },
+      "previous": "b8809579d6b2e5886f93b4738b91b1d23f08e9bada11141f7d6d5d611346f9c0",
+      "digest": "45b74c421c2739fa0bd20e88188153561387057a76df829f28c32ab0c3d41630"
+    },
+    {
+      "sequence": 2026,
+      "at": "2026-10-09T07:35:29.149Z",
+      "kind": "transaction",
+      "data": {
+        "id": "3ef385e3-b518-4842-9226-e3cb271d2c65"
+      },
+      "previous": "45b74c421c2739fa0bd20e88188153561387057a76df829f28c32ab0c3d41630",
+      "digest": "76cb377b87d9aa5359049ffec205d0894672ef19ed7d9dc199289733aae4f490"
     }
   ]
 }
