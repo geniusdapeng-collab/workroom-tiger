@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repo": "workloom-ai/workroom-tiger",
-  "revision": 1800,
+  "revision": 1802,
   "tasks": {
     "79": {
       "number": 79,
@@ -321,7 +321,7 @@
         "trading_system/universe.py"
       ],
       "ciSince": 1791316217323,
-      "updatedAt": 1791506414885,
+      "updatedAt": 1791507311841,
       "alignmentCount": 1,
       "alignmentIntent": null,
       "developerReview": null,
@@ -350,9 +350,9 @@
       },
       "recoveryCount": 0,
       "reviewFailures": null,
-      "blockedUntil": 1791507014885,
+      "blockedUntil": 1791507911841,
       "candidate": null,
-      "error": "检查/评审阻断：Developer has not handed off; Codex review identity differs from the exact repository/source/main/policy",
+      "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
       "repairRequired": {
         "provider": "codex",
         "headSha": "1f34592091580968f914a1d76e1a5e97b0bc019f",
@@ -66249,6 +66249,31 @@
       },
       "previous": "6e93d3337a3616a526806ba733384ee1f1e7143c2c58b658240ce3de957c318d",
       "digest": "6b1bd3ab207c5463a0657560497b02d85ea3d03a37c3be5531d27b49c2ab6f78"
+    },
+    {
+      "sequence": 1801,
+      "at": "2026-10-09T00:55:11.841Z",
+      "kind": "task",
+      "data": {
+        "number": 80,
+        "patch": {
+          "status": "parked",
+          "error": "CNB 429 https://api.cnb.cool/workloom-ai/workroom-tiger/-/pulls/80/commit-statuses :: {\"errcode\":8,\"errmsg\":\"Too many requests. Please try again later.\"}\n",
+          "blockedUntil": 1791507911841
+        }
+      },
+      "previous": "6b1bd3ab207c5463a0657560497b02d85ea3d03a37c3be5531d27b49c2ab6f78",
+      "digest": "d6b58c340597b5a56e1d84b7a1d2dfda7fa7602401a94fc4fb51a0e4c6ce1fa1"
+    },
+    {
+      "sequence": 1802,
+      "at": "2026-10-09T00:55:30.944Z",
+      "kind": "transaction",
+      "data": {
+        "id": "dbc7882a-4d1b-4e7e-96c8-9700d809cf6a"
+      },
+      "previous": "d6b58c340597b5a56e1d84b7a1d2dfda7fa7602401a94fc4fb51a0e4c6ce1fa1",
+      "digest": "e85e347eea520cbbfaa14bb6ac78d3ed970130bbc168d606324ada3f943cf368"
     }
   ]
 }
