@@ -83,7 +83,7 @@ function stateFor(mode, count) {
     settings: { member_no: "MC035-MOCK", display_name: "测试用户", persona_key: "tianmei", persona_custom: {},
       voice_key: "sweet", voice_on: false, widget_size: mode === "mini" ? "large" : mode,
       quiet_start: "22:00", quiet_end: "08:00", channels: {} },
-    items: itemsFor(count), calls: [], failChat: false, holdChat: null,
+    items: itemsFor(count), calls: [], failChat: false, holdChat: null, holdReadResponse: null,
     memory: { facts: Array.from({ length: 12 }, (_, index) => ({
       id: `memory-${index + 1}`, layer: "facts", mkey: `test-${index}`, source: "said",
       content: `模拟记忆 ${index + 1}：只记录本地测试输入，长内容必须能够滚动阅读与逐条删除。`,
@@ -120,6 +120,7 @@ async function routeFixture(route, state, origin, observation) {
           assert.ok(Array.isArray(input.ids));
           assert.ok(["read", "acted"].includes(input.status));
           state.items = state.items.filter((item) => !input.ids.includes(item.id));
+          if (input.status === "read" && state.holdReadResponse) await state.holdReadResponse;
           data = { dataMode: "simulated" }; break;
         case "service.secretary.memoryPanel": data = { memory: state.memory }; break;
         case "service.secretary.forget":
@@ -304,15 +305,23 @@ async function panelPaths(page, state, observation) {
   await expect(panel(page)).toHaveCount(0);
 }
 async function notificationPaths(page, state, observation) {
-  await pointer(page, page.getByRole("button", { name: "稍后", exact: true }).first(), observation, "later");
+  const [first, next] = state.items;
+  const card = (item) => page.locator("div:has(> .wl-action-row)")
+    .filter({ has: page.getByText(item.title, { exact: true }) });
+  await pointer(page, card(first).getByRole("button", { name: "稍后", exact: true }), observation, "later");
   await expect.poll(() => state.items.length).toBe(observation.count - 1);
   assert.deepEqual(state.calls.filter((c) => c.name === "service.secretary.markInbox").at(-1).input,
     { ids: ["MC035-1"], status: "read" });
+  // The HTTP fixture changes state before React receives the response. Wait for
+  // the dismissed card to leave the real DOM before targeting the next item.
+  await expect(page.getByText(first.title, { exact: true })).toHaveCount(0);
   if (observation.count > 1) {
-    await pointer(page, page.getByRole("button", { name: "查看事项", exact: true }).first(), observation, "act");
+    await expect(card(next)).toBeVisible();
+    await pointer(page, card(next).getByRole("button", { name: "查看事项", exact: true }), observation, "act");
     await expect.poll(() => state.items.length).toBe(observation.count - 2);
     assert.deepEqual(state.calls.filter((c) => c.name === "service.secretary.markInbox").at(-1).input,
       { ids: ["MC035-2"], status: "acted" });
+    await expect(page.getByText(next.title, { exact: true })).toHaveCount(0);
     await expect(page).toHaveURL(/\/agents\/MC035-2$/);
   }
 }
@@ -540,6 +549,43 @@ test("MC-035 assistant controls and unread digits remain usable in limited viewp
       await expect(panel(page)).toHaveCount(0);
       observation.actions.push({ name: "mini-preference-reload", passed: true });
     }, { defaultMini: true });
+    await scenario("notification-response-before-dom-commit", { width: 1440, height: 900 }, "mini", 12,
+      async (page, state, observation) => {
+        const [first, next] = state.items;
+        let release;
+        state.holdReadResponse = new Promise((resolve) => { release = resolve; });
+        // Observe the same flow as every layout scenario while only its HTTP
+        // response is pending. No sleep, DOM mutation, or click bypass is used.
+        const flow = notificationPaths(page, state, observation);
+        const outcome = flow.then(() => ({ passed: true }), (error) => ({ passed: false, error }));
+        try {
+          await expect.poll(() => state.items.length).toBe(11);
+          await expect(page.getByText(first.title, { exact: true })).toHaveCount(1);
+          const acted = state.calls.filter((c) => c.name === "service.secretary.markInbox" && c.input.status === "acted");
+          observation.notificationSynchronization = {
+            beforeResponse: { serverItemCount: state.items.length,
+              firstTitlePresent: await page.getByText(first.title, { exact: true }).count(),
+              firstId: first.id, nextId: next.id, actedCalls: acted },
+          };
+          assert.deepEqual(acted, [], "The next action must wait while the dismissed card is still in the DOM");
+          await screenshot(page, observation, "read-response-held");
+        } finally {
+          release();
+          state.holdReadResponse = null;
+          const result = await outcome;
+          if (!result.passed) throw result.error;
+        }
+        observation.notificationSynchronization.afterResponse = {
+          serverItemCount: state.items.length,
+          firstTitlePresent: await page.getByText(first.title, { exact: true }).count(),
+          nextTitlePresent: await page.getByText(next.title, { exact: true }).count(),
+          actedCalls: state.calls.filter((c) => c.name === "service.secretary.markInbox" && c.input.status === "acted"),
+          pathname: new URL(page.url()).pathname,
+        };
+        assert.equal(observation.notificationSynchronization.afterResponse.firstTitlePresent, 0);
+        assert.equal(observation.notificationSynchronization.afterResponse.nextTitlePresent, 0);
+        await screenshot(page, observation, "correct-item-after-release");
+      });
     await t.test("Source and runner bytes remain stable", async () => {
       const check = { name: "source-stability", passed: false }; receipt.checks.push(check);
       assert.deepEqual(await sourceHashes(), receipt.sourceBefore);
@@ -554,7 +600,7 @@ test("MC-035 assistant controls and unread digits remain usable in limited viewp
     receipt.sourceStable = JSON.stringify(receipt.sourceBefore) === JSON.stringify(receipt.sourceAfter);
     receipt.runnerStable = sha256(await readFile(TEST_FILE)) === receipt.runnerSha256;
     receipt.finishedAt = new Date().toISOString(); receipt.error = failure;
-    receipt.passed = !failure && receipt.observations.length === 53 && receipt.sourceStable && receipt.runnerStable
+    receipt.passed = !failure && receipt.observations.length === 54 && receipt.sourceStable && receipt.runnerStable
       && receipt.cleanupErrors.length === 0 && receipt.checks.length === 1 && receipt.checks.every((c) => c.passed)
       && receipt.observations.every((o) => o.passed && o.recordWritten);
     if (OUT) await writeFile(path.join(OUT, "receipt.json"), JSON.stringify(receipt, null, 2) + "\n");

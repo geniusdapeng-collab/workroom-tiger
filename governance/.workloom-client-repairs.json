@@ -116,7 +116,7 @@
     {
       "path": "scripts/acceptance/lib/loommate-viewport.test.mjs",
       "card": "MC-035",
-      "sha256": "e1fcd2ea0879408f7bdaf38122d1aa1937227140117a14822c61e7524a8d81cf"
+      "sha256": "d3f43a6af1e15797ed217ced24924a77d68aa22ad62d2c51240f23fed9d7a038"
     }
   ]
 }
