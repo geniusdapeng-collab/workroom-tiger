@@ -1,0 +1,211 @@
+{
+  "schema": "workloom.mine-clear/ledger@1",
+  "task_id": "T-2026-1020-0901",
+  "repo": "workroom-tiger",
+  "repo_path": ".",
+  "title": "MC041 task plan visibility follow-up",
+  "created_at": "2026-10-20T18:50:05.132Z",
+  "updated_at": "2026-10-20T19:23:49.757052+00:00",
+  "baseline": {
+    "audit": {
+      "commit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+      "branch": "task/T-2026-1020-0901",
+      "remote": "origin",
+      "fetched_at": "2026-10-20T18:50:05.077Z",
+      "fetch_status": "success",
+      "notes": "本地 HEAD 不是 origin/main 最新（云端 5fc58513 / 本地 e530d4a1）——按 §1.2 先对齐基线"
+    },
+    "repair": {
+      "commit": null,
+      "reverified_problem_ids": []
+    },
+    "acceptance": {
+      "commit": null,
+      "is_descendant_of_repair": null
+    }
+  },
+  "environment": {
+    "kind": "local-preview",
+    "notes": "Portable audit-only specification; open/not-run is intentional. Actual repair and independent acceptance receipts are separate delivery artifacts."
+  },
+  "invariants": [
+    {
+      "id": "INV-1",
+      "text": "租户边界覆盖数据库 RLS、运行时上下文、事件、缓存和外部连接器。",
+      "source": "AGENTS.md#4.1"
+    },
+    {
+      "id": "INV-2",
+      "text": "经营事件、审批和关键回执只增不改；纠正通过新事件表达，不静默覆盖证据。",
+      "source": "AGENTS.md#4.2"
+    },
+    {
+      "id": "INV-3",
+      "text": "所有外部或变更性动作及其子调用，统一经过权限、PII、围栏和审批链路。",
+      "source": "AGENTS.md#4.3"
+    },
+    {
+      "id": "INV-4",
+      "text": "涉钱、敏感数据、群发、公开发布、交易和破坏性变更必须按高风险处理并由人审批。",
+      "source": "AGENTS.md#4.4"
+    },
+    {
+      "id": "INV-5",
+      "text": "没有真实回执就不能标记完成；mock、模拟和体验模式在数据结构与界面上都要明确区分。",
+      "source": "AGENTS.md#4.5"
+    },
+    {
+      "id": "INV-6",
+      "text": "客户原始经营数据不得上行；蜂群只接受白名单化、最小化、匿名化且可审计的元数据或派生经验。",
+      "source": "AGENTS.md#4.6"
+    },
+    {
+      "id": "INV-7",
+      "text": "租户覆盖层只能收紧围栏，不能放宽平台不可变红线。",
+      "source": "AGENTS.md#4.7"
+    },
+    {
+      "id": "INV-8",
+      "text": "模型、提示词、技能、bundle、策略和热更新必须先评测再灰度，且始终可回滚。",
+      "source": "AGENTS.md#4.8"
+    },
+    {
+      "id": "INV-9",
+      "text": "platform-ops、平台账户运营和平台秘密只属于 Andromeda。",
+      "source": "AGENTS.md#4.9"
+    },
+    {
+      "id": "INV-10",
+      "text": "Tiger 在获得单独的合规审查和用户明确授权前，只能模拟或纸面交易。",
+      "source": "AGENTS.md#4.10"
+    },
+    {
+      "id": "INV-11",
+      "text": "令牌、密码、API key、私钥、客户凭证和私密客户数据不得进入源码、文档、上下文、提示词、日志或提交。",
+      "source": "AGENTS.md#4.11"
+    },
+    {
+      "id": "INV-12",
+      "text": "个性化与行业扩展不得形成公共机制的第二事实源。",
+      "source": "AGENTS.md#4.12"
+    }
+  ],
+  "cards": [
+    {
+      "id": "MC-041",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 3,
+      "state": "open",
+      "title": "Persisted task plans are hidden from task details and the experience probe misses asynchronous plan updates",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/pages/p2/P2.tsx:35@e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+          "sha256": "6e88605374bdc651f90a0d51c6fbe136aa42e332fff0a26e151f3fa07420250e",
+          "note": "A: Root read all 466 lines. ThreadRow/load/rendering have no persisted plan field or ordered plan list."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:722@e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+          "sha256": "23e22d40716a1f6b8a323037dc16745260d2dd0e69265bd505aad1c5b0bc694b",
+          "note": "C: Root read the full threads.get block; its SELECT omits plan. This does not claim full reading of the large router."
+        },
+        {
+          "type": "code",
+          "ref": "governance/scripts/acceptance/experience.mjs:381@e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+          "sha256": "f3499d6f070ddf983184d153996a4d8e5dd930829dec6932202b7a7a25a88ceb",
+          "note": "C: Root read the complete EXP05 dispatch flow. It checks only the initial detail/events and omits the actual label field."
+        },
+        {
+          "type": "ui",
+          "ref": "audit-evidence/mc041-persisted-plan.json",
+          "sha256": "5ed38ded3d5f5d12c5d3c096e9ca4b535013c1bed3b1d612721d5c1f70caa73a",
+          "commit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+          "note": "B: Independent read-only database observation: T525 completed 2/2 with two persisted labels, without task mutation."
+        },
+        {
+          "type": "ui",
+          "ref": "audit-evidence/mc041-visible-detail.json",
+          "sha256": "3410dde88c9f07169f608e55168fff9307883aeec9e394a3f1a1ba6dd00d0470",
+          "commit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+          "note": "B+C: Actual normal detail navigation, API and visible text. Root and independent actor viewed both screenshots. The diagnostic exit1 belongs to a later EXP03 binding guard; it is not reported as an overall pass."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/pages/p2/P2.tsx",
+        "line": 35,
+        "commit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+        "symbol": "ThreadRow / load / task detail rendering"
+      },
+      "trigger_path": "Normal P1 dispatch queues a task. Scheduler persists and executes QuestStep plans, but threads.get omits plan and P2 displays only generic events. EXP05 ends after the initial query without observing later plans.",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "Protected threads.get and isolated PostgreSQL with valid/null/empty/malformed plans, cross-workspace and unauthenticated access, and private execution fields.",
+          "expect": "Preserve access boundaries, return only stepId/label and truthful plan state, reject malformed plans without inventing success or leaking params, preserve fallback warnings verbatim.",
+          "command": "pnpm -C governance exec vitest run apps/server/src/trpc/thread-plan-visibility.pg.test.ts --testTimeout 30000",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "exec",
+              "vitest",
+              "run",
+              "apps/server/src/trpc/thread-plan-visibility.pg.test.ts",
+              "--testTimeout",
+              "30000"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "Actual P2 with production styles at desktop/mobile widths, long labels, pending/empty/invalid/offline states, delayed same-task plans, and positive/negative probe evidence.",
+          "expect": "Render real ordered plan labels and truthful state. EXP05 requires same-task visible labels within the original dispatchAt deadline; wrong-thread, absent, hidden or late plans cannot pass.",
+          "command": "node --test --test-concurrency=1 governance/scripts/acceptance/lib/task-plan-visibility.test.mjs governance/scripts/acceptance/lib/task-plan-evidence.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "--test-concurrency=1",
+              "governance/scripts/acceptance/lib/task-plan-visibility.test.mjs",
+              "governance/scripts/acceptance/lib/task-plan-evidence.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "Project persisted plan into a minimal read-only DTO. Render ordered labels and truthful state in P2. Observe same-thread later polling with real labels and the unchanged action/time thresholds.",
+      "rollback": "Ordinary revert of this card source/tests, exact client repair binding and CI registration. No database migration or historical plan rewrite.",
+      "conflict_paths": [
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/apps/web/src/pages/p2/P2.tsx",
+        "governance/scripts/acceptance/experience.mjs",
+        "governance/apps/server/src/trpc/thread-plan-display.ts",
+        "governance/apps/server/src/trpc/thread-plan-visibility.pg.test.ts",
+        "governance/scripts/acceptance/lib/task-plan-evidence.mjs",
+        "governance/scripts/acceptance/lib/task-plan-visibility.test.mjs",
+        "governance/scripts/acceptance/lib/task-plan-evidence.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs",
+        ".github/workflows/workloom-ui-contract.yml",
+        "governance/scripts/acceptance/lib/ui-evidence.test.mjs",
+        "governance/scripts/acceptance/lib/response-observer.test.mjs"
+      ],
+      "blast_radius": "Tiger task detail read display and corresponding experience observation only. No scheduling, planning, tool execution, fences, approvals or trading-strategy changes. New projected fields appear only on the existing protected detail endpoint.",
+      "regression": {
+        "command": "RUN_TASK_PLAN_PG_TESTS=1 pnpm -C governance exec vitest run apps/server/src/trpc/thread-plan-visibility.pg.test.ts --testTimeout 30000 && node --test --test-concurrency=1 governance/scripts/acceptance/lib/task-plan-visibility.test.mjs governance/scripts/acceptance/lib/task-plan-evidence.test.mjs"
+      },
+      "notes": "Discovered by independent real database/API/page evidence. Assertions are not run yet. EXP03/04/08 missing prerequisites are not forced green by this card.",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    }
+  ],
+  "gates": []
+}

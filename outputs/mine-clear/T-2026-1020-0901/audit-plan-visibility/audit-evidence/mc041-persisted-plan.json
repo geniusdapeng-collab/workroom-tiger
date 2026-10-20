@@ -1,0 +1,397 @@
+{
+  "schema": "tiger.independent-experience-readonly-diagnostic/v1",
+  "actor": "/root/fix_skill_suggestion_layout/fresh_independent_acceptance",
+  "commit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+  "startedAt": "2026-10-20T18:32:37.960Z",
+  "evidenceGrade": "B",
+  "mutation": false,
+  "database": "workloom_tiger_acceptance",
+  "sourceExperience": {
+    "path": "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-e530d4a-fresh-independent/experience/experience-report.json",
+    "sha256": "4a2f359b3ce493ac8f62a6559184345aae01ff6eb6953be5d9197a8ee4d807e5"
+  },
+  "executorSha256": "3f1fc9ad5716b7c791e2ae48d04d72a22b5cd6a9021aff33d3ee01109591302c",
+  "sourceDispatchObservation": {
+    "healthy": true,
+    "entryState": {
+      "healthy": true,
+      "loading": false,
+      "terminalError": false
+    },
+    "inputVisible": true,
+    "filled": true,
+    "clicked": true,
+    "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+    "requestTitle": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+    "threadId": "T-525",
+    "responseOk": true,
+    "detailThreadId": "T-525",
+    "detailTitle": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+    "planSteps": 0,
+    "planVisible": false,
+    "steps": 3,
+    "dispatchMs": null,
+    "responseKind": "routed",
+    "evidenceChecks": {
+      "页面未处于登录、加载或错误态": true,
+      "输入入口可见": true,
+      "输入填写成功": true,
+      "启航真实点击": true,
+      "请求绑定输入目标": true,
+      "服务端成功响应": true,
+      "响应含新任务编号": true,
+      "详情任务编号一致": true,
+      "详情任务目标一致": true,
+      "实际拆解非空": false,
+      "拆解在页面可见": false,
+      "三步内完成": true,
+      "派发耗时达标": null
+    },
+    "missingEvidence": [
+      "派发耗时达标"
+    ],
+    "failedEvidence": [
+      "实际拆解非空",
+      "拆解在页面可见"
+    ]
+  },
+  "thread": {
+    "id": "T-525",
+    "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+    "mode": "quest",
+    "status": "completed",
+    "agent_id": "agt-attribution-analyst",
+    "progress_done": 2,
+    "progress_total": 2,
+    "plan": [
+      {
+        "tool": "journal.read",
+        "label": "【兜底计划·需人工核对目标】读取信号台账",
+        "action": "journal.read",
+        "params": {},
+        "stepId": "s1",
+        "context": {
+          "planner": "deterministic-fallback",
+          "params_incomplete": true
+        },
+        "objectType": "journal"
+      },
+      {
+        "tool": "report.snapshot.read",
+        "label": "【兜底计划·需人工核对目标】读取当日日报分数快照",
+        "action": "report.snapshot.read",
+        "params": {},
+        "stepId": "s2",
+        "context": {
+          "planner": "deterministic-fallback",
+          "params_incomplete": true
+        },
+        "objectType": "report_snapshot"
+      }
+    ],
+    "plan_version": 1,
+    "created_at": "2026-10-20T18:25:45.290Z",
+    "updated_at": "2026-10-20T18:25:47.145Z"
+  },
+  "events": [
+    {
+      "event_id": "E-24621",
+      "seq": "15506",
+      "payload": {
+        "who": {
+          "id": "MEM-T001",
+          "type": "human"
+        },
+        "object": {
+          "id": "T-525",
+          "type": "thread"
+        },
+        "context": {
+          "time": "2026-10-20T18:25:45.295Z",
+          "channel": "inapp",
+          "tenant_id": "tiger",
+          "workspace_id": "trading"
+        },
+        "decision": {
+          "after": {
+            "mode": "quest",
+            "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+            "agentId": "agt-attribution-analyst",
+            "threadId": "T-525",
+            "presetKey": "attribution-analyst",
+            "rationale": "交付型指令，规格驱动自主执行（默认 Quest）",
+            "presetSelection": "explicit"
+          },
+          "action": "thread.dispatch"
+        },
+        "event_id": "E-24621",
+        "rule_impact": []
+      }
+    },
+    {
+      "event_id": "E-24622",
+      "seq": "15507",
+      "payload": {
+        "who": {
+          "id": "attribution-analyst",
+          "type": "agent",
+          "version": "v0.1"
+        },
+        "object": {
+          "type": "journal"
+        },
+        "context": {
+          "time": "2026-10-20T18:25:47.142Z",
+          "tenant_id": "tiger",
+          "workspace_id": "trading"
+        },
+        "receipt": {
+          "mode": "simulated",
+          "synced": true,
+          "verified_at": "2026-10-20T18:25:47.142Z",
+          "snapshot_uri": "workloom-sim://receipt/journal.read/mvh0kkg6"
+        },
+        "decision": {
+          "kind": "execute",
+          "tool": "journal.read",
+          "after": {
+            "result": {
+              "input": {},
+              "state": "simulated"
+            }
+          },
+          "basis": [
+            "演示模式回执（dataMode=simulated）"
+          ],
+          "action": "journal.read",
+          "effect": "read",
+          "params": {},
+          "step_id": "s1",
+          "fingerprint": "75bf99c4fc486afa239eba8a33a1a725a2b86d71cd92499211a74c5111c00824"
+        },
+        "event_id": "E-24622",
+        "model_trace": {
+          "tier": "standard",
+          "credits": 1,
+          "model_id": "simulated-runtime"
+        },
+        "rule_impact": []
+      }
+    },
+    {
+      "event_id": "E-24623",
+      "seq": "15508",
+      "payload": {
+        "who": {
+          "id": "attribution-analyst",
+          "type": "agent",
+          "version": "v0.1"
+        },
+        "object": {
+          "type": "report_snapshot"
+        },
+        "context": {
+          "time": "2026-10-20T18:25:47.145Z",
+          "tenant_id": "tiger",
+          "workspace_id": "trading"
+        },
+        "receipt": {
+          "mode": "simulated",
+          "synced": true,
+          "verified_at": "2026-10-20T18:25:47.144Z",
+          "snapshot_uri": "workloom-sim://receipt/report.snapshot.read/mvh0kkg8"
+        },
+        "decision": {
+          "kind": "execute",
+          "tool": "report.snapshot.read",
+          "after": {
+            "result": {
+              "input": {},
+              "state": "simulated"
+            }
+          },
+          "basis": [
+            "演示模式回执（dataMode=simulated）"
+          ],
+          "action": "report.snapshot.read",
+          "effect": "read",
+          "params": {},
+          "step_id": "s2",
+          "fingerprint": "e6f5f017307e4e456b2c6249f630427fd4630a75d9d01b36714f61aadae3956c"
+        },
+        "event_id": "E-24623",
+        "model_trace": {
+          "tier": "standard",
+          "credits": 1,
+          "model_id": "simulated-runtime"
+        },
+        "rule_impact": []
+      }
+    }
+  ],
+  "boundAgent": [
+    {
+      "id": "agt-attribution-analyst",
+      "preset_key": "attribution-analyst",
+      "name": "归因分析师",
+      "status": "ready"
+    }
+  ],
+  "recentThreadTitles": [
+    {
+      "id": "T-525",
+      "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T18:25:45.290Z"
+    },
+    {
+      "id": "T-524",
+      "title": "生成一份本周运行复盘，并列出三项下一步任务",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T18:23:43.566Z"
+    },
+    {
+      "id": "T-523",
+      "title": "请问现在有哪些事项需要我决定？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T18:23:43.555Z"
+    },
+    {
+      "id": "T-522",
+      "title": "请问当前工作区最近有哪些关键进展？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T18:23:43.510Z"
+    },
+    {
+      "id": "T-446",
+      "title": "生成一份本周运行复盘，并列出三项下一步任务",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T16:48:55.717Z"
+    },
+    {
+      "id": "T-445",
+      "title": "请问现在有哪些事项需要我决定？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T16:48:55.707Z"
+    },
+    {
+      "id": "T-444",
+      "title": "请问当前工作区最近有哪些关键进展？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T16:48:55.672Z"
+    },
+    {
+      "id": "T-368",
+      "title": "生成一份本周运行复盘，并列出三项下一步任务",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T14:32:24.687Z"
+    },
+    {
+      "id": "T-367",
+      "title": "请问现在有哪些事项需要我决定？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T14:32:24.675Z"
+    },
+    {
+      "id": "T-366",
+      "title": "请问当前工作区最近有哪些关键进展？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T14:32:24.634Z"
+    },
+    {
+      "id": "T-280",
+      "title": "生成一份本周运行复盘，并列出三项下一步任务",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T11:31:57.447Z"
+    },
+    {
+      "id": "T-279",
+      "title": "请问现在有哪些事项需要我决定？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T11:31:57.434Z"
+    },
+    {
+      "id": "T-278",
+      "title": "请问当前工作区最近有哪些关键进展？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T11:31:57.373Z"
+    },
+    {
+      "id": "T-192",
+      "title": "为下周三的客房促销活动写一条发布计划，本周五前交付",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T10:14:51.415Z"
+    },
+    {
+      "id": "T-191",
+      "title": "生成一份本周运行复盘，并列出三项下一步任务",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T10:09:53.833Z"
+    },
+    {
+      "id": "T-190",
+      "title": "请问现在有哪些事项需要我决定？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T10:09:53.822Z"
+    },
+    {
+      "id": "T-189",
+      "title": "请问当前工作区最近有哪些关键进展？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T10:09:53.801Z"
+    },
+    {
+      "id": "T-188",
+      "title": "生成一份本周运行复盘，并列出三项下一步任务",
+      "mode": "quest",
+      "status": "completed",
+      "created_at": "2026-10-20T10:03:29.041Z"
+    },
+    {
+      "id": "T-187",
+      "title": "请问现在有哪些事项需要我决定？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T10:03:29.030Z"
+    },
+    {
+      "id": "T-186",
+      "title": "请问当前工作区最近有哪些关键进展？",
+      "mode": "ask",
+      "status": "completed",
+      "created_at": "2026-10-20T10:03:28.996Z"
+    }
+  ],
+  "nightRuns": [],
+  "member": [
+    {
+      "id": "mem-t001-id",
+      "member_no": "MEM-T001",
+      "role": "owner",
+      "status": "active",
+      "account_id": null
+    }
+  ],
+  "grants": [],
+  "accountMemberships": [],
+  "completed": true,
+  "finishedAt": "2026-10-20T18:32:37.978Z",
+  "stableSource": true
+}

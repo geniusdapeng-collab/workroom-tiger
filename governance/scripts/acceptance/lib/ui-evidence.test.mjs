@@ -240,7 +240,7 @@ async function runFixture(name, kind, mode, onlyIds = null) {
   const temp = mkdtempSync(join(tmpdir(), "workloom-ui-evidence-"));
   const output = process.env.MC031_EVIDENCE_DIR ? join(resolve(process.env.MC031_EVIDENCE_DIR), name) : join(temp, "evidence");
   mkdirSync(output, { recursive: true });
-  const state = { submitted: null, approvalStatus: "pending", requests: [], port: null };
+  const state = { submitted: null, approvalStatus: "pending", requests: [], port: null, planReadyAt: 0 };
   const bad = mode === "spoof";
   const personaMode = ["persona-fallback", "wrong-persona", "safe-term-name", "unsafe-term-name"].includes(mode);
   const agent = { id: "agent-1", preset_key: personaMode ? "backtest-wfa" : "fixture-agent", name: personaMode ? "回测WFA引擎" : "测试岗位", version: "v1", fence_bindings: [], skills: [], meta: {} };
@@ -258,7 +258,9 @@ async function runFixture(name, kind, mode, onlyIds = null) {
     { approval_id: "approval-1", event_id: "event-1", status: state.approvalStatus, created_at: today },
     ...(bad ? Array.from({ length: 7 }, (_, i) => ({ approval_id: `approval-${i + 2}`, event_id: `event-${i + 2}`, status: "pending", created_at: today })) : []),
   ];
-  const thread = () => ({ id: "T-1", title: state.submitted ?? "本地复盘任务", status: "running", progress_total: 1, progress_done: 0 });
+  const thread = () => ({ id: "T-1", title: state.submitted ?? "本地复盘任务", status: "running", progress_total: 1, progress_done: 0,
+    plan_state: Date.now() < state.planReadyAt ? "pending" : "ready",
+    plan: Date.now() < state.planReadyAt ? null : [{ stepId: "s1", label: "读取并形成复盘" }], plan_version: 1 });
   const events = () => [{ event_id: "event-1", who: { type: "agent", id: "fixture" }, context: { time: today }, decision: { action: "quest.plan", after: { steps: [{ tool: "local.read", description: "读取并形成复盘" }] } } }];
   const rules = [{ id: "rule-row", rule_id: "R1", version: "v1", status: "active", name: "本地规则", match_spec: { object_types: ["local"], actions: ["local.read"], when: "true" } }];
   const versions = [{ version: "v1", status: "active", rules: "1", created_at: today }];
@@ -284,10 +286,13 @@ async function runFixture(name, kind, mode, onlyIds = null) {
       } else if (procedure === "captain.theater") data = { latestBriefing: { text: "今日经营简报：模拟任务运行正常", at: today }, pendingByTier: { l4_chairman: 1 } };
       else if (procedure === "captain.chairmanQueue") data = [{ approval_id: "approval-1", snapshot: { title: "需要决策的本地事项" } }];
       else if (procedure === "threads.list") data = [thread()];
-      else if (procedure === "threads.get") data = thread();
+      else if (procedure === "threads.get") data = { ...thread(),
+        ...(mode === "wrong-plan-thread" ? { id: "T-other" } : {}),
+        ...(mode === "wrong-plan-title" ? { title: "不是本次派发的目标" } : {}) };
       else if (procedure === "threads.events") data = events();
       else if (procedure === "threads.dispatch") {
         state.submitted = input.title;
+        state.planReadyAt = Date.now() + (mode === "delayed-plan" ? 400 : mode === "late-plan" ? 3100 : 0);
         data = { kind: "routed", threadId: "T-1" };
       } else if (procedure === "accounts.inbox.unified") data = { groups: [{ workspaceId, workspaceName: "模拟工作区", pendingApprovals: 1 }] };
       else if (procedure === "accounts.my.memberships") data = [{ workspace_id: workspaceId, workspace_name: "模拟工作区", tenant_id: "tenant-fixture" }];
@@ -324,7 +329,8 @@ async function runFixture(name, kind, mode, onlyIds = null) {
     } else if (url.pathname === "/skills") {
       res.end(html("<main>官方技能 1 已安装</main>"));
     } else if (url.pathname === "/tasks/T-1") {
-      res.end(html(`<main><h2>任务执行</h2><span>T-1</span><p>${state.submitted ?? "本地复盘任务"}</p><article>数字员工 · 事件 event-1 读取并形成复盘 步骤 拆解 回执 执行</article></main>`, `rpc('threads.get',{threadId:'T-1'});${mode === "stale-trace" ? "" : "rpc('threads.events',{threadId:'T-1'});"}`));
+      res.end(html(`<main><h2>任务执行</h2><span>T-1</span><p>${state.submitted ?? "本地复盘任务"}</p><section aria-label="任务拆解" data-thread-id="T-1" data-plan-stale="false" ${mode === "hidden-plan" ? "hidden" : ""}><ol id="plan"></ol></section><article>数字员工 · 事件 event-1 读取并形成复盘 步骤 拆解 回执 执行</article></main>`,
+        `async function refreshPlan(){const detail=await rpc('threads.get',{threadId:'T-1'});const list=document.querySelector('#plan');list.replaceChildren();for(const step of detail.plan??[]){const item=document.createElement('li');item.textContent=step.label;list.append(item);}}refreshPlan();${["delayed-plan", "late-plan"].includes(mode) ? "setInterval(refreshPlan,100);" : ""}${mode === "stale-trace" ? "" : "rpc('threads.events',{threadId:'T-1'});"}`));
     } else if (url.pathname === "/tasks") {
       const readyTasks = `<h1>任务</h1><input placeholder="说出一句话目标…（最多 500 字）"><button id="dispatch">启航</button><div id="tasks"><article><h2>${thread().title}</h2><p>请求回执：T-1</p></article></div>`;
       const setupTasks = `rpc('access.me');rpc('threads.list');document.querySelector('#dispatch').onclick=async()=>{const title=document.querySelector('input').value;const r=await rpc('threads.dispatch',{title,presetKey:'fixture'},true);document.querySelector('#tasks').innerHTML='<a href="/tasks/'+r.threadId+'">'+title+'</a>';};`;
@@ -394,6 +400,7 @@ async function runFixture(name, kind, mode, onlyIds = null) {
   writeFileSync(join(scripts, sourceName), source);
   if (existsSync(join(SOURCE, "lib/ui-evidence.mjs"))) writeFileSync(join(scripts, "lib/ui-evidence.mjs"), readFileSync(join(SOURCE, "lib/ui-evidence.mjs")));
   if (existsSync(join(SOURCE, "lib/response-observer.mjs"))) writeFileSync(join(scripts, "lib/response-observer.mjs"), readFileSync(join(SOURCE, "lib/response-observer.mjs")));
+  if (existsSync(join(SOURCE, "lib/task-plan-evidence.mjs"))) writeFileSync(join(scripts, "lib/task-plan-evidence.mjs"), readFileSync(join(SOURCE, "lib/task-plan-evidence.mjs")));
   // Exercise the exact product naming and display modules, including the
   // installed UI language implementation. Do not copy its policy into tests.
   const clientLib = join(temp, "apps/web/src/lib");
@@ -523,6 +530,11 @@ test("real browser CLI: UI screenshot failures make the probe unsuccessful", { t
 
 for (const [mode, id, expectedPass] of [
   ["delayed-task-input", "EXP-05", true],
+  ["delayed-plan", "EXP-05", true],
+  ["late-plan", "EXP-05", false],
+  ["hidden-plan", "EXP-05", false],
+  ["wrong-plan-thread", "EXP-05", false],
+  ["wrong-plan-title", "EXP-05", false],
   ["dispatch-loading", "EXP-05", false],
   ["dispatch-error", "EXP-05", false],
   ["slug-only", "EXP-07", true],
@@ -553,10 +565,15 @@ for (const [mode, id, expectedPass] of [
     if (mode === "dispatch-loading" || mode === "dispatch-error") {
       assert.equal(requests.some((request) => request.path === "/trpc/threads.dispatch"), false);
     }
-    if (mode === "delayed-task-input") {
+    if (mode === "delayed-task-input" || mode === "delayed-plan") {
       assert.ok(requests.some((request) => request.path === "/trpc/threads.dispatch" && request.method === "POST"));
       assert.equal(check.actual.steps, 3);
       assert.ok(check.actual.dispatchMs <= 3000);
+    }
+    if (["delayed-plan", "late-plan"].includes(mode)) {
+      assert.ok(requests.filter((request) => request.path === "/trpc/threads.get").length >= 2);
+      assert.equal(requests.filter((request) => request.path === "/trpc/threads.dispatch").length, 1);
+      assert.equal(requests.some((request) => request.path === "/trpc/threads.run"), false);
     }
     if (mode === "chat-refusal") {
       assert.equal(check.actual.requestOk, true);

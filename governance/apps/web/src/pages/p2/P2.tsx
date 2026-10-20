@@ -9,7 +9,7 @@
  *  - 权限态：只读成员不显示输入栏（E2.6，隐藏非置灰）
  * 状态变体：p2 执行中 / p2_review 待审查 / p2_done 已完成 / p2_error 错误（?demo= 强制走查）
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
 import { COMMON_STATUS_TEXT, MODEL_TIER_TEXT, MODEL_WINDOW_TEXT, RULE_RESULT_TEXT, THREAD_MODE_TEXT, actionText, actorText, approvalGestureText, dictText, payloadText, shortId } from "../../lib/display";
@@ -36,6 +36,9 @@ interface ThreadRow {
   id: string; title: string; mode: string; status: string;
   progress_done: number; progress_total: number; agent_id: string | null;
   created_by: string; created_at: string;
+  plan?: Array<{ stepId: string; label: string }> | null;
+  plan_state?: "pending" | "empty" | "invalid" | "ready";
+  plan_version?: number;
 }
 interface Ev {
   event_id: string;
@@ -77,9 +80,17 @@ export default function P2() {
   /** X-02：来自对话框卡片的审批锚点（?apr=）——高亮并滚动到该审批卡 */
   const anchorApprovalId = params.get("apr");
 
-  const [ready, setReady] = useState(false);
-  const [offline, setOffline] = useState(false); // 断线重连中（F3.4 不伪造进度）
-  const [thread, setThread] = useState<ThreadRow | null>(null);
+  const [readyThreadId, setReadyThreadId] = useState<string | null>(null);
+  const [offlineThreadId, setOfflineThreadId] = useState<string | null>(null);
+  const [loadedThread, setThread] = useState<ThreadRow | null>(null);
+  const activeThreadId = useRef(threadId);
+  activeThreadId.current = threadId;
+  const requestSequence = useRef(0);
+  const appliedSequence = useRef(0);
+  const ready = readyThreadId === threadId;
+  const offline = offlineThreadId === threadId;
+  // A previous route's cached response must not appear under the new task ID.
+  const thread = loadedThread?.id === threadId ? loadedThread : null;
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   const [events, setEvents] = useState<Ev[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
@@ -88,6 +99,8 @@ export default function P2() {
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    const current = () => activeThreadId.current === threadId && sequence >= appliedSequence.current;
     try {
       await ensureDemoLogin();
       const [th, list, ap] = await Promise.all([
@@ -95,28 +108,36 @@ export default function P2() {
         trpc.threads.list.query() as Promise<ThreadRow[]>,
         trpc.approvals.list.query() as Promise<ApprovalRow[]>,
       ]);
+      const ev = th ? (await trpc.threads.events.query({ threadId })) as Ev[] : [];
+      if (!current()) return;
+      appliedSequence.current = sequence;
       setThread(th);
       setThreads(list);
-      if (th) {
-        const ev = (await trpc.threads.events.query({ threadId })) as Ev[];
-        setEvents(ev);
-        // 本线程相关审批（event_id ∈ 线程事件链）
-        const ids = new Set(ev.map((e) => e.event_id));
-        setApprovals(ap.filter((a) => ids.has(a.event_id)));
-      }
-      setOffline(false);
+      setEvents(ev);
+      // 同一任务的详情、事件与审批一起更新；迟到的旧路由响应不得串入。
+      const ids = new Set(ev.map((e) => e.event_id));
+      setApprovals(ap.filter((a) => ids.has(a.event_id)));
+      setOfflineThreadId(null);
     } catch {
-      setOffline(true); // 断线：显「重连中」，保留最后已知进度（不伪造）
+      if (current()) {
+        appliedSequence.current = sequence;
+        setOfflineThreadId(threadId); // 保留同一任务最后已知数据，并明确标旧。
+      }
     } finally {
-      setReady(true);
+      if (current()) setReadyThreadId(threadId);
     }
   }, [threadId]);
 
   useEffect(() => {
+    activeThreadId.current = threadId;
     void load();
     const t = setInterval(() => void load(), 5000); // F3.4 ≤5s 轮询
-    return () => clearInterval(t);
-  }, [load]);
+    return () => {
+      clearInterval(t);
+      // Unmounted views cannot accept a late response, including StrictMode cleanup.
+      activeThreadId.current = "";
+    };
+  }, [load, threadId]);
 
   /* ---------- 计量与围栏聚合（ThreadInspector） ---------- */
   const meter = useMemo(() => {
@@ -280,6 +301,50 @@ export default function P2() {
           <div className="mb-3"><BannerAlert level={banner.level} actionLabel="知道了" onAction={() => setBanner(null)}>{banner.text}</BannerAlert></div>
         )}
 
+        {(!ready || thread || offline) && (
+          <section
+            aria-label="任务拆解"
+            data-thread-id={thread?.id}
+            data-plan-stale={offline ? "true" : "false"}
+            className="mb-4 min-w-0 rounded-lg border border-holo/30 bg-card p-3.5"
+          >
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <h3 className="text-body font-bold text-holo">任务拆解</h3>
+              {thread?.plan_state === "ready" && <span className="text-body text-ink3">{thread.plan?.length ?? 0} 个步骤</span>}
+            </div>
+            {!ready ? (
+              <Skeleton count={2} height={28} label="任务拆解正在加载" />
+            ) : !thread ? (
+              <p role="status" className="text-body text-warn">暂时无法获取任务拆解，正在重连</p>
+            ) : (
+              <>
+                {offline && <p role="status" className="mb-2 text-body text-warn">连接中断，以下为上次成功获取的任务拆解</p>}
+                {thread.plan_state === "ready" && Array.isArray(thread.plan) && thread.plan.length > 0 ? (
+                  <>
+                    <ol className="list-decimal space-y-2 pl-5 text-body leading-relaxed text-ink2">
+                      {thread.plan.map((step) => (
+                        <li key={step.stepId} className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{step.label}</li>
+                      ))}
+                    </ol>
+                    <p className="mt-3 text-body text-ink3">按计划顺序展示，执行结果以行动回执为准。</p>
+                  </>
+                ) : thread.plan_state === "pending" ? (
+                  <p role="status" className="text-body text-ink3">{
+                    thread.mode === "ask" ? "此任务为问询，不生成步骤拆解"
+                    : ["completed", "failed", "cancelled"].includes(thread.status)
+                      ? "此任务没有保存可展示的拆解"
+                      : thread.status === "paused" ? "任务已暂停，尚无可展示的拆解" : "正在等待任务拆解"
+                  }</p>
+                ) : thread.plan_state === "empty" ? (
+                  <p role="status" className="text-body text-ink3">当前计划没有步骤</p>
+                ) : (
+                  <p role="alert" className="text-body text-warn">任务拆解暂时无法显示</p>
+                )}
+              </>
+            )}
+          </section>
+        )}
+
         {/* p2_error：探针失效停止一切点击 + 三入口（E3.1/L3.3） */}
         {isFailed && (
           <div className="mb-3 rounded-lg border border-alert/55 bg-alert/8 p-3.5">
@@ -298,6 +363,8 @@ export default function P2() {
         <div className="flex-1 space-y-3">
           {!ready ? (
             <><Skeleton count={2} height={44} label="会话摘要正在加载" /><Skeleton count={4} label="会话内容正在加载" /></>
+          ) : !thread && offline ? (
+            <EmptyState icon={<Icon name="warning" size={24} />} title="暂时无法获取任务内容" hint="连接恢复后会自动重试" />
           ) : !thread ? (
             <EmptyState icon={<Icon name="tasks" size={24} />} title="这个任务不存在，或已被清理" hint="从左侧会话列表选择一条任务线程" />
           ) : events.length === 0 ? (

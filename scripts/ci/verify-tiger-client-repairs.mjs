@@ -22,6 +22,7 @@ const REPAIR_PATHS = new Map([
   ["apps/web/src/components/loommate/LoomMate.tsx", "MC-034"],
   ["apps/web/src/components/SkillDistBanner.tsx", "MC-037"],
   ["apps/web/src/pages/p6/P6.tsx", "MC-038"],
+  ["apps/web/src/pages/p2/P2.tsx", "MC-041"],
 ]);
 const TEST_PATHS = new Map([
   ["apps/web/src/components/star-ring/StarRing.contract.test.tsx", {
@@ -50,6 +51,9 @@ const TEST_PATHS = new Map([
   }],
   ["scripts/acceptance/lib/task-notification-interception.test.mjs", {
     card: "MC-039", repairs: ["apps/web/src/components/loommate/LoomMate.tsx"],
+  }],
+  ["scripts/acceptance/lib/task-plan-visibility.test.mjs", {
+    card: "MC-041", repairs: ["apps/web/src/pages/p2/P2.tsx"],
   }],
 ]);
 const SHA256 = /^[a-f0-9]{64}$/;

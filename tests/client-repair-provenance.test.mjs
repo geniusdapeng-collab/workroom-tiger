@@ -29,6 +29,8 @@ const stackingRegression = "scripts/acceptance/lib/loommate-stacking.test.mjs";
 const skillsPage = "apps/web/src/pages/p6/P6.tsx";
 const suggestionRegression = "scripts/acceptance/lib/skill-suggestion-layout.test.mjs";
 const notificationRegression = "scripts/acceptance/lib/task-notification-interception.test.mjs";
+const taskPage = "apps/web/src/pages/p2/P2.tsx";
+const taskPlanRegression = "scripts/acceptance/lib/task-plan-visibility.test.mjs";
 const manifestFile = ".workloom-client-repairs.json";
 const write = (root, path, content) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); };
 
@@ -36,7 +38,7 @@ function fixture(t, repaired = true) {
   const root = mkdtempSync(join(tmpdir(), "tiger-client-repairs-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const g = join(root, "governance");
-  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball, levelBadge, profilePage, loomMate, skillBanner, skillsPage];
+  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball, levelBadge, profilePage, loomMate, skillBanner, skillsPage, taskPage];
   for (const path of entries) write(g, path, `original:${path}\n`);
   write(g, ".workloom-ui.json", JSON.stringify({ version: "0.1.17" }));
   const state = {
@@ -55,7 +57,7 @@ function fixture(t, repaired = true) {
     repairs: [], testAdditions: [],
   };
   if (repaired) {
-    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"], [ball, "MC-032"], [levelBadge, "MC-033"], [profilePage, "MC-033"], [loomMate, "MC-034"], [skillBanner, "MC-037"], [skillsPage, "MC-038"]]) {
+    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"], [ball, "MC-032"], [levelBadge, "MC-033"], [profilePage, "MC-033"], [loomMate, "MC-034"], [skillBanner, "MC-037"], [skillsPage, "MC-038"], [taskPage, "MC-041"]]) {
       write(g, path, `reviewed repair:${path}\n`);
       manifest.repairs.push({ path, card, upstreamSha256: state.managedFiles[path].sha256, repairedSha256: digest(readFileSync(join(g, path))), sourceCommit: "a".repeat(40), reason: "Reviewed contract repair with focused behavioral regression coverage." });
     }
@@ -65,7 +67,7 @@ function fixture(t, repaired = true) {
     manifest.testAdditions.push({ path: modeRegression, card: "MC-027", sha256: digest(readFileSync(join(g, modeRegression))) });
     write(g, ballRegression, "test('decorative animation stays outside sequential keyboard focus', () => {});\n");
     manifest.testAdditions.push({ path: ballRegression, card: "MC-032", sha256: digest(readFileSync(join(g, ballRegression))) });
-    for (const [path, card] of [[levelRegression, "MC-033"], [unreadRegression, "MC-034"], [viewportRegression, "MC-035"], [stackingRegression, "MC-037"], [suggestionRegression, "MC-038"], [notificationRegression, "MC-039"]]) {
+    for (const [path, card] of [[levelRegression, "MC-033"], [unreadRegression, "MC-034"], [viewportRegression, "MC-035"], [stackingRegression, "MC-037"], [suggestionRegression, "MC-038"], [notificationRegression, "MC-039"], [taskPlanRegression, "MC-041"]]) {
       write(g, path, "test('real browser component evidence', () => {});\n");
       manifest.testAdditions.push({ path, card, sha256: digest(readFileSync(join(g, path))) });
     }
@@ -229,6 +231,7 @@ for (const [card, source, regressionPath] of [
   ["MC-037", skillBanner, stackingRegression],
   ["MC-038", skillsPage, suggestionRegression],
   ["MC-039", loomMate, notificationRegression],
+  ["MC-041", taskPage, taskPlanRegression],
 ]) {
   for (const kind of ["changed-source", "missing-source-registration", "wrong-source-card", "missing-test-registration", "changed-test", "wrong-test-card", "executable-test", "symlink-test"]) {
     test(`${card} ${source} browser regression binding ${kind} fails closed`, (t) => {

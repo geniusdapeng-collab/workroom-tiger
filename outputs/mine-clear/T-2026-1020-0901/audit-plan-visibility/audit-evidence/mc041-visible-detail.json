@@ -1,0 +1,347 @@
+{
+  "schema": "tiger.independent-experience-ui-diagnostic/v1",
+  "actor": "/root/fix_skill_suggestion_layout/fresh_independent_acceptance",
+  "commit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+  "startedAt": "2026-10-20T18:39:44.908Z",
+  "scope": "Read-only normal navigation of existing T525 and original EXP03 event; no original result replaced.",
+  "sourceExperience": {
+    "path": "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-e530d4a-fresh-independent/experience/experience-report.json",
+    "sha256": "4a2f359b3ce493ac8f62a6559184345aae01ff6eb6953be5d9197a8ee4d807e5"
+  },
+  "businessMutations": [],
+  "failures": [
+    "Error: Original event does not bind to exactly one actual source thread"
+  ],
+  "screenshots": [
+    "existing-task-top.png",
+    "existing-task-scrolled.png"
+  ],
+  "task": {
+    "id": "T-525",
+    "firstThreadResponse": {
+      "procedure": "threads.get",
+      "input": {
+        "threadId": "T-525"
+      },
+      "data": {
+        "id": "T-525",
+        "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+        "mode": "quest",
+        "status": "completed",
+        "progress_done": 2,
+        "progress_total": 2,
+        "created_by": "MEM-T001",
+        "agent_id": "agt-attribution-analyst",
+        "created_at": "2026-10-20T18:25:45.290Z",
+        "updated_at": "2026-10-20T18:25:47.145Z"
+      },
+      "status": 200,
+      "ok": true,
+      "method": "GET",
+      "requestAt": 1792521587751,
+      "at": 1792521587778
+    },
+    "firstEventsResponse": {
+      "procedure": "threads.events",
+      "input": {
+        "threadId": "T-525"
+      },
+      "data": [
+        {
+          "who": {
+            "id": "MEM-T001",
+            "type": "human"
+          },
+          "object": {
+            "id": "T-525",
+            "type": "thread"
+          },
+          "context": {
+            "time": "2026-10-20T18:25:45.295Z",
+            "channel": "inapp",
+            "tenant_id": "tiger",
+            "workspace_id": "trading"
+          },
+          "decision": {
+            "after": {
+              "mode": "quest",
+              "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+              "agentId": "agt-attribution-analyst",
+              "threadId": "T-525",
+              "presetKey": "attribution-analyst",
+              "rationale": "交付型指令，规格驱动自主执行（默认 Quest）",
+              "presetSelection": "explicit"
+            },
+            "action": "thread.dispatch"
+          },
+          "event_id": "E-24621",
+          "rule_impact": []
+        },
+        {
+          "who": {
+            "id": "attribution-analyst",
+            "type": "agent",
+            "version": "v0.1"
+          },
+          "object": {
+            "type": "journal"
+          },
+          "context": {
+            "time": "2026-10-20T18:25:47.142Z",
+            "tenant_id": "tiger",
+            "workspace_id": "trading"
+          },
+          "receipt": {
+            "mode": "simulated",
+            "synced": true,
+            "verified_at": "2026-10-20T18:25:47.142Z",
+            "snapshot_uri": "workloom-sim://receipt/journal.read/mvh0kkg6"
+          },
+          "decision": {
+            "kind": "execute",
+            "tool": "journal.read",
+            "after": {
+              "result": {
+                "input": {},
+                "state": "simulated"
+              }
+            },
+            "basis": [
+              "演示模式回执（dataMode=simulated）"
+            ],
+            "action": "journal.read",
+            "effect": "read",
+            "params": {},
+            "step_id": "s1",
+            "fingerprint": "75bf99c4fc486afa239eba8a33a1a725a2b86d71cd92499211a74c5111c00824"
+          },
+          "event_id": "E-24622",
+          "model_trace": {
+            "tier": "standard",
+            "credits": 1,
+            "model_id": "simulated-runtime"
+          },
+          "rule_impact": []
+        },
+        {
+          "who": {
+            "id": "attribution-analyst",
+            "type": "agent",
+            "version": "v0.1"
+          },
+          "object": {
+            "type": "report_snapshot"
+          },
+          "context": {
+            "time": "2026-10-20T18:25:47.145Z",
+            "tenant_id": "tiger",
+            "workspace_id": "trading"
+          },
+          "receipt": {
+            "mode": "simulated",
+            "synced": true,
+            "verified_at": "2026-10-20T18:25:47.144Z",
+            "snapshot_uri": "workloom-sim://receipt/report.snapshot.read/mvh0kkg8"
+          },
+          "decision": {
+            "kind": "execute",
+            "tool": "report.snapshot.read",
+            "after": {
+              "result": {
+                "input": {},
+                "state": "simulated"
+              }
+            },
+            "basis": [
+              "演示模式回执（dataMode=simulated）"
+            ],
+            "action": "report.snapshot.read",
+            "effect": "read",
+            "params": {},
+            "step_id": "s2",
+            "fingerprint": "e6f5f017307e4e456b2c6249f630427fd4630a75d9d01b36714f61aadae3956c"
+          },
+          "event_id": "E-24623",
+          "model_trace": {
+            "tier": "standard",
+            "credits": 1,
+            "model_id": "simulated-runtime"
+          },
+          "rule_impact": []
+        }
+      ],
+      "status": 200,
+      "ok": true,
+      "method": "GET",
+      "requestAt": 1792521587777,
+      "at": 1792521587784
+    },
+    "settledThreadResponse": {
+      "procedure": "threads.get",
+      "input": {
+        "threadId": "T-525"
+      },
+      "data": {
+        "id": "T-525",
+        "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+        "mode": "quest",
+        "status": "completed",
+        "progress_done": 2,
+        "progress_total": 2,
+        "created_by": "MEM-T001",
+        "agent_id": "agt-attribution-analyst",
+        "created_at": "2026-10-20T18:25:45.290Z",
+        "updated_at": "2026-10-20T18:25:47.145Z"
+      },
+      "status": 200,
+      "ok": true,
+      "method": "GET",
+      "requestAt": 1792521592753,
+      "at": 1792521592772
+    },
+    "settledEventsResponse": {
+      "procedure": "threads.events",
+      "input": {
+        "threadId": "T-525"
+      },
+      "data": [
+        {
+          "who": {
+            "id": "MEM-T001",
+            "type": "human"
+          },
+          "object": {
+            "id": "T-525",
+            "type": "thread"
+          },
+          "context": {
+            "time": "2026-10-20T18:25:45.295Z",
+            "channel": "inapp",
+            "tenant_id": "tiger",
+            "workspace_id": "trading"
+          },
+          "decision": {
+            "after": {
+              "mode": "quest",
+              "title": "本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）",
+              "agentId": "agt-attribution-analyst",
+              "threadId": "T-525",
+              "presetKey": "attribution-analyst",
+              "rationale": "交付型指令，规格驱动自主执行（默认 Quest）",
+              "presetSelection": "explicit"
+            },
+            "action": "thread.dispatch"
+          },
+          "event_id": "E-24621",
+          "rule_impact": []
+        },
+        {
+          "who": {
+            "id": "attribution-analyst",
+            "type": "agent",
+            "version": "v0.1"
+          },
+          "object": {
+            "type": "journal"
+          },
+          "context": {
+            "time": "2026-10-20T18:25:47.142Z",
+            "tenant_id": "tiger",
+            "workspace_id": "trading"
+          },
+          "receipt": {
+            "mode": "simulated",
+            "synced": true,
+            "verified_at": "2026-10-20T18:25:47.142Z",
+            "snapshot_uri": "workloom-sim://receipt/journal.read/mvh0kkg6"
+          },
+          "decision": {
+            "kind": "execute",
+            "tool": "journal.read",
+            "after": {
+              "result": {
+                "input": {},
+                "state": "simulated"
+              }
+            },
+            "basis": [
+              "演示模式回执（dataMode=simulated）"
+            ],
+            "action": "journal.read",
+            "effect": "read",
+            "params": {},
+            "step_id": "s1",
+            "fingerprint": "75bf99c4fc486afa239eba8a33a1a725a2b86d71cd92499211a74c5111c00824"
+          },
+          "event_id": "E-24622",
+          "model_trace": {
+            "tier": "standard",
+            "credits": 1,
+            "model_id": "simulated-runtime"
+          },
+          "rule_impact": []
+        },
+        {
+          "who": {
+            "id": "attribution-analyst",
+            "type": "agent",
+            "version": "v0.1"
+          },
+          "object": {
+            "type": "report_snapshot"
+          },
+          "context": {
+            "time": "2026-10-20T18:25:47.145Z",
+            "tenant_id": "tiger",
+            "workspace_id": "trading"
+          },
+          "receipt": {
+            "mode": "simulated",
+            "synced": true,
+            "verified_at": "2026-10-20T18:25:47.144Z",
+            "snapshot_uri": "workloom-sim://receipt/report.snapshot.read/mvh0kkg8"
+          },
+          "decision": {
+            "kind": "execute",
+            "tool": "report.snapshot.read",
+            "after": {
+              "result": {
+                "input": {},
+                "state": "simulated"
+              }
+            },
+            "basis": [
+              "演示模式回执（dataMode=simulated）"
+            ],
+            "action": "report.snapshot.read",
+            "effect": "read",
+            "params": {},
+            "step_id": "s2",
+            "fingerprint": "e6f5f017307e4e456b2c6249f630427fd4630a75d9d01b36714f61aadae3956c"
+          },
+          "event_id": "E-24623",
+          "model_trace": {
+            "tier": "standard",
+            "credits": 1,
+            "model_id": "simulated-runtime"
+          },
+          "rule_impact": []
+        }
+      ],
+      "status": 200,
+      "ok": true,
+      "method": "GET",
+      "requestAt": 1792521592771,
+      "at": 1792521592777
+    },
+    "visibleMainText": "任务执行\n主线任务\n···525\n本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）\n02:25 · 任务会话 ···525 已建立，派遣事件已写入账本\n本地验收：整理本周工作记录并形成复盘摘要，周五交付（2026-10-20T18:25:45.201Z）\n02:25\n归因分析师\n第 0.1 版\n尾号 24622\n已生效\n系统操作\n结果：输入：0 项信息；补充信息：演示模式\n能量 1\n归因分析师\n第 0.1 版\n尾号 24623\n已生效\n系统操作\n结果：输入：0 项信息；补充信息：演示模式\n能量 1\n交付完成 · 变更报告\n演示模式执行（模拟回执，非真实交付）\n本任务没有产生对外变更，仅完成了只读分析。\n决策链路时间轴（共 3 条账本事件）：\n账本凭证 ···24621\n系统成员 · 任务派发\n账本凭证 ···24622\n归因分析师 · 系统操作\n账本凭证 ···24623\n归因分析师 · 系统操作\n主线任务\n闲聊\n夜班\n启航\n沿用当前任务上下文",
+    "containsPlanProperty": false,
+    "hasEventStepsArray": false,
+    "messageCardCount": 0
+  },
+  "readFailures": [],
+  "observedPostProcedures": [],
+  "stableSource": true,
+  "finishedAt": "2026-10-20T18:39:54.336Z",
+  "executorSha256": "172a496f6132482dc49de188bdebbcc604664c5908589833bdf36f5d5f776a78"
+}

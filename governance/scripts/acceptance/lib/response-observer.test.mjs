@@ -16,7 +16,7 @@ const GOVERNANCE = resolve(ACCEPTANCE, "../..");
 const EVIDENCE = process.env.MC036_EVIDENCE_DIR ? resolve(process.env.MC036_EVIDENCE_DIR) : null;
 const BODY_LIMIT = 8000;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const sourceHashes = () => Object.fromEntries(["experience.mjs", "lib/response-observer.mjs", "lib/ui-evidence.mjs"]
+const sourceHashes = () => Object.fromEntries(["experience.mjs", "lib/response-observer.mjs", "lib/ui-evidence.mjs", "lib/task-plan-evidence.mjs"]
   .map((file) => [file, existsSync(join(SOURCE, file)) ? hash(readFileSync(join(SOURCE, file))) : null]));
 const flush = () => new Promise((done) => setImmediate(done));
 const helper = () => import(pathToFileURL(join(SOURCE, "lib/ui-evidence.mjs")).href);
@@ -411,7 +411,7 @@ async function runCliFixture(mode) {
     return await withBrowserServer(mode, async ({ endpoint, mark }) => withServer(mode, async ({ base, requests }) => {
       const scripts = join(temporary, "scripts/acceptance");
       mkdirSync(join(scripts, "lib"), { recursive: true });
-      for (const file of ["experience.mjs", "lib/ui-evidence.mjs", "lib/response-observer.mjs"]) {
+      for (const file of ["experience.mjs", "lib/ui-evidence.mjs", "lib/response-observer.mjs", "lib/task-plan-evidence.mjs"]) {
         if (existsSync(join(SOURCE, file))) writeFileSync(join(scripts, file), readFileSync(join(SOURCE, file)));
       }
       const profile = {

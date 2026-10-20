@@ -15,6 +15,7 @@ import { loadChromium } from "./lib/playwright.mjs";
 import { loginAsMember, productIdOf } from "./lib/session.mjs";
 import { canonicalJson, dailyDecisionEvidence, evaluateJourney, pageStateEvidence, rpcExchange, visibleIdentifier, workspaceIdentityEvidence } from "./lib/ui-evidence.mjs";
 import { observeResponses } from "./lib/response-observer.mjs";
+import { taskPlanDom, waitForTaskPlan } from "./lib/task-plan-evidence.mjs";
 
 const args = cliArgs();
 const REPO_ROOT = findRepoRoot();
@@ -361,33 +362,34 @@ async function dispatch() {
     const inputVisible = await input.count() > 0 && await input.isVisible() && await input.isEnabled();
     const entryState = await screen(page);
     let filled = false, clicked = false, steps = 0, dispatchMs = null, exchange = null, dispatchAt = null;
+    let deadline = null;
     if (inputVisible && entryState.healthy) {
       await input.fill(title); filled = await input.inputValue() === title; steps += 1;
       dispatchAt = now();
+      deadline = dispatchAt + T.dispatchMs;
       const send = page.getByRole("button", { name: /^启航/ }).first();
-      if (filled && await send.count() && await send.isEnabled()) {
-        await send.click({ timeout: 8000 }); clicked = true; steps += 1;
-        exchange = await watcher.wait("threads.dispatch", (row) => row.requestAt >= dispatchAt && row.method === "POST" && row.input?.title === title, T.dispatchMs);
+      if (filled && await send.count() && await send.isEnabled() && now() < deadline) {
+        await send.click({ timeout: Math.max(1, Math.min(8000, deadline - now())) }); clicked = true; steps += 1;
+        if (now() < deadline) exchange = await watcher.wait("threads.dispatch",
+          (row) => row.requestAt >= dispatchAt && row.method === "POST" && row.input?.title === title, deadline - now());
       }
     }
     const threadId = exchange?.ok ? exchange.data?.threadId : null;
-    let detail = null, chain = null, plan = [], planVisible = false;
-    if (threadId) {
+    let detail = null, plan = [], planVisible = false;
+    if (threadId && deadline !== null && now() < deadline) {
       const link = page.locator(`a[href="${R.tasks}/${encodeURIComponent(threadId)}"]`).first();
-      if (await waitUntil(page, async () => await link.count() > 0 && await link.isVisible())) {
+      if (await waitUntil(page, async () => await link.count() > 0 && await link.isVisible(), deadline - now()) && now() < deadline) {
         const navigationAt = now();
-        await link.click({ timeout: 8000 }); steps += 1;
-        detail = await watcher.wait("threads.get", (row) => row.requestAt >= navigationAt && row.input?.threadId === threadId);
-        chain = await watcher.wait("threads.events", (row) => row.requestAt >= navigationAt && row.input?.threadId === threadId);
-        if (detail?.ok && Array.isArray(detail.data?.plan)) plan = detail.data.plan;
-        else if (chain?.ok && Array.isArray(chain.data)) plan = chain.data.flatMap((event) => Array.isArray(event.decision?.after?.steps) ? event.decision.after.steps : []);
-        if (plan.length) {
-          planVisible = await waitUntil(page, async () => {
-            const dom = await screen(page);
-            return dom.healthy && plan.some((step) => [step.description, step.title, step.summary, step.action].some((value) => typeof value === "string" && value.length > 1 && dom.text.includes(value)));
-          });
-        }
-        if (planVisible && dispatchAt !== null) dispatchMs = now() - dispatchAt;
+        await link.click({ timeout: Math.max(1, Math.min(8000, deadline - now())) }); steps += 1;
+        // Observe the page's own 5s poll. The original dispatch deadline covers
+        // response, navigation and visible breakdown; no new task/run is sent.
+        const evidence = await waitForTaskPlan({
+          watcher, threadId, title, navigationAt, dispatchAt, deadline,
+          expectedPath: `${R.tasks}/${encodeURIComponent(threadId)}`,
+          readDom: async () => ({ ...await taskPlanDom(page), healthy: (await screen(page)).healthy }),
+          sleep: (ms) => page.waitForTimeout(ms),
+        });
+        ({ detail, plan, planVisible, dispatchMs } = evidence);
       }
     }
     return checked({

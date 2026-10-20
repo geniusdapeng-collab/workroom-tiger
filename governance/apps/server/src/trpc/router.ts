@@ -162,6 +162,7 @@ import {
   runMemoryMinerBeat,
 } from "@workloom/base/evolve";
 import { getMemorySources, searchMemories } from "@workloom/base/workdata";
+import { projectThreadPlan } from "./thread-plan-display.js";
 
 /** system router：健康检查（公开） */
 const systemRouter = router({
@@ -718,17 +719,20 @@ const threadsRouter = router({
         // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
         const r = await client.query(
-          `SELECT id, title, mode, status, progress_done, progress_total, created_by, agent_id, created_at, updated_at
-           FROM threads WHERE workspace_id=$1 AND id=$2`,
-          [scope.workspaceId, input.threadId],
+          `SELECT id, title, mode, status, progress_done, progress_total, created_by, agent_id, created_at, updated_at, plan, plan_version
+           FROM threads WHERE workspace_id=$1 AND id=$2 AND tenant_id=$3`,
+          [scope.workspaceId, input.threadId, scope.tenantId],
         );
-        return r.rows[0] ?? null;
+        await client.query("COMMIT");
+        if (!r.rows[0]) return null;
+        const { plan, ...detail } = r.rows[0];
+        return { ...detail, ...projectThreadPlan(plan) };
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw err;
       } finally {
-        await client.query("COMMIT").catch(() => undefined);
         client.release();
       }
     }),
