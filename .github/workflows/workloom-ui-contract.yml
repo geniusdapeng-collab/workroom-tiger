@@ -89,6 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs tests/client-repair-provenance.test.mjs
+          pnpm -C "$WORKLOOM_DIR" exec vitest run scripts/release-gate.test.ts
           pnpm -C "$WORKLOOM_DIR" test
           RUN_DB_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test fence-engine/fence-engine.test.ts
           # The sequence assertions share one database and must run serially.
