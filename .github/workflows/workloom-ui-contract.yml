@@ -110,7 +110,7 @@ jobs:
           pnpm -C "$WORKLOOM_DIR" typecheck
           for CLIENT in web webb webc; do
             test -f "$WORKLOOM_DIR/apps/$CLIENT/package.json"
-            pnpm -C "$WORKLOOM_DIR/apps/$CLIENT" build
+            NODE_ENV=production pnpm -C "$WORKLOOM_DIR/apps/$CLIENT" build
           done
       - name: 安装 Chromium
         run: pnpm -C "$WORKLOOM_DIR/apps/web" exec playwright install --with-deps chromium
