@@ -1910,6 +1910,7 @@ const rosterRouter = router({
 
         const ws = await client.query<{ name: string; bundle_id: string | null; is_example: boolean }>(
         `SELECT name, bundle_id, is_example FROM workspaces WHERE id=$1`, [scope.workspaceId]);
+        const bundleId = ws.rows[0]?.bundle_id;
 
         // 航道许可：fence_bindings 逐条对账 fence_rules 当前 active 版本（缺规则=声明悬空，标红 F2.10）
         const fences = agent.fence_bindings.length === 0 ? [] : (await client.query<{
@@ -1986,7 +1987,7 @@ const rosterRouter = router({
             constraints: agent.meta?.prompt?.constraints ?? [],
           },
           workspaceName: ws.rows[0]?.name ?? "",
-          bundle: "workloom-hotel", // 首版唯一行业 Bundle（D2）
+          bundle: bundleId?.trim() ? bundleId : "未配置",
           nightWindow: { open: inNightWindow(), range: "22:00–08:00" },
           fences: agent.fence_bindings.map((ruleId) => {
             const hit = fences.find((f) => f.rule_id === ruleId);
