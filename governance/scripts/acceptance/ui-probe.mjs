@@ -16,6 +16,7 @@ import pg from "pg";
 import { cliArgs, findRepoRoot, loadProfile, urlsOf } from "./lib/profile.mjs";
 import { loadChromium } from "./lib/playwright.mjs";
 import { loginAsMember, productIdOf } from "./lib/session.mjs";
+import { profileEvidence } from "./lib/ui-evidence.mjs";
 
 const args = cliArgs();
 const REPO_ROOT = findRepoRoot();
@@ -115,7 +116,11 @@ async function loginPc() {
 
 const token = await loginPc();
 const shot = async (target, name) => {
-  await target.screenshot({ path: join(SHOT_DIR, `${name}.png`) }).catch(() => undefined);
+  try {
+    await target.screenshot({ path: join(SHOT_DIR, `${name}.png`) });
+  } catch (error) {
+    report.issues.push({ where: `screenshot:${name}`, detail: `截图未写入：${String(error).split("\n")[0]}` });
+  }
 };
 
 /* ① 岗位档案页 */
@@ -141,14 +146,16 @@ if (!args.has("--skip-agents")) {
           uninstalled: /未安装/.test(text),
           dangling: text.includes("声明悬空") || text.includes("标红"),
           notFound: text.includes("成员不存在或已停用"),
-          hasHeader: /成员档案 · \S/.test(text),
+          // Read the actual heading's own text. Its nested version badge must
+          // not supply a missing name, and body copy cannot impersonate a title.
+          heading: [...document.querySelectorAll("h1,h2")]
+            .map((el) => [...el.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim())
+            .find((heading) => /^(?:员工|成员)档案\s*·/.test(heading)) ?? "",
         };
       });
-      const identityOk = dom.hasHeader && dom.identity.includes(versionLabel(agent.version)) && dom.identity.includes("来源行业包");
-      const fenceOk = !dom.dangling && (expectedFences === 0 || dom.declared >= expectedFences);
-      const skillsOk = expectedSkills.length === 0 ? !dom.uninstalled : dom.equipped >= expectedSkills.length && !dom.uninstalled;
-      row.ok = identityOk && fenceOk && skillsOk && !dom.notFound;
-      row.detail = { identityOk, fenceOk, skillsOk, declared: dom.declared, expectedFences, equipped: dom.equipped, expectedSkills: expectedSkills.length, errors: consoleErrors.slice(0, 2) };
+      const verdict = profileEvidence(dom, { name: agent.name, versionLabel: versionLabel(agent.version), expectedFences, expectedSkills: expectedSkills.length });
+      row.ok = verdict.ok;
+      row.detail = { ...verdict, heading: dom.heading, declared: dom.declared, expectedFences, equipped: dom.equipped, expectedSkills: expectedSkills.length, errors: consoleErrors.slice(0, 2) };
     } catch (err) {
       row.detail = { error: String(err).split("\n")[0], errors: consoleErrors.slice(0, 3) };
     }

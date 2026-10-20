@@ -119,6 +119,8 @@ jobs:
           done
       - name: 安装 Chromium
         run: pnpm -C "$WORKLOOM_DIR/apps/web" exec playwright install --with-deps chromium
+      - name: 验证体验探针绑定真实界面动作与结果
+        run: cd "$WORKLOOM_DIR" && node --test scripts/acceptance/lib/ui-evidence.test.mjs
       - name: 三端生产预览主入口与首帧横向溢出冒烟
         run: CI=true pnpm -C "$WORKLOOM_DIR/apps/web" test:consumer
       - name: 留存三端浏览器冒烟证据
