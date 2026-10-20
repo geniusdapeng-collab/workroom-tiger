@@ -61,6 +61,30 @@
       "repairedSha256": "4a5f7d9a630136cb170170dcdbc32e471d77824952dab70b70466ee73939a576",
       "sourceCommit": "3ff33c56b07c1ff6321e463b7ba5423373c7d151",
       "reason": "Keep the aria-hidden decorative roster animation outside sequential keyboard focus while retaining pointer activation, live animation and reduced-motion behavior."
+    },
+    {
+      "path": "apps/web/src/components/hud/gamification.tsx",
+      "card": "MC-033",
+      "upstreamSha256": "17a2ae4a7d854d41a4152760c357f3e86aecc576a7c32088a1ec427a59cbe057",
+      "repairedSha256": "cbd00bbe3fe4f35305c17cdb7590be96fddcfb0a23ecd4c65d3574213937d2e4",
+      "sourceCommit": "ed0026c0e613e754a4cd1d8bbd20aad4d8b75b27",
+      "reason": "Keep employee versions in normal text flow with an unchanged avatar and level semantics; verify narrow and enlarged-text layouts with real browser geometry."
+    },
+    {
+      "path": "apps/web/src/pages/p8/P8.tsx",
+      "card": "MC-033",
+      "upstreamSha256": "02cdc45b7b9d38c431de021fda35ec8293a9792a873df8219b39dc619efb43ff",
+      "repairedSha256": "f002d7f13850bbf1ea95eced28a3ea13470eb7d409f1c061304154fcbc5b1ae8",
+      "sourceCommit": "ed0026c0e613e754a4cd1d8bbd20aad4d8b75b27",
+      "reason": "Give skill names, versions and installation state readable width while retaining existing labels, state and navigation; bind real pointer and keyboard regressions."
+    },
+    {
+      "path": "apps/web/src/components/loommate/LoomMate.tsx",
+      "card": "MC-034",
+      "upstreamSha256": "7713f3c1332937d2781720bc67d1fc7a4acee4641f30d863ae15bd2b212218f1",
+      "repairedSha256": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
+      "sourceCommit": "9df5cdb84d3dd5c8873fe7cc6ed7bc186486e842",
+      "reason": "MC-034 corrects unread-count contrast with existing tokens; MC-035 bounds scrollable surfaces and preserves full numeric badges, avatar dimensions and ordinary pointer and keyboard controls. Both distinct regressions are required."
     }
   ],
   "testAdditions": [
@@ -78,6 +102,21 @@
       "path": "apps/web/src/components/loomball/LoomBall.accessibility.test.tsx",
       "card": "MC-032",
       "sha256": "4f3eefb9d9efe45313d039e4cb446fcb67df4eeb99dc56be3d4466409f03d287"
+    },
+    {
+      "path": "scripts/acceptance/lib/level-badge-layout.test.mjs",
+      "card": "MC-033",
+      "sha256": "84432fd0a6301de4aabfe8c37366d06c6a8f5fdd61c2c7a267c9acd4150ee9ff"
+    },
+    {
+      "path": "scripts/acceptance/lib/loommate-unread-contrast.test.mjs",
+      "card": "MC-034",
+      "sha256": "46d50e66847e68a0d6665182d0004404707d64d3a8afd17c4d98d0a8c0077fc5"
+    },
+    {
+      "path": "scripts/acceptance/lib/loommate-viewport.test.mjs",
+      "card": "MC-035",
+      "sha256": "e1fcd2ea0879408f7bdaf38122d1aa1937227140117a14822c61e7524a8d81cf"
     }
   ]
 }

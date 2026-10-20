@@ -18,6 +18,12 @@ const banner = "apps/web/src/components/SimBanner.tsx";
 const modeRegression = "apps/web/src/pages/onboarding/Onboarding.mode.test.tsx";
 const ball = "apps/web/src/components/loomball/LoomBall.tsx";
 const ballRegression = "apps/web/src/components/loomball/LoomBall.accessibility.test.tsx";
+const levelBadge = "apps/web/src/components/hud/gamification.tsx";
+const profilePage = "apps/web/src/pages/p8/P8.tsx";
+const levelRegression = "scripts/acceptance/lib/level-badge-layout.test.mjs";
+const loomMate = "apps/web/src/components/loommate/LoomMate.tsx";
+const unreadRegression = "scripts/acceptance/lib/loommate-unread-contrast.test.mjs";
+const viewportRegression = "scripts/acceptance/lib/loommate-viewport.test.mjs";
 const manifestFile = ".workloom-client-repairs.json";
 const write = (root, path, content) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); };
 
@@ -25,7 +31,7 @@ function fixture(t, repaired = true) {
   const root = mkdtempSync(join(tmpdir(), "tiger-client-repairs-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const g = join(root, "governance");
-  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball];
+  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball, levelBadge, profilePage, loomMate];
   for (const path of entries) write(g, path, `original:${path}\n`);
   write(g, ".workloom-ui.json", JSON.stringify({ version: "0.1.17" }));
   const state = {
@@ -44,7 +50,7 @@ function fixture(t, repaired = true) {
     repairs: [], testAdditions: [],
   };
   if (repaired) {
-    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"], [ball, "MC-032"]]) {
+    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"], [ball, "MC-032"], [levelBadge, "MC-033"], [profilePage, "MC-033"], [loomMate, "MC-034"]]) {
       write(g, path, `reviewed repair:${path}\n`);
       manifest.repairs.push({ path, card, upstreamSha256: state.managedFiles[path].sha256, repairedSha256: digest(readFileSync(join(g, path))), sourceCommit: "a".repeat(40), reason: "Reviewed contract repair with focused behavioral regression coverage." });
     }
@@ -54,6 +60,10 @@ function fixture(t, repaired = true) {
     manifest.testAdditions.push({ path: modeRegression, card: "MC-027", sha256: digest(readFileSync(join(g, modeRegression))) });
     write(g, ballRegression, "test('decorative animation stays outside sequential keyboard focus', () => {});\n");
     manifest.testAdditions.push({ path: ballRegression, card: "MC-032", sha256: digest(readFileSync(join(g, ballRegression))) });
+    for (const [path, card] of [[levelRegression, "MC-033"], [unreadRegression, "MC-034"], [viewportRegression, "MC-035"]]) {
+      write(g, path, "test('real browser component evidence', () => {});\n");
+      manifest.testAdditions.push({ path, card, sha256: digest(readFileSync(join(g, path))) });
+    }
     write(g, manifestFile, JSON.stringify(manifest));
   }
   return { root, g, manifest, state, save: () => write(g, manifestFile, JSON.stringify(manifest)) };
@@ -204,4 +214,33 @@ for (const kind of ["changed-source", "missing-source-registration", "wrong-sour
     f.save();
     assert.ok(verifyTigerClientRepairs(f.root).length > 0);
   });
+}
+for (const [card, source, regressionPath] of [
+  ["MC-033", levelBadge, levelRegression],
+  ["MC-033", profilePage, levelRegression],
+  ["MC-034", loomMate, unreadRegression],
+  ["MC-035", loomMate, viewportRegression],
+]) {
+  for (const kind of ["changed-source", "missing-source-registration", "wrong-source-card", "missing-test-registration", "changed-test", "wrong-test-card", "executable-test", "symlink-test"]) {
+    test(`${card} ${source} browser regression binding ${kind} fails closed`, (t) => {
+      const f = fixture(t);
+      const repair = f.manifest.repairs.find((entry) => entry.path === source);
+      const boundTest = f.manifest.testAdditions.find((entry) => entry.path === regressionPath);
+      if (kind === "changed-source") write(f.g, source, "unreviewed component change\n");
+      if (kind === "missing-source-registration") f.manifest.repairs = f.manifest.repairs.filter((entry) => entry.path !== source);
+      if (kind === "wrong-source-card") repair.card = "MC-012";
+      if (kind === "missing-test-registration") f.manifest.testAdditions = f.manifest.testAdditions.filter((entry) => entry.path !== regressionPath);
+      if (kind === "changed-test") write(f.g, regressionPath, "unreviewed browser assertions\n");
+      if (kind === "wrong-test-card") boundTest.card = "MC-012";
+      if (kind === "executable-test") chmodSync(join(f.g, regressionPath), 0o755);
+      if (kind === "symlink-test") {
+        const external = join(f.root, `outside-${card}.test.mjs`);
+        copyFileSync(join(f.g, regressionPath), external);
+        rmSync(join(f.g, regressionPath));
+        symlinkSync(external, join(f.g, regressionPath));
+      }
+      f.save();
+      assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+    });
+  }
 }

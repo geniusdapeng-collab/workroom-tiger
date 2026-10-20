@@ -17,6 +17,9 @@ const REPAIR_PATHS = new Map([
   ["apps/web/src/pages/onboarding/Onboarding.tsx", "MC-027"],
   ["apps/web/src/components/SimBanner.tsx", "MC-027"],
   ["apps/web/src/components/loomball/LoomBall.tsx", "MC-032"],
+  ["apps/web/src/components/hud/gamification.tsx", "MC-033"],
+  ["apps/web/src/pages/p8/P8.tsx", "MC-033"],
+  ["apps/web/src/components/loommate/LoomMate.tsx", "MC-034"],
 ]);
 const TEST_PATHS = new Map([
   ["apps/web/src/components/star-ring/StarRing.contract.test.tsx", {
@@ -27,6 +30,15 @@ const TEST_PATHS = new Map([
   }],
   ["apps/web/src/components/loomball/LoomBall.accessibility.test.tsx", {
     card: "MC-032", repairs: ["apps/web/src/components/loomball/LoomBall.tsx"],
+  }],
+  ["scripts/acceptance/lib/level-badge-layout.test.mjs", {
+    card: "MC-033", repairs: ["apps/web/src/components/hud/gamification.tsx", "apps/web/src/pages/p8/P8.tsx"],
+  }],
+  ["scripts/acceptance/lib/loommate-unread-contrast.test.mjs", {
+    card: "MC-034", repairs: ["apps/web/src/components/loommate/LoomMate.tsx"],
+  }],
+  ["scripts/acceptance/lib/loommate-viewport.test.mjs", {
+    card: "MC-035", repairs: ["apps/web/src/components/loommate/LoomMate.tsx"],
   }],
 ]);
 const SHA256 = /^[a-f0-9]{64}$/;

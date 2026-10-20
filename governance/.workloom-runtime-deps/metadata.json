@@ -32,7 +32,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "6b2e321f965c7c4c83d54baa219749d0a3acd404fd9166f42180f4f100ad0233"
+      "sha256": "9615d421f931661624c494b0baf282105ab2f60888d09745e1b48606c3fa9317"
     },
     {
       "path": "packages/base/package.json",
@@ -56,7 +56,7 @@
     },
     {
       "path": "pnpm-lock.yaml",
-      "sha256": "843515ef787fc614b4e6ac3a93242b963b56253d900a71d5b319aa1571f158fb"
+      "sha256": "2fae0c36555a8162ccadcecc1c4d626b7bbc1b7b090c2aae76cfd1996d8026e9"
     },
     {
       "path": "product.manifest.json",
