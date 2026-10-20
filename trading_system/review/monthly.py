@@ -15,12 +15,58 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 from .. import config
+from ..ledger_io import write_json_atomic
 
 logger = logging.getLogger(__name__)
+
+# Approval recovery records are deliberately not .json proposal entries.
+APPROVAL_TRANSACTION = ".approval-transaction"
+
+
+@contextmanager
+def _approval_lock(path: Path):
+    """Serialize cooperating proposal readers/writers; contention fails closed.
+
+    Keep the lock file in place: unlinking it would let a new writer lock a
+    different inode while the previous writer still holds the old one.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _ensure_no_approval_transaction(proposals_dir: str) -> None:
+    """Incomplete two-file commits must not be presented as approved proposals."""
+    path = os.path.join(proposals_dir, APPROVAL_TRANSACTION)
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        logger.exception("审批恢复记录检查失败: %s", path)
+        raise
+    logger.error("审批事务待恢复，暂不读取或修改提案: %s", path)
+    raise RuntimeError(f"审批事务待恢复: {path}；请重试原审批或驳回操作")
 
 
 @dataclass
@@ -51,14 +97,34 @@ def _proposal_path(proposals_dir: str, proposal_id: str) -> str:
 def save_proposal(p: Proposal, proposals_dir: str | None = None) -> str:
     """提案落盘（会计账，跨轮累计）。"""
     d = proposals_dir or config.REVIEW_PROPOSALS_DIR
-    os.makedirs(d, exist_ok=True)
-    path = _proposal_path(d, p.proposal_id)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(asdict(p), f, ensure_ascii=False, indent=2)
+    try:
+        with _approval_lock(Path(d).resolve() / ".approval.lock"):
+            _ensure_no_approval_transaction(d)
+            return _save_proposal_unlocked(p, d)
+    except Exception:
+        logger.exception("提案 %s 保存失败: %s", p.proposal_id, d)
+        raise
+
+
+def _save_proposal_unlocked(p: Proposal, proposals_dir: str) -> str:
+    """Caller must hold the proposal-directory lock."""
+    path = _proposal_path(proposals_dir, p.proposal_id)
+    write_json_atomic(path, asdict(p))
     return path
 
 
 def load_proposal(proposals_dir: str, proposal_id: str) -> Proposal:
+    try:
+        with _approval_lock(Path(proposals_dir).resolve() / ".approval.lock"):
+            return _load_proposal_unlocked(proposals_dir, proposal_id)
+    except Exception:
+        logger.exception("提案 %s 读取失败", proposal_id)
+        raise
+
+
+def _load_proposal_unlocked(proposals_dir: str, proposal_id: str) -> Proposal:
+    """Caller must hold the proposal-directory lock."""
+    _ensure_no_approval_transaction(proposals_dir)
     path = _proposal_path(proposals_dir, proposal_id)
     if not os.path.exists(path):
         raise FileNotFoundError(f"提案不存在: {proposal_id}（{path}）")
@@ -72,14 +138,20 @@ def list_proposals(proposals_dir: str | None = None) -> list[Proposal]:
     out: list[Proposal] = []
     if not os.path.isdir(d):
         return out
-    for name in sorted(os.listdir(d)):
-        if not name.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(d, name), encoding="utf-8") as f:
-                out.append(Proposal(**json.load(f)))
-        except Exception as exc:
-            logger.warning("提案文件损坏跳过 %s: %s", name, exc)
+    try:
+        with _approval_lock(Path(d).resolve() / ".approval.lock"):
+            _ensure_no_approval_transaction(d)
+            for name in sorted(os.listdir(d)):
+                if not name.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(d, name), encoding="utf-8") as f:
+                        out.append(Proposal(**json.load(f)))
+                except Exception as exc:
+                    logger.warning("提案文件损坏跳过 %s: %s", name, exc)
+    except Exception:
+        logger.exception("提案列表读取失败: %s", d)
+        raise
     out.sort(key=lambda p: p.created_at)
     return out
 
