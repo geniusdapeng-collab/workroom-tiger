@@ -160,7 +160,7 @@
     {
       "path": "scripts/acceptance/lib/task-plan-visibility.test.mjs",
       "card": "MC-041",
-      "sha256": "2d252679cf6f61a8ac4e90d7854f528999b1b5590db2b5dce86ccc71b862e88b"
+      "sha256": "795ead39baaadc5eaf571e81a8142c15f28b96d063d599ef20fd73f282921807"
     }
   ]
 }

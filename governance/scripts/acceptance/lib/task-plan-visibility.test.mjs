@@ -16,7 +16,7 @@ const ROOT = path.resolve(process.env.MC041_SOURCE_DIR ?? path.join(path.dirname
 const WEB = path.join(ROOT, "governance/apps/web");
 const OUT = process.env.MC041_EVIDENCE_DIR ? path.resolve(process.env.MC041_EVIDENCE_DIR) : null;
 const requireWeb = createRequire(path.join(WEB, "package.json"));
-const { chromium } = requireWeb("@playwright/test");
+const { chromium, expect } = requireWeb("@playwright/test");
 const { createServer } = await import(requireWeb.resolve("vite"));
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SOURCE_PATHS = ["src/pages/p2/P2.tsx", "src/shell/Bridge.tsx", "src/shell/SideNav.tsx",
@@ -33,6 +33,14 @@ const deferred = () => {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
+};
+const exactPlanItems = async (region, expected, { timeout = 3000, onSample } = {}) => {
+  await expect.poll(async () => {
+    const actual = await region.getByRole("listitem").allTextContents();
+    onSample?.(actual);
+    return actual;
+  }, { timeout }).toEqual(expected);
+  assert.deepEqual(await region.getByRole("listitem").allTextContents(), expected);
 };
 const thread = (id = "mc041-task", additions = {}) => ({
   id, title: id === "mc041-task" ? "本周工作记录复盘" : "另一项独立任务",
@@ -173,7 +181,7 @@ test("MC-041 real task breakdown at desktop/mobile widths", { timeout: 240_000 }
         detail: { plan: long ? PLAN.map((step) => ({ ...step, label: step.label + "\n" + "公开资料核对".repeat(100) })) : PLAN },
       }, async ({ region, page, state, row }) => {
         await region.waitFor();
-        assert.deepEqual(await region.getByRole("listitem").allTextContents(), state.detail.plan.map((step) => step.label));
+        await exactPlanItems(region, state.detail.plan.map((step) => step.label));
         assert.equal(await region.locator("script").count(), 0);
         assert.equal(await region.getByRole("button").count(), 0);
         assert.equal(await page.getByPlaceholder(/^说出一句话目标/).count(), 0, "readonly member has no task mutation composer");
@@ -189,6 +197,28 @@ test("MC-041 real task breakdown at desktop/mobile widths", { timeout: 240_000 }
         assert.ok(row.geometry.scrollWidth <= width + 1);
         assert.ok(row.geometry.items.every((item) => item.scrollWidth <= item.clientWidth + 1
           && item.rects.every((rect) => rect.left >= row.geometry.left && rect.right <= row.geometry.right)));
+      });
+      await scene(`readiness-gate-${width}`, width, { loading: true }, async ({ region, state, page, row }) => {
+        await region.getByRole("status", { name: "任务拆解正在加载" }).waitFor();
+        await region.waitFor();
+        row.beforeReady = await region.getByRole("listitem").allTextContents();
+        assert.deepEqual(row.beforeReady, [], "visible section can still be a loading skeleton");
+        const firstSample = deferred();
+        const waiting = exactPlanItems(region, PLAN.map((step) => step.label), {
+          onSample: (actual) => firstSample.resolve(actual),
+        }).then(() => ({ ok: true }), (error) => ({ ok: false, error }));
+        assert.deepEqual(await firstSample.promise, []);
+        state.gate.resolve();
+        const outcome = await waiting;
+        if (!outcome.ok) throw outcome.error;
+        row.afterReady = await region.getByRole("listitem").allTextContents();
+        row.geometry = await region.evaluate((node) => {
+          const box = node.getBoundingClientRect();
+          return { left: box.left, right: box.right, scrollWidth: document.documentElement.scrollWidth };
+        });
+        assert.ok(row.geometry.left >= 0 && row.geometry.right <= width + 1);
+        assert.ok(row.geometry.scrollWidth <= width + 1);
+        assert.equal(await page.getByPlaceholder(/^说出一句话目标/).count(), 0);
       });
       for (const [name, detail, text] of [
         ["pending", { plan: null, plan_state: "pending" }, "正在等待任务拆解"],
@@ -224,6 +254,20 @@ test("MC-041 real task breakdown at desktop/mobile widths", { timeout: 240_000 }
         assert.equal(await region.getByRole("listitem").count(), 0);
       });
     }
+    for (const [name, options] of [
+      ["never-ready", { loading: true }],
+      ["wrong-order", { detail: { plan: [...PLAN].reverse() } }],
+      ["missing-row", { detail: { plan: [PLAN[0]] } }],
+    ]) await scene(`readiness-rejects-${name}`, 1440, options, async ({ region, row }) => {
+      await region.waitFor();
+      if (!options.loading) await region.getByRole("listitem").first().waitFor();
+      row.observedLabels = await region.getByRole("listitem").allTextContents();
+      assert.deepEqual(row.observedLabels, options.loading ? [] : options.detail.plan.map((step) => step.label));
+      await assert.rejects(
+        exactPlanItems(region, PLAN.map((step) => step.label), { timeout: 200 }),
+      );
+      row.strictOracleRejected = true;
+    });
     await scene("delayed-poll", 1440, { detail: { plan: null, plan_state: "pending" } }, async ({ region, state, page }) => {
       await region.getByText("正在等待任务拆解", { exact: true }).waitFor();
       state.detail = thread();
