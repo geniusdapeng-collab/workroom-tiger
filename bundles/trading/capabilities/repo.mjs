@@ -6,14 +6,14 @@
  *   repoStatus     本仓自述：product.manifest 摘要 + bundles/docs/脚本计数
  *   repoDocs       docs/*.md 索引（文件名 + 一级标题），给 Agent 找文档用
  *   bundleSummary  默认行业包概览：skills / fences / pipelines / presets 计数
- *   repoReadiness  接入就绪度：Node、依赖、运行时资产、密钥文件、MCP 入口、dsh-gate pin
+ *   repoReadiness  接入就绪度：Python 引擎与 governance 治理壳布局、Node、MCP 入口
  *   opsInventory   平台运营目录概览（platform-ops/，目录不存在时如实说明）
- *   assetsInventory 素材库概览（bundles/<bundle>/library/**，目录不存在时如实说明）
+ *   assetsInventory 素材库概览（governance/bundles/<bundle>/library/**，目录不存在时如实说明）
  *
  * 边界：只读本仓文件；路径监狱（仓内相对路径）；单文件 8MB / 2 万行上限；
- * 不回显密钥值（只报"是否存在"）；不联网、不写盘、不触发任何渲染或业务动作。
+ * 不读取用户环境/密钥文件；不联网、不写盘、不触发任何业务动作。
  */
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 
 const BUNDLE_ID = "trading";
@@ -45,32 +45,52 @@ function assertKeys(input, allowed) {
   return value;
 }
 
-/** 仓内路径监狱：只接受相对路径，realpath 复核防软链逃逸 */
+/** All file reads stay below this module's repository; symbolic and hard links are rejected. */
 function insideRepo(relativePath, label = "path") {
   const base = root();
-  if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(relativePath)) {
+  if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.startsWith("/") || /^[A-Za-z]:/u.test(relativePath)) {
     throw new RepoCapabilityError(`${label} 须为仓库内相对路径`);
   }
   const absolute = resolve(base, relativePath);
   const rel = relative(base, absolute);
-  if (!rel || rel.startsWith("..") || rel.split(sep).includes("..")) {
-    throw new RepoCapabilityError(`${label} 越出仓库根（路径监狱）`);
+  if (!rel || rel === ".." || rel.startsWith(`..${sep}`)) throw new RepoCapabilityError(`${label} 越出仓库根`);
+  let current = base;
+  for (const part of rel.split(sep)) {
+    current = join(current, part);
+    let info;
+    try { info = lstatSync(current); }
+    catch (error) { if (error.code === "ENOENT") break; throw error; }
+    if (info.isSymbolicLink()) throw new RepoCapabilityError(`${label} 含符号链接`, "UNSAFE_PATH");
   }
   if (existsSync(absolute)) {
     const real = relative(realpathSync(base), realpathSync(absolute));
-    if (!real || real.startsWith("..") || real.split(sep).includes("..")) {
-      throw new RepoCapabilityError(`${label} 的真实路径越出仓库根（符号链接逃逸）`);
-    }
+    if (!real || real === ".." || real.startsWith(`..${sep}`)) throw new RepoCapabilityError(`${label} 的真实路径越出仓库根`, "UNSAFE_PATH");
   }
   return absolute;
 }
 
+function confined(absolute, label = "path") { return insideRepo(relative(root(), absolute), label); }
+function directoryExists(absolute) {
+  const path = confined(absolute);
+  return existsSync(path) && lstatSync(path).isDirectory();
+}
+function fileExists(absolute) {
+  const path = confined(absolute);
+  return existsSync(path) && lstatSync(path).isFile();
+}
 function readText(absolute, label) {
-  if (!existsSync(absolute)) return null;
-  const info = statSync(absolute);
-  if (!info.isFile()) throw new RepoCapabilityError(`${label} 不是普通文件`);
-  if (info.size > MAX_FILE_BYTES) throw new RepoCapabilityError(`${label} 超过读取上限`, "TOO_LARGE");
-  return readFileSync(absolute, "utf8");
+  const path = confined(absolute, label);
+  if (!existsSync(path)) return null;
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.nlink !== 1) throw new RepoCapabilityError(`${label} 不是独立普通文件`, "UNSAFE_PATH");
+    if (info.size > MAX_FILE_BYTES) throw new RepoCapabilityError(`${label} 超过读取上限`, "TOO_LARGE");
+    const text = readFileSync(fd, "utf8");
+    if (Buffer.byteLength(text) > MAX_FILE_BYTES || text.split("\n").length > 20000) throw new RepoCapabilityError(`${label} 超过读取上限`, "TOO_LARGE");
+    confined(path, label);
+    return text;
+  } finally { closeSync(fd); }
 }
 
 function readJson(absolute, label) {
@@ -84,15 +104,15 @@ function readJson(absolute, label) {
 }
 
 function countFiles(dir) {
-  if (!existsSync(dir)) return 0;
+  if (!directoryExists(dir)) return 0;
   let total = 0;
   const walk = (current, depth) => {
     if (depth > 4) return;
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       if (entry.name.startsWith(".")) continue;
-      const child = join(current, entry.name);
+      const child = confined(join(current, entry.name));
       if (entry.isDirectory()) walk(child, depth + 1);
-      else total += 1;
+      else if (entry.isFile()) total += 1;
     }
   };
   walk(dir, 0);
@@ -100,31 +120,11 @@ function countFiles(dir) {
 }
 
 function listDirs(dir) {
-  if (!existsSync(dir)) return [];
+  if (!directoryExists(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map((entry) => entry.name)
     .sort();
-}
-
-function envFileKeyPresence(name) {
-  const candidates = [process.env.WORKLOOM_KEYS_FILE, join(process.env.HOME ?? "", ".workloom/live.env")]
-    .filter((entry) => typeof entry === "string" && entry.trim());
-  for (const file of candidates) {
-    if (!existsSync(file)) continue;
-    let text = "";
-    try {
-      text = readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      const match = line.match(/^([A-Z0-9_]+)=(.*)$/u);
-      if (match && match[1] === name) return { present: Boolean(match[2].trim()), source: file };
-    }
-    return { present: false, source: file };
-  }
-  return { present: false, source: null };
 }
 
 /* ---------------------------------- 能力 ---------------------------------- */
@@ -134,15 +134,17 @@ export function repoStatus(input) {
   assertKeys(input, []);
   const base = root();
   const manifest = readJson(join(base, "product.manifest.json"), "product.manifest.json") ?? {};
-  const docsCount = existsSync(join(base, "docs"))
+  const docsCount = directoryExists(join(base, "docs"))
     ? readdirSync(join(base, "docs")).filter((name) => name.endsWith(".md")).length
     : 0;
   return {
+    engineRoot: base,
+    governanceRoot: join(base, "governance"),
     productId: manifest.productId ?? null,
     defaultBundle: manifest.defaultBundle ?? BUNDLE_ID,
     demoWorkspaceSlug: manifest.demoWorkspaceSlug ?? null,
     desktopPortOffset: manifest.desktop?.portOffset ?? null,
-    bundles: listDirs(join(base, "bundles")),
+    bundles: listDirs(join(base, "governance", "bundles")),
     docsMarkdownCount: docsCount,
     scriptsToolsFiles: countFiles(join(base, "scripts", "tools")),
     note: "只读自述；行业语义与运行能力以本仓文档与清单为准",
@@ -152,10 +154,13 @@ export function repoStatus(input) {
 /** docs/*.md 索引：文件名 + 一级标题（Agent 找文档用） */
 export function repoDocs(input) {
   const value = assertKeys(input, ["limit"]);
-  const limit = Number.isInteger(value.limit) ? Math.min(Math.max(value.limit, 1), DOC_LIMIT) : DOC_LIMIT;
+  if (value.limit !== undefined && (!Number.isInteger(value.limit) || value.limit < 1 || value.limit > DOC_LIMIT)) {
+    throw new RepoCapabilityError("limit 须为 1 到 60 的整数");
+  }
+  const limit = value.limit ?? DOC_LIMIT;
   const base = root();
   const docsDir = join(base, "docs");
-  if (!existsSync(docsDir)) return { found: false, docs: [], hint: "本仓没有 docs/ 目录" };
+  if (!directoryExists(docsDir)) return { found: false, docs: [], hint: "本仓没有 docs/ 目录" };
   const docs = readdirSync(docsDir)
     .filter((name) => name.endsWith(".md"))
     .sort()
@@ -171,16 +176,16 @@ export function repoDocs(input) {
 /** 默认行业包概览：skills / fences / pipelines / presets 计数 + 围栏规则样例 */
 export function bundleSummary(input) {
   assertKeys(input, []);
-  const bundleDir = join(root(), "bundles", BUNDLE_ID);
-  if (!existsSync(bundleDir)) return { found: false, bundle: BUNDLE_ID, hint: "没有该行业包目录" };
-  const manifest = readJson(join(bundleDir, "bundle.json"), `bundles/${BUNDLE_ID}/bundle.json`);
+  const bundleDir = join(root(), "governance", "bundles", BUNDLE_ID);
+  if (!directoryExists(bundleDir)) return { found: false, bundle: BUNDLE_ID, hint: "没有该行业包目录" };
+  const manifest = readJson(join(bundleDir, "bundle.json"), `governance/bundles/${BUNDLE_ID}/bundle.json`);
   const counts = {};
   for (const name of ["skills", "fences", "pipelines", "presets", "library"]) {
     counts[name] = countFiles(join(bundleDir, name));
   }
   const fenceIds = [];
   const fencesDir = join(bundleDir, "fences");
-  if (existsSync(fencesDir)) {
+  if (directoryExists(fencesDir)) {
     for (const name of readdirSync(fencesDir).sort()) {
       if (!/\.ya?ml$/u.test(name)) continue;
       const text = readText(join(fencesDir, name), `fences/${name}`) ?? "";
@@ -192,6 +197,7 @@ export function bundleSummary(input) {
   return {
     found: true,
     bundle: BUNDLE_ID,
+    location: `governance/bundles/${BUNDLE_ID}`,
     version: manifest?.version ?? null,
     counts,
     fenceRuleSample: fenceIds,
@@ -203,25 +209,30 @@ export function bundleSummary(input) {
 export function repoReadiness(input) {
   assertKeys(input, []);
   const base = root();
+  const governance = join(base, "governance");
   const nodeMajor = Number(process.versions.node.split(".")[0]);
-  const gatePkg = readJson(join(base, "packages", "runtime", "dsh-gate", "package.json"), "dsh-gate/package.json");
-  const ark = envFileKeyPresence("VOLCENGINE_ARK_API_KEY");
+  const gatePkg = readJson(join(governance, "packages", "runtime", "dsh-gate", "package.json"), "governance/dsh-gate/package.json");
   const items = [
     { id: "node", ok: nodeMajor >= 24, detail: `Node ${process.versions.node}（要求 ≥ 24）` },
-    { id: "deps", ok: existsSync(join(base, "node_modules")), detail: "node_modules（缺失先 pnpm install）" },
-    { id: "runtime-deps", ok: existsSync(join(base, ".workloom-runtime-deps")), detail: "受控运行时资产清单" },
-    { id: "mcp-entry", ok: existsSync(join(base, "scripts", "workloom-agent-mcp.mjs")), detail: "stdio MCP 入口" },
-    { id: "keys-file", ok: ark.present, detail: ark.present ? `密钥文件已配置（${ark.source}）` : "缺 VOLCENGINE_ARK_API_KEY（用到出片/出图时才需要）" },
-    { id: "dsh-gate", ok: Boolean(gatePkg), detail: `内置 DSH 组件 pin：${gatePkg ? { ...gatePkg.dependencies, ...gatePkg.devDependencies }["@deepseek-ai/dsh"] : "未登记"}` },
+    { id: "engine", ok: fileExists(join(base, "trading_system", "__init__.py")), detail: "根目录 Python 引擎；实际 Python 版本及依赖由 tiger-agent doctor 检查" },
+    { id: "governance-deps", ok: directoryExists(join(governance, "node_modules")), detail: "governance/node_modules；独立 Tiger CLI/MCP 使用 Node 内置模块" },
+    { id: "runtime-deps", ok: fileExists(join(governance, ".workloom-runtime-deps")) || directoryExists(join(governance, ".workloom-runtime-deps")), detail: "governance/.workloom-runtime-deps（治理壳运行时资产，非公开 paper 必需项）" },
+    { id: "mcp-entry", ok: fileExists(join(base, "scripts", "workloom-agent-mcp.mjs")), detail: "原通用只读 stdio MCP 入口" },
+    { id: "tiger-mcp-entry", ok: fileExists(join(base, "scripts", "tiger-agent-mcp.mjs")), detail: "独立 Tiger stdio MCP 入口，默认只读" },
+    { id: "dsh-gate", ok: Boolean(gatePkg), detail: `governance 内置 DSH 组件 pin：${gatePkg ? { ...gatePkg.dependencies, ...gatePkg.devDependencies }["@deepseek-ai/dsh"] ?? "未登记" : "未登记"}` },
   ];
-  return { ready: items.filter((item) => ["node", "deps", "mcp-entry"].includes(item.id)).every((item) => item.ok), items };
+  return {
+    ready: items.filter((item) => ["node", "engine", "mcp-entry", "tiger-mcp-entry"].includes(item.id)).every((item) => item.ok),
+    engineRoot: base, governanceRoot: governance, items,
+    note: "这是文件布局检查；未启动 Python、读取密钥、连接服务或验证业务执行。请继续调用 tiger_doctor。",
+  };
 }
 
 /** 平台运营目录概览（andromeda 专用；目录不存在时如实说明） */
 export function opsInventory(input) {
   assertKeys(input, []);
   const dir = join(root(), "platform-ops");
-  if (!existsSync(dir)) return { found: false, hint: "本仓没有 platform-ops/ 目录（平台运营专属）" };
+  if (!directoryExists(dir)) return { found: false, hint: "本仓没有 platform-ops/ 目录（平台运营专属）" };
   const sections = listDirs(dir).map((name) => ({ name, files: countFiles(join(dir, name)) }));
   return { found: true, sections, totalFiles: countFiles(dir) };
 }
@@ -229,8 +240,8 @@ export function opsInventory(input) {
 /** 素材库概览（视频类行业仓专用；目录不存在时如实说明） */
 export function assetsInventory(input) {
   assertKeys(input, []);
-  const dir = join(root(), "bundles", BUNDLE_ID, "library");
-  if (!existsSync(dir)) return { found: false, bundle: BUNDLE_ID, hint: "本仓行业包没有 library/ 素材目录" };
+  const dir = join(root(), "governance", "bundles", BUNDLE_ID, "library");
+  if (!directoryExists(dir)) return { found: false, bundle: BUNDLE_ID, hint: "本仓行业包没有 library/ 素材目录" };
   const sections = listDirs(dir).map((name) => ({ name, files: countFiles(join(dir, name)) }));
   return { found: true, bundle: BUNDLE_ID, sections, totalFiles: countFiles(dir) };
 }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 
 from . import config
@@ -69,20 +69,75 @@ def _freshness_note(raw: dict) -> str:
     return note + "；个股时点以各自行情为准"
 
 
-def to_json(result: PipelineResult, out_dir: str = config.REPORTS_DIR) -> str:
+
+def project_report(value):
+    """Explicit JSON projection, preserving strategy objects and disclosing missingness."""
+    import math
+    from datetime import date, datetime
+    import numpy as np
+    missing = []
+    active = set()
+
+    def visit(item, path):
+        if item is None or isinstance(item, (str, bool, int)):
+            return item
+        if isinstance(item, float):
+            if math.isfinite(item):
+                return item
+            missing.append({"path": path, "reason": "nan" if math.isnan(item)
+                            else "positive_infinity" if item > 0 else "negative_infinity"})
+            return None
+        if isinstance(item, np.generic):
+            return visit(item.item(), path)
+        if isinstance(item, (date, datetime)):
+            return item.isoformat()
+        identity = id(item)
+        if identity in active:
+            raise TypeError("Cyclic report value")
+        active.add(identity)
+        try:
+            if is_dataclass(item) and not isinstance(item, type):
+                return {field.name: visit(getattr(item, field.name), path + "/" + field.name)
+                        for field in fields(item)}
+            if isinstance(item, dict):
+                if not all(isinstance(key, str) for key in item):
+                    raise TypeError("Report mapping keys must be strings")
+                return {key: visit(child, path + "/" + key.replace("~", "~0").replace("/", "~1"))
+                        for key, child in item.items()}
+            if isinstance(item, (list, tuple)):
+                return [visit(child, path + "/" + str(index)) for index, child in enumerate(item)]
+            raise TypeError(f"Unsupported report value: {type(item).__name__}")
+        finally:
+            active.remove(identity)
+
+    return visit(value, ""), missing
+
+def to_json(result: PipelineResult, out_dir: str = config.REPORTS_DIR, *, strict: bool = False) -> str:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     ts = result.trade_date.replace("-", "")
     path = Path(out_dir) / f"result_{ts}.json"
-    path.write_text(json.dumps(asdict(result), ensure_ascii=False, indent=2, default=str),
-                    encoding="utf-8")
+    if strict:
+        from .ledger_io import write_json_atomic
+        value, missing = project_report(result)
+        value.setdefault("raw", {})["serialization"] = {
+            "schema": "tiger.report-json.v1", "nonfinite_values": missing,
+        }
+        write_json_atomic(path, value)
+    else:
+        path.write_text(json.dumps(asdict(result), ensure_ascii=False, indent=2, default=str),
+                        encoding="utf-8")
     return str(path)
 
 
-def to_markdown(result: PipelineResult, out_dir: str = config.REPORTS_DIR) -> str:
+def to_markdown(result: PipelineResult, out_dir: str = config.REPORTS_DIR, *, strict: bool = False) -> str:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     ts = result.trade_date.replace("-", "")
     path = Path(out_dir) / f"日报_{ts}.md"
-    path.write_text(render_markdown(result), encoding="utf-8")
+    if strict:
+        from .ledger_io import write_text_atomic
+        write_text_atomic(path, render_markdown(result))
+    else:
+        path.write_text(render_markdown(result), encoding="utf-8")
     return str(path)
 
 

@@ -20,12 +20,14 @@ import json
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+from pathlib import Path
 from typing import Iterable
 
 from .. import config
 from .models import RawDocument, SearchBatch
 from .sources import SearchSource, default_sources
+from ..redline.execution import EvidenceWriteError
 
 log = logging.getLogger("search.hub")
 
@@ -34,6 +36,14 @@ TTL_SECONDS = 6 * 3600          # 内存/磁盘缓存 6 小时（未分类查询
 WALL_CLOCK_BUDGET = 45.0        # 单批搜索总墙钟（秒）
 BREAKER_FAILS = 3               # 连续失败熔断阈值
 BREAKER_COOLDOWN = 900.0        # 熔断冷却（秒）
+
+
+class SearchBudgetExceeded(TimeoutError):
+    """The source result was not observed inside the collection budget."""
+
+
+class SearchWorkersUnsettled(RuntimeError):
+    """Started source calls exceeded the separate bounded cleanup window."""
 
 
 class _Breaker:
@@ -67,8 +77,23 @@ class SearchHub:
                  *, demo: bool = False, ttl: int = TTL_SECONDS,
                  budget: float = WALL_CLOCK_BUDGET, max_workers: int = 6,
                  use_disk_cache: bool = True,
-                 ttl_tiers: dict[str, int] | None = None):
-        self.sources = list(sources) if sources is not None else default_sources(demo)
+                 ttl_tiers: dict[str, int] | None = None,
+                 execution=None, cleanup_budget: float = 15.0,
+                 cache_dir: str | None = None):
+        self.execution = execution
+        self.sources = list(sources) if sources is not None else default_sources(
+            demo, allowed_names=execution.policy.search_source_names if execution else None)
+        if execution and any(s.name not in execution.policy.search_source_names for s in self.sources):
+            raise ValueError("Search source is outside the trusted public allowlist")
+        if not 0 <= cleanup_budget <= 60:
+            raise ValueError("Search cleanup budget must be bounded between 0 and 60 seconds")
+        self.cleanup_budget = cleanup_budget
+        self.cache_dir = cache_dir or (str(execution.paths.work_dir / CACHE_DIR)
+                                       if execution else CACHE_DIR)
+        if execution and not Path(self.cache_dir).resolve().is_relative_to(execution.paths.work_dir):
+            raise ValueError("Search cache is outside the run directory")
+        self.batches: list[SearchBatch] = []
+        self._started_futures = []
         self.ttl = ttl
         self.budget = budget
         self.max_workers = max_workers
@@ -82,7 +107,7 @@ class SearchHub:
         #          "routing": {id: [源名...] | None}}
         self._topic_sets: dict[str, dict] = {}
         if use_disk_cache:
-            os.makedirs(CACHE_DIR, exist_ok=True)
+            os.makedirs(self.cache_dir, exist_ok=True)
 
     # ---------------------------------------------------------- 主题集注册
     def register_topic_set(self, name: str, topics: dict, *, enabled: bool = True) -> None:
@@ -139,14 +164,17 @@ class SearchHub:
         if hit and time.time() - hit[0] < ttl:
             return hit[1]
         if self.use_disk_cache:
-            path = os.path.join(CACHE_DIR, f"{key}.json")
+            path = os.path.join(self.cache_dir, f"{key}.json")
             if os.path.exists(path) and time.time() - os.path.getmtime(path) < ttl:
                 try:
-                    raw = json.load(open(path, encoding="utf-8"))
+                    with open(path, encoding="utf-8") as handle:
+                        raw = json.load(handle)
                     docs = [RawDocument(**d) for d in raw]
                     self._mem[key] = (time.time(), docs)
                     return docs
                 except Exception:
+                    if self.execution is not None:
+                        raise
                     return None
         return None
 
@@ -155,10 +183,12 @@ class SearchHub:
         if self.use_disk_cache:
             try:
                 from dataclasses import asdict
-                json.dump([asdict(d) for d in docs],
-                          open(os.path.join(CACHE_DIR, f"{key}.json"), "w", encoding="utf-8"),
-                          ensure_ascii=False)
+                with open(os.path.join(self.cache_dir, f"{key}.json"), "w", encoding="utf-8") as handle:
+                    json.dump([asdict(d) for d in docs], handle, ensure_ascii=False,
+                              allow_nan=self.execution is None)
             except Exception as e:
+                if self.execution is not None:
+                    raise
                 log.info("搜索磁盘缓存写入失败: %s", e)
 
     # ---------------------------------------------------------- 查询规划
@@ -187,6 +217,8 @@ class SearchHub:
                category: str = "news") -> SearchBatch:
         """跨源并发搜索。任何单源失败不阻塞整体；返回源级统计供审计。
         category：缓存分层类别（quote/news/announcement/macro），决定 TTL。"""
+        if self.execution is not None:
+            return self._strict_search(query, limit, sources, category)
         key = self._cache_key(query, limit, category)
         cached = self._cache_get(key, category)
         if cached is not None:
@@ -228,6 +260,103 @@ class SearchHub:
             pool.shutdown(wait=False, cancel_futures=True)
         self._cache_put(key, docs)
         return SearchBatch(query=query, docs=docs, source_stats=stats)
+
+    def _strict_search(self, query: str, limit: int,
+                       sources: list[str] | None, category: str) -> SearchBatch:
+        key = self._cache_key(query, limit, category)
+        cached = self._cache_get(key, category)
+        if cached is not None:
+            batch = SearchBatch(query, cached, {"cache": {"ok": True, "n": len(cached)}})
+            self.batches.append(batch)
+            return batch
+        active = [source for source in self.sources
+                  if (sources is None or source.name in sources)
+                  and self._breaker.allow(source.name)]
+        stats = {source.name: {"ok": False, "n": 0, "skipped": "breaker_cooldown"}
+                 for source in self.sources
+                 if (sources is None or source.name in sources)
+                 and not self._breaker.allow(source.name)}
+        docs: list[RawDocument] = []
+        deadline = time.monotonic() + self.budget
+        pool = ThreadPoolExecutor(max_workers=self.max_workers)
+        pending = {}
+        observed = set()
+        try:
+            for source in active:
+                handle = self.execution.begin_io(f"search.{source.name}.search", {
+                    "source": source.name, "query": query, "limit": limit,
+                    "category": category, "collection_budget_s": self.budget,
+                })
+                future = pool.submit(source.search, query, limit)
+                pending[future] = (source, handle)
+                self._started_futures.append(future)
+            try:
+                for future in as_completed(pending, timeout=max(0, deadline - time.monotonic())):
+                    if time.monotonic() > deadline:
+                        break
+                    source, handle = pending[future]
+                    try:
+                        result = future.result()
+                    except EvidenceWriteError:
+                        raise
+                    except Exception as error:
+                        self.execution.finish_io(handle, error=error)
+                        stats[source.name] = {"ok": False, "n": 0,
+                                              "error_type": type(error).__name__,
+                                              "outcome_observed": True}
+                        self._breaker.report(source.name, False)
+                    else:
+                        self.execution.finish_io(handle, output=result)
+                        stats[source.name] = {"ok": True, "n": len(result),
+                                              "outcome_observed": True}
+                        self._breaker.report(source.name, True)
+                        docs.extend(result)
+                    observed.add(future)
+            except TimeoutError:
+                # Timeout affects collection only. Running calls are tracked until
+                # the separate cleanup boundary, and their late data is ignored.
+                pass
+            for future, (source, handle) in pending.items():
+                if future not in observed:
+                    cancelled = future.cancel()
+                    self.execution.finish_io(handle, error=SearchBudgetExceeded(),
+                                             outcome_observed=False)
+                    self._breaker.report(source.name, False)
+                    stats[source.name] = {"ok": False, "n": 0,
+                                          "error_type": "SearchBudgetExceeded",
+                                          "outcome_observed": False,
+                                          "cancelled_before_start": cancelled}
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        self._cache_put(key, docs)
+        batch = SearchBatch(query, docs, stats)
+        self.batches.append(batch)
+        return batch
+
+    def settle_workers(self) -> dict:
+        """Bounded task cleanup; never consume a late Future result."""
+        started = time.monotonic()
+        unfinished = [future for future in self._started_futures if not future.done()]
+        if unfinished:
+            _, unfinished = wait(unfinished, timeout=self.cleanup_budget)
+        cancelled = sum(future.cancelled() for future in self._started_futures)
+        result = {"submitted": len(self._started_futures),
+                  "started": len(self._started_futures) - cancelled,
+                  "cancelled_before_start": cancelled,
+                  "remaining": len(unfinished), "settled": not unfinished,
+                  "cleanup_budget_s": self.cleanup_budget,
+                  "cleanup_elapsed_s": round(time.monotonic() - started, 6),
+                  "collection_budget_s": self.budget,
+                  "late_results_consumed": False}
+        if self.execution is not None:
+            self.execution.call_io("search.workers.cleanup_observation", {
+                "collection_budget_s": self.budget,
+                "cleanup_budget_s": self.cleanup_budget}, lambda: result)
+        if unfinished:
+            error = SearchWorkersUnsettled("Search workers exceeded bounded cleanup deadline")
+            error.cleanup = result
+            raise error
+        return result
 
     def gather(self, topic: str, tickers: list[str] | None = None,
                limit_per_query: int = 8, deep: bool = True,

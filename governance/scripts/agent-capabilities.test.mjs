@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { test } from "node:test";
@@ -9,6 +10,7 @@ import {
 } from "./agent-capabilities.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+const product = JSON.parse(readFileSync(resolve(root, "product.manifest.json"), "utf8"));
 
 async function testServer(handler) {
   const server = createServer(handler);
@@ -22,7 +24,7 @@ async function testServer(handler) {
 
 test("catalog only publishes reviewed common capabilities in the base repo", async () => {
   const catalog = await loadCatalog(root);
-  assert.equal(catalog.bundle, "ai-pm");
+  assert.equal(catalog.bundle, product.defaultBundle);
   assert.equal(catalog.entries.size, 8);
   assert.equal(mcpTools(catalog).length, 8);
   assert.equal(catalog.entries.get("core.workspace.profile").transport.path, "workspace.profile");
@@ -77,7 +79,7 @@ test("loopback dev identity invokes the same tRPC procedure and returns structur
     assert.deepEqual(output.result, { workspace: "demo" });
     assert.equal(requests[0].method, "POST");
     assert.deepEqual(JSON.parse(requests[0].body), {
-      workspaceSlug: "ai-pm-demo", memberNo: "MEM-001",
+      workspaceSlug: product.demoWorkspaceSlug, memberNo: product.demoMemberNo,
     });
     assert.equal(requests[1].method, "GET");
     assert.equal(requests[1].auth, `Bearer ${localTestToken}`);

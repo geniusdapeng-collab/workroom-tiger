@@ -54,12 +54,14 @@ WHITELIST = (
 )
 
 
-def purge_run_state(base_dir: str = ".") -> dict:
+def purge_run_state(base_dir: str = ".", *, strict: bool = False) -> dict:
     """清除上一轮运行残留。返回 {path: "removed"|"absent"|"kept(whitelist)"}。
 
     只清除 PURGE_TARGETS 列出的路径；白名单内文件即使同名也跳过。
     每轮生产运行（daily/premarket）在 pipeline 启动前调用。
     """
+    if strict:
+        return _purge_strict(base_dir)
     report: dict[str, str] = {}
     import glob as _glob
     for rel in PURGE_TARGETS:
@@ -90,4 +92,34 @@ def purge_run_state(base_dir: str = ".") -> dict:
             logger.info("零基线: 清除 %s", rel)
         else:
             report[rel] = "absent"
+    return report
+
+
+def _purge_strict(base_dir: str) -> dict:
+    """Only remove enumerated run-local cache paths, verifying their absence."""
+    import glob
+    from pathlib import Path
+    root = Path(base_dir).resolve(strict=True)
+    report = {}
+    for relative in PURGE_TARGETS:
+        targets = [Path(p) for p in glob.glob(str(root / relative))]
+        if not targets:
+            report[relative] = "absent"
+            continue
+        removed = 0
+        for target in targets:
+            if target.name in WHITELIST:
+                raise ValueError("Strict cache cleanup overlaps an accounting file")
+            if target.is_symlink() or not target.resolve().is_relative_to(root):
+                raise ValueError("Strict cache cleanup encountered an unsafe path")
+            if target.is_dir():
+                shutil.rmtree(target)
+            elif target.is_file():
+                target.unlink()
+            else:
+                raise ValueError("Strict cache cleanup encountered an unsupported entry")
+            if target.exists() or target.is_symlink():
+                raise OSError("Strict cache cleanup did not remove its target")
+            removed += 1
+        report[relative] = f"removed({removed} entries)"
     return report

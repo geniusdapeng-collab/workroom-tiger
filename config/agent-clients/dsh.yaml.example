@@ -1,0 +1,12 @@
+# Plugin-list overlay; add to the selected DSH deployment's plugin collection.
+# Portable example only. Actual host attachment needs its own verification.
+- id: mcp-tiger-workflow
+  name: "@deepseek-ai/dsh-mcp-client"
+  config:
+    serverName: tiger-workflow
+    transport: stdio
+    command: "/absolute/path/to/node"
+    args: ["/absolute/path/to/workroom-tiger/scripts/tiger-agent-mcp.mjs", "--python", "/absolute/path/to/python", "--state-root", "/absolute/path/to/tiger-state", "--mode", "readonly"]
+    cwd: "/absolute/path/to/workroom-tiger"
+    toolCallTimeoutMs: 65000
+    failOnStartupError: true

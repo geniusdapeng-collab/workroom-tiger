@@ -32,6 +32,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any
+from .redline.execution import EvidenceWriteError
 
 logger = logging.getLogger(__name__)
 
@@ -190,15 +191,25 @@ class GovernanceBridge:
     """
 
     def __init__(self, path: str, tenant_id: str = "tiger",
-                 workspace_id: str = "trading", enabled: bool = True):
+                 workspace_id: str = "trading", enabled: bool = True, *, strict: bool = False):
         self.path = path
         self.tenant_id = tenant_id
         self.workspace_id = workspace_id
         self.enabled = enabled
+        self.strict = strict
+        self.emitted: list[dict] = []
+        if strict:
+            if not enabled:
+                raise ValueError("Strict governance cannot be disabled")
+            self.records()
 
     # ------------------------------------------------------------ 写路径
     def _tail(self) -> tuple[int, str]:
         """读链尾（seq, hash）；文件不存在/为空 → (SEQ_BASE, GENESIS)。"""
+        if self.strict:
+            records = self.records()
+            return ((int(records[-1]["payload"]["event_id"].split("-")[1]), records[-1]["hash"])
+                    if records else (_EVENT_SEQ_BASE, GENESIS_HASH))
         if not os.path.exists(self.path):
             return _EVENT_SEQ_BASE, GENESIS_HASH
         seq, prev = _EVENT_SEQ_BASE, GENESIS_HASH
@@ -234,11 +245,46 @@ class GovernanceBridge:
                 h = event_hash(prev, payload)
                 rec = {"payload": payload, "prev_hash": prev, "hash": h}
                 with open(self.path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(rec, ensure_ascii=False, allow_nan=not self.strict) + "\n")
+                    if self.strict:
+                        f.flush()
+                        os.fsync(f.fileno())
+            self.emitted.append(rec)
             return rec
-        except Exception as exc:  # 治理旁路：失败不阻塞内核
+        except EvidenceWriteError:
+            raise
+        except Exception as exc:  # Legacy governance remains a nonblocking side channel.
+            if self.strict:
+                raise
             logger.warning("[治理桥] 事件写入失败（不阻塞内核）: %s", exc)
             return None
+
+    def records(self) -> list[dict]:
+        """Read and verify the exact staged ledger; a new empty ledger is valid."""
+        from .agent_evidence import strict_json
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                lines = handle.readlines()
+        except FileNotFoundError:
+            return []
+        records = []
+        previous = GENESIS_HASH
+        sequence = _EVENT_SEQ_BASE
+        for line in lines:
+            if not line.strip():
+                continue
+            record = strict_json(line)
+            if not isinstance(record, dict) or set(record) != {"payload", "prev_hash", "hash"}:
+                raise ValueError("Invalid governance record")
+            payload = record["payload"]
+            if (not isinstance(payload, dict) or payload.get("event_id") != f"E-{sequence + 1}"
+                    or record["prev_hash"] != previous
+                    or record["hash"] != event_hash(previous, payload)):
+                raise ValueError("Governance history failed integrity validation")
+            previous = record["hash"]
+            sequence += 1
+            records.append(record)
+        return records
 
     # ------------------------------------------------------------ 读路径
     @staticmethod

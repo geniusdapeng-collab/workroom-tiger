@@ -322,8 +322,18 @@ class DemoSearchSource:
         return docs
 
 
-def default_sources(demo: bool = False) -> list[SearchSource]:
+def default_sources(demo: bool = False, *, allowed_names: tuple[str, ...] | None = None) -> list[SearchSource]:
     """生产默认源集群；demo 用确定性源。"""
+    if allowed_names is not None:
+        factories = {
+            "google_news": GoogleNewsSource, "reddit": RedditSource,
+            "edgar": EDGARSource, "patentsview": PatentsViewSource,
+            "federal_register": FederalRegisterSource,
+            "eastmoney_news": EastmoneyNewsSource, "sina_flash": SinaFlashSource,
+        }
+        if demo or not allowed_names or any(name not in factories for name in allowed_names):
+            raise ValueError("Strict search requires an explicit public source allowlist")
+        return [factories[name]() for name in allowed_names]
     if demo:
         return [DemoSearchSource()]
     return [

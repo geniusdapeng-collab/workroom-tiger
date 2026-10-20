@@ -21,3 +21,10 @@ var/whiteboard/
 
 # 排雷/验收等本地产物（与基座 .gitignore 同口径，不入库）
 outputs/
+
+# Per-machine Agent client configuration and controlled local paper state.
+.codex/config.toml
+.dsh/tiger-mcp.yaml
+.tiger-agent/
+.tiger-agent-config.lock
+.tiger-agent-config-*.tmp

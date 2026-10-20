@@ -38,6 +38,31 @@ class LLMClient(Protocol):
         ...
 
 
+class DisabledLLMClient:
+    """Trusted public-paper boundary: no SDK import, endpoint probe or request."""
+
+    def __init__(self, execution=None):
+        self.execution = execution
+        self.attempts = 0
+
+    def describe(self) -> dict:
+        return {"mode": "disabled", "reason": "trusted public paper policy",
+                "attempts": self.attempts, "remote_requests": 0}
+
+    def complete_json(self, *, system: str, user: str, schema_hint: dict,
+                      max_tokens: int = 1200, temperature: float = 0.2) -> dict:
+        self.attempts += 1
+        def refuse():
+            raise LLMUnavailable("Model invocation disabled by trusted public paper policy")
+        if self.execution is not None:
+            return self.execution.call_io(
+                "model.disabled.complete_json",
+                {"system": system, "user": user, "schema_hint": schema_hint,
+                 "max_tokens": max_tokens, "temperature": temperature,
+                 "policy": "disabled"}, refuse)
+        return refuse()
+
+
 class KimiGatewayClient:
     """agent-gw chat_completion 实现。"""
 

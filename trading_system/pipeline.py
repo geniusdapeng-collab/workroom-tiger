@@ -26,10 +26,13 @@ from .agents.narrative_agent import NarrativeAgent
 from .cleaning.pipeline import llm_semantic_clean, rule_base_clean, unwrap_cleaned
 from .data_models import PipelineResult
 from .events import EventCalendar
-from .llm.client import default_client
+from .llm.client import DisabledLLMClient, default_client
 from .providers import get_provider
 from .providers.base import is_synthetic
 from .redline import ExecutionTracer, Passthrough
+from .redline.execution import (EvidenceWriteError, ExecutionContractError,
+                                StrictDataUnavailable, StrictDataStale, StrictObservationError,
+                                optional_step, record_provider)
 from .search.hub import SearchHub
 from .tech_chain.agents import (
     ChainRiskAgent, ChainSentimentAgent, CycleLinkageAgent, TechChainMonitorAgent,
@@ -99,7 +102,7 @@ def _health_score(name: str) -> float:
     return (h["ok"] + 1) / (total + 2) - min(h["fail"], 4) * 0.1
 
 
-def _channel_chain() -> list:
+def _channel_chain(execution=None) -> list:
     """降级通道群（v6.2 七环制 + v3 官方宏观源），按本轮健康分自适应排序：
     official(FRED/CBOE 官方宏观基准：利率/波动率)
     → tencent(腾讯) / sina(新浪) / eastmoney(东财) 中国免费源（无需 key）
@@ -113,19 +116,26 @@ def _channel_chain() -> list:
                      ("agentgw", "AgentGwProvider"),
                      ("ifind_gw", "IfindGwProvider"),
                      ("tiingo", "TiingoProvider")):
+        if execution is not None and cls_path[0] not in execution.policy.provider_names:
+            continue
         try:
             mod = __import__(f"trading_system.providers.{cls_path[0]}",
                              fromlist=[cls_path[1]])
             cls = getattr(mod, cls_path[1])
-            if cls.available():
-                chain.append(cls())
+            available = (execution.call_io(
+                f"provider.{cls_path[0]}.available", {"provider": cls_path[0]}, cls.available)
+                if execution is not None else cls.available())
+            if available:
+                chain.append(record_provider(cls(), execution))
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception:
             continue
     chain.sort(key=lambda p: _health_score(p.name), reverse=True)
     return chain
 
 
-def _series_stale(out, max_lag_days: int = 5) -> bool:
+def _series_stale(out, max_lag_days: int = 5, *, as_of_date=None) -> bool:
     """宏观序列陈旧判定（v3 修复：tencent VIX 曾返回 4 个月前的陈旧序列）。
     仅对带 DatetimeIndex 的 pd.Series 生效；末根距今 >max_lag_days 个自然日
     视为陈旧（容忍官方源自然滞后：FRED ~1 个交易日、周末/假期顺延，
@@ -138,7 +148,7 @@ def _series_stale(out, max_lag_days: int = 5) -> bool:
         if not isinstance(idx, pd.DatetimeIndex):
             return False
         last = idx.max().to_pydatetime().date()
-        return (datetime.now().date() - last).days > max_lag_days
+        return ((as_of_date or datetime.now().date()) - last).days > max_lag_days
     except Exception:
         return False
 
@@ -164,6 +174,8 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
       1) None/空表/全 NaN 视同失败，继续寻找后续真实可用源；
       2) 序列级陈旧检测：返回的宏观序列末根过旧时视同失败继续降级。
     """
+    execution = getattr(provider, "execution", None)
+    as_of = execution.run_date if execution is not None else None
     what = f"{method}({args[0] if args else ''})"
     t0 = time.time()
     try:
@@ -171,20 +183,22 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
         if _missing_data(out):
             kind = "None" if out is None else "空数据（含全 NaN）"
             raise RuntimeError(f"{provider.name}.{method} 返回 {kind}（视同失败，继续降级）")
-        if _series_stale(out):
+        if _series_stale(out, as_of_date=as_of):
             raise RuntimeError(f"{provider.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
         _LINEAGE.append((what, _provider_source(provider)))
         _health_record(provider.name, True, time.time() - t0)
         return out
+    except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+        raise
     except Exception as e:
         _health_record(provider.name, False, time.time() - t0)
         _data_issue(provider, method, list(args[:1]), "provider_error", error=e)
         failure = ProviderDataError(provider.name, method, type(e).__name__)
         chain: list = []
-        if provider.name == "yahoo":
+        if provider.name == "yahoo" and (execution is None or "stooq" in execution.policy.provider_names):
             from .providers.stooq import StooqProvider
-            chain.append(StooqProvider())
-        chain.extend(p for p in _channel_chain()
+            chain.append(record_provider(StooqProvider(allow_challenge=False), execution) if execution else StooqProvider())
+        chain.extend(p for p in (_channel_chain(execution) if execution else _channel_chain())
                      if p.name != provider.name and _supports(p, method))
         for alt in chain:
             if not is_synthetic(provider) and is_synthetic(alt):
@@ -199,11 +213,13 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
                 if _missing_data(out):
                     kind = "None" if out is None else "空数据（含全 NaN）"
                     raise RuntimeError(f"{alt.name}.{method} 返回 {kind}（视同失败，继续降级）")
-                if _series_stale(out):
+                if _series_stale(out, as_of_date=as_of):
                     raise RuntimeError(f"{alt.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
                 _LINEAGE.append((what, _provider_source(alt)))
                 _health_record(alt.name, True, time.time() - t1)
                 return out
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
             except Exception as e2:
                 _health_record(alt.name, False, time.time() - t1)
                 _data_issue(alt, method, list(args[:1]), "provider_error", error=e2)
@@ -251,18 +267,22 @@ def quote_with_fallback(provider, ticker: str) -> dict | None:
     """
     import math
     from numbers import Real
+    execution = getattr(provider, "execution", None)
 
     def sources():
         # 正常主源成功后不探测无关通道；实际回退顺序保持不变。
         yield provider
-        if provider.name != "stooq":
+        if provider.name != "stooq" and (execution is None or "stooq" in execution.policy.provider_names):
             try:
                 from .providers.stooq import StooqProvider
-                yield StooqProvider()
+                yield record_provider(StooqProvider(allow_challenge=False), execution) if execution else StooqProvider()
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
             except Exception as exc:
                 logger.warning("stooq 报价源初始化失败（%s），尝试下一环",
                                type(exc).__name__)
-        yield from (p for p in _channel_chain() if p.name != provider.name)
+        yield from (p for p in (_channel_chain(execution) if execution else _channel_chain())
+                    if p.name != provider.name)
 
     stale_q: dict | None = None
     for src in sources():
@@ -272,6 +292,8 @@ def quote_with_fallback(provider, ticker: str) -> dict | None:
             continue
         try:
             q = src.quote(ticker)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception as e:
             _data_issue(src, "quote", [ticker], "provider_error", error=e)
             logger.warning("%s.quote(%s) 异常（%s），降级下一环",
@@ -310,6 +332,7 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
                          label: str = "batch") -> dict[str, pd.DataFrame]:
     """批量拉取：yahoo → stooq → 服务端通道群依次补洞
     （仅真实源之间降级；生产链路绝不回退合成数据，覆盖率如实记录 data_coverage）。"""
+    execution = getattr(provider, "execution", None)
     if not tickers:
         return {}
 
@@ -323,6 +346,8 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
             return {}
         try:
             batch = src.ohlcv_batch(missing, days=days)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception as exc:
             _data_issue(src, "ohlcv_batch", missing, "provider_error", error=exc, label=label)
             logger.warning("%s.ohlcv_batch 批量拉取异常（%s），跳过该环继续降级",
@@ -355,19 +380,19 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
     _LINEAGE.append((f"{label}[{len(data)}/{len(tickers)}]", _provider_source(provider)))
     if len(data) >= enough:
         return _finish()
-    if provider.name != "stooq":
+    if provider.name != "stooq" and (execution is None or "stooq" in execution.policy.provider_names):
         logger.warning("%s 批量拉取覆盖率不足（%d/%d），降级 stooq",
                        provider.name, len(data), len(tickers))
         from .providers.stooq import StooqProvider
         missing = [t for t in tickers if t not in data]
-        stooq = StooqProvider()
+        stooq = record_provider(StooqProvider(allow_challenge=False), execution) if execution else StooqProvider()
         got = _fetch(stooq, missing) if missing else {}
         data.update(got)
         if got:
             _LINEAGE.append((f"{label}+补{len(got)}只", _provider_source(stooq)))
         if len(data) >= enough:
             return _finish()
-    for alt in _channel_chain():
+    for alt in (_channel_chain(execution) if execution else _channel_chain()):
         missing = [t for t in tickers if t not in data]
         if not missing or len(data) >= len(tickers):
             break
@@ -391,44 +416,77 @@ def run_pipeline(
     use_tuned: bool = False,
     market: str = "us",
     accounting_blocked_reason: str | None = None,
+    *, execution=None,
 ) -> PipelineResult:
-    started = time.time()
-    _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
-    _HEALTH.clear()    # 零基线：provider 健康度每轮重新度量
-    _DATA_ISSUES.clear()
-    trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
-    provider = get_provider(provider_name)
-    # S4 多市场（D1 框架不变、输入替换）：市场规格解析——日历/基准组/板块代理/
-    # 扫描过滤/合规规则/轻仓毕业门槛全部来自 spec（参数 single source = config）。
-    from .markets import get_market
-    spec = get_market(market)
-    bmk = spec.benchmarks
-    benchmark_labels = {"index": bmk.get("index_label", bmk["index"]),
-                        "rate": bmk.get("rate_label", bmk["rate"]),
-                        "vol": bmk.get("vol_label", bmk["vol"])}
-    ah_enabled = bool(config.AH_TOPICS_ENABLED
-                      or spec.market_id in config.AH_AUTO_MARKETS)
-    market_grad = spec.graduation()
-    universe_source = universe_mode
-    if spec.market_id == "us":
-        if universe_mode == "full":
-            from .universe import load_full_universe
-            universe, universe_source = load_full_universe()   # nasdaqtrader/cache/fallback
+    with optional_step(execution, "pipeline.prepare", {
+        "provider": provider_name, "universe_mode": universe_mode,
+        "universe_file": universe_file, "top_n": top_n, "max_picks": max_picks,
+        "account_usd": account_usd, "market": market, "use_tuned": use_tuned,
+        "run_date": execution.run_date if execution else trade_date,
+        "policy": execution.policy if execution else None,
+    }) as prepared:
+        started = time.time()
+        _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
+        _HEALTH.clear()    # 零基线：provider 健康度每轮重新度量
+        _DATA_ISSUES.clear()
+        if execution is not None:
+            if trade_date is not None and trade_date != execution.run_date.isoformat():
+                raise ExecutionContractError("Trade date differs from admission-market date")
+            if market != "us" or use_tuned:
+                raise ExecutionContractError("Strict public paper requires US market and unchanged defaults")
+            trade_date = execution.run_date.isoformat()
         else:
-            universe = load_universe(universe_mode, universe_file)
-    else:
-        # CN/HK：full=东财全量清单（两级拉取复刻 US）；其他=内嵌池/文件
-        from .universe import load_market_universe
-        universe, universe_source = load_market_universe(
-            spec.market_id, universe_mode, universe_file)
-    tracer = ExecutionTracer(run_id=trade_date)
-    demo_mode = is_synthetic(provider)
+            trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
+        provider = (get_provider(provider_name, execution=execution) if execution
+                    else get_provider(provider_name))
+        # S4 多市场（D1 框架不变、输入替换）：市场规格解析——日历/基准组/板块代理/
+        # 扫描过滤/合规规则/轻仓毕业门槛全部来自 spec（参数 single source = config）。
+        from .markets import get_market
+        spec = get_market(market)
+        bmk = spec.benchmarks
+        benchmark_labels = {"index": bmk.get("index_label", bmk["index"]),
+                            "rate": bmk.get("rate_label", bmk["rate"]),
+                            "vol": bmk.get("vol_label", bmk["vol"])}
+        ah_enabled = bool(config.AH_TOPICS_ENABLED
+                          or spec.market_id in config.AH_AUTO_MARKETS)
+        market_grad = spec.graduation()
+        universe_source = universe_mode
+        if spec.market_id == "us":
+            if universe_mode == "full":
+                from .universe import load_full_universe
+                universe, universe_source = load_full_universe()   # nasdaqtrader/cache/fallback
+            else:
+                universe = load_universe(universe_mode, universe_file)
+        else:
+            # CN/HK：full=东财全量清单（两级拉取复刻 US）；其他=内嵌池/文件
+            from .universe import load_market_universe
+            universe, universe_source = load_market_universe(
+                spec.market_id, universe_mode, universe_file)
+        tracer = ExecutionTracer(run_id=trade_date, execution=execution)
+        demo_mode = is_synthetic(provider)
 
-    # ================= 搜索与清洗（系统的命脉环节） =================
-    llm = default_client()
+        # ================= 搜索与清洗（系统的命脉环节） =================
+        llm = DisabledLLMClient(execution) if execution is not None else default_client()
+        event_calendar = (EventCalendar(str(execution.paths.calendar_override_path), strict=True)
+                          if execution is not None else None)
+        options_store = None
+        if execution is not None:
+            from .options_metrics import OptionsHistoryStore
+            options_store = OptionsHistoryStore(execution.paths.options_history_dir,
+                                                strict=True, as_of_date=execution.run_date,
+                                                execution=execution)
+        prepared.output({"trade_date": trade_date, "provider": provider.name,
+                         "synthetic": demo_mode, "market": spec.to_dict(),
+                         "universe": universe, "universe_source": universe_source,
+                         "benchmark_labels": benchmark_labels, "scan_filters": spec.scan_filters(),
+                         "market_grad": market_grad, "ah_topics_enabled": ah_enabled,
+                         "calendar": event_calendar.to_dict() if event_calendar else None,
+                         "model": llm.describe() if execution is not None else {"mode": "legacy"}})
 
-    with tracer.step("search.collect"):
-        hub = SearchHub(demo=demo_mode)
+    with tracer.step("search.collect", {"chains": CHAIN_TOPICS, "sectors": SECTOR_TOPICS,
+                     "ah": config.AH_TOPICS, "ah_enabled": ah_enabled, "limit_per_query": 4,
+                     "deep": True, "source_allowlist": execution.policy.search_source_names if execution else None}) as stage:
+        hub = SearchHub(demo=demo_mode, execution=execution) if execution else SearchHub(demo=demo_mode)
         # 主题集注册（SearchHub 同款机制）：科技六子链 + 全领域八主题——每个板块
         # 都要有自己的情报输入，否则非科技板块的 LLM 叙事维度被架空（情报偏科即评分偏科）。
         # S3：AH（A股/港股）主题默认关闭（config.AH_TOPICS_ENABLED，S4 多市场启用），
@@ -437,25 +495,35 @@ def run_pipeline(
         hub.register_topic_set("sectors", SECTOR_TOPICS)
         hub.register_topic_set("ah", config.AH_TOPICS, enabled=ah_enabled)
         raw_docs = hub.gather_topic_sets(limit_per_query=4, deep=True)
+        search_cleanup = (execution.call_io("search.workers.settle",
+                          {"collection_budget_s": hub.budget, "cleanup_budget_s": hub.cleanup_budget},
+                          hub.settle_workers) if execution is not None else {})
         all_topics = hub.active_topics()
         logger.info("search.collect: %d 篇原始文档（%d 主题；AH主题=%s）",
                     len(raw_docs), len(all_topics),
                     "启用" if ah_enabled else "关闭")
 
-    with tracer.step("clean.rule_base"):
+        stage.output({"documents": raw_docs, "topics": all_topics,
+                      "batches": hub.batches if execution else [], "cleanup": search_cleanup})
+
+    with tracer.step("clean.rule_base", {"documents": raw_docs}) as stage:
         base_docs = rule_base_clean(raw_docs)
         logger.info("clean.rule_base: %d→%d（去重/格式校验）", len(raw_docs), len(base_docs))
 
-    with tracer.step("clean.llm_semantic"):
+        stage.output({"documents": base_docs})
+
+    with tracer.step("clean.llm_semantic", {"documents": base_docs}) as stage:
         cleaned = unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer))
         degraded_n = sum(1 for c in cleaned if c.degraded)
         logger.info("clean.llm_semantic: %d 篇（语义缺失 %d）", len(cleaned), degraded_n)
+
+        stage.output({"documents": cleaned, "degraded_count": degraded_n})
 
     # S3 数据层：交叉验证（规则层调度，D9 不引入 LLM）。关键事件类文档需
     # ≥2 个不同源（且至少一个 ≤T2）佐证；未达标标记 corroborated=False——
     # 不删除（透传纪律），但叙事/舆情打分输入只使用 corroborated=True 的集合；
     # 被降级文档在决策侧仅作背景参考（tech.risk / decision.debate 仍可见全集）。
-    with tracer.step("clean.cross_validate"):
+    with tracer.step("clean.cross_validate", {"documents": cleaned}) as stage:
         from .search.credibility import CrossValidator, scoring_docs
         cv_stats = CrossValidator().validate(cleaned)
         score_docs = scoring_docs(cleaned)
@@ -464,6 +532,8 @@ def run_pipeline(
                     cv_stats["total"], cv_stats["key_event_docs"],
                     cv_stats["corroborated"], cv_stats["downgraded"],
                     cv_stats["llm_missing"], cv_stats["missing_published_at"])
+
+        stage.output({"documents": cleaned, "scoring_documents": score_docs, "stats": cv_stats})
 
     # WFA 调优参数：默认【不加载】——tuned_params.json 属于上一轮生产残留，
     # 零基线纪律下每轮从零开始；仅当调用方显式 use_tuned=True 时才覆盖默认闸门。
@@ -497,7 +567,7 @@ def run_pipeline(
         report: dict = {}
         idx_name = bmk["index"]
         if len(spy_df) < 260:
-            raise RuntimeError(
+            raise (StrictDataUnavailable if execution else RuntimeError)(
                 f"[{spec.market_id}] {idx_name} 历史不足（{len(spy_df)} < 260 行）："
                 "SMA200/252 日分位口径不成立，"
                 "宁可中止也不产出带污点的评分（白皮书§1.3 诚实失败）")
@@ -505,7 +575,7 @@ def run_pipeline(
         vix_ok = vix_s is not None and len(vix_s) >= 30
         if spec.benchmark_hard_fail:
             if not tnx_ok or not vix_ok:
-                raise RuntimeError(
+                raise (StrictDataUnavailable if execution else RuntimeError)(
                     f"[{spec.market_id}] {bmk['rate']}/{bmk['vol']} 历史不足"
                     f"（{0 if tnx_s is None else len(tnx_s)}/"
                     f"{0 if vix_s is None else len(vix_s)} 行），MRS 宏观/情绪维口径不成立")
@@ -519,8 +589,10 @@ def run_pipeline(
         lag = (expect - spy_last).days
         report["benchmark_last_bar"] = str(spy_last)
         report["benchmark_lag_days"] = lag
+        if execution is not None and lag < 0:
+            raise StrictObservationError("Benchmark is later than the expected market trading date")
         if lag > 3:
-            raise RuntimeError(
+            raise (StrictDataStale if execution else RuntimeError)(
                 f"[{spec.market_id}] 基准数据陈旧：{idx_name} 末根 {spy_last}，"
                 f"最近交易日 {expect}（滞后 {lag} 天）——"
                 "用陈旧数据产出'今日'评分是数据造假，立即中止（白皮书§12.3）")
@@ -532,7 +604,7 @@ def run_pipeline(
         if len(etfs) < need_etf:
             missing = [e for e in sector_list if e not in etfs]
             if spec.sector_hard_fail:
-                raise RuntimeError(
+                raise (StrictDataUnavailable if execution else RuntimeError)(
                     f"[{spec.market_id}] 板块 ETF 覆盖率不足（{len(etfs)}/{len(sector_list)} < 2/3，"
                     f"缺 {missing}）：SHS 主线判定地基不全，诚实失败")
             report["sector_breadth_missing"] = (
@@ -554,13 +626,17 @@ def run_pipeline(
     # ---------- 数据准备 ----------
     days = 420
     market_data: dict = {"benchmark_labels": benchmark_labels}
-    with tracer.step("data.prepare"):
+    with tracer.step("data.prepare", {"universe": universe, "benchmarks": bmk,
+                     "sector_symbols": spec.sector_symbols, "days": days,
+                     "trade_date": trade_date, "scan_filters": spec.scan_filters()}) as stage:
         idx_sym = bmk["index"]
         try:
             spy = _single_with_fallback(provider, "ohlcv", idx_sym, days=days)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception as exc:
             # D2 诚实失败：该市场基准（指数）全断 → 当日中止，其余市场不受影响
-            raise RuntimeError(
+            raise (StrictDataUnavailable if execution else RuntimeError)(
                 f"[{spec.market_id}] {idx_sym} 基准数据获取失败（含降级源），"
                 f"该市场当日诚实失败，MRS 无法计算: {exc}") from exc
         market_data["spy"] = spy
@@ -568,9 +644,11 @@ def run_pipeline(
         try:
             market_data["tnx"] = _single_with_fallback(
                 provider, "rate_yield_for", bmk["rate"], days=days)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception as exc:
             if spec.benchmark_hard_fail:
-                raise RuntimeError(
+                raise (StrictDataUnavailable if execution else RuntimeError)(
                     f"[{spec.market_id}] {bmk['rate']} 数据获取失败（含降级源），"
                     f"MRS 无法计算: {exc}") from exc
             logger.warning("[%s] 利率基准 %s 不可得（%s）→ 宏观维缺失再归一化",
@@ -580,9 +658,11 @@ def run_pipeline(
         try:
             market_data["vix"] = _single_with_fallback(
                 provider, "vol_index_for", bmk["vol"], days=days)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception as exc:
             if spec.benchmark_hard_fail:
-                raise RuntimeError(
+                raise (StrictDataUnavailable if execution else RuntimeError)(
                     f"[{spec.market_id}] {bmk['vol']} 数据获取失败（含降级源），"
                     f"MRS 无法计算: {exc}") from exc
             logger.warning("[%s] 波动率基准 %s 不可得（%s）→ 情绪维缺失再归一化",
@@ -592,6 +672,8 @@ def run_pipeline(
             market_data["vix9d"] = (_single_with_fallback(
                 provider, "vol_index_for", bmk["vol_short"], days=days)
                 if bmk.get("vol_short") else None)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception:
             market_data["vix9d"] = None
 
@@ -640,28 +722,40 @@ def run_pipeline(
         logger.info("数据准备完成: 股票 %d/%d, 板块ETF %d",
                     len(stock_data), len(all_tickers), len(sector_etfs))
 
+        stage.output({"market_data": market_data, "universe": universe, "all_tickers": all_tickers,
+                      "prefilter": prefilter_note, "lineage": list(_LINEAGE), "data_issues": list(_DATA_ISSUES)})
+
     # ================= 科技股产业链专项子集群 =================
     # （放在数据准备之后：monitor 复用已下载行情，仅全球联动标的单独拉取）
-    with tracer.step("tech.monitor"):
+    with tracer.step("tech.monitor", {"prefetched": stock_data, "provider": provider.name}) as stage:
         tech_monitor = TechChainMonitorAgent(provider).execute(tracer, prefetched=stock_data)
-    with tracer.step("tech.cycle_linkage"):
+        stage.output(tech_monitor)
+    with tracer.step("tech.cycle_linkage", {"leaders": CycleLinkageAgent.LEADERS, "provider": provider.name}) as stage:
         tech_linkage = CycleLinkageAgent(provider).execute(tracer)
-    with tracer.step("tech.sentiment"):
+        stage.output(tech_linkage)
+    with tracer.step("tech.sentiment", {"documents": score_docs}) as stage:
         tech_sentiment = ChainSentimentAgent(llm).execute(score_docs, tracer)
-    with tracer.step("tech.risk"):
+        stage.output(tech_sentiment)
+    with tracer.step("tech.risk", {"documents": cleaned}) as stage:
         tech_alerts = ChainRiskAgent(llm).execute(cleaned, tracer)
-    with tracer.step("tech.fusion"):
+        stage.output(tech_alerts)
+    with tracer.step("tech.fusion", {"monitor": tech_monitor, "linkage": tech_linkage,
+                     "sentiment": tech_sentiment, "alerts": tech_alerts}) as stage:
         tech_signals = TechChainFusionAgent().execute(
             tech_monitor, tech_linkage, tech_sentiment, tech_alerts, tracer)
         logger.info("tech.fusion: %s",
                     [(s.chain_id, s.prosperity, s.risk_level, s.bonus_hint) for s in tech_signals])
 
+        stage.output(tech_signals)
+
     # ================= SHS 叙事维度（LLM 化） =================
     narrative_llm: dict = {}
-    with tracer.step("sector.narrative"):
+    with tracer.step("sector.narrative", {"documents": score_docs, "sector_symbols": spec.sector_symbols}) as stage:
         narr_res = NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer)
         if not isinstance(narr_res, Passthrough):
             narrative_llm = narr_res
+
+        stage.output({"raw_result": narr_res, "narrative": narrative_llm})
 
     # v6.3：链映射覆盖率披露——无链映射的候选在 L4 只能走轻仓通道
     # （SHS 钉 5.0），覆盖率本身就是公平性指标，必须显性化
@@ -679,7 +773,8 @@ def run_pipeline(
         "scan_filters": scan_filt,
         "market_grad": market_grad,
         # v6.0：事件日历（白皮书§11 事件风险管理的机器执行）
-        "event_calendar": EventCalendar(),
+        "event_calendar": event_calendar or EventCalendar(),
+        "options_store": options_store,
         # 科技链子集群标准化汇入（核心因子之一）
         "tech_signals": [s.to_dict() for s in tech_signals],
         "tech_bonus_map": signals_to_bonus_map(tech_signals),
@@ -689,26 +784,44 @@ def run_pipeline(
     }
 
     # ---------- 六层流水线 ----------
-    with tracer.step("layer1.mrs"):
+    with tracer.step("layer1.mrs", {"market_data": market_data}) as stage:
         mrs = MRSAgent(provider).execute(context)
-    with tracer.step("layer2.sector"):
+        stage.output(mrs)
+    with tracer.step("layer2.sector", {"market_data": market_data, "narrative": narrative_llm}) as stage:
         sectors = SectorAgent(provider).execute(context)
-    with tracer.step("layer2b.chain"):
+        stage.output({"sectors": sectors, "sector_map": context.get("sector_map", {})})
+    with tracer.step("layer2b.chain", {"spy": spy, "stock_ohlcv": stock_data}) as stage:
         chains = ChainCycleAgent(provider).execute(context)
-    with tracer.step("layer0.scan"):
+        stage.output({"chains": chains, "chain_map": context.get("chain_map", {})})
+    with tracer.step("layer0.scan", {"universe": universe, "top_n": top_n,
+                     "market_data": market_data, "scan_filters": scan_filt, "sectors": sectors}) as stage:
         scanner = UniverseScannerAgent(provider, universe, top_n=top_n)
         candidates = scanner.execute(context)
-    with tracer.step("layer3.tss"):
+        stage.output({"candidates": candidates, "scan_stats": context["scan_stats"]})
+    with tracer.step("layer3.tss", {"watchlist": candidates, "market_data": market_data,
+                     "chain_map": context.get("chain_map", {}), "sector_map": context.get("sector_map", {}),
+                     "tech_bonus_map": context["tech_bonus_map"], "tech_signal_map": context["tech_signal_map"],
+                     "trade_date": trade_date}) as stage:
         candidates = TSSAgent(provider).execute(context)
-    with tracer.step("layer4.risk"):
+        stage.output({"watchlist": candidates, "options_history": options_store.observed if options_store else {}})
+    with tracer.step("layer4.risk", {"watchlist": candidates, "mrs": mrs, "sectors": sectors,
+                     "chains": chains, "market_grad": market_grad, "market": spec.to_dict(),
+                     "trade_date": trade_date, "account_usd": account_usd, "max_picks": max_picks,
+                     "calendar": event_calendar.to_dict() if event_calendar else None,
+                     "tech_signal_map": context["tech_signal_map"]}) as stage:
         picks = RiskManagerAgent(provider, account_usd=account_usd,
                                  max_picks=max_picks).execute(context)
+
+        stage.output({key: context.get(key) for key in
+                      ("picks", "pick_rationale", "action", "market_view", "notes", "currency_policy", "compliance")})
 
     # ================= 多空辩论证据层（v6.3 S2，桥水 AIA 辩论制） =================
     # 铁律：辩论在 L4 闸门产出【之后】执行，只读 picks/rationale/watchlist，
     # 绝不回写任何分数与闸门输出；产出仅作交易卡片"第六段"进报告层。
     # 回测路径不经过本 pipeline（无未来函数：历史回放禁止注入 LLM）。
-    with tracer.step("decision.debate"):
+    with tracer.step("decision.debate", {"enabled": config.DEBATE_ENABLED, "picks": picks,
+                     "rationale": context.get("pick_rationale", {}), "watchlist": context.get("watchlist", []),
+                     "action": context.get("action", "HOLD"), "documents": cleaned}) as stage:
         from .agents.debate_agent import DebateAgent, select_debate_targets
         debate_raw: dict = {"status": "disabled", "triggered": [], "evidence": {}}
         if config.DEBATE_ENABLED:
@@ -729,10 +842,15 @@ def run_pipeline(
         logger.info("decision.debate: status=%s triggered=%s",
                     debate_raw["status"], debate_raw["triggered"])
 
+        stage.output(debate_raw)
+
     # ================= 统计校准层（v6.3 S2，迭代层·只进报告不改闸门） =================
     # 会计账白名单（与 journal 同级）：只读已结算台账，输出仅进报告披露，
     # 绝不进入决策输入（代码层隔离，见 calibration.py 头注）。
-    with tracer.step("iteration.calibration"):
+    with tracer.step("iteration.calibration", {"currency_policy": context["currency_policy"],
+                     "accounting_blocked_reason": accounting_blocked_reason,
+                     "journal_path": execution.paths.journal_path if execution else None,
+                     "samples_path": execution.paths.calibration_path if execution else None}) as stage:
         from .calibration import CalibrationLayer
         try:
             if context["currency_policy"]["execution_blocked"] or accounting_blocked_reason:
@@ -740,8 +858,28 @@ def run_pipeline(
                                        "reason": (context["currency_policy"]["reason"]
                                                   or accounting_blocked_reason)}
             else:
-                calibration_summary = CalibrationLayer().run()
+                if execution is not None:
+                    from .ledger_io import read_json_strict
+                    journal_input = execution.call_io("calibration.journal.read",
+                        {"path": execution.paths.journal_path},
+                        lambda: read_json_strict(execution.paths.journal_path))
+                    samples_before = execution.call_io("calibration.samples.read",
+                        {"path": execution.paths.calibration_path},
+                        lambda: read_json_strict(execution.paths.calibration_path))
+                    calibration_summary = execution.call_io("calibration.run",
+                        {"journal": journal_input, "previous_samples": samples_before,
+                         "journal_path": execution.paths.journal_path,
+                         "samples_path": execution.paths.calibration_path},
+                        lambda: CalibrationLayer(journal_path=str(execution.paths.journal_path),
+                            samples_path=str(execution.paths.calibration_path)).run())
+                    execution.call_io("calibration.samples.readback",
+                        {"path": execution.paths.calibration_path},
+                        lambda: read_json_strict(execution.paths.calibration_path))
+                else:
+                    calibration_summary = CalibrationLayer().run()
         except Exception as exc:
+            if execution is not None:
+                raise
             # 注册表约定：本环节不可透传——失败则跳过披露并记录（不阻塞主链路）
             logger.warning("iteration.calibration 失败，跳过披露并记录: %s", exc)
             calibration_summary = {"status": "skipped", "reason": str(exc)}
@@ -749,7 +887,10 @@ def run_pipeline(
         logger.info("iteration.calibration: status=%s n=%s",
                     calibration_summary.get("status"), calibration_summary.get("n"))
 
-    with tracer.step("report.emit"):
+        stage.output(calibration_summary)
+
+    with tracer.step("report.emit", {key: value for key, value in context.items()
+                     if key not in ("market_data", "market_spec", "event_calendar", "options_store")}) as stage:
         notes = context.get("notes", [])
         if tuned_note:
             notes = notes + [tuned_note]
@@ -774,7 +915,8 @@ def run_pipeline(
                 "currency_policy": context["currency_policy"],
                 "pick_rationale": context.get("pick_rationale", {}),
                 "source_lineage": list(_LINEAGE),
-                "provider_health": dict(_HEALTH),
+                "provider_health": ({name: dict(health) for name, health in _HEALTH.items()}
+                                    if execution is not None else dict(_HEALTH)),
                 "provider_name": provider.name,
                 "synthetic": demo_mode,
                 "data_issues": list(_DATA_ISSUES),
@@ -798,6 +940,7 @@ def run_pipeline(
                 "calibration": context.get("calibration", {}),
             },
         )
+        stage.output(result)
     # 红线 1：全链路环节完整性强制校验（缺环节 = 系统性事故，立即停止）
     tracer.assert_complete()
     # S6：review.daily 属延迟环节（依赖 main.daily 尾部的 journal 落账/结算），
