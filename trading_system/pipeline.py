@@ -28,6 +28,7 @@ from .data_models import PipelineResult
 from .events import EventCalendar
 from .llm.client import default_client
 from .providers import get_provider
+from .providers.base import is_synthetic
 from .redline import ExecutionTracer, Passthrough
 from .search.hub import SearchHub
 from .tech_chain.agents import (
@@ -44,6 +45,33 @@ _LINEAGE: list[tuple[str, str]] = []   # 本轮行情来源血缘（对象, 实�
 # v6.0 provider 健康度（白皮书§12 披露文化的延伸）：本轮内按源记录调用
 # 成功/失败/时延；连续失败 ≥2 次的源在本轮降级顺序中沉底；摘要写入报告。
 _HEALTH: dict[str, dict] = {}
+# 回退失败与最终缺失的结构化披露；只记异常类型，避免把源端 URL/凭据写入报告。
+_DATA_ISSUES: list[dict] = []
+
+
+def _provider_source(provider) -> str:
+    """来源标签必须遵守 synthetic 标记，合成源改名也不能伪装成真实源。"""
+    return "demo" if is_synthetic(provider) else provider.name
+
+
+def _data_issue(provider, method: str, symbols: list[str], issue: str,
+                *, error: Exception | None = None, label: str | None = None) -> None:
+    item = {"provider": provider.name, "synthetic": is_synthetic(provider),
+            "method": method, "symbols": list(symbols), "issue": issue}
+    if error is not None:
+        item["error_type"] = type(error).__name__
+    if label is not None:
+        item["label"] = label
+    _DATA_ISSUES.append(item)
+
+
+def _missing_data(out) -> bool:
+    """空容器/全 NaN 不是成功取数；有效数据保持原对象与原值。"""
+    if out is None:
+        return True
+    if isinstance(out, (pd.DataFrame, pd.Series)):
+        return out.empty or out.dropna(how="all").empty
+    return False
 
 
 def _health_record(name: str, ok: bool, elapsed: float) -> None:
@@ -113,6 +141,9 @@ def _supports(provider, method: str) -> bool:
         # 未声明时按基类接口推断：rate_yield_for/vol_index_for 等非 OHLCV 方法
         # 对所有 provider 视为支持（基类有默认实现）；未声明者不做裁剪。
         return True
+    if method == "ohlcv_batch":
+        # 基类批量方法逐只委托 ohlcv；仅声明 ohlcv 的源仍可用批量接口。
+        return "ohlcv_batch" in caps or "ohlcv" in caps
     return method in caps
 
 
@@ -120,23 +151,24 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
     """单只/单序列拉取：yahoo → stooq → 服务端通道群（agentgw/ifind/tiingo）。
 
     v3 修复两条降级协议缺陷（2026-08-30 真实运行暴露）：
-      1) None 视同失败：可选序列（如 vix9d）失败时部分 provider 返回 None
-         而不抛异常，旧协议把 None 当成功 → 后续真实可用源永不被尝试；
+      1) None/空表/全 NaN 视同失败，继续寻找后续真实可用源；
       2) 序列级陈旧检测：返回的宏观序列末根过旧时视同失败继续降级。
     """
     what = f"{method}({args[0] if args else ''})"
     t0 = time.time()
     try:
         out = getattr(provider, method)(*args, **kwargs)
-        if out is None:
-            raise RuntimeError(f"{provider.name}.{method} 返回 None（视同失败，继续降级）")
+        if _missing_data(out):
+            kind = "None" if out is None else "空数据（含全 NaN）"
+            raise RuntimeError(f"{provider.name}.{method} 返回 {kind}（视同失败，继续降级）")
         if _series_stale(out):
             raise RuntimeError(f"{provider.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
-        _LINEAGE.append((what, provider.name))
+        _LINEAGE.append((what, _provider_source(provider)))
         _health_record(provider.name, True, time.time() - t0)
         return out
     except Exception as e:
         _health_record(provider.name, False, time.time() - t0)
+        _data_issue(provider, method, list(args[:1]), "provider_error", error=e)
         chain: list = []
         if provider.name == "yahoo":
             from .providers.stooq import StooqProvider
@@ -145,19 +177,25 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
                      if p.name != provider.name and _supports(p, method))
         last = e
         for alt in chain:
+            if not is_synthetic(provider) and is_synthetic(alt):
+                _data_issue(alt, method, list(args[:1]), "synthetic_fallback_rejected")
+                logger.warning("%s.%s 是合成源，真实数据回退链跳过该源", alt.name, method)
+                continue
             t1 = time.time()
             try:
                 logger.warning("%s.%s 失败（%s），降级 %s", provider.name, method, last, alt.name)
                 out = getattr(alt, method)(*args, **kwargs)
-                if out is None:
-                    raise RuntimeError(f"{alt.name}.{method} 返回 None（视同失败，继续降级）")
+                if _missing_data(out):
+                    kind = "None" if out is None else "空数据（含全 NaN）"
+                    raise RuntimeError(f"{alt.name}.{method} 返回 {kind}（视同失败，继续降级）")
                 if _series_stale(out):
                     raise RuntimeError(f"{alt.name}.{method} 序列陈旧（末根滞后超限，视同失败）")
-                _LINEAGE.append((what, alt.name))
+                _LINEAGE.append((what, _provider_source(alt)))
                 _health_record(alt.name, True, time.time() - t1)
                 return out
             except Exception as e2:
                 _health_record(alt.name, False, time.time() - t1)
+                _data_issue(alt, method, list(args[:1]), "provider_error", error=e2)
                 last = e2
         raise last
 
@@ -222,40 +260,73 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
                          label: str = "batch") -> dict[str, pd.DataFrame]:
     """批量拉取：yahoo → stooq → 服务端通道群依次补洞
     （仅真实源之间降级；生产链路绝不回退合成数据，覆盖率如实记录 data_coverage）。"""
-    data = provider.ohlcv_batch(tickers, days=days)
-    enough = max(3, len(tickers) // 3)
-    _LINEAGE.append((f"{label}[{len(data)}/{len(tickers)}]", provider.name))
-    if len(data) >= enough:
+    if not tickers:
+        return {}
+
+    def _fetch(src, missing: list[str]) -> dict[str, pd.DataFrame]:
+        if src is not provider and not is_synthetic(provider) and is_synthetic(src):
+            _data_issue(src, "ohlcv_batch", missing, "synthetic_fallback_rejected", label=label)
+            logger.warning("%s 是合成源，真实数据回退链跳过该源", src.name)
+            return {}
+        if not _supports(src, "ohlcv_batch"):
+            _data_issue(src, "ohlcv_batch", missing, "unsupported", label=label)
+            return {}
+        try:
+            batch = src.ohlcv_batch(missing, days=days)
+        except Exception as exc:
+            _data_issue(src, "ohlcv_batch", missing, "provider_error", error=exc, label=label)
+            logger.warning("%s 批量拉取异常（%s），跳过该环继续降级", src.name, exc)
+            return {}
+        if not isinstance(batch, dict):
+            _data_issue(src, "ohlcv_batch", missing, "invalid_data", label=label)
+            logger.warning("%s 批量结果不是行情字典，跳过该环继续降级", src.name)
+            return {}
+        got = {t: batch[t] for t in missing if t in batch
+               and isinstance(batch[t], pd.DataFrame) and not _missing_data(batch[t])}
+        invalid = [t for t in missing if t in batch and t not in got]
+        if invalid:
+            _data_issue(src, "ohlcv_batch", invalid, "invalid_data", label=label)
+        if not got:
+            _data_issue(src, "ohlcv_batch", missing, "no_data", label=label)
+        return got
+
+    def _finish() -> dict[str, pd.DataFrame]:
+        missing = [t for t in tickers if t not in data]
+        if missing:
+            _data_issue(provider, "ohlcv_batch", missing,
+                        "batch_missing" if data else "batch_unavailable", label=label)
+            logger.warning("%s 批量数据缺失（%d/%d），缺失标的已记录 data_issues",
+                           label, len(data), len(tickers))
         return data
+
+    data = _fetch(provider, tickers)
+    enough = max(3, len(tickers) // 3)
+    _LINEAGE.append((f"{label}[{len(data)}/{len(tickers)}]", _provider_source(provider)))
+    if len(data) >= enough:
+        return _finish()
     if provider.name != "stooq":
         logger.warning("%s 批量拉取覆盖率不足（%d/%d），降级 stooq",
                        provider.name, len(data), len(tickers))
         from .providers.stooq import StooqProvider
-        try:
-            # v6.1：stooq 批量异常必须被吞掉并继续降级——单源故障不得中断任务
-            # （白皮书§12.1 调度层原则同样适用于行情链）
-            data2 = StooqProvider().ohlcv_batch(tickers, days=days)
-        except Exception as exc:
-            logger.warning("stooq 批量拉取异常（%s），跳过该环继续降级", exc)
-            data2 = {}
-        got = {k: v for k, v in data2.items() if k not in data}
+        missing = [t for t in tickers if t not in data]
+        stooq = StooqProvider()
+        got = _fetch(stooq, missing) if missing else {}
         data.update(got)
         if got:
-            _LINEAGE.append((f"{label}+补{len(got)}只", "stooq"))
+            _LINEAGE.append((f"{label}+补{len(got)}只", _provider_source(stooq)))
         if len(data) >= enough:
-            return data
+            return _finish()
     for alt in _channel_chain():
         missing = [t for t in tickers if t not in data]
         if not missing or len(data) >= len(tickers):
             break
         logger.warning("覆盖率仍不足（%d/%d），%s 通道补 %d 只",
                        len(data), len(tickers), alt.name, len(missing))
-        data3 = alt.ohlcv_batch(missing, days=days)
-        got = {k: v for k, v in data3.items() if k not in data}
+        got = _fetch(alt, missing)
         data.update(got)
         if got:
-            _LINEAGE.append((f"{label}+补{len(got)}只", alt.name))
-    return data
+            _LINEAGE.append((f"{label}+补{len(got)}只", _provider_source(alt)))
+    return _finish()
 
 
 def run_pipeline(
@@ -272,6 +343,7 @@ def run_pipeline(
     started = time.time()
     _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
     _HEALTH.clear()    # 零基线：provider 健康度每轮重新度量
+    _DATA_ISSUES.clear()
     trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
     provider = get_provider(provider_name)
     # S4 多市场（D1 框架不变、输入替换）：市场规格解析——日历/基准组/板块代理/
@@ -298,9 +370,7 @@ def run_pipeline(
         universe, universe_source = load_market_universe(
             spec.market_id, universe_mode, universe_file)
     tracer = ExecutionTracer(run_id=trade_date)
-    demo_mode = (provider_name == "demo") or getattr(provider, "name", "") == "demo"
-    if not demo_mode and getattr(provider, "name", "") == "demo":
-        raise RuntimeError("红线：生产链路禁止注入 demo 合成数据源")
+    demo_mode = is_synthetic(provider)
 
     # ================= 搜索与清洗（系统的命脉环节） =================
     llm = default_client()
@@ -628,7 +698,7 @@ def run_pipeline(
             notes = notes + [tuned_note]
         result = PipelineResult(
             trade_date=trade_date,
-            provider=provider.name,
+            provider=_provider_source(provider),
             mrs=context.get("mrs"),
             sectors=context.get("sectors", []),
             chains=context.get("chains", []),
@@ -646,6 +716,9 @@ def run_pipeline(
                 "pick_rationale": context.get("pick_rationale", {}),
                 "source_lineage": list(_LINEAGE),
                 "provider_health": dict(_HEALTH),
+                "provider_name": provider.name,
+                "synthetic": demo_mode,
+                "data_issues": list(_DATA_ISSUES),
                 "freshness": market_data.get("freshness", {}),
                 "chain_coverage": context.get("chain_coverage", ""),
                 "data_coverage": f"{len(stock_data)}/{len(all_tickers)}",
