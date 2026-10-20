@@ -3,6 +3,7 @@
  * 纯函数（偏好块/枚举校验/积分卡口粮）+ PG 集成（注入检索/提炼器/生命周期/统计闸，RUN_DB_TESTS=1）
  */
 import { describe, expect, it } from "vitest";
+import { scopedMemoryId } from "../workdata/memory-id.js";
 import {
   buildPreferenceBlock,
   preferenceMemoryRefs,
@@ -255,11 +256,12 @@ d("PG 集成 · 自我进化飞轮（种子库）", async () => {
     // 记忆内容带统计口径；归因可反查
     // 固定 memory_id 会跨重复验收运行被幂等强化；按精确 ID 读取，避免工作区中
     // 历史记忆超过列表上限后让存在性断言受到分页顺序影响。
-    const { memory: mem } = await getMemorySources(app, scope, "mem-reject-price.too_high");
+    const memoryId = scopedMemoryId(scope, "approval-reject", "price.too_high");
+    const { memory: mem } = await getMemorySources(app, scope, memoryId);
     expect(mem).toBeDefined();
     expect(mem!.content).toContain("price.too_high");
     expect(Number(mem!.confidence)).toBeGreaterThan(0.5);
-    const sources = await getMemorySources(app, scope, "mem-reject-price.too_high");
+    const sources = await getMemorySources(app, scope, memoryId);
     expect(sources.sourceEvents.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -267,7 +269,7 @@ d("PG 集成 · 自我进化飞轮（种子库）", async () => {
     await seedGestures(3, "edit", undefined, "preference");
     const r = await runMemoryMinerBeat(app, gateway, scope);
     expect(r.editPatterns).toBeGreaterThanOrEqual(1);
-    const { memory: mem } = await getMemorySources(app, scope, "mem-pat-edit-price.adjust");
+    const { memory: mem } = await getMemorySources(app, scope, scopedMemoryId(scope, "approval-edit-pattern", "price.adjust"));
     expect(mem).toBeDefined();
     expect(mem!.content).toContain("口味");
   });
@@ -292,7 +294,7 @@ d("PG 集成 · 自我进化飞轮（种子库）", async () => {
     const reactivated = await reactivateMemory(app, gateway, scope, { memberNo: "MEM-001" }, `mem-inj-pref-${RUN}`);
     expect(reactivated.calibrateEventId).toMatch(/^E-\d+$/);
     expect((await searchMemories(app, scope, { limit: 50 })).some((h) => h.memory_id === `mem-inj-pref-${RUN}`)).toBe(true);
-    // 来源人清算：本用例 MEM-TEST-<RUN> 的手势沉淀（提炼器强化的 mem-reject-price.too_high 含其来源事件）
+    // 来源人清算：本用例 MEM-TEST-<RUN> 的手势沉淀（提炼器强化的工作区记忆含其来源事件）
     const recall = await recallMemoriesByMember(app, gateway, scope, { memberNo: "MEM-001" }, `MEM-TEST-${RUN}`);
     expect(recall.recalled.length).toBeGreaterThanOrEqual(1);
     expect(recall.calibrateEventIds.length).toBe(recall.recalled.length);

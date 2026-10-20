@@ -22,6 +22,7 @@ import {
 } from "@workloom/shared";
 import { gatewayAppend, gatewayAppendOnClient } from "../workdata/gateway.js";
 import { upsertMemory, upsertMemoryInTx, MockEmbedder, type Embedder } from "../workdata/memory.js";
+import { scopedMemoryId } from "../workdata/memory-id.js";
 import { assertEditKindValid, assertReasonEnumAllowed, type EditKind } from "../evolve/feedback-enums.js";
 
 /* ================= 类型 ================= */
@@ -297,8 +298,10 @@ export async function decide(
 
     // F1.7 校准闭环：驳回原因枚举 → 偏好模式记忆（机制位；权重衰减在数据大脑侧）
     if (gesture.type === "reject" && gesture.reasonEnum) {
+      // Global memory PKs must include tenant/workspace; the miner uses the same identity.
+      const memoryId = scopedMemoryId(scope, "approval-reject", gesture.reasonEnum);
       await upsertMemoryInTx(c, scope, {
-        memoryId: `mem-reject-${gesture.reasonEnum}`,
+        memoryId,
         scope: "workspace",
         kind: "preference",
         content: `驳回偏好模式：原因枚举「${gesture.reasonEnum}」被采纳为校准信号（最新来源 ${gres.eventId}）`,
@@ -309,7 +312,7 @@ export async function decide(
       // 缺列时 workspace_id 为 NULL，WITH CHECK 不通过（RLS 42501）
       await c.query(
         `INSERT INTO memory_usage (memory_id, event_id, workspace_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [`mem-reject-${gesture.reasonEnum}`, gres.eventId, scope.workspaceId],
+        [memoryId, gres.eventId, scope.workspaceId],
       );
     }
 
