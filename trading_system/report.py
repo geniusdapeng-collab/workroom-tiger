@@ -23,6 +23,21 @@ def _market_currency(raw: dict) -> str:
     return str((raw.get("market") or {}).get("currency") or "币种未知")
 
 
+def _execution_blocked(raw: dict) -> bool:
+    return any((raw.get(key) or {}).get("execution_blocked")
+               for key in ("accounting", "currency_policy"))
+
+
+def _accounting_note(raw: dict) -> str:
+    for key in ("accounting", "currency_policy"):
+        policy = raw.get(key) or {}
+        if policy.get("execution_blocked"):
+            return str(policy.get("reason") or "USD 账户币种边界受阻，交易记账已暂停。")
+    if raw.get("account_currency") or raw.get("currency_policy"):
+        return "账户净值、风险预算与交易账本以 USD 计；原币报价未经汇率换算不得入账。"
+    return ""
+
+
 def _universe_note(raw: dict) -> str:
     """请求模式、实际列表来源与扫描数量是三个不同的事实。"""
     modes = {"core": "内置核心池", "extended": "内置扩展池",
@@ -109,10 +124,16 @@ def render_markdown(r: PipelineResult) -> str:
     lines.append(f"> {_universe_note(r.raw)}")
     lines.append(f"> {_freshness_note(r.raw)}")
     lines.append(f"> 行情报价币种：{_market_currency(r.raw)}")
+    if _accounting_note(r.raw):
+        lines.append(f"> {_accounting_note(r.raw)}")
     if mk:
         grad_txt = ("标准通道已开放" if mk_grad.get("graduated", True)
                     else f"新市场验证期（{mk_grad.get('settled', 0)}"
                          f"/{mk_grad.get('required', 50)}）·强制轻仓")
+        if _execution_blocked(r.raw):
+            grad_txt = ("毕业条件已满足" if mk_grad.get("graduated", True) else
+                        f"新市场验证期（{mk_grad.get('settled', 0)}"
+                        f"/{mk_grad.get('required', 50)}）·轻仓门槛保留") + "；交易记账已暂停"
         lines.append(f"> 市场: **{mk.get('name')}**（{mk.get('market_id')} ｜ "
                      f"{mk.get('timezone')} ｜ 结算 {mk.get('settlement')} ｜ "
                      f"{mk.get('limit_note')}）｜ 通道状态: {grad_txt}")
@@ -130,7 +151,9 @@ def render_markdown(r: PipelineResult) -> str:
         lines.append(f"3. **主线板块**：{main_txt}" +
                      (f" ｜ 次主线: " + "；".join(f"{s.etf}(SHS {s.shs})" for s in sub_sectors) if sub_sectors else ""))
         lines.append(f"4. **允许交易标的**：{len(r.picks)} 只 → " +
-                     ("、".join(p.ticker for p in r.picks) if r.picks else "无达标标的，等待"))
+                     ("、".join(p.ticker for p in r.picks) if r.picks else
+                      "币种执行边界受阻，仅供研究" if _execution_blocked(r.raw) else
+                      "无达标标的，等待"))
     lines.append("")
     lines.append(f"**系统指令**：`{r.action}` — {r.market_view}")
     lines.append("")
@@ -272,6 +295,9 @@ def render_markdown(r: PipelineResult) -> str:
             for v in violations:
                 lines.append(f"  - ❌ {v.get('ticker')} {v.get('side')}: "
                              f"{v.get('reason')}（{v.get('rule_id')}）")
+        elif _execution_blocked(r.raw):
+            lines.append(f"  - 本轮市场规则校验 {len(comp)} 笔，未命中违反项；"
+                         "币种边界仍阻止交易记账")
         else:
             lines.append(f"  - 本轮校验 {len(comp)} 笔买入请求，全部放行（无违反项）")
         if not mk_grad.get("graduated", True):

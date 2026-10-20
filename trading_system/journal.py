@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from . import config
+from .currency import ACCOUNT_CURRENCY, require_usd_records, require_usd_result
 from .ledger_io import write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -48,9 +49,11 @@ class Journal:
             for record in records
         ):
             raise ValueError(f"信号日记 {self.path} 结构无效，已停止以保留原账本")
+        require_usd_records(records, scope=f"信号日记 {self.path}")
         return records
 
     def save(self) -> None:
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         write_json_atomic(self.path, self.records)
 
     # ------------------------------------------------------------
@@ -59,6 +62,8 @@ class Journal:
         """把本次放行的 picks 落账（同日同票去重）。返回新增条数。"""
         from .providers.base import source_label
 
+        require_usd_result(result, scope="信号日记输入")
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         source = source_label(getattr(result, "provider", ""))   # v6.5 来源留痕
         existing = {(r["date"], r["ticker"]) for r in self.records}
         added = 0
@@ -69,6 +74,8 @@ class Journal:
             self.records.append({
                 "date": result.trade_date,
                 "ticker": p.ticker,
+                "account_currency": ACCOUNT_CURRENCY,
+                "quote_currency": ACCOUNT_CURRENCY,
                 "mode": "标准做多" if "标准" in p.card else "轻仓试错",
                 "template": p.entry_template or "无",
                 "sector": p.sector or "",
@@ -94,6 +101,7 @@ class Journal:
 
     def settle(self, provider, horizon_days: int = 30) -> int:
         """结算 open 记录：模拟与回测一致的出场规则。返回本次结算条数。"""
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         today = datetime.now().date()
         settled = 0
         changed = False
@@ -197,6 +205,7 @@ class Journal:
     # ------------------------------------------------------------
 
     def stats(self) -> dict:
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         closed = [r for r in self.records if r["status"] == "closed" and r.get("r") is not None]
         open_n = sum(1 for r in self.records if r["status"] == "open")
         rs = [r["r"] for r in closed]

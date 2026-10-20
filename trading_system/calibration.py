@@ -26,6 +26,7 @@ import math
 from pathlib import Path
 
 from . import config
+from .currency import require_usd_records
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class CalibrationLayer:
     def collect_samples(self, records: list[dict]) -> list[dict]:
         """从 journal 记录提取校准样本。【只读已结算记录】：
         status=="closed" 且 r 非空（未结算/作废/悬挂一律不进入样本库）。"""
+        require_usd_records(records, scope="校准历史")
         samples: list[dict] = []
         seen: set[tuple] = set()
         for rec in records:
@@ -79,6 +81,7 @@ class CalibrationLayer:
         return samples
 
     def save_samples(self, samples: list[dict]) -> None:
+        require_usd_records(samples, scope="校准样本保存")
         self.samples_path.parent.mkdir(parents=True, exist_ok=True)
         self.samples_path.write_text(
             json.dumps(samples, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -100,6 +103,7 @@ class CalibrationLayer:
 
     def summarize(self, samples: list[dict]) -> dict:
         """分桶统计 + 样本门槛降级 + 单调性检测。"""
+        require_usd_records(samples, scope="校准样本统计")
         n = len(samples)
         bucket_stats = []
         for lo, hi in self.buckets:

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from . import config
+from .currency import ACCOUNT_CURRENCY, require_usd_result, require_usd_sim_state
 from .ledger_io import write_json_atomic
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class SimEngine:
         loaded = self._load()
         self.state = loaded if loaded is not None else {
             "started": None, "initial_cash": initial_cash,
+            "account_currency": ACCOUNT_CURRENCY,
             "cash": initial_cash, "positions": [], "pending": [],
             "closed": [], "equity_curve": [], "ops_log": [],
         }
@@ -96,9 +98,11 @@ class SimEngine:
                        or not math.isfinite(state[key])
                        for key in ("initial_cash", "cash"))):
             raise ValueError(f"模拟盘账本 {self.path} 结构无效，已停止以保留原账本")
+        require_usd_sim_state(state, scope=f"模拟盘账本 {self.path}")
         return state
 
     def save(self) -> None:
+        require_usd_sim_state(self.state, scope=f"模拟盘账本 {self.path}")
         write_json_atomic(self.path, self.state, indent=1)
 
     # ---------------------------------------------------------------- 主节拍
@@ -109,6 +113,9 @@ class SimEngine:
         result: PipelineResult（今日全链路产出）
         get_bar: callable(ticker) -> Bar | None（最新完整日 K，四环链实时拉取）
         """
+        # 两项检查都先于 started/现金/持仓/行情调用，失败保留内存与原账本。
+        require_usd_result(result, scope="模拟盘输入")
+        require_usd_sim_state(self.state, scope=f"模拟盘账本 {self.path}")
         s = self.state
         s["started"] = s["started"] or trade_date
         ops: list[str] = []
@@ -324,6 +331,7 @@ class SimEngine:
 
     # ---------------------------------------------------------------- 统计
     def stats(self) -> dict:
+        require_usd_sim_state(self.state, scope=f"模拟盘账本 {self.path}")
         s = self.state
         closed = s["closed"]
         n = len(closed)

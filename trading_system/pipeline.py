@@ -377,6 +377,7 @@ def run_pipeline(
     trade_date: str | None = None,
     use_tuned: bool = False,
     market: str = "us",
+    accounting_blocked_reason: str | None = None,
 ) -> PipelineResult:
     started = time.time()
     _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
@@ -721,7 +722,12 @@ def run_pipeline(
     with tracer.step("iteration.calibration"):
         from .calibration import CalibrationLayer
         try:
-            calibration_summary = CalibrationLayer().run()
+            if context["currency_policy"]["execution_blocked"] or accounting_blocked_reason:
+                calibration_summary = {"status": "skipped",
+                                       "reason": (context["currency_policy"]["reason"]
+                                                  or accounting_blocked_reason)}
+            else:
+                calibration_summary = CalibrationLayer().run()
         except Exception as exc:
             # 注册表约定：本环节不可透传——失败则跳过披露并记录（不阻塞主链路）
             logger.warning("iteration.calibration 失败，跳过披露并记录: %s", exc)
@@ -751,6 +757,8 @@ def run_pipeline(
                 "universe_mode": universe_mode,
                 "universe_source": universe_source,
                 "account_usd": account_usd,
+                "account_currency": "USD",
+                "currency_policy": context["currency_policy"],
                 "pick_rationale": context.get("pick_rationale", {}),
                 "source_lineage": list(_LINEAGE),
                 "provider_health": dict(_HEALTH),

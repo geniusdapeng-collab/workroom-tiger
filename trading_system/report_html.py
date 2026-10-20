@@ -20,7 +20,10 @@ import re as _re
 from . import config
 from .data_models import PipelineResult
 from .redline import STEP_REGISTRY
-from .report import _freshness_note, _market_currency, _market_name, _universe_note
+from .report import (
+    _accounting_note, _execution_blocked, _freshness_note, _market_currency,
+    _market_name, _universe_note,
+)
 
 try:  # AI 生成美术资源（老虎全球资产管理头图 / 产业链主题产品图，内嵌 base64，零外链）
     from .hero_art import HERO_ART_B64, THEME_ART_B64
@@ -607,9 +610,9 @@ def _decision_card(r: "PipelineResult", pick) -> str:
     nm_tk = _name_zh(pick.ticker)
     P.append("<div class='eyebrow-l'>THE TRADE · 一句话说清这笔买卖</div>")
     P.append(f"<div style='font-size:16px;line-height:1.75'>"
-             f"<b>${pick.entry_price:.2f} 附近买 {pick.ticker}"
+             f"<b>{currency} {pick.entry_price:.2f} 附近买 {pick.ticker}"
              + (f"（{nm_tk}）" if nm_tk else "")
-             + f"</b>，认错线 <b style='color:{RED}'>{pick.stop_price:.2f}</b>"
+             + f"</b>，认错线 <b style='color:{RED}'>{currency} {pick.stop_price:.2f}</b>"
              f"——跌破就走，不商量；赚够两倍风险，认错线自动抬到成本价，"
              f"这用于降低回撤，不保证保本。</div>")
     bio = _TICKER_BIO.get(pick.ticker.upper(), "")
@@ -1521,8 +1524,10 @@ def _stock_tab(r: "PipelineResult") -> str:
              "今日放行标的的完整分析档案：四层共振结论、五段业务依据、技术档案、"
              "板块内部结构与赛道联动——全部数据与决策同源，逐项可回溯。</div></div>")
     if not r.picks:
+        accounting = (_esc(_accounting_note(r.raw)) if _execution_blocked(r.raw) else
+                      "本轮未产生新的放行信号；既有持仓继续按出场规则管理。")
         P.append("<div class='card'><b>今日无放行标的</b><div class='sub' style='margin-top:6px'>"
-                 "本轮未产生新的放行信号；既有持仓继续按出场规则管理。"
+                 + accounting +
                  "以下为本轮观察名单前列标的的质量档案，后续仍须重新通过各项闸门。</div></div>")
         for c in r.watchlist[:3]:
             nm = _name_zh(c.ticker)
@@ -2418,6 +2423,8 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                 journal_entries: list[dict] | None = None,
                 sim: dict | None = None, bench: dict | None = None) -> str:
     raw = r.raw or {}
+    accounting_blocked = _execution_blocked(raw)
+    accounting_note = _esc(_accounting_note(raw))
     market = _esc(_market_name(raw))
     currency = _esc(_market_currency(raw))
     color, action_zh = _action_style(r.action)
@@ -2460,13 +2467,17 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     win_r = (journal_stats or {}).get("win_rate")
     chips = [f"<div class='hchip'><div class='sub'>今日状态</div>"
              f"<div class='v' style='color:{color}'>{r.action} · {_esc(action_zh)}</div></div>"]
-    if eq:
+    if eq and not accounting_blocked:
         chips.append(f"<div class='hchip'><div class='sub'>小虎模拟盘净值</div>"
                      f"<div class='v'>${eq:,.0f}</div></div>")
-    chips.append(f"<div class='hchip'><div class='sub'>逐笔留痕</div>"
-                 f"<div class='v'>{n_closed} 笔已结算"
-                 + (f" · 胜率 {win_r:.0%}" if n_closed and win_r is not None else "")
-                 + "</div></div>")
+    if accounting_blocked:
+        chips.append("<div class='hchip'><div class='sub'>交易记账</div>"
+                     "<div class='v'>已暂停 · 币种边界受阻</div></div>")
+    else:
+        chips.append(f"<div class='hchip'><div class='sub'>逐笔留痕</div>"
+                     f"<div class='v'>{n_closed} 笔已结算"
+                     + (f" · 胜率 {win_r:.0%}" if n_closed and win_r is not None else "")
+                     + "</div></div>")
     chips.append("<div class='hchip'><div class='sub'>首个 DSR 检查点</div>"
                  f"<div class='v' style='font-size:15px'>{_DSR_CHECKPOINT}</div></div>")
     P.append(f"<div class='hero-chips'>{''.join(chips)}</div>")
@@ -2481,7 +2492,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
              "onclick='showTab(\"philosophy\")'>🎓 核心交易理念</button></div>")
     # ---- 跑马灯：最新结算逐笔滚动（亏赚如实，翻倍重复以无缝循环）----
     tape_items = []
-    for e in reversed((journal_entries or [])[-16:]):
+    for e in reversed((journal_entries or [])[-16:] if not accounting_blocked else []):
         tk = e.get("ticker", "")
         if e.get("status") == "closed" and e.get("r") is not None:
             col = "#16a34a" if e.get("win") else "#f87171"
@@ -2525,7 +2536,8 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
              f"border-top:1px dashed {BORDER}'>数据源：<b style='color:{FG}'>"
              f"{prov_txt}</b><br>{_esc(_freshness_note(raw))}"
              f"<br>{_esc(_universe_note(raw))}"
-             f"<br>行情报价币种：{currency}</div></div>")
+             f"<br>行情报价币种：{currency}"
+             + (f"<br>{accounting_note}" if accounting_note else "") + "</div></div>")
 
     # ---- 决策日报·二级栏目导航（今日决策报告 / 个股深度报告 / 策略验证）----
     P.append("<div style='display:flex;gap:8px;margin:10px 0 14px;flex-wrap:wrap;"
@@ -2589,6 +2601,8 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         k_line = ("刀口看清了，放出 "
                   + "、".join(f"<b>{p.ticker}</b>" for p in r.picks)
                   + f" 这 {len(r.picks)} 枪——每笔都写清认错线，跌破就走，不商量。")
+    elif accounting_blocked:
+        k_line = "本轮仅保留研究；USD 交易记账暂停，原有账本保持原样。"
     else:
         k_line = "今日无新放行标的；既有持仓继续按出场规则管理。"
     P.append(f"<div class='card' style='border-color:#d4af3766;margin-bottom:12px'>"
@@ -2623,9 +2637,11 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                  f"<button class='subbtn' style='margin-top:8px' "
                  f"onclick='showDaily(\"history\")'>查看完整验证 →</button></div>")
     else:
+        ledger_note = ("本轮未更新交易账本，未执行持仓或待成交信号的模拟结算。"
+                       if accounting_blocked else
+                       "新的推荐信号与既有持仓分开管理，实际持仓和待成交记录见台账。")
         P.append(f"<div class='card'><b>今日无新放行标的</b><div class='sub' style='margin-top:6px'>"
-                 f"{_esc(r.market_view)}；新的推荐信号与既有持仓分开管理，"
-                 f"实际持仓和待成交记录见台账。</div></div>")
+                 f"{_esc(r.market_view)}；{ledger_note}</div></div>")
         # —— 开门条件（业务化，告诉投资者"等什么"）——
         if mrs:
             weak = []
@@ -2650,9 +2666,11 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                 P.append("</div>")
         # —— 预备观察名单（环境开门后的第一梯队）——
         if r.watchlist:
+            watch_note = ("个股质量与原币价位仅供研究；币种执行边界解除前不生成交易指令。"
+                          if accounting_blocked else
+                          "个股质量已评估完毕，等待市场环境开门——开门后按此优先级复核入场：")
             P.append("<div class='card' style='margin-top:10px'><b>预备观察名单</b>"
-                     "<div class='sub' style='margin-top:4px'>个股质量已评估完毕，"
-                     "等待市场环境开门——开门后按此优先级复核入场：</div><table style='margin-top:6px'>"
+                     f"<div class='sub' style='margin-top:4px'>{watch_note}</div><table style='margin-top:6px'>"
                      "<tr><th>#</th><th>标的</th><th>日K收盘价</th><th>综合质量</th>"
                      "<th>入场形态</th><th>关键位</th><th>产业链</th></tr>")
             for i, c in enumerate(r.watchlist[:5], 1):
@@ -2796,6 +2814,8 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                              f"含主线板块额外补扫 {ss.get('mainline_boost', 0)} 只", BLUE))
         P.append(_funnel_row("④ 今日最终放行", n_pick,
                              ("三道关全部通过才放行" if n_pick else
+                              "币种执行边界受阻；本轮仅保留研究，既有账本原样保留"
+                              if accounting_blocked else
                               "本轮无新放行信号，既有持仓按出场规则管理"), GOLD))
         if total and n_pick is not None:
             rate = (1 - n_pick / total) * 100
@@ -2840,7 +2860,9 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         for p in r.picks:
             P.append(f"<pre class='card-block'>{_esc(p.card)}</pre>")
     else:
-        P.append("<div class='card sub'>今日无新放行标的；既有持仓继续按出场规则管理。</div>")
+        trade_note = (accounting_note if accounting_blocked else
+                      "今日无新放行标的；既有持仓继续按出场规则管理。")
+        P.append(f"<div class='card sub'>{trade_note}</div>")
 
     # ---- 系统执行自检 ----
     redline = raw.get("redline", [])
@@ -2868,7 +2890,9 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
 
     # ---- 胜率追踪 ----
     P.append("<h2>九、胜率追踪（信号日记）</h2><div class='card'>")
-    if journal_stats and journal_stats.get("closed", 0) > 0:
+    if accounting_blocked:
+        P.append(f"<div class='sub'>{accounting_note} 本轮未更新或发布账本统计。</div>")
+    elif journal_stats and journal_stats.get("closed", 0) > 0:
         P.append("<div class='grid g4'>"
                  f"<div><div class='sub'>已结算</div><div class='kpi'>{journal_stats['closed']}</div></div>"
                  f"<div><div class='sub'>总胜率</div><div class='kpi'>{journal_stats['win_rate']:.1%}</div></div>"
@@ -2911,7 +2935,10 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
 
     # ---- 二级栏目：策略验证中心（成绩单/生命周期/归因实验室/全量台账）----
     P.append("<div id='daily-pane-history' style='display:none'>")
-    P.append(_verify_tab(journal_entries, journal_stats, bench, sim))
+    if accounting_blocked:
+        P.append(f"<div class='card sub'>{accounting_note} 本轮未更新或发布策略验证统计。</div>")
+    else:
+        P.append(_verify_tab(journal_entries, journal_stats, bench, sim))
     P.append("</div>")
 
     # ---- 首页底部：系统拓扑图（镇场子——数据到决策全链路一图收束）----
@@ -2924,7 +2951,9 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
 
     # ---- 一级页签：小虎纯AI模拟盘（全 AI 掌控模拟盘，公开验证）----
     P.append("<div id='tab-sim' style='display:none'>")
-    if sim:
+    if accounting_blocked:
+        P.append(f"<div class='card sub'>{accounting_note} 既有模拟盘台账原样保留。</div>")
+    elif sim:
         P.append(_sim_tab(sim))
     else:
         P.append("<div class='card sub'>未提供模拟盘台账，初始资金、持仓与成交状态未知。</div>")

@@ -70,9 +70,20 @@ bash scripts/publish_site.sh
 
 ```bash
 python3 main.py --market us --mode daily --html     # 美股（默认）
-python3 main.py --market cn --mode daily --html     # A股（轻仓验证期 0/50）
-python3 main.py --market hk --mode daily --html     # 港股（轻仓验证期 0/50）
+python3 main.py --market cn --mode daily --html     # A股原币行情与研究（不做交易记账）
+python3 main.py --market hk --mode daily --html     # 港股原币行情与研究（不做交易记账）
 ```
+
+`--account` 始终表示 **USD 账户净值**。当前没有可核验的汇率换算契约，CNY/HKD
+报价不能直接除美元风险预算或扣减美元现金。因此 A 股、港股仍生成行情、评分、观察名单与
+JSON/Markdown/HTML 研究报告，但不输出可执行股数，也不更新信号日记、模拟盘、校准样本、
+复盘或治理事件。报告中的 `currency_policy.execution_blocked` 和
+`accounting.status=blocked_currency` 明确披露原因；研究运行正常完成。
+
+模拟盘与信号日记的公开入口也拒绝显式非 USD 元数据，以及已知 `.SS`/`.SZ`/`.HK`
+原币标的。发现旧账本存在这些记录时，原文件保持不变并停止记账，不自动重标币种或按猜测汇率
+迁移。未标币种的旧美股账本按原有 USD 接口契约兼容；新增账本/记录明确记录 USD 单位。
+轻仓毕业门槛与交易策略参数保持原有定义，达到门槛也不会绕过币种边界。
 
 ## B. 全栈（内核 + WorkLoom 治理底座）✅ 已落地
 
