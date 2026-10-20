@@ -7,8 +7,8 @@
  * 使用纪律：
  *  1. 一个挂载点一个实例；`emotion` 一律走 `agent-emotion.ts` 的映射层，业务方不传裸 ID；
  *  2. 列表默认 `live={false}`（引擎 `autostart:false` → `lite` 静态缩略图，零 rAF）；
- *     只有当前活跃项 / hover / focus 才激活动画（性能与注意力都省）；
- *  3. 球是装饰性元素（`aria-hidden`），语义由旁边的文字 chip 承担（`emotionLabelOf`）；
+ *     只有当前活跃项 / 指针悬停才激活动画（性能与注意力都省）；
+ *  3. 球是装饰性元素（`aria-hidden`，不参与焦点导航），语义由旁边的文字 chip 承担（`emotionLabelOf`）；
  *  4. `VITE_LOOMBALL=0` 时渲染等尺寸空盒：布局不跳、实例/监听/帧循环为零（一键回退；
  *     引擎模块本身仍随包加载，见 docs/loomball.md §5）。
  */
@@ -48,7 +48,7 @@ export interface LoomBallProps {
   live?: boolean;
   /** 注视跟随（默认跟随 live） */
   followGaze?: boolean;
-  /** 非 live 时，hover/focus 临时激活动画（名册默认开） */
+  /** 非 live 时，指针悬停临时激活动画（名册默认开） */
   hoverActivate?: boolean;
   /** 眼环放大系数（默认按 size 推导） */
   eyeScale?: number;
@@ -167,9 +167,6 @@ export function LoomBall(props: LoomBallProps) {
       data-loomball-active={active ? "1" : "0"}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
-      onFocus={() => setHovered(true)}
-      onBlur={() => setHovered(false)}
-      tabIndex={hoverActivate ? 0 : -1}
     >
       <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
     </div>
