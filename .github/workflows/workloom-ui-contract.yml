@@ -38,6 +38,7 @@ jobs:
       - name: 执行仓库已有测试
         run: |
           set -euo pipefail
+          node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs
           pnpm -C "$WORKLOOM_DIR" test
           if [ -f requirements.txt ] && [ -d tests ] && find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
             python -m pip install --disable-pip-version-check -r requirements.txt
