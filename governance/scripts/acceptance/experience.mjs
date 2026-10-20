@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { cliArgs, findRepoRoot, loadProfile, urlsOf } from "./lib/profile.mjs";
 import { loadChromium } from "./lib/playwright.mjs";
 import { loginAsMember, productIdOf } from "./lib/session.mjs";
-import { canonicalJson, dailyDecisionEvidence, evaluateJourney, rpcExchange, visibleIdentifier } from "./lib/ui-evidence.mjs";
+import { canonicalJson, dailyDecisionEvidence, evaluateJourney, pageStateEvidence, rpcExchange, visibleIdentifier, workspaceIdentityEvidence } from "./lib/ui-evidence.mjs";
 
 const args = cliArgs();
 const REPO_ROOT = findRepoRoot();
@@ -74,12 +74,27 @@ const shot = async (target, name) => {
 const TOKEN = await loginAsMember(page, { urls: URLs, workspaceSlug: WORKSPACE_SLUG, memberNo: MEMBER_NO, productId: productIdOf(REPO_ROOT) });
 
 /** Expand the real context drawer; a failed click must fail the journey. */
-async function ensureRightPanel(target) {
+async function ensureRightPanel(target, controlSelector = null) {
+  const panelReady = async () => {
+    const panels = [
+      target.locator(".wl-bridge-right:visible").first(),
+      target.getByRole("dialog", { name: "任务上下文", exact: true }).first(),
+    ];
+    for (const panel of panels) {
+      if (await panel.count() === 0 || !await panel.isVisible()) continue;
+      if (!controlSelector) return true;
+      const control = panel.locator(controlSelector).first();
+      if (await control.count() > 0 && await control.isVisible() && await control.isEnabled()) return true;
+    }
+    return false;
+  };
+  if (await panelReady()) return false;
   const toggle = target.locator('button[aria-label="显示任务上下文面板"]').first();
-  if (await toggle.count() && await toggle.isVisible() && await toggle.getAttribute("aria-pressed") !== "true") {
+  if (await toggle.count() && await toggle.isVisible() && await toggle.isEnabled()) {
     await toggle.click({ timeout: 6000 });
-    await toggle.waitFor({ state: "visible", timeout: 6000 });
-    if (await toggle.getAttribute("aria-pressed") !== "true") throw new Error("上下文面板未在点击后展开");
+    // In Bridge's compact layout aria-pressed describes the hidden grid
+    // column. It correctly stays false when the separate drawer opens.
+    if (!await waitUntil(target, panelReady, 6000)) throw new Error("上下文面板未在点击后显示所需内容");
     return true;
   }
   return false;
@@ -91,14 +106,30 @@ const idShown = visibleIdentifier;
 const digest = (value) => value == null ? null : createHash("sha256").update(canonicalJson(value)).digest("hex");
 
 async function screen(target) {
-  return target.evaluate(() => {
+  const snapshot = await target.evaluate(() => {
     const roots = [...document.querySelectorAll("main")];
     const root = roots.at(-1) ?? document.body;
     const text = root.innerText ?? "";
-    const body = document.body.innerText ?? "";
-    const unhealthy = /登录已失效|请重新登录|B 端移动工作台|正在恢复工作区|正在确认身份|正在确认访问范围|暂时无法|服务连接失败|加载失败|读取失败|当前身份不能访问|Internal Server Error/.test(body);
-    return { healthy: text.trim().length > 0 && !unhealthy, text, ready: document.querySelector('[data-product-ready="true"]') !== null };
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const outsideChat = (element) => !element.closest(".rounded-tl-sm,.rounded-br-sm");
+    const visibleNodes = [document.body, ...document.querySelectorAll("body *")]
+      .filter((element) => visible(element) && outsideChat(element) && !element.matches("script,style"));
+    const stateNodes = visibleNodes.filter((element) => element.matches('.wl-state,[role="status"],[role="alert"]'));
+    return {
+      text,
+      directTexts: visibleNodes.map((element) => [...element.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim()).filter(Boolean),
+      stateTexts: stateNodes.map((element) => element.innerText ?? ""),
+      loadingState: stateNodes.some((element) => element.matches(".wl-state--loading")),
+      errorState: stateNodes.some((element) => element.matches(".wl-state--error,.wl-state--forbidden")),
+      ready: document.querySelector('[data-product-ready="true"]') !== null,
+    };
   });
+  return pageStateEvidence(snapshot);
 }
 
 async function waitUntil(target, predicate, timeout = 8000) {
@@ -364,11 +395,16 @@ async function dispatch() {
   try {
     await page.goto(`${URLs.pc}${R.tasks}`, { waitUntil: "domcontentloaded" });
     const input = page.locator('input[placeholder^="说出一句话目标"], textarea[placeholder^="说出一句话目标"]').first();
-    await waitUntil(page, async () => await input.count() > 0 || !(await screen(page)).healthy, 5000);
+    await waitUntil(page, async () => {
+      const dom = await screen(page);
+      const usable = await input.count() > 0 && await input.isVisible() && await input.isEnabled();
+      return dom.terminalError || usable && !dom.loading;
+    }, 5000);
     const title = `本地验收：整理本周工作记录并形成复盘摘要，周五交付（${new Date().toISOString()}）`;
     const inputVisible = await input.count() > 0 && await input.isVisible() && await input.isEnabled();
+    const entryState = await screen(page);
     let filled = false, clicked = false, steps = 0, dispatchMs = null, exchange = null, dispatchAt = null;
-    if (inputVisible) {
+    if (inputVisible && entryState.healthy) {
       await input.fill(title); filled = await input.inputValue() === title; steps += 1;
       dispatchAt = now();
       const send = page.getByRole("button", { name: /^启航/ }).first();
@@ -404,7 +440,7 @@ async function dispatch() {
       steps: ["填写页面目标输入", "点击启航", "点击新任务并核对同一任务的拆解"],
       expected: `≤3 步完成派活；详情可读拆解；派发 ≤${T.dispatchMs / 1000}s`,
       evidence: await shot(page, "exp-05-dispatch"),
-    }, { healthy: (await screen(page)).healthy, inputVisible, filled, clicked, title, requestTitle: exchange?.input?.title, threadId, responseOk: exchange?.ok ?? false, detailThreadId: detail?.ok ? detail.data?.id : null, detailTitle: detail?.ok ? detail.data?.title : null, planSteps: plan.length, planVisible, steps, dispatchMs, responseKind: exchange?.data?.kind ?? null });
+    }, { healthy: (await screen(page)).healthy, entryState: { healthy: entryState.healthy, loading: entryState.loading, terminalError: entryState.terminalError }, inputVisible, filled, clicked, title, requestTitle: exchange?.input?.title, threadId, responseOk: exchange?.ok ?? false, detailThreadId: detail?.ok ? detail.data?.id : null, detailTitle: detail?.ok ? detail.data?.title : null, planSteps: plan.length, planVisible, steps, dispatchMs, responseKind: exchange?.data?.kind ?? null });
   } finally { await watcher.stop(); }
 }
 
@@ -438,6 +474,9 @@ async function inbox() {
 }
 
 async function mobileStaff() {
+  // This read uses the exact TOKEN returned by loginAsMember for WORKSPACE_SLUG,
+  // independently of the mobile access response being checked.
+  const session = await readRpc("members.me");
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN" });
   const key = profile.storage?.bMobileTokenKey ?? `workloom:${productId()}:b-mobile:access-token`;
   await context.addInitScript(({ t, slug, k }) => {
@@ -450,6 +489,7 @@ async function mobileStaff() {
     await mobile.goto(`${URLs.bMobile}${R.tasks}`, { waitUntil: "domcontentloaded" });
     const source = await watcher.wait("threads.list", () => true, 10000);
     const access = await watcher.wait("access.me", () => true, 10000);
+    const workspaceIdentity = workspaceIdentityEvidence(profile, session?.ok ? session.data?.identity : null, access?.ok ? access.data : null);
     const expectedTasks = source?.ok && Array.isArray(source.data) ? source.data.map(({ id, title }) => ({ id, title })) : null;
     const cards = await mobile.evaluate(() => [...document.querySelectorAll('[data-wl-pattern="agent-work-card"],main article')]
       .map((el) => ({ title: el.querySelector("h2,h3")?.textContent?.trim() ?? "", receipt: el.querySelector(".wl-receipt")?.textContent ?? el.innerText })));
@@ -467,7 +507,7 @@ async function mobileStaff() {
       steps: ["打开移动任务页", "核对成员、工作区和任务对象", "检查390px横向溢出"],
       expected: "成员与任务来源一致；任务内容可见；390px 无横向滚动", evidence: await shot(mobile, "exp-07-mobile"),
     }, { healthy: dom.healthy, member: access?.ok && access.data?.subject?.kind === "member" && access.data.subject.memberNo === MEMBER_NO,
-      workspaceMatches: access?.ok && access.data?.scope?.workspaceId === profile.workspaceId,
+      workspaceMatches: workspaceIdentity.matches, workspaceIdentity,
       titleVisible: await mobile.getByRole("heading", { name: "任务", exact: true }).count() > 0,
       sourceOk: source?.ok ?? false, expectedTasks, renderedTasks, overflow });
   } finally { await watcher.stop(); await context.close(); }
@@ -609,7 +649,7 @@ async function dryRun() {
     await page.goto(`${URLs.pc}${R.guardrails}`, { waitUntil: "domcontentloaded" });
     await watcher.wait("fence.rules");
     const before = await fenceSnapshot();
-    const openedPanel = await ensureRightPanel(page);
+    const openedPanel = await ensureRightPanel(page, 'textarea[placeholder^="填写规则名称"]');
     const editor = page.locator('textarea[placeholder^="填写规则名称"]').first();
     const editorVisible = await editor.count() > 0 && await editor.isVisible() && await editor.isEnabled();
     let draftClicked = false, draftVisible = false, clicked = false, exchange = null, reportVisible = false, reportTextMatches = false, reportAbsentBefore = false;

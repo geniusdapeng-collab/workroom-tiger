@@ -12,6 +12,44 @@ const same = (left, right) => left == null || right == null ? null : nonempty(le
 const duration = (value, limit) => known(value, (v) => Number.isFinite(v) && v >= 0 && Number.isFinite(limit) && v <= limit);
 const count = (value) => Number.isInteger(value) && value >= 0;
 
+/** DOM collectors supply only visible page/status text here. Chat messages are
+ * content, not application-state signals, even when an answer says it cannot
+ * help. The matching request and completed reply are checked separately. */
+export function pageStateEvidence(snapshot) {
+  const loadingCopy = /^(?:正在恢复工作区|正在确认身份|正在确认访问范围|正在确认行业能力|正在连接(?:\s*WorkLoom\s*)?服务|正在加载|加载中)/;
+  const errorCopy = /^(?:登录已失效|请重新登录|B 端移动工作台|暂时无法|服务连接失败|服务配置待恢复|加载失败|读取失败|当前身份不能访问|Internal Server Error|WorkLoom\s*(?:服务暂时无法连接|环境未就绪))/;
+  const direct = Array.isArray(snapshot.directTexts) ? snapshot.directTexts : [];
+  const states = Array.isArray(snapshot.stateTexts) ? snapshot.stateTexts : [];
+  const loading = snapshot.loadingState === true || [...direct, ...states].some((value) => loadingCopy.test(text(value)));
+  const terminalError = snapshot.errorState === true || [...direct, ...states].some((value) => errorCopy.test(text(value)));
+  return { healthy: nonempty(snapshot.text) && !loading && !terminalError, loading, terminalError, text: snapshot.text ?? "", ready: snapshot.ready === true };
+}
+
+/** loginAsMember obtains TOKEN with auth.loginAs(profile.identity.workspaceSlug).
+ * members.me is read with that same TOKEN; its server-verified identity is the
+ * slug-to-ID witness. Never derive the expected ID from the access under test. */
+export function workspaceIdentityEvidence(profile, identity, access) {
+  const requestedSlug = profile.identity?.workspaceSlug ?? null;
+  const memberNo = profile.identity?.human ?? "MEM-001";
+  const declaredWorkspaceId = profile.workspaceId ?? null;
+  const evidence = {
+    source: "auth.loginAs(workspaceSlug) -> members.me(same token) -> access.me",
+    requestedSlug, memberNo, declaredWorkspaceId,
+    resolvedTenantId: identity?.tenantId ?? null,
+    resolvedWorkspaceId: identity?.workspaceId ?? null,
+    observedTenantId: access?.scope?.tenantId ?? null,
+    observedWorkspaceId: access?.scope?.workspaceId ?? null,
+  };
+  if (!nonempty(requestedSlug) || !identity || !nonempty(identity.tenantId) || !nonempty(identity.workspaceId)
+    || !nonempty(identity.memberNo) || !access || !nonempty(access.scope?.tenantId) || !nonempty(access.scope?.workspaceId)) {
+    return { ...evidence, matches: null, reason: "缺少登录工作区或服务端身份/范围证据" };
+  }
+  const matches = identity.memberNo === memberNo && access.subject?.kind === "member" && access.subject.memberNo === memberNo
+    && (declaredWorkspaceId === null || nonempty(declaredWorkspaceId) && declaredWorkspaceId === identity.workspaceId)
+    && identity.tenantId === access.scope.tenantId && identity.workspaceId === access.scope.workspaceId;
+  return { ...evidence, matches, reason: matches ? null : "声明、登录身份或移动端范围不一致" };
+}
+
 export function profileEvidence(dom, expected) {
   const match = /^(?:员工|成员)档案\s*·\s*(\S(?:.*\S)?)$/.exec(text(dom.heading));
   const headerOk = Boolean(match && match[1] === text(expected.name));

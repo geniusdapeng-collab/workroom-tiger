@@ -16,7 +16,9 @@ import pg from "pg";
 import { cliArgs, findRepoRoot, loadProfile, urlsOf } from "./lib/profile.mjs";
 import { loadChromium } from "./lib/playwright.mjs";
 import { loginAsMember, productIdOf } from "./lib/session.mjs";
-import { profileEvidence } from "./lib/ui-evidence.mjs";
+import { profileEvidence, rpcExchange } from "./lib/ui-evidence.mjs";
+import { displayNameOf, hydrateAliases } from "../../apps/web/src/lib/naming.ts";
+import { hydrateClientSafeTerms } from "../../apps/web/src/lib/display.ts";
 
 const args = cliArgs();
 const REPO_ROOT = findRepoRoot();
@@ -115,6 +117,34 @@ async function loginPc() {
 }
 
 const token = await loginPc();
+let profileNamePolicy = null;
+let profileNamePolicyError = null;
+try {
+  const response = await page.request.get(`${URLs.api}/trpc/access.me`, {
+    headers: { authorization: `Bearer ${token}` }, timeout: 15000,
+  });
+  const exchange = rpcExchange(response.url(), "GET", null, response.status(), await response.json(), "access.me");
+  const access = exchange?.ok ? exchange.data : null;
+  if (access?.subject?.kind !== "member" || access.subject.memberNo !== (profile.identity?.human ?? "MEM-001")
+    || access.scope?.workspaceId !== WORKSPACE_ID || typeof access.bundle?.configured !== "boolean") {
+    throw new Error("未取得与登录工作区一致的显示命名规则");
+  }
+  if (access.bundle.configured && (!access.bundle.ui || typeof access.bundle.ui !== "object")) {
+    throw new Error("服务端行业显示投影缺失");
+  }
+  const safeTerms = access.bundle.configured ? access.bundle.ui?.safeTerms ?? [] : [];
+  if (!Array.isArray(safeTerms) || !safeTerms.every((term) => typeof term === "string")) {
+    throw new Error("服务端行业术语声明不是有效数组");
+  }
+  hydrateClientSafeTerms(safeTerms);
+  // Each profile is a fresh document navigation. P8 uses displayNameOf without
+  // hydrating aliases; only P0 hydrates its in-memory table. Match that exact
+  // entry path, not arbitrary DB aliases or an unrelated Chinese persona.
+  hydrateAliases([]);
+  profileNamePolicy = { source: "client naming.ts + access.me.bundle.ui.safeTerms; fresh profile document", safeTerms };
+} catch (error) {
+  profileNamePolicyError = String(error).split("\n")[0];
+}
 const shot = async (target, name) => {
   try {
     await target.screenshot({ path: join(SHOT_DIR, `${name}.png`) });
@@ -131,6 +161,8 @@ if (!args.has("--skip-agents")) {
     const expectedFences = (agent.fence_bindings ?? []).length;
     const row = { name: agent.name, bundle: agent.meta?.sourceBundleId ?? null, fences: expectedFences, skills: expectedSkills.length, ok: false };
     try {
+      if (!profileNamePolicy) throw new Error(`员工显示名无法核验：${profileNamePolicyError}`);
+      const expectedName = displayNameOf({ presetKey: agent.preset_key, roleName: agent.name });
       await page.goto(`${URLs.pc}/agents/${encodeURIComponent(agent.id)}`, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.body.innerText.includes("身份与归属"), null, { timeout: 20000 });
       const dom = await page.evaluate(() => {
@@ -153,9 +185,9 @@ if (!args.has("--skip-agents")) {
             .find((heading) => /^(?:员工|成员)档案\s*·/.test(heading)) ?? "",
         };
       });
-      const verdict = profileEvidence(dom, { name: agent.name, versionLabel: versionLabel(agent.version), expectedFences, expectedSkills: expectedSkills.length });
+      const verdict = profileEvidence(dom, { name: expectedName, versionLabel: versionLabel(agent.version), expectedFences, expectedSkills: expectedSkills.length });
       row.ok = verdict.ok;
-      row.detail = { ...verdict, heading: dom.heading, declared: dom.declared, expectedFences, equipped: dom.equipped, expectedSkills: expectedSkills.length, errors: consoleErrors.slice(0, 2) };
+      row.detail = { ...verdict, heading: dom.heading, expectedName, namePolicy: profileNamePolicy, declared: dom.declared, expectedFences, equipped: dom.equipped, expectedSkills: expectedSkills.length, errors: consoleErrors.slice(0, 2) };
     } catch (err) {
       row.detail = { error: String(err).split("\n")[0], errors: consoleErrors.slice(0, 3) };
     }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,7 +16,7 @@ const thresholds = {
   firstValueMs: 20000, approvalMs: 30000, dispatchMs: 60000,
   traceClicks: 2, guestFirstReplyMs: 30000, decisionQuota: 7,
 };
-const helper = () => import("./ui-evidence.mjs");
+const helper = () => import(pathToFileURL(join(SOURCE, "lib/ui-evidence.mjs")).href);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -44,6 +44,77 @@ test("profile identity accepts the rendered employee heading and preserves all o
     { identity: "第 2 版 来源行业包" }, { identity: "第 1 版" },
     { declared: 0 }, { equipped: 0 }, { dangling: true }, { uninstalled: true }, { notFound: true },
   ]) assert.equal(profileEvidence({ ...dom, ...patch }, expected).ok, false, JSON.stringify(patch));
+});
+
+test("profile name oracle reuses the client role, persona, safe-term and alias rules", async () => {
+  const { displayNameOf, hydrateAliases } = await import("../../../apps/web/src/lib/naming.ts");
+  const { hydrateClientSafeTerms } = await import("../../../apps/web/src/lib/display.ts");
+  const { profileEvidence } = await helper();
+  const agent = { presetKey: "backtest-wfa", roleName: "回测WFA引擎" };
+  const dom = { heading: "员工档案 · 韩栖迟", identity: "第 1 版 来源行业包", declared: 0, equipped: 0, dangling: false, uninstalled: false, notFound: false };
+  const expected = (name) => ({ name, versionLabel: "第 1 版", expectedFences: 0, expectedSkills: 0 });
+  try {
+    hydrateAliases([]);
+    hydrateClientSafeTerms([]);
+    assert.equal(displayNameOf(agent), "韩栖迟");
+    assert.equal(profileEvidence(dom, expected(displayNameOf(agent))).ok, true);
+    assert.equal(profileEvidence({ ...dom, heading: "员工档案 · 周叙白" }, expected(displayNameOf(agent))).ok, false);
+    assert.equal(displayNameOf({ ...agent, roleName: "回测研究员" }), "回测研究员");
+    hydrateClientSafeTerms(["WFA"]);
+    assert.equal(displayNameOf(agent), "回测WFA引擎");
+    assert.equal(profileEvidence(dom, expected(displayNameOf(agent))).ok, false);
+    hydrateAliases([{ presetKey: agent.presetKey, alias: "测试别名" }]);
+    assert.equal(displayNameOf(agent), "测试别名");
+  } finally {
+    hydrateAliases([]);
+    hydrateClientSafeTerms([]);
+  }
+});
+
+test("page state distinguishes loading, terminal errors and ordinary completed content", async () => {
+  const { pageStateEvidence } = await helper();
+  const ready = { text: "任务已就绪", directTexts: ["任务已就绪"], stateTexts: [], loadingState: false, errorState: false };
+  assert.equal(pageStateEvidence(ready).healthy, true);
+  assert.deepEqual(
+    [pageStateEvidence({ ...ready, loadingState: true }).loading, pageStateEvidence({ ...ready, loadingState: true }).terminalError],
+    [true, false],
+  );
+  for (const label of ["正在确认访问范围", "正在恢复工作区", "正在连接服务", "正在加载"]) {
+    const state = pageStateEvidence({ ...ready, directTexts: [label] });
+    assert.equal(state.loading, true, label);
+    assert.equal(state.terminalError, false, label);
+  }
+  for (const patch of [{ errorState: true }, { directTexts: ["登录已失效，请重新登录"] }, { stateTexts: ["暂时无法确认访问权限"] }, { directTexts: ["服务连接失败，可重试发送"] }]) {
+    const state = pageStateEvidence({ ...ready, ...patch });
+    assert.equal(state.terminalError, true, JSON.stringify(patch));
+    assert.equal(state.healthy, false);
+  }
+  // Chat bubbles are excluded by the DOM collector; their words must never
+  // become page-state evidence merely because they appear in main.innerText.
+  assert.equal(pageStateEvidence({ ...ready, text: "抱歉，这个问题我暂时无法准确回答。" }).healthy, true);
+});
+
+test("workspace identity is bound to the slug-login token and authoritative member scope", async () => {
+  const { workspaceIdentityEvidence } = await helper();
+  const profile = { identity: { workspaceSlug: "fixture", human: "MEM-001" } };
+  const identity = { memberNo: "MEM-001", tenantId: "tenant-fixture", workspaceId: "workspace-42" };
+  const access = { subject: { kind: "member", memberNo: "MEM-001" }, scope: { tenantId: "tenant-fixture", workspaceId: "workspace-42" } };
+  const valid = workspaceIdentityEvidence(profile, identity, access);
+  assert.equal(valid.matches, true);
+  assert.equal(valid.requestedSlug, "fixture");
+  assert.equal(valid.resolvedWorkspaceId, "workspace-42");
+  assert.equal(valid.source, "auth.loginAs(workspaceSlug) -> members.me(same token) -> access.me");
+  for (const [changedProfile, changedIdentity, changedAccess] of [
+    [{ ...profile, workspaceId: "other" }, identity, access],
+    [profile, { ...identity, memberNo: "MEM-999" }, access],
+    [profile, identity, { ...access, scope: { ...access.scope, workspaceId: "other" } }],
+    [profile, identity, { ...access, scope: { ...access.scope, tenantId: "other" } }],
+    [profile, identity, { ...access, subject: { kind: "guest", memberNo: "MEM-001" } }],
+    [profile, null, access],
+    [profile, {}, access],
+    [profile, identity, null],
+    [{ identity: { human: "MEM-001" } }, identity, access],
+  ]) assert.notEqual(workspaceIdentityEvidence(changedProfile, changedIdentity, changedAccess).matches, true);
 });
 
 test("tRPC exchange parsing binds batch index, request body and response error", async () => {
@@ -171,7 +242,17 @@ async function runFixture(name, kind, mode, onlyIds = null) {
   mkdirSync(output, { recursive: true });
   const state = { submitted: null, approvalStatus: "pending", requests: [], port: null };
   const bad = mode === "spoof";
-  const agent = { id: "agent-1", preset_key: "fixture-agent", name: "测试岗位", version: "v1", fence_bindings: [], skills: [], meta: {} };
+  const personaMode = ["persona-fallback", "wrong-persona", "safe-term-name", "unsafe-term-name"].includes(mode);
+  const agent = { id: "agent-1", preset_key: personaMode ? "backtest-wfa" : "fixture-agent", name: personaMode ? "回测WFA引擎" : "测试岗位", version: "v1", fence_bindings: [], skills: [], meta: {} };
+  const workspaceId = "workspace-42";
+  const memberIdentity = { workspaceId, tenantId: "tenant-fixture", memberNo: "MEM-001", name: "验收成员" };
+  const accessPayload = {
+    subject: { kind: bad ? "guest" : "member", memberNo: "MEM-001", name: "验收成员" },
+    scope: { workspaceId: mode === "wrong-workspace" ? "workspace-other" : workspaceId, tenantId: mode === "wrong-tenant" ? "tenant-other" : "tenant-fixture" },
+    bundle: mode === "safe-term-name"
+      ? { configured: true, ui: { safeTerms: ["WFA"] } }
+      : { configured: false },
+  };
   const today = new Date().toISOString();
   const approvalRows = () => [
     { approval_id: "approval-1", event_id: "event-1", status: state.approvalStatus, created_at: today },
@@ -208,10 +289,11 @@ async function runFixture(name, kind, mode, onlyIds = null) {
       else if (procedure === "threads.dispatch") {
         state.submitted = input.title;
         data = { kind: "routed", threadId: "T-1" };
-      } else if (procedure === "accounts.inbox.unified") data = { groups: [{ workspaceId: "fixture", workspaceName: "模拟工作区", pendingApprovals: 1 }] };
-      else if (procedure === "accounts.my.memberships") data = [{ workspace_id: "fixture", workspace_name: "模拟工作区", tenant_id: "tenant-fixture" }];
-      else if (procedure === "access.me" || procedure === "members.me") data = { subject: { kind: bad ? "guest" : "member", memberNo: "MEM-001", name: "验收成员" }, scope: { workspaceId: "fixture" }, identity: { workspaceId: "fixture", memberNo: "MEM-001", name: "验收成员" } };
-      else if (procedure === "accounts.admin.grants") data = [{ id: "grant-1", partner_name: "本地伙伴", workspaces: ["fixture"], capabilities: ["report.view"], expires_at: "2027-01-01" }];
+      } else if (procedure === "accounts.inbox.unified") data = { groups: [{ workspaceId, workspaceName: "模拟工作区", pendingApprovals: 1 }] };
+      else if (procedure === "accounts.my.memberships") data = [{ workspace_id: workspaceId, workspace_name: "模拟工作区", tenant_id: "tenant-fixture" }];
+      else if (procedure === "access.me") data = mode === "missing-name-policy" ? {} : accessPayload;
+      else if (procedure === "members.me") data = { identity: mode === "missing-identity" ? null : memberIdentity };
+      else if (procedure === "accounts.admin.grants") data = [{ id: "grant-1", partner_name: "本地伙伴", workspaces: [workspaceId], capabilities: ["report.view"], expires_at: "2027-01-01" }];
       else if (procedure === "fence.rules") data = rules;
       else if (procedure === "fence.versions") data = versions;
       else if (procedure === "fence.dryRun") data = bad ? null : { dryRunId: "dry-1", report: { ruleId: input.ruleId, replayed: 1, wouldBlock: [], wouldReview: [], unchanged: 1, impact: "已回放 1 条，无新增拦截" } };
@@ -222,7 +304,10 @@ async function runFixture(name, kind, mode, onlyIds = null) {
           return;
         }
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ answer: "可以协助核对，请提供开票抬头。", conversationId: "conversation-1", mock: true }));
+        res.end(JSON.stringify({
+          answer: mode === "chat-refusal" ? "抱歉，这个问题我暂时无法准确回答，不敢随意编造。可以转人工继续核对。" : "可以协助核对，请提供开票抬头。",
+          conversationId: "conversation-1", mock: true,
+        }));
         return;
       } else data = {};
       res.writeHead(bad && ["approvals.decide", "fence.dryRun"].includes(procedure) ? 503 : 200, { "content-type": "application/json" });
@@ -231,17 +316,30 @@ async function runFixture(name, kind, mode, onlyIds = null) {
     }
     res.writeHead(200, { "content-type": "text/html" });
     if (url.pathname.startsWith("/agents/")) {
-      const heading = mode === "spoof-heading" ? "员工档案 · " : "员工档案 · 测试岗位";
+      const name = mode === "persona-fallback" ? "韩栖迟"
+        : mode === "wrong-persona" ? "周叙白"
+          : ["safe-term-name", "unsafe-term-name"].includes(mode) ? "回测WFA引擎" : "测试岗位";
+      const heading = mode === "spoof-heading" ? "员工档案 · " : `员工档案 · ${name}`;
       res.end(html(`<main><h2>${heading}<span>第 1 版</span></h2><section>身份与归属 第 1 版 来源行业包</section>${mode === "spoof-heading" ? "<p>成员档案 · 测试岗位</p>" : ""}</main>`));
     } else if (url.pathname === "/skills") {
       res.end(html("<main>官方技能 1 已安装</main>"));
     } else if (url.pathname === "/tasks/T-1") {
       res.end(html(`<main><h2>任务执行</h2><span>T-1</span><p>${state.submitted ?? "本地复盘任务"}</p><article>数字员工 · 事件 event-1 读取并形成复盘 步骤 拆解 回执 执行</article></main>`, `rpc('threads.get',{threadId:'T-1'});${mode === "stale-trace" ? "" : "rpc('threads.events',{threadId:'T-1'});"}`));
     } else if (url.pathname === "/tasks") {
-      res.end(html(bad
-        ? `<main><h1>任务</h1><p>登录已失效，请输入验证码。${"安全说明，当前任务等待身份验证。".repeat(40)}</p></main>`
-        : `<main><h1>任务</h1><input placeholder="说出一句话目标…（最多 500 字）"><button id="dispatch">启航</button><div id="tasks"><article><h2>${thread().title}</h2><p>请求回执：T-1</p></article></div></main>`,
-      bad ? `rpc('access.me');` : `rpc('access.me');rpc('threads.list');document.querySelector('#dispatch').onclick=async()=>{const title=document.querySelector('input').value;const r=await rpc('threads.dispatch',{title,presetKey:'fixture'},true);document.querySelector('#tasks').innerHTML='<a href="/tasks/'+r.threadId+'">'+title+'</a>';};`));
+      const readyTasks = `<h1>任务</h1><input placeholder="说出一句话目标…（最多 500 字）"><button id="dispatch">启航</button><div id="tasks"><article><h2>${thread().title}</h2><p>请求回执：T-1</p></article></div>`;
+      const setupTasks = `rpc('access.me');rpc('threads.list');document.querySelector('#dispatch').onclick=async()=>{const title=document.querySelector('input').value;const r=await rpc('threads.dispatch',{title,presetKey:'fixture'},true);document.querySelector('#tasks').innerHTML='<a href="/tasks/'+r.threadId+'">'+title+'</a>';};`;
+      const loading = `<div class="wl-state wl-state--loading" role="status"><strong>正在确认访问范围</strong><p>正在读取当前工作区的角色与版本能力。</p></div>`;
+      if (mode === "delayed-task-input") {
+        res.end(html(`<main>${loading}</main>`, `setTimeout(()=>{document.querySelector('main').innerHTML=${JSON.stringify(readyTasks)};${setupTasks}},180);`));
+      } else if (mode === "dispatch-loading") {
+        res.end(html(`<main>${loading}${readyTasks}</main>`, setupTasks));
+      } else if (mode === "dispatch-error") {
+        res.end(html(`<main><div class="wl-state wl-state--error" role="alert"><strong>暂时无法确认访问权限</strong><p>权限恢复前不会打开业务页面。</p></div>${readyTasks}</main>`, setupTasks));
+      } else {
+        res.end(html(bad
+          ? `<main><h1>任务</h1><p>登录已失效，请输入验证码。${"安全说明，当前任务等待身份验证。".repeat(40)}</p></main>`
+          : `<main>${readyTasks}</main>`, bad ? `rpc('access.me');` : setupTasks));
+      }
     } else if (url.pathname === "/approvals") {
       res.end(html(`<main><h2>审批中心</h2><button>approval-1 必审</button><section><button id="advance">推进</button><button>校准</button><button>制动</button></section><div id="notice">${bad ? "审批决定已写入事件账本，已采纳" : ""}</div></main>`,
         `rpc('approvals.list');document.querySelector('#advance').onclick=async()=>{const r=await rpc('approvals.decide',{approvalId:'approval-1',gesture:'approve'},true);${bad ? "" : `document.querySelector('#notice').textContent='审批决定已写入事件账本，账本事件 '+r.gestureEventId;rpc('approvals.list');`}};`));
@@ -256,10 +354,31 @@ async function runFixture(name, kind, mode, onlyIds = null) {
     } else if (url.pathname === "/partners") {
       res.end(html(`<main><h1>伙伴授权</h1><section><h2>授权台账（1）</h2><article><span class="font-medium">本地伙伴</span><div>工作区：${mode === "wrong-partner-scope" ? "其他工作区" : "模拟工作区"}<br>能力：经营报表 · 有效期至 2027/1/1</div></article></section>${bad ? "" : "<p>资金相关能力不向伙伴开放；空工作区范围会被客户端和服务端同时拒绝。</p>"}</main>`, `rpc('accounts.admin.grants');rpc('accounts.my.memberships');`));
     } else if (url.pathname === "/guardrails") {
-      res.end(html(`<main><h2>规则与权限</h2><p>生效范围 规则版本记录</p><textarea placeholder="填写规则名称或审批意图"></textarea><select><option>本地规则</option></select><button id="draft">生成结构化规则草稿</button><div id="preview"></div><div id="report">${mode === "stale-report" ? "<div>模拟回放报告</div><div>已回放 1 条，无新增拦截</div>" : ""}</div></main>`,
-        `rpc('fence.rules');rpc('fence.versions');document.querySelector('#draft').onclick=()=>{document.querySelector('#preview').innerHTML='<p>草稿预览（确认后进入变更审批）</p><button id="dry">模拟回放最近 10 条事件</button>';document.querySelector('#dry').onclick=async()=>{const r=await rpc('fence.dryRun',{ruleId:'R2',name:document.querySelector('textarea').value,level:'review',objectTypes:['local'],actions:['local.read'],when:'true'},true);${bad ? "" : `document.querySelector('#report').innerHTML='<div>模拟回放报告</div><div>'+r.report.impact+'</div><button>确认并提交变更审批（审批前不生效）</button>';`}};};`));
+      const controls = `<textarea placeholder="填写规则名称或审批意图"></textarea><select><option>本地规则</option></select><button id="draft">生成结构化规则草稿</button><div id="preview"></div><div id="report">${mode === "stale-report" ? "<div>模拟回放报告</div><div>已回放 1 条，无新增拦截</div>" : ""}</div>`;
+      const setup = `document.querySelector('#draft').onclick=()=>{document.querySelector('#preview').innerHTML='<p>草稿预览（确认后进入变更审批）</p><button id="dry">模拟回放最近 10 条事件</button>';document.querySelector('#dry').onclick=async()=>{const r=await rpc('fence.dryRun',{ruleId:'R2',name:document.querySelector('textarea').value,level:'review',objectTypes:['local'],actions:['local.read'],when:'true'},true);${bad ? "" : `document.querySelector('#report').innerHTML='<div>模拟回放报告</div><div>'+r.report.impact+'</div><button>确认并提交变更审批（审批前不生效）</button>';`}};};`;
+      const main = `<main><h2>规则与权限</h2><p>生效范围 规则版本记录</p></main>`;
+      const toggle = `<button id="context-toggle" aria-label="显示任务上下文面板" aria-pressed="false">上下文</button>`;
+      let body = `<main><h2>规则与权限</h2><p>生效范围 规则版本记录</p>${controls}</main>`;
+      let script = setup;
+      if (mode === "panel-grid-visible") {
+        body = `${main}<button id="context-toggle" aria-label="隐藏任务上下文面板" aria-pressed="true">上下文</button><aside class="wl-bridge-right">${controls}</aside>`;
+        script = `${setup}document.querySelector('#context-toggle').onclick=()=>{throw new Error('an open panel must not be toggled closed')};`;
+      } else if (mode === "panel-grid-hidden") {
+        body = `${main}${toggle}<aside class="wl-bridge-right" hidden>${controls}</aside>`;
+        script = `${setup}document.querySelector('#context-toggle').onclick=()=>{document.querySelector('.wl-bridge-right').hidden=false;document.querySelector('#context-toggle').setAttribute('aria-pressed','true');document.querySelector('#context-toggle').setAttribute('aria-label','隐藏任务上下文面板');};`;
+      } else if (mode === "panel-compact" || mode === "panel-wrong-drawer") {
+        body = `${main}${toggle}<aside class="wl-bridge-right" hidden></aside>`;
+        const title = mode === "panel-compact" ? "任务上下文" : "任务会话";
+        script = `document.querySelector('#context-toggle').onclick=()=>{document.body.insertAdjacentHTML('beforeend',${JSON.stringify(`<div role="dialog" aria-label="${title}"><h2>${title}</h2>${controls}</div>`)});${setup}};`;
+      } else if (mode === "panel-noop") {
+        // Decoy controls remain in main. Only aria-pressed changes, while the
+        // requested panel stays closed: the old attribute-only check passed.
+        body += `${toggle}<aside class="wl-bridge-right" hidden></aside>`;
+        script += `document.querySelector('#context-toggle').onclick=()=>document.querySelector('#context-toggle').setAttribute('aria-pressed','true');`;
+      }
+      res.end(html(body, `rpc('fence.rules');rpc('fence.versions');${script}`));
     } else if (url.pathname === "/guest" || url.pathname === "/guest/") {
-      res.end(html(`<main><div id="messages"><div><div class="rounded-tl-sm">欢迎咨询，这是旧欢迎消息。${"本地服务介绍。".repeat(45)}</div><button>转人工</button></div></div><textarea placeholder="请输入您的需求…"></textarea><button id="send">发送</button><a href="#tickets">工单</a></main>`,
+      res.end(html(`<main>${mode === "chat-page-error" ? '<div class="wl-state wl-state--error" role="alert">服务连接失败，可重试发送</div>' : ""}<div id="messages"><div><div class="rounded-tl-sm">欢迎咨询，这是旧欢迎消息。${"本地服务介绍。".repeat(45)}</div><button>转人工</button></div></div><textarea placeholder="请输入您的需求…"></textarea><button id="send">发送</button><a href="#tickets">工单</a></main>`,
         `document.querySelector('#send').onclick=async()=>{const text=document.querySelector('textarea').value;document.querySelector('#messages').insertAdjacentHTML('beforeend','<div class="rounded-br-sm">'+text+'</div>');${bad ? `document.querySelector('#messages').insertAdjacentHTML('beforeend','<div>小虎正在思考…</div>');` : ""}const r=await fetch('/c/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});const data=await r.json();${bad ? "" : `document.querySelector('#messages').insertAdjacentHTML('beforeend','<div><div class="rounded-tl-sm">'+data.answer+'<span>演示</span></div><button>转人工</button></div>');`}};`));
     } else {
       res.end(html(`<main data-product-ready="true"><h1>经营主页</h1><p>今日经营简报：模拟任务运行正常</p><section>请您决策 · 1 件<p>需要决策的本地事项</p></section>${bad ? "<p>待决 待审批</p>" : ""}</main>`, `rpc('captain.theater');rpc('captain.chairmanQueue');`));
@@ -268,16 +387,24 @@ async function runFixture(name, kind, mode, onlyIds = null) {
   await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   state.port = server.address().port;
   const base = `http://127.0.0.1:${state.port}`;
-  const scripts = join(temp, "scripts");
+  const scripts = join(temp, "scripts", "acceptance");
   mkdirSync(join(scripts, "lib"), { recursive: true });
   const sourceName = kind === "ui" ? "ui-probe.mjs" : "experience.mjs";
   const source = readFileSync(join(SOURCE, sourceName), "utf8");
   writeFileSync(join(scripts, sourceName), source);
-  if (existsSync(join(HERE, "ui-evidence.mjs"))) writeFileSync(join(scripts, "lib/ui-evidence.mjs"), readFileSync(join(HERE, "ui-evidence.mjs")));
+  if (existsSync(join(SOURCE, "lib/ui-evidence.mjs"))) writeFileSync(join(scripts, "lib/ui-evidence.mjs"), readFileSync(join(SOURCE, "lib/ui-evidence.mjs")));
+  // Exercise the exact product naming and display modules, including the
+  // installed UI language implementation. Do not copy its policy into tests.
+  const clientLib = join(temp, "apps/web/src/lib");
+  mkdirSync(clientLib, { recursive: true });
+  for (const file of ["naming.ts", "display.ts"]) writeFileSync(join(clientLib, file), readFileSync(join(GOVERNANCE, "apps/web/src/lib", file)));
+  symlinkSync(join(GOVERNANCE, "apps/web/node_modules"), join(temp, "apps/web/node_modules"), "dir");
+  writeFileSync(join(temp, "package.json"), '{"type":"module"}');
   const journeys = ["first-value", "approval", "traceability", "brake", "dispatch", "inbox", "mobile-staff", "partner-scope", "guest-service", "dry-run"]
     .map((script, i) => ({ id: `EXP-${String(i + 1).padStart(2, "0")}`, script: `builtin:${script}` }));
   const profile = {
-    identity: { workspaceSlug: "fixture", human: "MEM-001" }, workspaceId: "fixture",
+    identity: { workspaceSlug: "fixture", human: "MEM-001" },
+    ...(["slug-only", "wrong-workspace", "wrong-tenant", "missing-identity"].includes(mode) ? {} : { workspaceId: mode === "conflicting-workspace" ? "workspace-other" : workspaceId }),
     routes: { home: "/", tasks: "/tasks", approvals: "/approvals", events: "/events", reports: "/reports", inbox: "/inbox", partners: "/partners", guardrails: "/guardrails" },
     surfaces: { pcRoutes: [], bMobileRoutes: [], cRoutes: [] }, storage: {},
     thresholds: { ...thresholds, firstValueMs: 5000, guestFirstReplyMs: 800, dispatchMs: 3000, approvalMs: 3000 },
@@ -299,7 +426,7 @@ async function runFixture(name, kind, mode, onlyIds = null) {
   `);
   mkdirSync(join(temp, "node_modules/pg"), { recursive: true });
   writeFileSync(join(temp, "node_modules/pg/package.json"), '{"type":"module","exports":"./index.mjs"}');
-  writeFileSync(join(temp, "node_modules/pg/index.mjs"), `export default {Client:class{async connect(){} async end(){} async query(sql){return{rows:sql.includes('FROM workspaces')?[{id:'fixture',slug:'fixture'}]:sql.includes('FROM agents')?[${JSON.stringify(agent)}]:[]}}}};`);
+  writeFileSync(join(temp, "node_modules/pg/index.mjs"), `export default {Client:class{async connect(){} async end(){} async query(sql){return{rows:sql.includes('FROM workspaces')?[{id:${JSON.stringify(workspaceId)},slug:'fixture'}]:sql.includes('FROM agents')?[${JSON.stringify(agent)}]:[]}}}};`);
   const argv = [join(scripts, sourceName)];
   if (kind !== "ui") argv.push("--only", (onlyIds ?? journeys.map((j) => j.id)).join(","));
   try {
@@ -332,6 +459,19 @@ test("real browser CLI: body text cannot impersonate a missing profile name", { 
   assert.equal(report.agents["fixture-agent"].ok, false);
   assert.equal(exitCode, 1);
 });
+
+for (const [mode, expectedPass] of [
+  ["persona-fallback", true], ["safe-term-name", true],
+  ["wrong-persona", false], ["unsafe-term-name", false], ["missing-name-policy", false],
+]) {
+  test(`real browser CLI: exact client profile policy ${mode}`, { timeout: 120000 }, async () => {
+    const { report, exitCode } = await runFixture(mode, "ui", mode);
+    const rows = Object.values(report.agents);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].ok, expectedPass, JSON.stringify(rows[0]));
+    assert.equal(exitCode, expectedPass ? 0 : 1);
+  });
+}
 
 const expectedJourneyIds = Object.keys(good);
 function assertCompleteJourneys(report) {
@@ -379,3 +519,54 @@ test("real browser CLI: UI screenshot failures make the probe unsuccessful", { t
   assert.ok(report.issues.some((issue) => issue.where.startsWith("screenshot:")));
   assert.equal(exitCode, 1);
 });
+
+for (const [mode, id, expectedPass] of [
+  ["delayed-task-input", "EXP-05", true],
+  ["dispatch-loading", "EXP-05", false],
+  ["dispatch-error", "EXP-05", false],
+  ["slug-only", "EXP-07", true],
+  ["wrong-workspace", "EXP-07", false],
+  ["wrong-tenant", "EXP-07", false],
+  ["conflicting-workspace", "EXP-07", false],
+  ["missing-identity", "EXP-07", false],
+  ["chat-refusal", "EXP-09", true],
+  ["chat-page-error", "EXP-09", false],
+  ["panel-grid-visible", "EXP-10", true],
+  ["panel-grid-hidden", "EXP-10", true],
+  ["panel-compact", "EXP-10", true],
+  ["panel-noop", "EXP-10", false],
+  ["panel-wrong-drawer", "EXP-10", false],
+]) {
+  test(`real browser CLI: ${mode} has the correct ${id} verdict`, { timeout: 120000 }, async () => {
+    const { report, exitCode, requests } = await runFixture(mode, "experience", mode, [id]);
+    assert.deepEqual(report.checks.map((check) => check.id), [id]);
+    const check = report.checks[0];
+    assert.equal(check.pass, expectedPass, JSON.stringify(check.actual));
+    assert.equal(exitCode, expectedPass ? 0 : 1);
+    if (mode === "slug-only") {
+      assert.equal(check.actual.workspaceIdentity.requestedSlug, "fixture");
+      assert.equal(check.actual.workspaceIdentity.resolvedWorkspaceId, "workspace-42");
+      assert.equal(check.actual.workspaceIdentity.source, "auth.loginAs(workspaceSlug) -> members.me(same token) -> access.me");
+      assert.ok(requests.some((request) => request.path === "/trpc/members.me" && request.method === "GET"));
+    }
+    if (mode === "dispatch-loading" || mode === "dispatch-error") {
+      assert.equal(requests.some((request) => request.path === "/trpc/threads.dispatch"), false);
+    }
+    if (mode === "delayed-task-input") {
+      assert.ok(requests.some((request) => request.path === "/trpc/threads.dispatch" && request.method === "POST"));
+      assert.equal(check.actual.steps, 3);
+      assert.ok(check.actual.dispatchMs <= 3000);
+    }
+    if (mode === "chat-refusal") {
+      assert.equal(check.actual.requestOk, true);
+      assert.equal(check.actual.newAssistantText, check.actual.responseText);
+      assert.match(check.actual.responseText, /暂时无法准确回答/);
+      assert.equal(check.actual.demoLabeled, true);
+    }
+    if (mode === "panel-compact" || mode === "panel-grid-hidden") assert.equal(check.actual.openedPanel, true);
+    if (mode === "panel-grid-visible") assert.equal(check.actual.openedPanel, false);
+    if (mode === "panel-noop" || mode === "panel-wrong-drawer") {
+      assert.equal(requests.some((request) => request.path === "/trpc/fence.dryRun"), false);
+    }
+  });
+}
