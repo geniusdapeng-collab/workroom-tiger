@@ -21,8 +21,9 @@ import {
 } from "@workloom/base/tenancy";
 import { gatewayAppend, gatewayAppendOnClient, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
 import { makeReadableId } from "@workloom/shared";
-import { capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
+import { actionProcedure, capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
 import { accountsRouter } from "./accounts-router.js";
+import { overlayRouter } from "./overlay-router.js";
 import {
   ApprovalError,
   batchApprove,
@@ -133,11 +134,19 @@ import {
   resolveAuthoritativeClientAccess,
 } from "../service/access-authority.js";
 import {
+  advanceWizardDraftOn,
+  completeWizardDraft,
+  getWizardDraft,
+  OnboardingDraftError,
   replayWelcome,
+  saveWizardDraft,
   saveWelcomeProgress,
   welcomeProgress,
   WELCOME_STEPS,
 } from "../service/onboarding-continuity.js";
+import { bundledServiceFrontAvailable, resolveServiceFrontPublication } from "../service/service-front-publication.js";
+import { llmConfigurationFingerprint, onboardingStatus, onboardingStatusOn } from "../service/onboarding-readiness.js";
+import { serviceTx } from "../service/events.js";
 import {
   buildEvolutionScorecard,
   decayMemories,
@@ -145,6 +154,10 @@ import {
   editMemoryContent,
   getFeedbackEnums,
   recallMemoriesByMember,
+  previewMemoryImpact,
+  reactivateMemory,
+  restoreMemories,
+  MemoryGovernanceError,
   runMemoryMinerBeat,
 } from "@workloom/base/evolve";
 import { getMemorySources, searchMemories } from "@workloom/base/workdata";
@@ -212,16 +225,13 @@ function persistLlmEnv(cfg: { provider: string; baseUrl: string; apiKey: string;
   resetLlmAssembly(); // v3.0：模型池与行业策略缓存同步复位（写盘即全链生效免重启）
 }
 
-/** LLM 装配状态（真实=非 mock 且 baseUrl 齐备；apiKey 可空=免 key 网关） */
-function llmAssembly(): { provider: string; model: string; baseUrl: string; real: boolean } {
-  const provider = process.env.LLM_PROVIDER ?? "mock";
-  const baseUrl = process.env.LLM_BASE_URL ?? "";
-  return {
-    provider,
-    model: process.env.LLM_MODEL ?? "",
-    baseUrl,
-    real: provider !== "mock" && baseUrl.length > 0,
-  };
+async function wizardResult<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof OnboardingDraftError) throw new TRPCError({ code: error.code, message: error.message });
+    throw error;
+  }
 }
 
 /** 真实试调探针（落地向导「测试连接」：真实 round-trip 通过才允许保存） */
@@ -264,47 +274,35 @@ const onboardingRouter = router({
     role: ctx.identity.role,
   })),
 
-  /** 运行态总览（P0 横幅/落地向导同一事实源）：数据模式 + LLM 装配 + 工作区规模 */
-  status: protectedProcedure.query(async ({ ctx }) => {
-    const scope = scopeOf(ctx.identity);
-    const app = getAppPool();
-    const client = await app.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
-      await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-      const prof = await client.query<{ data_mode: string | null }>(
-        `SELECT archive->>'dataMode' AS data_mode FROM profiles WHERE workspace_id=$1`,
-        [scope.workspaceId],
-      );
-      const ws = await client.query<{ name: string; bundle_id: string | null; is_example: boolean }>(
-        `SELECT name, bundle_id, is_example FROM workspaces WHERE id=$1`, [scope.workspaceId]);
-      const n = async (sql: string) => Number((await client.query<{ n: string }>(sql, [scope.workspaceId])).rows[0]?.n ?? 0);
-      const [events, members, agents, memories] = await Promise.all([
-        n(`SELECT count(*)::text AS n FROM biz_events WHERE workspace_id=$1`),
-        n(`SELECT count(*)::text AS n FROM members WHERE workspace_id=$1`),
-        n(`SELECT count(*)::text AS n FROM agents WHERE workspace_id=$1`),
-        n(`SELECT count(*)::text AS n FROM org_memory WHERE workspace_id=$1`),
-      ]);
-      await client.query("COMMIT");
-      return {
-        // 缺省按模拟态处理（种子库/历史库均无标记时横幅常显，宁可多提示不可漏提示）
-        dataMode: (prof.rows[0]?.data_mode ?? "simulated") as "simulated" | "real",
-        llm: llmAssembly(),
-        workspace: { name: ws.rows[0]?.name ?? "", events, members, agents, memories },
-        workspaceId: scope.workspaceId,
-        bundle: { id: ws.rows[0]?.bundle_id ?? null, isExample: !!ws.rows[0]?.is_example },
-      };
-    } catch (err) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw err;
-    } finally {
-      client.release();
-    }
-  }),
+  wizardDraft: protectedProcedure.query(({ ctx }) => getWizardDraft(ctx.identity.workspaceId)),
+
+  saveWizardDraft: actionProcedure("workspace.configure")
+    .input(z.object({
+      expectedVersion: z.number().int().min(0),
+      currentStep: z.number().int().min(0).max(4),
+      payload: z.object({
+        provider: z.string().max(40).optional(), baseUrl: z.string().max(200).optional(),
+        model: z.string().max(80).optional(), businessName: z.string().max(60).optional(),
+        industry: z.string().max(40).optional(), note: z.string().max(300).optional(),
+        siteUrl: z.string().max(2000).optional(), documentTitle: z.string().max(200).optional(),
+        testQuestion: z.string().max(2000).optional(),
+      }).strict(),
+    }).strict())
+    .mutation(({ ctx, input }) => wizardResult(() => saveWizardDraft(ctx.identity.workspaceId, ctx.identity, input))),
+
+  completeWizardDraft: actionProcedure("workspace.configure")
+    .input(z.object({ expectedVersion: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => wizardResult(() => completeWizardDraft(ctx.identity.workspaceId, ctx.identity, input.expectedVersion))),
+
+  serviceFrontPublication: protectedProcedure.query(({ ctx }) => resolveServiceFrontPublication({
+    workspaceId: ctx.identity.workspaceId, bundledClientAvailable: bundledServiceFrontAvailable(),
+  })),
+
+  /** 页面与启用事务共用同一事实采集器；模型实测、装配和考试缺项均不能冒充就绪。 */
+  status: protectedProcedure.query(({ ctx }) => onboardingStatus(ctx.identity)),
 
   /** 第①步：真实大模型「测试连接」（真实 round-trip；不落盘、不留痕 key） */
-  testLlm: writeProcedure
+  testLlm: actionProcedure("workspace.configure")
     .input(z.object({
       baseUrl: z.string().url().min(1),
       apiKey: z.string().max(200).default(""),
@@ -320,7 +318,7 @@ const onboardingRouter = router({
     }),
 
   /** 第①步保存：真实试调通过 → 写 .env 四变量 + 即时生效 + 事件留痕（key 只记掩码；provider=mock 为还原操作，免实测） */
-  saveLlmConfig: writeProcedure
+  saveLlmConfig: actionProcedure("workspace.configure")
     .input(z.object({
       provider: z.string().min(1).max(40),
       baseUrl: z.string().max(200).default(""),
@@ -358,7 +356,7 @@ const onboardingRouter = router({
               provider: input.provider, base_url: input.baseUrl, model: input.model,
               key_mask: input.apiKey ? `***${input.apiKey.slice(-4)}` : "(免 key 网关)",
             },
-            after: { real: input.provider !== "mock" },
+            after: { real: input.provider !== "mock", probeVerified: input.provider !== "mock", configFingerprint: llmConfigurationFingerprint(input) },
             basis: ["落地向导：真实大模型装配（实测通过后写回 .env 四变量，全链即时生效）"],
           },
           rule_impact: [],
@@ -375,10 +373,10 @@ const onboardingRouter = router({
     }),
 
   /** 第②步：经营主体信息（工作区名 + 行业 + 简介 → 档案；事件留痕） */
-  setupWorkspace: writeProcedure
+  setupWorkspace: actionProcedure("workspace.configure")
     .input(z.object({
-      displayName: z.string().min(1).max(60),
-      industry: z.string().min(1).max(40),
+      displayName: z.string().trim().min(1).max(60),
+      industry: z.string().trim().min(1).max(40),
       note: z.string().max(300).default(""),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -389,10 +387,10 @@ const onboardingRouter = router({
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-        await client.query(`UPDATE workspaces SET name=$2, industry=$3 WHERE id=$1`, [scope.workspaceId, input.displayName, input.industry]);
+        await client.query(`UPDATE workspaces SET name=$2, industry=$3, is_example=false WHERE id=$1`, [scope.workspaceId, input.displayName, input.industry]);
         await client.query(
           `UPDATE profiles SET archive = jsonb_set(archive, '{business}', $2::jsonb), industry=$3, updated_at=now() WHERE workspace_id=$1`,
-          [scope.workspaceId, JSON.stringify({ name: input.displayName, note: input.note, onboarded_at: new Date().toISOString() }), input.industry],
+          [scope.workspaceId, JSON.stringify({ name: input.displayName, industry: input.industry, note: input.note, source: "user", configuredAt: new Date().toISOString() }), input.industry],
         );
         // D16（#1/A）：档案写与事件留痕同一事务同一 COMMIT
         await gatewayAppendOnClient(client, {
@@ -421,7 +419,7 @@ const onboardingRouter = router({
     }),
 
   /** 第③步：启用真实模式（dataMode simulated→real；横幅熄灭；事件留痕。模拟期事件保留为「演示期」历史，可经 reset.sh 整库重建清空） */
-  activateRealMode: writeProcedure.mutation(async ({ ctx }) => {
+  activateRealMode: actionProcedure("workspace.configure").mutation(async ({ ctx }) => {
     const scope = scopeOf(ctx.identity);
     const app = getAppPool();
     const client = await app.connect();
@@ -429,11 +427,21 @@ const onboardingRouter = router({
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+      const fingerprint = llmConfigurationFingerprint();
+      const status = await onboardingStatusOn(client, ctx.identity, true);
+      if (!status.activationGate.canActivate || fingerprint !== llmConfigurationFingerprint()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `尚不能启用正式模式：${status.activationGate.blockers.join("；") || "模型配置在检查期间发生变化，请重试"}` });
+      }
+      if (status.dataMode === "real") {
+        await client.query("COMMIT");
+        return { ok: true, dataMode: "real" as const };
+      }
       await client.query(
         `UPDATE profiles SET archive = jsonb_set(archive, '{dataMode}', '"real"'::jsonb), updated_at=now() WHERE workspace_id=$1`,
         [scope.workspaceId],
       );
-      // D16（#1/A）：dataMode 翻转与事件留痕同一事务同一 COMMIT
+      await advanceWizardDraftOn(client, scope.workspaceId, ctx.identity.memberId);
+      // D16（#1/A）：dataMode 翻转、向导进度与事件留痕同一事务同一 COMMIT
       await gatewayAppendOnClient(client, {
         ...scope, actor: { id: ctx.identity.memberNo, type: "human" }, sessionId: `onboarding-${scope.workspaceId}`,
       }, {
@@ -443,7 +451,7 @@ const onboardingRouter = router({
         decision: {
           action: "onboarding.real_mode_activated",
           params: { from: "simulated", to: "real" },
-          after: { dataMode: "real" },
+          after: { dataMode: "real", activationFingerprint: status.activationFingerprint },
           basis: ["落地向导收官：切换真实经营模式，模拟数据横幅熄灭；此后经营动作即真实数据"],
         },
         rule_impact: [],
@@ -736,6 +744,26 @@ const threadsRouter = router({
         client.release();
       }
     }),
+
+  /** 留言只追加原线程的事件流；不能改变既定目标、进度或触发执行。 */
+  note: actionProcedure("task.dispatch")
+    .input(z.object({ threadId: z.string().min(1).max(200), text: z.string().trim().min(1).max(2000) }).strict())
+    .mutation(({ ctx, input }) => serviceTx(ctx.identity.workspaceId, async (client, scope) => {
+      const thread = await client.query(
+        `SELECT id FROM threads WHERE workspace_id=$1 AND id=$2 FOR UPDATE`, [scope.workspaceId, input.threadId],
+      );
+      if (!thread.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "任务不存在或不属于当前工作区" });
+      const result = await gatewayAppendOnClient(client, {
+        ...scope, actor: { id: ctx.identity.memberNo, type: "human" }, sessionId: input.threadId,
+      }, {
+        who: { id: ctx.identity.memberNo, type: "human" },
+        context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
+        object: { type: "thread", id: input.threadId },
+        decision: { action: "thread.note", after: { text: input.text }, basis: ["成员给现有任务留言；仅留痕，不触发执行"] },
+        rule_impact: [],
+      });
+      return { threadId: input.threadId, eventId: result.eventId };
+    })),
 
   /** 运行/续跑线程（replay 断点续跑幂等，E3.3/H-5；按线程模式分流：ask 应答 / agent 逐步确认 / quest 自主执行） */
   run: capabilityWriteProcedure("quest")
@@ -2730,6 +2758,36 @@ const captainRouter = router({
 
 /** 组织记忆中心（D24 自我进化飞轮 M2：可读可改可禁用，纠偏与信任通道） */
 const memoryRouter = router({
+  impact: protectedProcedure
+    .input(z.object({
+      memoryId: z.string().min(1).optional(),
+      memoryIds: z.array(z.string().min(1)).max(50).optional(),
+      memberId: z.string().min(1).optional(),
+    }).strict())
+    .query(({ ctx, input }) => previewMemoryImpact(getAppPool(), scopeOf(ctx.identity), {
+      memoryIds: input.memoryId ? [input.memoryId] : input.memoryIds,
+      sourceMemberId: input.memberId,
+    })),
+
+  reactivate: actionProcedure("memory.manage")
+    .input(z.object({ memoryId: z.string().min(1) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await reactivateMemory(getAppPool(), getGatewayPool(), scopeOf(ctx.identity),
+          { memberNo: ctx.identity.memberNo }, input.memoryId);
+      } catch (error) {
+        if (error instanceof MemoryGovernanceError) {
+          throw new TRPCError({ code: error.code === "NOT_FOUND" ? "NOT_FOUND" : "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
+
+  restore: actionProcedure("memory.manage")
+    .input(z.object({ memoryIds: z.array(z.string().min(1)).min(1).max(50) }).strict())
+    .mutation(({ ctx, input }) => restoreMemories(getAppPool(), getGatewayPool(), scopeOf(ctx.identity),
+      { memberNo: ctx.identity.memberNo }, input.memoryIds)),
+
   /** 列表（作用域/种类/状态过滤 + 语义检索可选） */
   list: protectedProcedure
     .input(
@@ -2815,6 +2873,7 @@ export const appRouter = router({
   auth: authRouter,
   access: accessRouter,
   accounts: accountsRouter,
+  overlay: overlayRouter,
   members: membersRouter,
   threads: threadsRouter,
   approvals: approvalsRouter,
