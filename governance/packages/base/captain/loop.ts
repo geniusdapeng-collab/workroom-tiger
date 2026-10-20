@@ -17,6 +17,7 @@ import { classifyDecision, runDeepAnalysis, judgeOutcome, type ExpectedOutcome }
 import { buildAgentScorecards, designReplacement } from "./hr.js";
 import { composeBoardPack, scanOrgHealth, proposeHiring } from "./board.js";
 import { generateBriefing, buildMemo, type BriefingKind } from "./briefing.js";
+import { numericKpiSnapshot } from "./kpi.js";
 
 export interface Scope { tenantId: string; workspaceId: string }
 
@@ -91,17 +92,22 @@ async function emitCeoEvent(
 
 /* ================= 到期自动降级（所有节拍前置） ================= */
 
-async function applyExpiryIfDue(app: pg.Pool, scope: Scope, charter: Charter): Promise<Charter> {
+async function applyExpiryInTx(client: pg.PoolClient, scope: Scope, charter: Charter): Promise<Charter> {
   if (!isExpired(charter)) return charter;
   const next = transition(charter, { kind: "expire" });
-  await inTx(app, scope, async (c) => {
-    await saveCharterInTx(c, scope, next);
-    await emitCeoEvent(c, scope, "captain.mode_change", {
-      params: { from: charter.mode, to: "suspended", reason: "试用/保留期到期自动降级（绝不自动续期，§12 铁律）" },
-      basis: [`试用截止 ${charter.grant?.trial_ends_at ?? charter.grant?.retain_until}`],
-    });
+  await saveCharterInTx(client, scope, next);
+  await emitCeoEvent(client, scope, "captain.mode_change", {
+    params: { from: charter.mode, to: "suspended", reason: "试用/保留期到期自动降级（绝不自动续期，§12 铁律）" },
+    basis: [charter.mode === "trial"
+      ? `试用截止 ${charter.grant?.trial_ends_at}`
+      : `保留截止 ${charter.grant?.retain_until}`],
   });
   return next;
+}
+
+async function applyExpiryIfDue(app: pg.Pool, scope: Scope, charter: Charter): Promise<Charter> {
+  if (!isExpired(charter)) return charter;
+  return inTx(app, scope, (c) => applyExpiryInTx(c, scope, charter));
 }
 
 /* ================= 节拍①：简报（晨报/周会/月报/集团晨报） ================= */
@@ -306,24 +312,27 @@ export async function runDeviationBeat(
 export async function runBreakerBeat(
   app: pg.Pool, scope: Scope,
 ): Promise<{ tripped: boolean; tightened: boolean; skipped?: string }> {
-  let charter = await loadCharter(app, scope);
-  charter = await applyExpiryIfDue(app, scope, charter);
-  if (!canExecute(charter.mode)) return { tripped: false, tightened: false, skipped: `${charter.mode}：熔断器仅在执行态生效` };
-  const kpi = await inTx(app, scope, async (c) => {
-    const r = await c.query<{ payload: Record<string, unknown> }>(
-      `SELECT payload FROM biz_events WHERE workspace_id=$1 AND payload->'decision'->>'action'='store.daily.summary'
-       ORDER BY seq DESC LIMIT 1`,
-      [scope.workspaceId],
+  // Lock the current charter before reading KPI or evaluating expiry. Concurrent
+  // beats and user edits must be observed before deciding whether to tighten.
+  return inTx(app, scope, async (c) => {
+    const profile = await c.query<{ archive: Record<string, unknown> }>(
+      `SELECT archive FROM profiles WHERE workspace_id=$1 AND tenant_id=$2 FOR UPDATE`,
+      [scope.workspaceId, scope.tenantId],
     );
-    const after = ((r.rows[0]?.payload?.decision as Record<string, unknown> | undefined)?.after ?? {}) as Record<string, unknown>;
-    return { occ: Number(after.occ ?? NaN), adr: Number(after.adr ?? NaN) };
-  });
-  const verdict = evalCircuitBreaker(charter, kpi as Record<string, number>);
-  if (!verdict.tripped || verdict.alreadyTightened) {
-    return { tripped: verdict.tripped, tightened: verdict.alreadyTightened };
-  }
-  const tightened = tightenAutonomy(charter);
-  await inTx(app, scope, async (c) => {
+    let charter = parseCharter(profile.rows[0]?.archive?.charter);
+    charter = await applyExpiryInTx(c, scope, charter);
+    if (!canExecute(charter.mode)) return { tripped: false, tightened: false, skipped: `${charter.mode}：熔断器仅在执行态生效` };
+    const r = await c.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM biz_events WHERE workspace_id=$1 AND tenant_id=$2 AND payload->'decision'->>'action'='store.daily.summary'
+       ORDER BY seq DESC LIMIT 1`,
+      [scope.workspaceId, scope.tenantId],
+    );
+    const after = (r.rows[0]?.payload?.decision as Record<string, unknown> | undefined)?.after;
+    const verdict = evalCircuitBreaker(charter, numericKpiSnapshot(after));
+    if (!verdict.tripped || verdict.alreadyTightened) {
+      return { tripped: verdict.tripped, tightened: verdict.alreadyTightened };
+    }
+    const tightened = tightenAutonomy(charter);
     await saveCharterInTx(c, scope, tightened);
     await emitCeoEvent(c, scope, "ceo.circuit_breaker", {
       params: { metric: verdict.metric, actual: verdict.actual, floor: verdict.floor },
@@ -333,8 +342,8 @@ export async function runBreakerBeat(
         "自治边界自动收紧一档并通知老板（方案 §六：自治权是挣来的，也会被收回）",
       ],
     });
+    return { tripped: true, tightened: true };
   });
-  return { tripped: true, tightened: true };
 }
 
 /* ================= 节拍⑤：决策命中率回测（决策日记到期对账） ================= */
