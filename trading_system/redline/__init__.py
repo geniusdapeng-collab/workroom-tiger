@@ -91,6 +91,10 @@ class StepRecord:
     elapsed_ms: float
     note: str = ""
 
+    def output(self, value: Any) -> None:
+        """Legacy tracing does not persist strict snapshots."""
+        return None
+
 
 @dataclass
 class Passthrough:
@@ -112,12 +116,17 @@ class ExecutionTracer:
     运行结束必须调用 assert_complete()，缺环节 = 系统性事故。"""
     run_id: str = ""
     records: list[StepRecord] = field(default_factory=list)
+    execution: Any = None
 
     @contextmanager
-    def step(self, name: str):
+    def step(self, name: str, inputs: Any = None):
         spec = next((s for s in STEP_REGISTRY if s.name == name), None)
         if spec is None:
             raise RedlineViolation(f"未注册环节被调用: {name}（疑似擅自变更全链路）")
+        if self.execution is not None:
+            with self.execution.step(name, inputs) as scope:
+                yield scope
+            return
         t0 = time.perf_counter()
         rec = StepRecord(name=name, status="executed", elapsed_ms=0.0)
         self.records.append(rec)  # 进入即入账：llm_guard 的 mark_passthrough 才能标记到当前环节
@@ -127,6 +136,9 @@ class ExecutionTracer:
             rec.elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
     def mark_passthrough(self, name: str, reason: str) -> None:
+        if self.execution is not None:
+            self.execution.mark_passthrough(name, reason)
+            return
         log.warning("[红线·透传] 环节 %s 无有效产出，透传兜底至下一环节: %s", name, reason)
         for rec in reversed(self.records):
             if rec.name == name:
@@ -135,6 +147,9 @@ class ExecutionTracer:
                 return
 
     def assert_complete(self) -> None:
+        if self.execution is not None:
+            self.execution.assert_pipeline_complete()
+            return
         executed = {r.name for r in self.records}
         missing = [s.name for s in STEP_REGISTRY
                    if s.name not in executed and s.name not in DEFERRED_STEPS]
@@ -151,6 +166,15 @@ class ExecutionTracer:
             note=note or "延迟至 pipeline 外编排层执行（执行后补记 executed）"))
 
     def summary(self) -> list[dict]:
+        if self.execution is not None:
+            names = {s.name for s in STEP_REGISTRY} - DEFERRED_STEPS
+            actual = [{"step": r["stage"],
+                       "status": "executed" if r["status"] == "completed" else r["status"],
+                       "ms": r["ms"], "note": r["reason"]}
+                      for r in self.execution.summary() if r["stage"] in names]
+            return actual + [{"step": r.name, "status": r.status,
+                              "ms": round(r.elapsed_ms, 1), "note": r.note}
+                             for r in self.records]
         return [{"step": r.name, "status": r.status,
                  "ms": round(r.elapsed_ms, 1), "note": r.note} for r in self.records]
 

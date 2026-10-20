@@ -1,0 +1,101 @@
+# Tiger 严格工作流实现与维护边界
+
+本文件说明 Tiger 专用 Agent 入口的实现约束。操作者命令、Codex/DeepSeek Harness 配置和错误码见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)；请求及返回结构见 `bundles/trading/agent-workflow.schema.json`。本轮研发任务为 [T-2026-1021-0902 / issue 26](https://github.com/geniusdapeng-collab/workroom-tiger/issues/26)。
+
+## 使用者、场景和范围
+
+使用者是通过 Codex、DeepSeek Harness 或其他支持 shell/STDIO MCP 的 Agent 调用 Tiger 的操作者。目标是执行完整公开行情研究和本地模拟账户流程，并能区分“任务已接纳”“流程失败”“结果通过独立校验”。调用者无需自行拼接内部阶段。
+
+三个具体场景：
+
+1. 操作者要求查看当前公开美股研究结果。Agent 先检查运行条件，提交固定请求，保存 run_id，等待后读取并校验回执，分别展示新信号、已有模拟持仓、待成交订单和现金。
+2. 桌面软件在运行期间关闭或连接中断。已接纳的业务进程继续运行；Agent 使用原 run_id 查询。若提交响应丢失，则用原请求和原幂等键恢复身份，不新建任务来猜测是否执行过。
+3. 操作者复核历史报告或发现文件损坏。receipt/verify 从磁盘重新核验来源、阶段、文件和账户提交；损坏时拒绝结果，不通过重跑、修补文件或编辑状态来制造成功。
+
+P0 为完整阶段执行、固定请求边界、独立模拟账户、持久幂等、进程超时、可核验回执和失败传播。缺少任何一项，Agent 都可能把部分执行或重复写入误报为完成。P1 为两种传输入口、项目配置生成/检查和操作指引，降低各宿主自行包装造成的不一致。P2 为后续 profile、平台和部署扩展；当前接口不接收这些扩展参数。
+
+当前不提供真实券商下单、用户真实持仓导入、策略调优/审批、自由阶段执行、内层付费模型接入、远程多租户服务、分布式锁或远程签名审计。通用 WorkLoom 只读能力目录继续保持其权限约束。
+
+## 方案选择
+
+| 方案 | 成本与优点 | 风险与适用前提 |
+|---|---|---|
+| 只有 CLI，调用者自行等待和整合 | 接口数量少，适合只支持 shell 的固定客户端 | 各宿主容易重复实现生命周期和完成判据；后加 MCP 可能复制业务逻辑 |
+| 一个 Python 运行器，薄 CLI 和专用 MCP | 阶段、账户、幂等和验证只有一个执行实现；CLI 可独立复核 MCP 的行为 | 需要额外协议、配置和进程清理测试；宿主挂载仍需实际连接证明 |
+
+实现采用第二种。Node 校验请求、启动可信 Python、管理观察期限和协议返回；Python 执行完整流程并持有账户状态。工具请求不能指定 Python、state-root、环境变量、provider、阶段或策略。
+
+## 固定 profile 和版本
+
+当前 profile 为 `us-public-paper-v1`，账户名称为 `public-usd`，初始资金为 100000 USD，股票池使用已有 `extended` 定义。独立 state-root 对应独立本地模拟账户；另建 state-root 不会继承旧账户，更不表示导入了真实券商资产。
+
+市场日期在接纳时以 `America/New_York` 冻结，保存 UTC 时间、宿主偏移和市场日期。后续计算使用该日期，不能在运行跨日时重新读取“今天”来改变记账日期。外部数据自身的日期、缺失和来源另行披露。
+
+profile 的字段、允许源、阶段注册表和策略语义必须视为版本化合同。当前验证器将保存的 policy 与其理解的 v1 定义精确比较。源码变化可以作为历史来源披露；这不表示任何未来 policy 都能验证旧回执。改变阶段或 policy 时必须采用新 profile，并保留匹配的历史验证器或设计明确的账户迁移；不能在原标识下悄悄改变定义，也不能承诺尚未实现的跨版本兼容。
+
+## 执行顺序和证据
+
+唯一阶段定义位于 `trading_system/redline/execution.py::daily_stage_specs`，由现有 pipeline 注册表与 daily 外层闭环组成。当前实际顺序为：
+
+```text
+daily.preflight → state.reset → pipeline.prepare
+→ search.collect → clean.rule_base → clean.llm_semantic → clean.cross_validate
+→ data.prepare → tech.monitor → tech.cycle_linkage → tech.sentiment → tech.risk
+→ tech.fusion → sector.narrative → layer1.mrs → layer2.sector → layer2b.chain
+→ layer0.scan → layer3.tss → layer4.risk → decision.debate
+→ iteration.calibration → report.emit
+→ accounting.validate → report.initial → journal.log → journal.settle
+→ journal.stats → paper.step → paper.persist → governance.initialize
+→ review.daily → governance.emit → governance.verify → report.final_json
+→ report.plan → report.markdown → report.html → daily.result
+```
+
+开始步骤时立即保存输入快照；结束前必须保存一次输出。重复、乱序、重叠、缺输出、跨线程写证据和未完成 I/O 均违反执行合同。异常结束记录 failed，并阻止成功推进。LLM 步骤只能在已实际执行且有原因和输出时记录合法 passthrough；当前 profile 的内层模型明确禁用，不能把外层聊天模型当成内层模型成功。
+
+快照保留实际已知类型的数据，包括表格索引、列和值；非有限值用明确缺失表示，未知对象和循环引用拒绝序列化。输出不能只用数量代替内容，也不能用无约束的字符串转换掩盖类型。阶段输出包含实际子 I/O 的输入、输出或错误引用。
+
+`events.jsonl` 为顺序追加记录，每条绑定 run_id、序号、步骤编号、输入/输出引用、前一事件摘要和前一步输出。验证器重新计算哈希、顺序、状态与引用，并检查完整业务结果和报告。保存的 `verified=true` 标记或文件存在均不能替代这些检查。
+
+事件日历覆盖文件是可选输入。运行接纳时将冻结源码中的覆盖文件原样复制；未提供时显式生成空覆盖层并记录 `source=builtin_only`。内置日历规则仍由冻结源码执行。`calendar-input.json` 与实际输入字节均受核验；已有文件的格式错误不能被当成“没有覆盖文件”静默忽略。当前没有自动财报日期数据源。
+
+## 状态、账户和进程
+
+状态目录包含短期提交锁、账户锁、幂等键映射、运行目录和账户版本目录。对外业务请求仅含 schema_version、profile、paper_account、idempotency_key 四个字段。第一次接纳持久化请求身份后，才启动独立业务进程；同键重试只能返回原身份与实际状态。
+
+运行期间，所有业务写入发生在该 run 的工作目录。账户提交的步骤为：
+
+1. 持有排他的账户锁，记录当前账户指针和只读输入快照。
+2. 完成全部阶段，生成最终 JSON、Markdown、HTML、复盘与账本。
+3. 建立包含父指针及文件摘要的新账户版本。
+4. 封存回执，独立核验阶段、文件、来源、日期、金额和父指针。
+5. 原子替换 `accounts/public-usd/current.json`；这是账户提交的权威位置。
+
+替换前的失败不会使该运行成为已提交账户；替换后的状态写入失败也不能抹去已发生的提交。只读查询沿当前指针和父版本链证明历史提交，不依赖可变状态文件。多个普通 JSON 文件写入并非数据库事务；实现采用准备文件和原子发布指针，并披露目录同步失败或缺少同步确认的情况。
+
+进程分为提交/查询进程、supervisor、guardian 和 engine。业务进程与客户端观察进程分离；断连或取消观察不会取消已接纳任务。supervisor 负责截止时间、清理与账户发布；guardian 独立监测 supervisor 的生命通道，并约束 engine 所属进程组。清理在回收保留的组首进程前执行，不能仅凭 PID 文件推断任务是否活跃。
+
+当前支持 macOS/Linux 所需的 POSIX 锁和目录写入语义，Python 最低 3.11。运行环境按允许列表构造，保留原 HOME，不继承模型/provider 凭据；业务缓存和临时文件在 run 内。每次新业务进程在首次使用 yfinance 前设置实际缓存位置。第三方包身份记录解释器字节和安装元数据，未声称逐文件证明全部依赖供应链。
+
+## 时间、并发和错误
+
+单个业务任务的总期限为 2400 秒。Node 单次提交/查询观察上限为 60 秒，CLI 默认等待窗口为 2460 秒；观察超时和业务超时是两个不同结果。
+
+公开搜索的 45 秒收集预算适用于每一批查询；主题会展开为多批查询，不能把它描述为整个搜索阶段只花 45 秒。收集期限之后的数据不再参与决策，已启动线程另有最多 15 秒的收尾等待；未结束的线程阻止流程成功，最外层业务期限仍然生效。
+
+一个 state-root 的模拟账户同时只允许一个业务写者，短期提交锁负责键映射和锁交接。专用 MCP 最多允许四个在途请求；多数为只读观察，这不会放宽账户写互斥。
+
+所有外部调用均需区分普通来源不可用和运行合同/证据失败。普通公开源失败按原有真实源回退规则处理并披露；不能切换合成数据。证据写入、日期边界、阶段合同、账户状态或回执校验失败必须终止严格任务，不允许转为合法 LLM 透传。
+
+错误返回统一 envelope 和受控 code/message/run_id/stage/details_ref；不把原始 HTTP 正文、密钥或完整环境返回给 Agent。详细退出码见操作指南。
+
+## 验证、发布和恢复
+
+新增 Python 测试验证真实本机进程、锁、幂等、截止时间、进程组清理、输入输出证据、账本版本和故障注入；Node 测试验证协议、模式、取消、流边界和配置保存。离线夹具明确标识为 TEST_FIXTURE，不能替代公开行情实跑。测试结果由各次执行日志、源摘要和独立验收回执提供，不在本文维护容易漂移的通过数量。
+
+云端现行 `workloom-ui-contract` 保留全部原有检查，并在已安装 Python 依赖之后执行专用 Node 套件。第一 main 的 MC-041 加载时序故障仅修测试就绪判据；原始完整内容、顺序和几何断言继续存在，详见 [TIGER-CLIENT-REPAIRS.md](TIGER-CLIENT-REPAIRS.md)。
+
+发布需普通 PR、准确候选 CI、会话审查与独立验收、普通 main 合并及读回。实际公开数据执行另记录源提交、冻结文件树、run_id、市场日期、模型缺失和 receipt/verify。配置解析和原始 MCP 通信不证明某个宿主已挂载；Codex 项目信任仍由正常客户端机制处理。
+
+回退代码使用普通版本控制流程。失败任务和已提交账户证据保留；不得自动删除幂等键、回退账户指针或通过新键隐藏失败。需要新的逻辑任务时，明确记录修复原因和新任务身份。若代码回退涉及不同 policy 语义，先使用匹配验证器检查历史账户兼容性。
+
+这些保证适用于同一用户下协作运行的进程。拥有任意源码、证据及 shell 写权限的主体仍能绕开本入口；本地哈希链不能替代权限隔离、远端签名或不可回滚存储。实现也不保证同时恶意终止所有监护进程、任意外部进程并发修改或所有主机断电故障下的恢复。

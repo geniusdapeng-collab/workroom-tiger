@@ -23,6 +23,7 @@ import numpy as np
 from . import config
 from .currency import ACCOUNT_CURRENCY, require_usd_records, require_usd_result
 from .ledger_io import write_json_atomic
+from .redline.execution import EvidenceWriteError, ExecutionContractError, StrictObservationError
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +100,10 @@ class Journal:
 
     # ------------------------------------------------------------
 
-    def settle(self, provider, horizon_days: int = 30) -> int:
+    def settle(self, provider, horizon_days: int = 30, *, as_of_date=None) -> int:
         """结算 open 记录：模拟与回测一致的出场规则。返回本次结算条数。"""
         require_usd_records(self.records, scope=f"信号日记 {self.path}")
-        today = datetime.now().date()
+        today = as_of_date or datetime.now().date()
         settled = 0
         changed = False
         self.last_failed: list[str] = []     # v6.1：行情缺失导致无法结算的标的（披露用）
@@ -115,6 +116,8 @@ class Journal:
                 continue
             try:
                 df = provider.ohlcv(rec["ticker"], days=min(90, horizon_days * 3))
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
             except Exception:
                 # v6.1：不再静默悬挂——结算失败必须可追踪（日报披露，
                 # 否则"信号落账后永远没有下文"，胜率样本悄悄失真）

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:workroom-tiger:agent-result:v1",
+  "title": "Tiger agent result envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "operation_ok", "run_id", "status", "execution_mode", "data", "summary", "verification", "limitations", "evidence_refs", "error"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "tiger.agent-result/v1"},
+    "operation": {"type": ["string", "null"], "enum": ["doctor", "describe", "run", "status", "receipt", "verify", null]},
+    "operation_ok": {"type": "boolean"},
+    "run_id": {"type": ["string", "null"], "pattern": "^run-[0-9a-f]{32}$"},
+    "status": {"type": "string", "enum": ["ready", "not_ready", "accepted", "running", "completed", "completed_degraded", "failed", "blocked", "interrupted", "not_found", "invalid"]},
+    "execution_mode": {"type": ["string", "null"], "enum": ["paper", null]},
+    "data": {"type": "object"},
+    "summary": {
+      "type": ["object", "null"],
+      "required": ["picks", "positions", "pending", "cash_usd", "equity_usd", "market_value_usd", "as_of", "disclosures"],
+      "properties": {
+        "picks": {"type": "array", "maxItems": 20000},
+        "positions": {"type": "array", "maxItems": 20000},
+        "pending": {"type": "array", "maxItems": 20000},
+        "cash_usd": {"type": "number"},
+        "equity_usd": {"type": "number"},
+        "market_value_usd": {"type": "number"},
+        "as_of": {
+          "type": "object", "required": ["market_date", "market_timezone", "admitted_at_utc", "benchmark_last_bar", "freshness"],
+          "properties": {
+            "market_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+            "market_timezone": {"type": "string", "const": "America/New_York"},
+            "admitted_at_utc": {"type": "string", "minLength": 1, "maxLength": 64},
+            "benchmark_last_bar": {"type": ["string", "null"], "maxLength": 128},
+            "freshness": {"type": "object"}
+          }
+        },
+        "disclosures": {
+          "type": "object", "required": ["synthetic", "execution_mode", "model_mode"],
+          "properties": {
+            "synthetic": {"type": "boolean", "const": false},
+            "execution_mode": {"type": "string", "const": "paper"},
+            "model_mode": {"type": "string", "const": "disabled"}
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["ok", "receipt_sha256", "evidence_count", "checks"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "evidence_count": {"type": "integer", "minimum": 0},
+        "checks": {"type": "array", "maxItems": 20000}
+      }
+    },
+    "limitations": {"type": "array", "maxItems": 1024, "items": {"type": "string", "maxLength": 4096}},
+    "evidence_refs": {
+      "type": "array", "maxItems": 20000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "sha256", "bytes", "schema"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "schema": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "error": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "required": ["code", "message", "run_id", "stage", "retryable", "details_ref"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 512},
+        "run_id": {"type": ["string", "null"], "pattern": "^run-[0-9a-f]{32}$"},
+        "stage": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+        "retryable": {"type": "boolean"},
+        "details_ref": {"type": ["string", "null"], "minLength": 1, "maxLength": 1024}
+      }
+    }
+  },
+  "$defs": {
+    "doctor_request": {"type": "object", "properties": {}, "additionalProperties": false},
+    "describe_request": {
+      "type": "object", "additionalProperties": false, "required": ["profile"],
+      "properties": {"profile": {"type": "string", "const": "us-public-paper-v1"}}
+    },
+    "run_request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "profile", "paper_account", "idempotency_key"],
+      "properties": {
+        "schema_version": {"type": "string", "const": "tiger.agent-request/v1"},
+        "profile": {"type": "string", "const": "us-public-paper-v1"},
+        "paper_account": {"type": "string", "const": "public-usd"},
+        "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,95}$"}
+      }
+    },
+    "status_request": {
+      "type": "object", "additionalProperties": false, "required": ["run_id"],
+      "properties": {"run_id": {"type": "string", "pattern": "^run-[0-9a-f]{32}$"}}
+    },
+    "receipt_request": {
+      "type": "object", "additionalProperties": false, "required": ["run_id"],
+      "properties": {"run_id": {"type": "string", "pattern": "^run-[0-9a-f]{32}$"}}
+    },
+    "verify_request": {
+      "type": "object", "additionalProperties": false, "required": ["run_id"],
+      "properties": {"run_id": {"type": "string", "pattern": "^run-[0-9a-f]{32}$"}}
+    }
+  }
+}

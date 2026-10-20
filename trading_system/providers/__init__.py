@@ -12,7 +12,21 @@ import os
 from .base import DataProvider
 
 
-def get_provider(name: str | None = None) -> DataProvider:
+def get_provider(name: str | None = None, *, execution=None) -> DataProvider:
+    if execution is not None:
+        from ..redline.execution import ExecutionContractError, StrictSourceSynthetic, record_provider
+        name = (name or "yahoo").lower()
+        if name == "demo" or name.endswith("-demo"):
+            raise StrictSourceSynthetic("Synthetic provider is forbidden by strict public policy")
+        if name not in execution.policy.provider_names:
+            raise ExecutionContractError("Provider is outside the trusted public allowlist")
+        if name == "stooq":
+            from .stooq import StooqProvider
+            return record_provider(StooqProvider(allow_challenge=False), execution)
+        if name == "official":
+            from .official import OfficialMacroProvider
+            return record_provider(OfficialMacroProvider(), execution)
+        return record_provider(get_provider(name), execution)
     name = (name or os.environ.get("TS_PROVIDER") or "yahoo").lower()
     if name == "demo":
         from .demo import DemoProvider

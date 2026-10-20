@@ -169,7 +169,7 @@ def _load_proposal_unlocked(proposals_dir: str, proposal_id: str) -> Proposal:
         return Proposal(**json.load(f))
 
 
-def list_proposals(proposals_dir: str | None = None) -> list[Proposal]:
+def list_proposals(proposals_dir: str | None = None, *, strict: bool = False) -> list[Proposal]:
     """全部提案（按创建时间升序）。"""
     d = proposals_dir or config.REVIEW_PROPOSALS_DIR
     out: list[Proposal] = []
@@ -182,9 +182,18 @@ def list_proposals(proposals_dir: str | None = None) -> list[Proposal]:
                 if not name.endswith(".json"):
                     continue
                 try:
-                    with open(os.path.join(d, name), encoding="utf-8") as f:
-                        out.append(Proposal(**json.load(f)))
+                    if strict:
+                        from ..ledger_io import read_json_strict
+                        candidate = Path(d) / name
+                        if candidate.is_symlink() or not candidate.is_file():
+                            raise ValueError("Unsafe proposal file")
+                        out.append(Proposal(**read_json_strict(candidate)))
+                    else:
+                        with open(os.path.join(d, name), encoding="utf-8") as f:
+                            out.append(Proposal(**json.load(f)))
                 except Exception as exc:
+                    if strict:
+                        raise
                     logger.warning("提案文件损坏跳过 %s: %s", name, exc)
     except Exception:
         logger.exception("提案列表读取失败: %s", d)

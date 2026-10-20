@@ -1,0 +1,8 @@
+# Portable example only. Use tiger-agent-config.mjs for the actual project paths.
+# Default readonly; explicitly select paper in trusted deployment configuration.
+[mcp_servers.tiger-workflow]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/workroom-tiger/scripts/tiger-agent-mcp.mjs", "--python", "/absolute/path/to/python", "--state-root", "/absolute/path/to/tiger-state", "--mode", "readonly"]
+cwd = "/absolute/path/to/workroom-tiger"
+startup_timeout_sec = 15
+tool_timeout_sec = 65

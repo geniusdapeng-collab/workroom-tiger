@@ -48,7 +48,10 @@ class TSSAgent(BaseAgent):
             df = stock_data.get(c.ticker)
             if df is None or len(df) < 130:
                 continue
-            self._score(c, df)
+            if context.get("options_store") is not None:
+                self._score(c, df, options_store=context["options_store"])
+            else:
+                self._score(c, df)
             bonus = chain_bonus(chain_map.get(c.chain_id))
             tech_hint = tech_bonus_map.get(c.chain_id, 1.0)
             if tech_hint != 1.0:
@@ -70,7 +73,7 @@ class TSSAgent(BaseAgent):
 
     # ------------------------------------------------------------
 
-    def _score(self, c: StockCandidate, df: pd.DataFrame) -> None:
+    def _score(self, c: StockCandidate, df: pd.DataFrame, *, options_store=None) -> None:
         f = extract_structure_features(df)
         close = df["Close"]
         vol = df["Volume"]
@@ -89,7 +92,8 @@ class TSSAgent(BaseAgent):
         c.s_momentum = aggregate({"A": ma, "B": vc_score, "C": adx_score}, config.TSS_MOMENTUM_AGG)
 
         # ---- S_options（真实期权链 + 历史分位；缺失/样本不足 → None 再归一化）----
-        opt = score_options(c.ticker, self.provider)
+        opt = (score_options(c.ticker, self.provider, store=options_store)
+               if options_store is not None else score_options(c.ticker, self.provider))
         c.s_options = opt["s_options"]              # None 表示缺失，聚合时剔除
         opt_evidence = opt["evidence"]
         for m in opt.get("missing", []):

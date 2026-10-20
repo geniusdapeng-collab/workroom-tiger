@@ -110,6 +110,15 @@ jobs:
             python -m pip install --disable-pip-version-check -r requirements.txt
             python -m pytest -q
           fi
+      - name: 验证 Tiger CLI、MCP、配置与真实 Python 协议
+        run: |
+          set -euo pipefail
+          TIGER_TEST_PYTHON="$(command -v python)" node --test \
+            bundles/trading/capabilities/workflow-client.test.mjs \
+            bundles/trading/capabilities/repo.test.mjs \
+            scripts/tiger-agent.test.mjs scripts/tiger-agent-mcp.test.mjs \
+            scripts/tiger-agent-config.test.mjs \
+            scripts/agent-capabilities.test.mjs governance/scripts/agent-capabilities.test.mjs
       - name: 三端逐一类型检查与生产构建
         run: |
           set -euo pipefail

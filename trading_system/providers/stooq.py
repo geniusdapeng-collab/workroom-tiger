@@ -38,9 +38,11 @@ _CHALLENGE_RE = re.compile(r'const c="([A-Za-z0-9+/=]+)",d=(\d+)')
 class _StooqSession:
     """带反爬质询求解的 HTTP 会话（无 requests 依赖时退化为 urllib）。"""
 
-    def __init__(self, timeout: int = 20, pow_max: int = 8_000_000):
+    def __init__(self, timeout: int = 20, pow_max: int = 8_000_000,
+                 *, allow_challenge: bool = True):
         self.timeout = timeout
         self.pow_max = pow_max
+        self.allow_challenge = allow_challenge
         self._cookies: dict[str, str] = {}
         self._verified_until = 0.0
 
@@ -107,6 +109,8 @@ class _StooqSession:
         if "Date," in text[:200] or "T,D,O,H,L,C,V" in text[:200]:
             return text
         if _CHALLENGE_RE.search(text):
+            if not self.allow_challenge:
+                raise RuntimeError("Stooq requires access verification; strict public policy refuses the challenge")
             if time.time() < self._verified_until or self._verify(text):
                 text = self._request("GET", url) or ""
                 if "Date," in text[:200] or "T,D,O,H,L,C,V" in text[:200]:
@@ -119,8 +123,8 @@ class _StooqSession:
 class StooqProvider(DataProvider):
     name = "stooq"
 
-    def __init__(self):
-        self._http = _StooqSession()
+    def __init__(self, *, allow_challenge: bool = True):
+        self._http = _StooqSession(allow_challenge=allow_challenge)
 
     def _fetch(self, symbol: str, days: int) -> pd.DataFrame:
         text = self._http.get_text(_BASE.format(symbol=symbol))

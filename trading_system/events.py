@@ -57,21 +57,50 @@ def _d(d) -> date:
 class EventCalendar:
     """事件日历（每轮运行实例化一次；用户覆盖文件可选）。"""
 
-    def __init__(self, override_path: str | None = None):
+    def __init__(self, override_path: str | None = None, *, strict: bool = False):
         self._macro: dict[str, str] = {d: "FOMC" for d in _FOMC}
         self._macro.update({d: "CPI" for d in _CPI})
         self._earnings: dict[str, str] = {}
+        if strict and not override_path:
+            raise ValueError("Strict event calendar requires an explicit reviewed overlay")
         path = override_path or os.environ.get("TS_EVENTS_CALENDAR", "events_calendar.json")
+        self.override_path = str(path)
         p = Path(path)
+        if strict and not p.is_file():
+            raise ValueError("Strict event calendar overlay is missing")
         if p.exists():
             try:
-                blob = json.loads(p.read_text())
+                if strict:
+                    from .ledger_io import read_json_strict
+                    blob = read_json_strict(p)
+                else:
+                    blob = json.loads(p.read_text())
+                if strict:
+                    if not isinstance(blob, dict) or set(blob) - {"macro", "earnings"}:
+                        raise ValueError("Invalid event calendar structure")
+                    for group in ("macro", "earnings"):
+                        entries = blob.get(group, {})
+                        if not isinstance(entries, dict):
+                            raise ValueError("Invalid event calendar entries")
+                        for key, value in entries.items():
+                            if not isinstance(key, str) or not key or not isinstance(value, str) or not value:
+                                raise ValueError("Invalid event calendar key/value")
+                            raw_date = key if group == "macro" else value
+                            if date.fromisoformat(raw_date).isoformat() != raw_date:
+                                raise ValueError("Invalid event calendar date")
                 self._macro.update(blob.get("macro", {}))
                 self._earnings.update({k.upper(): v for k, v in blob.get("earnings", {}).items()})
                 log.info("事件日历覆盖文件已加载: %s（宏观 %d 条，财报 %d 条）",
                          path, len(blob.get("macro", {})), len(self._earnings))
             except Exception as exc:
+                if strict:
+                    raise
                 log.warning("事件日历覆盖文件解析失败（忽略）: %s", exc)
+
+    def to_dict(self) -> dict:
+        return {"macro": dict(self._macro), "earnings": dict(self._earnings),
+                "override_path": self.override_path,
+                "earnings_source": "explicit overlay only; no automatic earnings feed"}
 
     # ------------------------------------------------------------ 宏观事件
     def macro_events(self, d) -> list[str]:

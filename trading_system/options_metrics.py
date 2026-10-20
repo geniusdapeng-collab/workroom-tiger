@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from . import config
+from .ledger_io import write_json_atomic, read_json_strict
+from .redline.execution import EvidenceWriteError, ExecutionContractError, StrictObservationError
 from .indicators import (
     aggregate, score_crowding_neutral_best, score_from_quantile,
     score_iv_pct_tss,
@@ -48,40 +50,100 @@ class OptionsHistoryStore:
     reports/ 随台账提交回仓库，是跨轮累计的唯一通道。
     """
 
-    def __init__(self, root: str | Path | None = None):
+    def __init__(self, root: str | Path | None = None, *, strict: bool = False,
+                 as_of_date: date | None = None, execution=None):
         import os
         # v6.0：root 可用 TS_OPTIONS_HIST_DIR 覆盖——台账数据本质不是代码，
         # 生产部署建议指向独立数据目录/卷，代码仓保持纯。
+        if strict and (root is None or not isinstance(as_of_date, date)
+                       or isinstance(as_of_date, datetime)):
+            raise ValueError("Strict options history requires explicit path and frozen date")
+        self.strict, self.as_of_date, self.execution = strict, as_of_date, execution
+        self.observed: dict[str, list[dict]] = {}
         self.root = Path(root or os.environ.get("TS_OPTIONS_HIST_DIR")
                          or Path(config.REPORTS_DIR) / "options_hist")
 
     def _path(self, ticker: str) -> Path:
-        return self.root / f"{ticker}.json"
+        path = self.root / f"{ticker}.json"
+        if self.strict:
+            import re
+            if not isinstance(ticker, str) or not re.fullmatch(r"[A-Za-z0-9.^-]{1,64}", ticker):
+                raise ValueError("Invalid options ticker path")
+            if path.is_symlink() or not path.resolve().is_relative_to(self.root.resolve()):
+                raise ValueError("Options history path escapes its staged directory")
+        return path
 
     def load(self, ticker: str) -> list[dict]:
+        if self.execution is not None:
+            return self.execution.call_io("options.history.read", {"ticker": ticker,
+                "path": str(self._path(ticker))}, lambda: self._load(ticker))
+        return self._load(ticker)
+
+    def _load(self, ticker: str) -> list[dict]:
         p = self._path(ticker)
         if not p.exists():
             return []
         try:
-            return json.loads(p.read_text())
+            hist = read_json_strict(p) if self.strict else json.loads(p.read_text())
+            if self.strict:
+                if not isinstance(hist, list):
+                    raise ValueError("Options history must be a list")
+                previous = None
+                for record in hist:
+                    if not isinstance(record, dict) or not {"date", "pcr_oi", "atm_iv", "call_oi"}.issubset(record):
+                        raise ValueError("Invalid options history record")
+                    day = date.fromisoformat(record["date"])
+                    if day.isoformat() != record["date"] or (previous is not None and day <= previous):
+                        raise ValueError("Options history dates must be canonical and increasing")
+                    previous = day
+                    for key in ("pcr_oi", "atm_iv", "call_oi"):
+                        value = record[key]
+                        if value is not None and (isinstance(value, bool)
+                                or not isinstance(value, (float, int)) or not math.isfinite(value)):
+                            raise ValueError("Invalid options history numeric value")
+            return hist
         except Exception:
+            if self.strict:
+                raise
             return []
 
     def append(self, ticker: str, snap: dict) -> list[dict]:
         """按日落账（同日重复运行不重复积累），返回完整历史。"""
         hist = self.load(ticker)
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = self.as_of_date.isoformat() if self.as_of_date else datetime.now().strftime("%Y-%m-%d")
         rec = {
             "date": today,
             "pcr_oi": snap.get("pcr_oi"),
             "atm_iv": snap.get("atm_iv"),
             "call_oi": snap.get("call_oi"),
         }
+        if self.strict:
+            for key in ("pcr_oi", "atm_iv", "call_oi"):
+                value = rec[key]
+                if value is not None:
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ValueError("Invalid new options numeric value")
+                    if not math.isfinite(value):
+                        rec[key] = None
+            if hist and hist[-1]["date"] > today:
+                raise ValueError("Options history contains a date after this admission-market date")
         if hist and hist[-1].get("date") == today:
             hist[-1] = rec
         else:
             hist.append(rec)
         hist = hist[-KEEP_OBS:]
+        if self.strict:
+            def persist_history():
+                write_json_atomic(self._path(ticker), hist)
+                readback = self._load(ticker)
+                if readback != hist:
+                    raise ValueError("Options history readback mismatch")
+                return readback
+            actual = (self.execution.call_io("options.history.write", {
+                "ticker": ticker, "path": str(self._path(ticker)), "records": hist}, persist_history)
+                if self.execution is not None else persist_history())
+            self.observed[ticker] = actual
+            return actual
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             self._path(ticker).write_text(json.dumps(hist))
@@ -100,6 +162,8 @@ def score_options(ticker: str, provider, store: OptionsHistoryStore | None = Non
     neutral = {"A": None, "B": None, "C": None, "s_options": None}
     try:
         snap = provider.options_chain_snapshot(ticker)
+    except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+        raise
     except Exception:
         snap = None
     if not snap:

@@ -27,6 +27,7 @@ from ..llm.client import LLMClient
 from ..llm.prompts import (RISK_SCHEMA, RISK_USER_TMPL, SENTIMENT_SCHEMA,
                            SENTIMENT_USER_TMPL, SYSTEM_ANALYST)
 from ..redline import ExecutionTracer, Passthrough, llm_guard
+from ..redline.execution import EvidenceWriteError, ExecutionContractError, StrictObservationError
 from ..search.models import CleanDocument
 from .universe import TECH_SUBCHAINS
 
@@ -117,6 +118,8 @@ class TechChainMonitorAgent:
             try:
                 extra = self.provider.ohlcv_batch(missing, days=90)
                 data.update(extra)
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
             except Exception as e:
                 log.info("tech.monitor 批量补充失败，退化为逐只（预算 %.0fs）: %s",
                          self.RETRY_BUDGET_S, e)
@@ -127,6 +130,8 @@ class TechChainMonitorAgent:
                         break
                     try:
                         data[t] = self.provider.ohlcv(t, days=90)
+                    except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                        raise
                     except Exception:
                         continue
         rows: list[ChainMonitorRow] = []
@@ -180,6 +185,8 @@ class CycleLinkageAgent:
         deadline = time.time() + 45.0
         try:
             spy = self.provider.ohlcv("SPY", days=90)
+        except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+            raise
         except Exception:
             spy = None
         spy_m20 = TechChainMonitorAgent._mom(spy, 20) if spy is not None else None
@@ -190,6 +197,8 @@ class CycleLinkageAgent:
                 break
             try:
                 df = self.provider.ohlcv(t, days=90)
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
             except Exception as e:
                 log.info("联动标的 %s 拉取失败: %s", t, e)
                 continue

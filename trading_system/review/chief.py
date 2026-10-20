@@ -29,7 +29,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .. import config
-from ..ledger_io import write_json_atomic
+from ..ledger_io import write_json_atomic, write_text_atomic, read_json_strict
+from ..redline.execution import EvidenceWriteError
 from . import monthly, weekly
 from .attribution import VIOLATIONS, attribute_journal
 from .monthly import (
@@ -155,7 +156,14 @@ def _commit_approval(proposal_path: Path, proposal: Proposal,
     journal.unlink()
 
 
-def _read_journal(path: str) -> list[dict]:
+def _read_journal(path: str, *, strict: bool = False) -> list[dict]:
+    if strict:
+        from ..journal import Journal
+        try:
+            read_json_strict(path)
+        except FileNotFoundError:
+            pass
+        return Journal(path).records
     if os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as f:
@@ -172,12 +180,19 @@ class ReviewChief:
     def __init__(self, out_dir: str = config.REPORTS_DIR,
                  journal_path: str | None = None,
                  proposals_dir: str | None = None,
-                 bridge=None):
+                 bridge=None, *, strict: bool = False, samples_path: str | None = None,
+                 execution=None):
         self.out_dir = out_dir
         self.journal_path = journal_path or os.path.join(out_dir, "journal.json")
         self.proposals_dir = proposals_dir or os.path.join(
             out_dir, "review_proposals")
         self.bridge = bridge        # GovernanceBridge（可选，治理旁路）
+        self.strict = strict
+        self.samples_path = samples_path or os.path.join(out_dir, "calibration_samples.json")
+        self.execution = execution
+
+    def _observe(self, method, inputs, fn):
+        return self.execution.call_io(method, inputs, fn) if self.execution else fn()
 
     # ------------------------------------------------------------ 治理事件
 
@@ -185,6 +200,8 @@ class ReviewChief:
               after: dict | None = None, rule: tuple[str, str] = ("R-T15", "pass")):
         """纪要/审批动作进治理五元事件（object=报告；旁路失败不阻塞）。"""
         if self.bridge is None:
+            if self.strict:
+                raise ValueError("Strict review requires a governance bridge")
             return None
         try:
             from ..governance_bridge import FiveElementEvent, RuleImpact
@@ -196,8 +213,16 @@ class ReviewChief:
                           **({"after": after} if after else {})},
                 rule_impact=[RuleImpact(rule[0], result=rule[1])],
             )
-            return self.bridge.emit(ev)
-        except Exception as exc:    # 治理旁路：失败只记 WARNING
+            emitted = self._observe("review.governance.emit", {"event": ev},
+                                    lambda: self.bridge.emit(ev))
+            if self.strict and emitted is None:
+                raise RuntimeError("Strict review governance event was not written")
+            return emitted
+        except EvidenceWriteError:
+            raise
+        except Exception as exc:    # Legacy governance remains nonblocking.
+            if self.strict:
+                raise
             logger.warning("[复盘] 治理事件写入失败（不阻塞）: %s", exc)
             return None
 
@@ -212,19 +237,27 @@ class ReviewChief:
         返回 {memo_path, attribution, calibration, weekly?, ms}。
         """
         t0 = time.perf_counter()
+        if self.strict:
+            if not trade_date or (self.execution and trade_date != self.execution.run_date.isoformat()):
+                raise ValueError("Strict review requires the frozen market date")
         trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
-        records = _read_journal(self.journal_path)
+        records = self._observe("review.journal.read", {"path": self.journal_path},
+                                lambda: _read_journal(self.journal_path, strict=self.strict))
         att = attribute_journal(records, snapshots)
 
         # 校准层状态（联动：更新样本库并取 n/50 披露；与 pipeline 同口径）
         try:
             from ..calibration import CalibrationLayer
-            cal = CalibrationLayer(
-                journal_path=self.journal_path,
-                samples_path=os.path.join(self.out_dir,
-                                          "calibration_samples.json"),
-            ).run()
+            cal = self._observe("review.calibration.run",
+                {"journal_records": records, "journal_path": self.journal_path,
+                 "samples_path": self.samples_path},
+                lambda: CalibrationLayer(journal_path=self.journal_path,
+                                         samples_path=self.samples_path).run())
+        except EvidenceWriteError:
+            raise
         except Exception as exc:
+            if self.strict:
+                raise
             cal = {"status": "skipped", "reason": str(exc),
                    "n": 0, "min_samples": config.CALIBRATION_MIN_SAMPLES,
                    "disclosure": f"校准层异常（已记录）: {exc}"}
@@ -237,17 +270,23 @@ class ReviewChief:
         if include_weekly:
             weekly_out = weekly.weekly_checkup(records, cal)
 
-        pending = [p for p in list_proposals(self.proposals_dir)
-                   if p.status == "pending_review"]
+        proposals = self._observe("review.proposals.read", {"path": self.proposals_dir},
+            lambda: list_proposals(self.proposals_dir, strict=True)
+            if self.strict else list_proposals(self.proposals_dir))
+        pending = [p for p in proposals if p.status == "pending_review"]
         memo = self._render_daily(trade_date, records, att, cal,
-                                  weekly_out, pending)
+                                  weekly_out, pending, proposals=proposals if self.strict else None)
         memo_path = os.path.join(
             self.out_dir, f"复盘_{trade_date.replace('-', '')}.md")
         os.makedirs(self.out_dir, exist_ok=True)
-        with open(memo_path, "w", encoding="utf-8") as f:
-            f.write(memo)
+        if self.strict:
+            self._observe("review.memo.write", {"path": memo_path, "text": memo},
+                          lambda: write_text_atomic(memo_path, memo))
+        else:
+            with open(memo_path, "w", encoding="utf-8") as f:
+                f.write(memo)
 
-        self._emit(
+        governance_event = self._emit(
             action="review.daily", object_id=f"复盘_{trade_date}",
             basis=[f"归因 {len(att['attributions'])} 笔",
                    f"违规命中 {att['total_violations']} 条",
@@ -261,6 +300,8 @@ class ReviewChief:
         return {"memo_path": memo_path, "attribution": att,
                 "calibration": cal, "weekly": weekly_out,
                 "pending": [p.proposal_id for p in pending],
+                **({"governance_event": governance_event,
+                    "proposals": [asdict(p) for p in proposals]} if self.strict else {}),
                 "ms": round((time.perf_counter() - t0) * 1000, 1)}
 
     # ------------------------------------------------------------ 周度
@@ -381,7 +422,7 @@ class ReviewChief:
 
     def _render_daily(self, trade_date: str, records: list[dict],
                       att: dict, cal: dict, weekly_out: dict | None,
-                      pending: list[Proposal]) -> str:
+                      pending: list[Proposal], *, proposals: list[Proposal] | None = None) -> str:
         lines = [f"# 复盘纪要 — {trade_date}（诸葛团队）", ""]
         lines.append("> 口径：只复盘流程不复盘运气（附录D）；归因只基于已落账数据"
                      "与当日快照，不重构决策；本纪要属会计账，不进入决策输入（D5）。")
@@ -472,7 +513,7 @@ class ReviewChief:
         else:
             lines.append("- 无待审批提案（DSR 不显著的提案已按 D7 自动 reject，"
                          "不进入审批队列）。")
-        approved = [p for p in list_proposals(self.proposals_dir)
+        approved = [p for p in (proposals if proposals is not None else list_proposals(self.proposals_dir))
                     if p.status == "approved"]
         for p in approved:
             lines.append(f"- 披露：提案 {p.proposal_id} 已批准，"
