@@ -21,14 +21,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import math
 from pathlib import Path
 
 from . import config
 from .currency import require_usd_records
-
-logger = logging.getLogger(__name__)
+from .ledger_io import write_json_atomic
 
 _WILSON_Z = 1.96     # 95% 置信区间
 
@@ -62,12 +60,32 @@ class CalibrationLayer:
     def collect_samples(self, records: list[dict]) -> list[dict]:
         """从 journal 记录提取校准样本。【只读已结算记录】：
         status=="closed" 且 r 非空（未结算/作废/悬挂一律不进入样本库）。"""
+        if not isinstance(records, list) or any(
+            not isinstance(rec, dict)
+            or not all(isinstance(rec.get(key), str) and rec[key]
+                       for key in ("date", "ticker", "status"))
+            for rec in records
+        ):
+            raise ValueError(f"校准历史 {self.journal_path} 结构无效，已停止以保留原样本库")
         require_usd_records(records, scope="校准历史")
         samples: list[dict] = []
         seen: set[tuple] = set()
-        for rec in records:
+        for index, rec in enumerate(records):
             if rec.get("status") != "closed" or rec.get("r") is None:
                 continue
+            for field in ("r", "tss_final", "mrs_star"):
+                value = rec.get(field)
+                if value is None:  # 旧台账允许分数缺失，不能补造分数。
+                    continue
+                try:
+                    valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
+                             and math.isfinite(value))
+                except OverflowError:
+                    valid = False
+                if not valid:
+                    raise ValueError(
+                        f"校准历史 {self.journal_path} 第 {index + 1} 条 {field} "
+                        "不是有限数值，已停止以保留原样本库")
             key = (rec.get("date"), rec.get("ticker"))
             if key in seen:
                 continue
@@ -82,24 +100,37 @@ class CalibrationLayer:
 
     def save_samples(self, samples: list[dict]) -> None:
         require_usd_records(samples, scope="校准样本保存")
-        self.samples_path.parent.mkdir(parents=True, exist_ok=True)
-        self.samples_path.write_text(
-            json.dumps(samples, ensure_ascii=False, indent=1), encoding="utf-8")
+        write_json_atomic(self.samples_path, samples, indent=1)
 
     # ------------------------------------------------------------ 摘要
 
     def run(self) -> dict:
-        """读 journal → 更新样本库（落盘）→ 输出校准摘要。"""
-        records: list[dict] = []
-        if self.journal_path.exists():
+        """读 journal → 验证并计算摘要 → 原子更新样本库，失败保留旧历史。"""
+        try:
+            records = json.loads(self.journal_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            # 首次运行可以没有 journal；已有历史时不能把源文件丢失当成零样本。
             try:
-                records = json.loads(self.journal_path.read_text(encoding="utf-8"))
-            except Exception as exc:
-                logger.warning("校准层读取 journal 失败（按空样本处理）: %s", exc)
+                previous = json.loads(self.samples_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
                 records = []
-        samples = self.collect_samples(records if isinstance(records, list) else [])
+            except (OSError, ValueError) as sample_exc:
+                raise ValueError(
+                    f"校准历史 {self.journal_path} 缺失，无法验证已有样本库"
+                    f"（{type(sample_exc).__name__}），已保留原样本库") from sample_exc
+            else:
+                if previous != []:
+                    raise ValueError(
+                        f"校准历史 {self.journal_path} 缺失，已停止以保留原样本库") from exc
+                return self.summarize([])  # 已验证的空历史无需重写。
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"校准历史 {self.journal_path} 读取或解析失败"
+                f"（{type(exc).__name__}），已停止以保留原样本库") from exc
+        samples = self.collect_samples(records)
+        summary = self.summarize(samples)
         self.save_samples(samples)
-        return self.summarize(samples)
+        return summary
 
     def summarize(self, samples: list[dict]) -> dict:
         """分桶统计 + 样本门槛降级 + 单调性检测。"""
