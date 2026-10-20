@@ -146,6 +146,12 @@ def observe_run(state: Path, run_id: str) -> dict:
     if not run.exists() and not run.is_symlink():
         raise EvidenceInvalid("RUN_NOT_FOUND", "Run identity is not present")
     checked_root(run)
+    # Sample liveness before mutable status and commitment. A run's writers
+    # retain this lock through their final writes and never restart that run.
+    # A held sample may conservatively stay running for one poll; an unlocked
+    # sample permits terminal reads. Sampling after older file reads could
+    # invent an interruption when the worker finishes between those reads.
+    active = _is_active(run)
     persisted = read_json(run, "status.json") if (run / "status.json").exists() else {}
     if (not isinstance(persisted, dict) or (persisted and (
             persisted.get("schema") != "tiger.status.v1"
@@ -163,8 +169,7 @@ def observe_run(state: Path, run_id: str) -> dict:
         if status not in {"completed", "completed_degraded"}:
             raise EvidenceInvalid("RESULT_INVALID", "Committed receipt has invalid status")
         return {"status": status, "observed_status": observed,
-                "commitment_present": True, "active": _is_active(run), "error": None}
-    active = _is_active(run)
+                "commitment_present": True, "active": active, "error": None}
     if observed in TERMINAL_FAILURES and not active:
         error = persisted.get("error")
         if (not isinstance(error, dict) or error.get("code") not in EXIT_CODES

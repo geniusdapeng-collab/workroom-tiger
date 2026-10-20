@@ -256,3 +256,67 @@ def test_deadline_failure_has_timeout_code_and_no_publication(tmp_path, monkeypa
     assert terminal["status"] == "failed"
     assert terminal["error"]["code"] == "TIMEOUT", terminal
     assert pointer_read(state) is None
+
+
+@pytest.mark.parametrize("mode,terminal_status", [
+    ("success", "completed_degraded"), ("fail", "failed"),
+])
+def test_status_does_not_mix_precompletion_evidence_with_postcompletion_liveness(
+        tmp_path, monkeypatch, mode, terminal_status):
+    source = fixture_source(tmp_path / "source", mode=mode)
+    entry = source / "main.py"
+    original = entry.read_text()
+    anchor = "def _daily(args, provider, *, execution):\n"
+    assert original.count(anchor) == 1
+    entry.write_text(original.replace(anchor, anchor + (
+        '    while not (execution.paths.work_dir / "query-release").exists():\n'
+        "        time.sleep(0.01)\n"
+    )))
+    state = tmp_path / "state"
+    accepted = runner.submit(state, REQUEST, source=source)
+    assert accepted["operation_ok"], accepted
+    run_id = accepted["run_id"]
+    run = state / "runs" / run_id
+    release = run / "work" / "query-release"
+    original_pointer = runner.committed_pointer
+    crossed = []
+
+    def finish_after_pointer_snapshot(actual_state, actual_run_id):
+        snapshot = original_pointer(actual_state, actual_run_id)
+        if actual_run_id == run_id and not crossed:
+            assert snapshot is None and runner._is_active(run)
+            assert read_json(run, "status.json")["status"] == "running"
+            crossed.append("before-completion")
+            release.touch()
+            deadline = time.monotonic() + 20
+            while True:
+                persisted = read_json(run, "status.json")
+                if persisted["status"] == terminal_status and not runner._is_active(run):
+                    crossed.append("after-completion")
+                    break
+                assert time.monotonic() < deadline, persisted
+                time.sleep(0.01)
+        return snapshot
+
+    try:
+        monkeypatch.setattr(runner, "committed_pointer", finish_after_pointer_snapshot)
+        query = runner.execute("status", {"run_id": run_id}, mode="readonly", state=state)
+        assert crossed == ["before-completion", "after-completion"]
+        assert query["operation_ok"], query
+        # A conservative running observation is safe; an invented interrupted
+        # terminal state would make a client stop waiting on the actual run.
+        assert query["status"] in {"running", terminal_status}, query
+        assert query["data"]["error"] is None or query["status"] == terminal_status
+        settled = runner.execute("status", {"run_id": run_id}, mode="readonly", state=state)
+        assert settled["status"] == terminal_status and not settled["data"]["active"]
+        receipt = runner.execute("receipt", {"run_id": run_id}, mode="readonly", state=state)
+        if mode == "success":
+            assert pointer_read(state)["run_id"] == run_id
+            assert receipt["operation_ok"] and receipt["verification"]["ok"]
+        else:
+            assert pointer_read(state) is None
+            assert settled["data"]["error"]["code"] == "RUNNER_FAILED"
+            assert not receipt["operation_ok"] and receipt["summary"] is None
+    finally:
+        release.touch()
+        wait_terminal(state, run_id)
