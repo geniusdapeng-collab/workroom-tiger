@@ -101,6 +101,14 @@
       "repairedSha256": "4e353e5281401a2c30f4aa9e2f70f23d671f6b8b073973bb4c9f06a0b015e392",
       "sourceCommit": "1fa7462206778206da699ff1280564120a000d17",
       "reason": "Give skill-suggestion copy and actions separate responsive rows while retaining confirmation, rejection and draft creation; verify ordinary pointer and keyboard actions across narrow and enlarged-text layouts."
+    },
+    {
+      "path": "apps/web/src/pages/p2/P2.tsx",
+      "card": "MC-041",
+      "upstreamSha256": "6e88605374bdc651f90a0d51c6fbe136aa42e332fff0a26e151f3fa07420250e",
+      "repairedSha256": "e709d6f0fccceed6fd4c90194d749ecb82a38a7ec03a2fa44b3b22feff240c42",
+      "sourceCommit": "3b09410d536dcb9df193878bb2da1cb218446263",
+      "reason": "Display saved task-plan labels in original order with truthful pending, empty, invalid and offline states; reject late or mismatched task responses and verify complete same-task visible labels within the original dispatch deadline."
     }
   ],
   "testAdditions": [
@@ -148,6 +156,11 @@
       "path": "scripts/acceptance/lib/task-notification-interception.test.mjs",
       "card": "MC-039",
       "sha256": "3c796d9f309b9d61b933196513fc2cb9c68a5e303ff9cd8145e332a2f0878ae2"
+    },
+    {
+      "path": "scripts/acceptance/lib/task-plan-visibility.test.mjs",
+      "card": "MC-041",
+      "sha256": "2d252679cf6f61a8ac4e90d7854f528999b1b5590db2b5dce86ccc71b862e88b"
     }
   ]
 }
