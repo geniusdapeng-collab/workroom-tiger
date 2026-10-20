@@ -54,10 +54,12 @@ import {
 } from "@workloom/base/night-shift";
 import {
   activateRuleVersion,
-  confirmDryRun,
+  confirmDryRunOnTx,
   createDryRun,
+  DryRunInputError,
   fenceActivationFromProposal,
-  fenceRuleRowId,
+  nextRuleRowIdentity,
+  type DryRunCandidateInput,
 } from "@workloom/base/fence-engine";
 import { MAX_CONCURRENT_THREADS, PLAN_TIERS } from "@workloom/shared";
 import {
@@ -1533,6 +1535,20 @@ const nightShiftRouter = router({
     }),
 });
 
+/** 回放与确认共用候选输入映射，避免两次请求的规则语义漂移。 */
+function fenceDryRunCandidate(rule: {
+  ruleId: string; name: string; level: "auto" | "review" | "block";
+  objectTypes: string[]; actions: string[]; when: string;
+}): DryRunCandidateInput {
+  return {
+    rules: [{
+      rule_id: rule.ruleId, version: "v-next", name: rule.name, level: rule.level,
+      is_baseline: false, objectTypes: rule.objectTypes, actions: rule.actions, when: rule.when,
+    }],
+    defaultLevel: "review",
+  };
+}
+
 /** fence router（F8 起 P5 数据源：规则版本化投影 + 30 天触发聚合 + dry-run 生命周期 F2.4/F2.5） */
 const fenceRouter = router({
   /** 规则列表（P5E2：级别 pill + 来源 + 30 天触发数；基线 🔒 集团强制 F2.3） */
@@ -1607,11 +1623,7 @@ const fenceRouter = router({
       return createDryRun(getAppPool(), scope, {
         ruleId: input.ruleId,
         ruleVersion: "v-next",
-        rules: [{
-          rule_id: input.ruleId, version: "v-next", name: input.name, level: input.level,
-          is_baseline: false, objectTypes: input.objectTypes, actions: input.actions, when: input.when,
-        }],
-        defaultLevel: "review",
+        ...fenceDryRunCandidate(input),
         createdBy: ctx.identity.memberNo,
       });
     }),
@@ -1627,9 +1639,8 @@ const fenceRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
-      await confirmDryRun(getAppPool(), scope, input.dryRunId);
       // 规则草稿进 pending_approval（激活须审批事件 ID，activateRuleVersion 在 P4 手势后调用——E1 已接线，见下方 decide/batchApprove）
-      // D16（#1/A）：规则草稿行、提案事件、审批行三者同一事务同一 COMMIT
+      // dry-run 确认、规则草稿行、提案事件、审批行同一事务同一 COMMIT
       const app = getAppPool();
       const client = await app.connect();
       let ev: { eventId: string };
@@ -1637,12 +1648,13 @@ const fenceRouter = router({
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-        const rowId = fenceRuleRowId(input.rule.ruleId, scope.workspaceId);
+        await confirmDryRunOnTx(client, scope, input.dryRunId, fenceDryRunCandidate(input.rule));
+        const { rowId, version } = await nextRuleRowIdentity(client, scope, input.rule.ruleId);
+        const after = { ...input.rule, dryRunId: input.dryRunId, ruleRowId: rowId, version };
         await client.query(
           `INSERT INTO fence_rules (id, rule_id, version, workspace_id, name, level, match_spec, action, is_baseline, status, created_by)
-           VALUES ($1,$2,'v-next',$3,$4,$5,$6,$7,false,'pending_approval',$8)
-           ON CONFLICT (id) DO NOTHING`,
-          [rowId, input.rule.ruleId, scope.workspaceId, input.rule.name, input.rule.level,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,'pending_approval',$9)`,
+          [rowId, input.rule.ruleId, version, scope.workspaceId, input.rule.name, input.rule.level,
            JSON.stringify({ object_types: input.rule.objectTypes, actions: input.rule.actions, when: input.rule.when }),
            JSON.stringify({ result: input.rule.level }), ctx.identity.memberNo],
         );
@@ -1652,7 +1664,7 @@ const fenceRouter = router({
           who: { type: "human", id: ctx.identity.memberNo },
           context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
           object: { type: "staff", id: input.rule.ruleId },
-          decision: { action: "fence.rule.propose", after: { ...input.rule, dryRunId: input.dryRunId } },
+          decision: { action: "fence.rule.propose", after },
           rule_impact: [],
         });
         // E1 联调接线（PF.5/F2.4）：围栏变更提案进 P4 决断队列——高危（不可批量采纳，须逐条手势，F5.4/G6）
@@ -1662,11 +1674,14 @@ const fenceRouter = router({
            VALUES ($1,$2,$3,$4,'inapp','pending',$5)
            ON CONFLICT (event_id, channel) DO NOTHING`,
           [`apr-${ev.eventId.toLowerCase()}`, scope.tenantId, scope.workspaceId, ev.eventId,
-           JSON.stringify({ after: input.rule, high_risk: true })],
+           JSON.stringify({ after, high_risk: true })],
         );
         await client.query("COMMIT");
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
+        if (err instanceof DryRunInputError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
         throw err;
       } finally {
         client.release();
