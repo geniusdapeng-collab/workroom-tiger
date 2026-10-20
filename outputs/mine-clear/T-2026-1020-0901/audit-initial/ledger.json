@@ -1,0 +1,2555 @@
+{
+  "schema": "workloom.mine-clear/ledger@1",
+  "task_id": "T-2026-1020-0901",
+  "repo": "workroom-tiger",
+  "repo_path": ".",
+  "title": "Tiger 深度审计与真实行情运行",
+  "created_at": "2026-10-20T01:06:29.269Z",
+  "updated_at": "2026-10-20T16:15:31.164301+00:00",
+  "baseline": {
+    "audit": {
+      "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+      "branch": "task/T-2026-1020-0901",
+      "remote": "origin",
+      "fetched_at": "2026-10-20T01:06:29.210Z",
+      "fetch_status": "success",
+      "notes": ""
+    },
+    "repair": {
+      "commit": null,
+      "reverified_problem_ids": []
+    },
+    "acceptance": {
+      "commit": null,
+      "is_descendant_of_repair": null
+    }
+  },
+  "environment": {
+    "kind": "local-preview",
+    "notes": "Portable audit-only specification; open/not-run is intentional. Actual repair and independent acceptance receipts are separate delivery artifacts."
+  },
+  "invariants": [
+    {
+      "id": "INV-1",
+      "text": "租户边界覆盖数据库 RLS、运行时上下文、事件、缓存和外部连接器。",
+      "source": "AGENTS.md#4.1"
+    },
+    {
+      "id": "INV-2",
+      "text": "经营事件、审批和关键回执只增不改；纠正通过新事件表达，不静默覆盖证据。",
+      "source": "AGENTS.md#4.2"
+    },
+    {
+      "id": "INV-3",
+      "text": "所有外部或变更性动作及其子调用，统一经过权限、PII、围栏和审批链路。",
+      "source": "AGENTS.md#4.3"
+    },
+    {
+      "id": "INV-4",
+      "text": "涉钱、敏感数据、群发、公开发布、交易和破坏性变更必须按高风险处理并由人审批。",
+      "source": "AGENTS.md#4.4"
+    },
+    {
+      "id": "INV-5",
+      "text": "没有真实回执就不能标记完成；mock、模拟和体验模式在数据结构与界面上都要明确区分。",
+      "source": "AGENTS.md#4.5"
+    },
+    {
+      "id": "INV-6",
+      "text": "客户原始经营数据不得上行；蜂群只接受白名单化、最小化、匿名化且可审计的元数据或派生经验。",
+      "source": "AGENTS.md#4.6"
+    },
+    {
+      "id": "INV-7",
+      "text": "租户覆盖层只能收紧围栏，不能放宽平台不可变红线。",
+      "source": "AGENTS.md#4.7"
+    },
+    {
+      "id": "INV-8",
+      "text": "模型、提示词、技能、bundle、策略和热更新必须先评测再灰度，且始终可回滚。",
+      "source": "AGENTS.md#4.8"
+    },
+    {
+      "id": "INV-9",
+      "text": "platform-ops、平台账户运营和平台秘密只属于 Andromeda。",
+      "source": "AGENTS.md#4.9"
+    },
+    {
+      "id": "INV-10",
+      "text": "Tiger 在获得单独的合规审查和用户明确授权前，只能模拟或纸面交易。",
+      "source": "AGENTS.md#4.10"
+    },
+    {
+      "id": "INV-11",
+      "text": "令牌、密码、API key、私钥、客户凭证和私密客户数据不得进入源码、文档、上下文、提示词、日志或提交。",
+      "source": "AGENTS.md#4.11"
+    },
+    {
+      "id": "INV-12",
+      "text": "个性化与行业扩展不得形成公共机制的第二事实源。",
+      "source": "AGENTS.md#4.12"
+    }
+  ],
+  "cards": [
+    {
+      "id": "MC-001",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "模拟账本旧行情重复成交、禁开仓指令未生效及初始资金口径错误",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "main.py:169@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "683f8473296272817adb1e7f8398ea3231c35d63de7cd2a1c432488a515edfba",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/simulator.py:101@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "8ffdb57fc7944c675f6a9435acb957015eb6abda98755857d26cc64c5f41faa8",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/journal.py:135@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "ad496c1e7b5af6b7a8c71bee22e1d996f73b2db169cf91f178ceb56d3707591e",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "main.py",
+        "line": 169,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "get_bar / SimEngine.step / Journal._settle_one"
+      },
+      "trigger_path": "信号当日或旧日K被后续运行使用；AVOID日有遗留待买；重载非10万美元账户。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "旧K/同K重放、禁开仓、资金重载与缺失历史",
+          "expect": "按实际行情日期结算且幂等；禁止新仓时不买入；恢复真实初始资金；缺历史不制造成交。",
+          "command": "python3 -m pytest tests/test_accounting_dates.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_accounting_dates.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "按实际行情日期结算且幂等；禁止新仓时不买入；恢复真实初始资金；缺历史不制造成交。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "main.py",
+        "trading_system/simulator.py",
+        "trading_system/journal.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_accounting_dates.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-002",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 1,
+      "state": "open",
+      "title": "治理壳冻结安装被版本配置漂移与缺失的锁定制品阻断",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/pnpm-workspace.yaml:4@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "35c93c8f1e98318d65b170d9a615ca2709034258d5f85ad78351878ea18e49ec",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/.workloom-ui.json:4@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "eaa95546152ac8028e20fd8a0692def5627cffe2a4eb652932befdea3a8bd86d",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/pnpm-workspace.yaml",
+        "line": 4,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "workspace overrides / exact UI transport"
+      },
+      "trigger_path": "pnpm冻结安装读取不一致的override或下载已失效制品。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "声明版本、锁文件、缺失/损坏/有效镜像",
+          "expect": "声明一致；仅使用与原始锁定摘要相同的镜像；缺失或损坏时拒绝安装。",
+          "command": "node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/install-contract.test.mjs",
+              "tests/ui-artifact-mirror.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "声明一致；仅使用与原始锁定摘要相同的镜像；缺失或损坏时拒绝安装。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/pnpm-workspace.yaml",
+        "governance/.workloom-ui.json"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-003",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "数据供应商异常中断降级链并丢失合成身份",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:221@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "d3921802655f4c19b9f676215f1b8a5ff68cacad7437942af775f240815fe551",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:119@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "d3921802655f4c19b9f676215f1b8a5ff68cacad7437942af775f240815fe551",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/pipeline.py",
+        "line": 221,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "batch/single fallback and synthetic provenance"
+      },
+      "trigger_path": "主供应商抛错或返回空数据时无机会使用后续来源；改名合成供应商被误认真实。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "主/次来源异常、能力不支持、空/NaN、已有有效数据、改名合成provider",
+          "expect": "异常后按原顺序继续降级且保留已有有效数据；合成身份继续隔离真实检索并披露。",
+          "command": "python3 -m pytest tests/test_provider_failure_boundaries.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_provider_failure_boundaries.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "异常后按原顺序继续降级且保留已有有效数据；合成身份继续隔离真实检索并披露。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/pipeline.py",
+        "trading_system/pipeline.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_provider_failure_boundaries.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-004",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "Yahoo收益率重复缩放导致宏观bp计算错误",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/providers/yahoo.py:80@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "268eff2ff15c72fe4efa57909f4f13c5eeaca61c7373d57bd474efc45a0ee32f",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/providers/yahoo.py",
+        "line": 80,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "YahooProvider.tnx_yield"
+      },
+      "trigger_path": "Yahoo已按百分数返回的Close再被除以10。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实接口单位格式及30bp变动样例",
+          "expect": "保持原百分数单位，30bp变化仍为30bp，原有评分和阈值不变。",
+          "command": "python3 -m pytest tests/test_yahoo_yield.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_yahoo_yield.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "保持原百分数单位，30bp变化仍为30bp，原有评分和阈值不变。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/providers/yahoo.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_yahoo_yield.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-005",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "跨市场组合权益曲线按数组位置错配日期",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/portfolio/steward.py:98@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "ca327493dcb8e22cd92dd9417511a862c985b75185c565dbd281cca588fdc970",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/portfolio/steward.py:108@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "ca327493dcb8e22cd92dd9417511a862c985b75185c565dbd281cca588fdc970",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/portfolio/steward.py",
+        "line": 98,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "PortfolioSteward curve alignment"
+      },
+      "trigger_path": "不同起止日/缺口的净值曲线按索引相加或截断。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "不同开始/结束/缺口/重复日/非法日/零基数曲线",
+          "expect": "按日期联合对齐并仅在首次有效观测后前向填充；不虚构初始资金；保留公式并披露缺失。",
+          "command": "python3 -m pytest tests/test_portfolio_alignment.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_portfolio_alignment.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "按日期联合对齐并仅在首次有效观测后前向填充；不虚构初始资金；保留公式并披露缺失。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/portfolio/steward.py",
+        "trading_system/portfolio/steward.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_portfolio_alignment.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-006",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "即时报价缺少日期与数值校验导致陈旧或虚假价可入选",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:178@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "d3921802655f4c19b9f676215f1b8a5ff68cacad7437942af775f240815fe551",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/providers/yahoo.py:135@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "268eff2ff15c72fe4efa57909f4f13c5eeaca61c7373d57bd474efc45a0ee32f",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/pipeline.py",
+        "line": 178,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "quote validation / Yahoo quote"
+      },
+      "trigger_path": "报价陈旧、显式stale、无效价格/时刻或供应商人为赋当前时刻。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "stale/缺时间/非有限与负价/合成报价/公开FastInfo字段",
+          "expect": "只使用可核验且满足现有新鲜度阈值的报价；否则回退带日期的有效日K，保留数据来源。",
+          "command": "python3 -m pytest tests/test_quote_validity.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_quote_validity.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "只使用可核验且满足现有新鲜度阈值的报价；否则回退带日期的有效日K，保留数据来源。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/pipeline.py",
+        "trading_system/providers/yahoo.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_quote_validity.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-007",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "围栏提案复用版本且确认与事务分离、回放输入未绑定",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:1630@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/packages/base/fence-engine/lifecycle.ts:99@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "e9b4b68dad895af7ec0df0d2e9035e22aff5e7161762893c2fe723a8117dceec",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/trpc/router.ts",
+        "line": 1630,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "fence.confirmDryRun / lifecycle"
+      },
+      "trigger_path": "确认后SQL失败留下孤立状态；连续规则版本冲突；提交规则与回放内容不同。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "连续版本、重复/并发确认、改写规则、跨工作区、事件/提交失败",
+          "expect": "候选行/审批/事件/确认同事务；版本唯一；仅可确认回放快照相同的输入；旧报告需重跑。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/fence-proposal.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/trpc/fence-proposal.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "自包含基础围栏夹具和真实PG",
+          "expect": "19个基础断言执行且通过，保留单调约束、对象锁和激活门禁。",
+          "command": "pnpm -C governance --filter @workloom/base exec vitest run fence-engine/fence-engine.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/base",
+              "exec",
+              "vitest",
+              "run",
+              "fence-engine/fence-engine.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "候选行/审批/事件/确认同事务；版本唯一；仅可确认回放快照相同的输入；旧报告需重跑。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/packages/base/fence-engine/lifecycle.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/fence-proposal.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-008",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "复盘提案跨文件保存中断可留下部分状态并丢失并发更新",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/review/chief.py:171@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "9d55ce77ab382c3af7825f294e4f65af4a41f1ff9b1fe258c8bb70cccec19aed",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/review/monthly.py:51@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "fda5491afde5e6887c19732079050a5d6c1a7056ec274a6a0918beeead8a00c6",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/review/chief.py",
+        "line": 171,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "proposal approval/rejection persistence"
+      },
+      "trigger_path": "提案状态与tuned配置两文件写入间异常、并发读改写或遗留事务日志。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "写入故障/恢复/重复/并发/路径别名",
+          "expect": "以原子写入、共享锁和恢复日志保持可恢复一致性；失败不标已批准；参数业务值不变。",
+          "command": "python3 -m pytest tests/test_proposal_persistence.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_proposal_persistence.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "以原子写入、共享锁和恢复日志保持可恢复一致性；失败不标已批准；参数业务值不变。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/review/chief.py",
+        "trading_system/review/monthly.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_proposal_persistence.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-009",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 3,
+      "state": "open",
+      "title": "决策报告把缺失数据、计划风险和信号状态表述为确定事实",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/report_html.py:205@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "e0a47cdbbb8102454cdf145cecc88d91d9cedab68cccb2dd87bfbf478985a37c",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/agents/mrs_agent.py:94@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "d67f0e5976c35b926fad6e7557916befa9ba1a4bf6c64bc80b446fdad026755a",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/review/weekly.py:22@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "3bee4b1a4aee4fd1408a32bd7a144da606ca30326375f5d54d3f515e86e885f7",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/report_html.py",
+        "line": 205,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "HTML/Markdown evidence and risk labels"
+      },
+      "trigger_path": "维度缺失、非100k账户、日K数据、空仓/待成交状态或R桶精确边界。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "缺失维度/不同初始资金/行情来源日期/待成交和已持仓/边界2R",
+          "expect": "不伪造中性分或实时性；真实初始资金；计划风险不承诺亏损上限；桶文案对应既有边界。",
+          "command": "python3 -m pytest tests/test_report_truthfulness.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_report_truthfulness.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "不伪造中性分或实时性；真实初始资金；计划风险不承诺亏损上限；桶文案对应既有边界。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/report_html.py",
+        "trading_system/agents/mrs_agent.py",
+        "trading_system/review/weekly.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_report_truthfulness.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-010",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "治理服务调用与操作者/指纹/宪章类型契约漂移",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/service/router.ts:465@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "9713e72f5ce7126ced4e4775930f9dee0c9310924d0830f73712b598ba48d739",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:2343@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/industry/inspection-adapter-catalog.ts:1@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "aedf4a626bde848459faa9ca353ee8e639a115d39e1fdc8329477850c7e4ac4b",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/service/eval.ts:458@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "9d8462016875f4a8a9b6efe4532c51a75782ad07edcf079d9af0e1a559eb32fe",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/service/router.ts",
+        "line": 465,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "bundle routes / captain.grant / exam"
+      },
+      "trigger_path": "当前向导/宪章调用不能通过类型或运行；缺候选确认和状态恢复路由。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "合法与畸形输入、过期哈希、跨租户、readonly、并发和事件失败",
+          "expect": "将已认证actor和完整哈希传给已有服务；恢复安全接线；通用宪章严格验证；异常回滚。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/contract-drift.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/service/contract-drift.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "将已认证actor和完整哈希传给已有服务；恢复安全接线；通用宪章严格验证；异常回滚。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/service/router.ts",
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/apps/server/src/industry/inspection-adapter-catalog.ts",
+        "governance/apps/server/src/service/eval.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/contract-drift.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-011",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "Tiingo 原始行情与调整后 OHLCV 合约不一致，拆股可扭曲波动指标",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/providers/tiingo.py:28@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "8712bb963983b80f56ec022223cea72ba5d6d20c90f5744ec7f6667a7db4d85d",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/providers/tiingo.py",
+        "line": 28,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "TiingoProvider.bars_daily"
+      },
+      "trigger_path": "供应商返回公司行动前后原始 OHLCV，进入约定复权的技术指标与缓存。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实格式的拆股夹具、五个复权字段、非法值、日期重复和缓存保护",
+          "expect": "使用同一复权口径的五字段；整批校验后才返回或缓存；异常不覆盖旧有效缓存，原评分规则保持。",
+          "command": "python3 -m pytest tests/test_tiingo_adjusted_bars.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_tiingo_adjusted_bars.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "使用同一复权口径的五字段；整批校验后才返回或缓存；异常不覆盖旧有效缓存，原评分规则保持。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/providers/tiingo.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_tiingo_adjusted_bars.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-012",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "前端续办和真实模式激活缺少后端契约与事实门禁",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:422@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/star-ring/StarRing.tsx:481@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "08c7b91c784b166a2843547e89a3028264969ed50ef3f03f02d0c3e800eb8c18",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/trpc/router.ts",
+        "line": 422,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "onboarding / StarRing continuation"
+      },
+      "trigger_path": "当前前端请求缺路由，续办漏原目标或激活直接翻转标签。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实 tRPC、当前资产与考试指纹、过期草案、角色权限、并发和事件故障",
+          "expect": "补齐现有服务接线；从当前事实计算激活条件；状态与回执同事务；续办保留原任务目标。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/frontend-contract.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/trpc/frontend-contract.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "真实组件与续办请求契约",
+          "expect": "原目标与稳定消息标识保留；缺少目标时拒绝续办。",
+          "command": "pnpm -C governance --filter @workloom/web exec vitest run src/components/star-ring/StarRing.contract.test.tsx",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/web",
+              "exec",
+              "vitest",
+              "run",
+              "src/components/star-ring/StarRing.contract.test.tsx"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "原始上游壳指纹与本仓两条已审修复、未登记路径和变更版本",
+          "expect": "仅接纳精确绑定的已审本仓差异；原始上游状态和验证器不变，其他漂移继续拒绝。",
+          "command": "node --test tests/client-repair-provenance.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/client-repair-provenance.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "补齐现有服务接线；从当前事实计算激活条件；状态与回执同事务；续办保留原任务目标。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/apps/web/src/components/star-ring/StarRing.tsx"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/frontend-contract.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-013",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "开发工具接口未受行业导航权限保护",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/service/router.ts:480@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "9713e72f5ce7126ced4e4775930f9dee0c9310924d0830f73712b598ba48d739",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/service/router.ts",
+        "line": 480,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "devtoolsRouter"
+      },
+      "trigger_path": "Tiger 身份可直接调用未展示的开发工具读写接口。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "16 个读写接口、真实 JWT/成员事实/RLS、有效活动包、匿名与撤权",
+          "expect": "复用既有行业导航权限和写权限；无权调用在业务处理前拒绝且不写数据。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/devtools-permissions.pg.test.ts src/service/router-governance.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/service/devtools-permissions.pg.test.ts",
+              "src/service/router-governance.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "复用既有行业导航权限和写权限；无权调用在业务处理前拒绝且不写数据。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/service/router.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/devtools-permissions.pg.test.ts src/service/router-governance.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-014",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 1,
+      "state": "open",
+      "title": "运行时持久化字段、状态与全局线程号源缺失",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/packages/db/src/schema.ts:205@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "7d27b195d4f383f80e98c3029859802dcea89525cdb01a8d31df1e8ddaeafda5",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/packages/db/migrations/0016_readable_id_tail.sql:8@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "11e4137ea25764dd0b609dd4464d965e583864c3bcc9eadd3bad5f334c1f4a45",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/packages/db/src/schema.ts",
+        "line": 205,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "runtime schema / threads_max_t_no"
+      },
+      "trigger_path": "任务规划、审批消费和并发派单访问现有 DDL 未提供的字段、状态或编号。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "全新库、历史行迁移、非法旧证据、RLS、并发编号和回滚",
+          "expect": "通过新增迁移补齐既有运行时契约；保留历史 SQL 校验和；消费幂等且线程号全局唯一。",
+          "command": "pnpm -C governance --filter @workloom/runtime exec vitest run src/runtime-schema.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/runtime",
+              "exec",
+              "vitest",
+              "run",
+              "src/runtime-schema.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "真实派单路由、多工作区与并发编号",
+          "expect": "直接使用统一分配结果，不重复加一，不跨工作区撞号。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/thread-number.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/trpc/thread-number.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "通过新增迁移补齐既有运行时契约；保留历史 SQL 校验和；消费幂等且线程号全局唯一。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/packages/db/src/schema.ts",
+        "governance/packages/db/migrations/0016_readable_id_tail.sql"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/runtime exec vitest run src/runtime-schema.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-015",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 1,
+      "state": "open",
+      "title": "治理回归依赖已移除酒店种子且 CI 未提供数据库",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/scripts/suite.ts:51@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "577d01daf273d1360587dd8eddba09772307b9990f23dbbdf73959a258cbc183",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": ".github/workflows/workloom-ui-contract.yml:38@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "4ffeb238e4632e429b5ce1c03f65ae89aaa2efbd92b4be2301aa93ebe4c0ef6a",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/scripts/suite.ts",
+        "line": 51,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "suite / PostgreSQL CI fixtures"
+      },
+      "trigger_path": "执行当前仓库 suite 与服务测试时缺 ws-yunqi 等过时隐式数据，CI 无真实数据库。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "独立租户工作区夹具、实际 PostgreSQL/HTTP、无行业业务适配器和模型 mock",
+          "expect": "使用显式模拟夹具执行原服务与 HTTP 用例；不回填生产酒店数据；CI 安装迁移并执行真实 PG 门禁。",
+          "command": "pnpm -C governance suite",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "suite"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "夹具数据库 URL、角色与作用域边界",
+          "expect": "外部或混合目标在写入前拒绝；仅允许受控本机专用数据库。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/test-fixtures/governance.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/test-fixtures/governance.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "使用显式模拟夹具执行原服务与 HTTP 用例；不回填生产酒店数据；CI 安装迁移并执行真实 PG 门禁。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/scripts/suite.ts",
+        ".github/workflows/workloom-ui-contract.yml"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance suite"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-016",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "交易种子丢失技能安装快照并覆盖客户档案",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/scripts/seed-trading.ts:141@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "713faead65ccb9f225342810c1d2f5329594419e05a0ea4396d4fbdfcd7ca61a",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/scripts/seed-trading.ts:166@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "713faead65ccb9f225342810c1d2f5329594419e05a0ea4396d4fbdfcd7ca61a",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/scripts/seed-trading.ts",
+        "line": 141,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "seed-trading"
+      },
+      "trigger_path": "首次 seed 缺技能版本快照；重跑重写风险与宪章档案；后段故障留下部分装配。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "专用空库、双空历史安装、已有有效客户状态、冲突归属、并发和晚期故障",
+          "expect": "安装快照来自实际注册表；只修双空历史；保留客户档案与有效安装；全 seed 事务失败回滚。",
+          "command": "node --test --test-concurrency=1 governance/scripts/seed-trading.pg.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "--test-concurrency=1",
+              "governance/scripts/seed-trading.pg.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "安装快照来自实际注册表；只修双空历史；保留客户档案与有效安装；全 seed 事务失败回滚。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/scripts/seed-trading.ts",
+        "governance/scripts/seed-trading.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "node --test --test-concurrency=1 governance/scripts/seed-trading.pg.test.mjs"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-017",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "美元账户按人民币或港币原价计算执行数量与账本",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/agents/risk_manager_agent.py:27@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "2057d2ced287775ebe72700659339a05d55ff79451c34d048e93172b65bfdbfd",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/simulator.py:101@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "8ffdb57fc7944c675f6a9435acb957015eb6abda98755857d26cc64c5f41faa8",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "main.py:452@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "683f8473296272817adb1e7f8398ea3231c35d63de7cd2a1c432488a515edfba",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/agents/risk_manager_agent.py",
+        "line": 27,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "USD risk sizing / account and derived ledgers"
+      },
+      "trigger_path": "CN/HK 原币报价进入明确美元预算且当前没有可靠 FX 合约。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "USD 正常值、CN/HK 研究、显式冲突元数据、历史原币账与派生统计",
+          "expect": "保留原币研究与选股规则；无 FX 合约时拒绝跨币种可执行数量和财务派生写入；美元数值保持一致。",
+          "command": "python3 -m pytest tests/test_currency_boundary.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_currency_boundary.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "保留原币研究与选股规则；无 FX 合约时拒绝跨币种可执行数量和财务派生写入；美元数值保持一致。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/agents/risk_manager_agent.py",
+        "trading_system/simulator.py",
+        "main.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_currency_boundary.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-018",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "H5 入口签名和工作区隔离未接通且业务回执失真",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/service/gateway.ts:43@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "41a60d4046abbac5e010bc244458937b3308f0264b3a629ad7f83925fb112774",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/service/store.ts:40@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "25ce51df81d3acda1a77a30b1f3b3f3ac61db1a03a89b29ee8cb2fb0d22ce97d",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/service/gateway.ts",
+        "line": 43,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "C gateway / session / bootstrap / receipt"
+      },
+      "trigger_path": "H5 自报身份或默认首个工作区可建立会话；酒店数据自动写入；接口与回执脱节。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实 HTTP/JWT/当前装配/RLS、跨租户、篡改票据、异常事务及幂等键",
+          "expect": "验证签名入口和当前工作区事实；取消隐式业务种子；通用工单可用，未声明行业能力拒绝；返回真实提交回执。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/gateway.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/service/gateway.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "现有 C 端 HTTP API 客户端",
+          "expect": "入口与工单参数按实际服务契约发送，失败保持可辨识。",
+          "command": "pnpm -C governance --filter @workloom/webc exec vitest run src/lib/api.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/webc",
+              "exec",
+              "vitest",
+              "run",
+              "src/lib/api.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "验证签名入口和当前工作区事实；取消隐式业务种子；通用工单可用，未声明行业能力拒绝；返回真实提交回执。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/service/gateway.ts",
+        "governance/apps/server/src/service/store.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/gateway.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-019",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "衍生反馈记忆 ID 未包含租户与工作区",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/packages/base/review-console/approvals.ts:301@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "33abd74062b6fcf9fdb927741b757cbcb15dbae8acbb8526562389b4615ec53b",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/packages/base/evolve/memory-miner.ts:140@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "82e54a10925476c29539b4c835e4e2349bdf38b1277f20725c72608b3cf6976e",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/packages/base/review-console/approvals.ts",
+        "line": 301,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "approval feedback / memory miner IDs"
+      },
+      "trigger_path": "两个工作区使用相同驳回原因或改稿动作，命中全局主键后失败或串用。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "跨工作区和租户、分隔符冲突、并发重放、旧记录与事件故障",
+          "expect": "使用租户、工作区、记忆种类和键组成的无歧义确定性 ID；生产者消费者一致，保留历史记录与 RLS。",
+          "command": "pnpm -C governance --filter @workloom/base exec vitest run review-console/approval-memory.pg.test.ts workdata/memory-id.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/base",
+              "exec",
+              "vitest",
+              "run",
+              "review-console/approval-memory.pg.test.ts",
+              "workdata/memory-id.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "使用租户、工作区、记忆种类和键组成的无歧义确定性 ID；生产者消费者一致，保留历史记录与 RLS。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/packages/base/review-console/approvals.ts",
+        "governance/packages/base/evolve/memory-miner.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/base exec vitest run review-console/approval-memory.pg.test.ts workdata/memory-id.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-020",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "通用 KPI 熔断读取旧字段且并发覆盖较新宪章",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/packages/base/captain/loop.ts:306@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "e1c4f5580da696235d33bc6979b1687832511e14374c180c99f1564c1997eee8",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/packages/base/captain/loop.ts",
+        "line": 306,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "runBreakerBeat"
+      },
+      "trigger_path": "通用质量指标不进入熔断计算；并发节拍重复事件或覆盖更严边界及撤权。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "有效有限 KPI、到期、并发节拍、并发收紧/撤权、事件失败",
+          "expect": "只映射既有通用 KPI；同一锁定事务读当前档案、评估、收紧和记账；公式不变且重复节拍无重复变更。",
+          "command": "pnpm -C governance --filter @workloom/base exec vitest run captain/breaker.pg.test.ts captain/kpi.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/base",
+              "exec",
+              "vitest",
+              "run",
+              "captain/breaker.pg.test.ts",
+              "captain/kpi.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "只映射既有通用 KPI；同一锁定事务读当前档案、评估、收紧和记账；公式不变且重复节拍无重复变更。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/packages/base/captain/loop.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/base exec vitest run captain/breaker.pg.test.ts captain/kpi.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-021",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "影子模式审批升级仍修改真实审批字段",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/packages/base/captain/loop.ts:214@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "e1c4f5580da696235d33bc6979b1687832511e14374c180c99f1564c1997eee8",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/packages/base/captain/loop.ts",
+        "line": 214,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "runQueueBeat shadow escalation"
+      },
+      "trigger_path": "影子模式模型给出 escalate 时，先 UPDATE tier/snapshot 后标记 dry_run。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "影子、试用和活动模式的各级裁决、重放、并发观察和写入故障",
+          "expect": "影子模式仅生成 dry_run 诊断和建议计数；不 UPDATE 审批；活动与试用既有行为保留。",
+          "command": "pnpm -C governance --filter @workloom/base exec vitest run captain/queue.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/base",
+              "exec",
+              "vitest",
+              "run",
+              "captain/queue.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "影子模式仅生成 dry_run 诊断和建议计数；不 UPDATE 审批；活动与试用既有行为保留。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/packages/base/captain/loop.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/base exec vitest run captain/queue.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-022",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "队列裁决提交未重新验证租户、权限及审批当前状态",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/packages/base/captain/loop.ts:129@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "e1c4f5580da696235d33bc6979b1687832511e14374c180c99f1564c1997eee8",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/packages/base/captain/loop.ts",
+        "line": 129,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "runQueueBeat commit boundary"
+      },
+      "trigger_path": "并发升级或模型推理期间提级/过期/撤权后仍按旧裁决写入；错配租户与工作区可越界。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实数据库的并发升级、推理期间授权与输入变更、作用域错配、事务失败",
+          "expect": "提交前核验当前作用域、宪章与审批事实；失效裁决不写状态或真实事件；同一审批至多提交一次有效升级。",
+          "command": "pnpm -C governance --filter @workloom/base exec vitest run captain/queue-boundaries.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/base",
+              "exec",
+              "vitest",
+              "run",
+              "captain/queue-boundaries.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "提交前核验当前作用域、宪章与审批事实；失效裁决不写状态或真实事件；同一审批至多提交一次有效升级。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/packages/base/captain/loop.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/base exec vitest run captain/queue-boundaries.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-023",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "校准历史读取异常被当作空账本并覆盖旧样本",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/calibration.py:88@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "0cc496eb051982eff48a6a164aeda476d573b56f471de1a8803b847883b33a65",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/calibration.py:81@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "0cc496eb051982eff48a6a164aeda476d573b56f471de1a8803b847883b33a65",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/calibration.py",
+        "line": 88,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "CalibrationLayer.run / save_samples"
+      },
+      "trigger_path": "损坏、不可读或形状错误的交易历史被置空；摘要晚于写入，坏输入可能先破坏旧样本。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "首次缺源、已有样本而源缺失、损坏 JSON、非法结构/数值、摘要与原子写入故障",
+          "expect": "有效输入及摘要完成后才原子替换；异常明确失败并保存旧样本原字节；统计公式与阈值不变。",
+          "command": "python3 -m pytest tests/test_calibration_history_integrity.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_calibration_history_integrity.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "有效输入及摘要完成后才原子替换；异常明确失败并保存旧样本原字节；统计公式与阈值不变。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/calibration.py",
+        "trading_system/calibration.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_calibration_history_integrity.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-024",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 3,
+      "state": "open",
+      "title": "发布门禁把失败任务与无关事件计为任务链路成功",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/scripts/release-gate.ts:316@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "83ffbd5660b2dc90cf6a856b50c7a314f481778d85e51f6d2f7f5b078210b23b",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/scripts/release-gate.ts:331@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "83ffbd5660b2dc90cf6a856b50c7a314f481778d85e51f6d2f7f5b078210b23b",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/scripts/release-gate.ts",
+        "line": 316,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "release-gate Q01 / Q02"
+      },
+      "trigger_path": "QUEST 已 failed 且 0/2 步仍通过；事件验证可由同工作区其他任务满足。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "实际门禁执行、成功与失败/未完成任务、进度矛盾、回执缺失、异线程或无关事件",
+          "expect": "成功必须绑定派发任务的终态、完整进度与执行回执；事件必须属于同任务，不削弱另外九项门禁。",
+          "command": "pnpm -C governance exec vitest run scripts/release-gate.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "exec",
+              "vitest",
+              "run",
+              "scripts/release-gate.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "成功必须绑定派发任务的终态、完整进度与执行回执；事件必须属于同任务，不削弱另外九项门禁。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/scripts/release-gate.ts",
+        "governance/scripts/release-gate.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance exec vitest run scripts/release-gate.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-025",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 3,
+      "state": "open",
+      "title": "数据源异常正文可能进入回退日志与上层披露",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:119@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "d3921802655f4c19b9f676215f1b8a5ff68cacad7437942af775f240815fe551",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:221@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "d3921802655f4c19b9f676215f1b8a5ff68cacad7437942af775f240815fe551",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/pipeline.py",
+        "line": 119,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "provider fallback error disclosure"
+      },
+      "trigger_path": "数据源异常包含URL、凭据或响应正文时，回退日志原样格式化异常文本。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "完全离线无真实秘密的异常sentinel，主备源失败和全部失败传播",
+          "expect": "只记录安全错误类别与已知调用上下文；不输出上游异常正文；保持回退次序、已有有效行情及数据质量披露。",
+          "command": "python3 -m pytest tests/test_provider_error_disclosure.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_provider_error_disclosure.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "只记录安全错误类别与已知调用上下文；不输出上游异常正文；保持回退次序、已有有效行情及数据质量披露。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/pipeline.py",
+        "trading_system/pipeline.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_provider_error_disclosure.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。 独立发现使用fixture sentinel，未观察到真实凭据泄露；后续红绿按实际修复基线绑定。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-026",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "月度提案同秒并发或编号空缺可覆盖旧记录",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/review/monthly.py:87@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "fda5491afde5e6887c19732079050a5d6c1a7056ec274a6a0918beeead8a00c6",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/review/monthly.py",
+        "line": 87,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "generate_proposal"
+      },
+      "trigger_path": "创建时在目录锁外按数量分配同秒ID；两个成功调用或编号空缺可选中已有路径。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "同秒串行/并发、编号空缺、坏JSON、目录与符号链接、发布抢占、写失败和审批恢复记录",
+          "expect": "锁内选择真实空闲ID，用完整临时文件独占发布；旧提案原字节保留，锁忙和写失败明确失败；审批更新与DSR/WFA规则保持。",
+          "command": "python3 -m pytest tests/test_proposal_creation_integrity.py -q",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "tests/test_proposal_creation_integrity.py",
+              "-q"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "锁内选择真实空闲ID，用完整临时文件独占发布；旧提案原字节保留，锁忙和写失败明确失败；审批更新与DSR/WFA规则保持。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "trading_system/review/monthly.py"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "python3 -m pytest tests/test_proposal_creation_integrity.py -q"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。 MC026/red-green.json 保留各实际源码的红绿回执；最终27项旧源9失败18通过、修后27通过，相邻合并73通过，协调者另跑73通过。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-027",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P2",
+      "batch": 2,
+      "state": "open",
+      "title": "运行配置展示把未配置或失效资格错误标成模拟数据",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/pages/onboarding/Onboarding.tsx:169@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b546b370419f42db8e014f3def1703e876ae91d7fec644d96e7383340ec638bd",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/SimBanner.tsx:67@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "068d845c135ee2f7cfd83fdc68d90b2940422559f09285a3eeddb57be477ede7",
+          "note": "A: relevant implementation fully read by repair actor or coordinator; baseline blob binding verified by script."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/pages/onboarding/Onboarding.tsx",
+        "line": 169,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "Onboarding checks and SimBanner"
+      },
+      "trigger_path": "工作区缺少 dataMode 或 real 声明缺少当前正式资格，页面根据资格别名冒称模拟执行。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "缺失/非法/模拟/非模拟档案、有效及失效资格、只读查看者、查询失败和旧API",
+          "expect": "明确区分档案声明、默认工具要求与正式资格；不得用正式资格失败推断模拟执行；保留原运行时、种子与激活规则。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/onboarding-mode.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/service/onboarding-mode.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "缺失/非法/模拟/非模拟档案、有效及失效资格、只读查看者、查询失败和旧API",
+          "expect": "明确区分档案声明、默认工具要求与正式资格；不得用正式资格失败推断模拟执行；保留原运行时、种子与激活规则。",
+          "command": "pnpm -C governance --filter @workloom/web exec vitest run src/pages/onboarding/Onboarding.mode.test.tsx src/pages/onboarding/systemText.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/web",
+              "exec",
+              "vitest",
+              "run",
+              "src/pages/onboarding/Onboarding.mode.test.tsx",
+              "src/pages/onboarding/systemText.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "缺失/非法/模拟/非模拟档案、有效及失效资格、只读查看者、查询失败和旧API",
+          "expect": "明确区分档案声明、默认工具要求与正式资格；不得用正式资格失败推断模拟执行；保留原运行时、种子与激活规则。",
+          "command": "node --test tests/client-repair-provenance.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/client-repair-provenance.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "明确区分档案声明、默认工具要求与正式资格；不得用正式资格失败推断模拟执行；保留原运行时、种子与激活规则。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/service/onboarding-readiness.ts",
+        "governance/apps/server/src/service/onboarding-mode.test.ts",
+        "governance/apps/web/src/components/SimBanner.tsx",
+        "governance/apps/web/src/pages/onboarding/Onboarding.tsx",
+        "governance/apps/web/src/pages/onboarding/Onboarding.mode.test.tsx",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/service/onboarding-mode.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。 MC027/source-freeze.json 与 repair-report.json 保留8文件摘要及实际红绿回执；初次provenance启动错误独立保留，真实red-v2及final已分别记录。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-028",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "继续推进误用默认岗位、丢失原任务目标且未绑定排队任务的执行岗位",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:606@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "C: router imports, complete threads router and touched call chain read; original full router is not claimed fully read. B: baseline blob hash and line binding verified."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:644@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "C: router imports, complete threads router and touched call chain read; original full router is not claimed fully read. B: baseline blob hash and line binding verified."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/trpc/router.ts",
+        "line": 606,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "threads.dispatch / threads.run"
+      },
+      "trigger_path": "实际 StarRing 对 T-106 继续推进返回 pricing-agent 未注册；P2 传 agents.id 而运行时要求 preset_key，排队派发未保存岗位，COMMIT 错误被吞。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实 PostgreSQL、实际 tRPC 与运行时；已存岗位 ID/key、旧精确 key、无效/停用/跨租户岗位、原目标、权限、并发续跑、事务提交失败",
+          "expect": "派发原子保存唯一就绪岗位及审计事件；续跑以存储的目标、模式和岗位为准，客户端只能确认原绑定；错误不执行、不落孤立事件；审批、配额及失败回放规则保留。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/thread-resume.pg.test.ts",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/trpc/thread-resume.pg.test.ts"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "派发原子保存唯一就绪岗位及审计事件；续跑以存储的目标、模式和岗位为准，客户端只能确认原绑定；错误不执行、不落孤立事件；审批、配额及失败回放规则保留。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/apps/server/src/trpc/router.ts"
+      ],
+      "blast_radius": "保持业务评分、交易阈值、模拟边界、权限、事件与数据口径；覆盖直接消费者及失效路径。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/thread-resume.pg.test.ts"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。 本卡修复者 /root/fix_thread_resume_binding；实际修复前 30 项中 28 失败、2 通过，修复后 30 通过。原始回执见 MC028/red-02 与 green-02；运行时实测 UI 失败截图另存 ui/star-ring-continue-interim-failure.png。断言运行需 RUN_THREAD_RESUME_PG_TESTS=1、ASK_WEB_SEARCH=0，使用本任务隔离数据库。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-029",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "模拟 IM 发件箱缓存只按通道分组，跨租户和工作区返回审批卡片",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:1965@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "C: audit-baseline cache and outbox sections read explicitly; exact baseline blob SHA256 checked. Current runtime defect separately reproduced through local tRPC + PostgreSQL using only synthetic fixtures."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:2129@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "C: audit-baseline cache and outbox sections read explicitly; exact baseline blob SHA256 checked. Current runtime defect separately reproduced through local tRPC + PostgreSQL using only synthetic fixtures."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/trpc/router.ts",
+        "line": 1965,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "mockDriverFor / im.sendApprovalCard / im.callback / im.outbox"
+      },
+      "trigger_path": "实际隔离数据库的 tRPC 调用：A 工作区发送合成审批卡片；其他租户及同租户另一工作区的 readonly 成员可读取该卡片完整载荷。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "三个模拟通道、不同租户和工作区、相同作用域的授权成员、特殊字符标识、并发、失效成员、无权写入及传输/数据库失败。",
+          "expect": "缓存与发送/回调/读取以当前认证身份的租户、工作区和通道组成无歧义键；自己的卡片及确认消息可读，其他作用域不可见；既有审批权限、事件和模拟边界保持。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/im-scope.pg.test.ts --no-file-parallelism --maxWorkers=1 --testTimeout=30000",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/trpc/im-scope.pg.test.ts",
+              "--no-file-parallelism",
+              "--maxWorkers=1",
+              "--testTimeout=30000"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "缓存与发送/回调/读取以当前认证身份的租户、工作区和通道组成无歧义键；自己的卡片及确认消息可读，其他作用域不可见；既有审批权限、事件和模拟边界保持。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不可回滚或改写追加账本。",
+      "conflict_paths": [
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/apps/server/src/trpc/router.ts"
+      ],
+      "blast_radius": "仅模拟 IM driver 缓存分组与三处取用；保留工作区内授权读取、写权限、审批/事件语义和现有真实连接器边界。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/im-scope.pg.test.ts --no-file-parallelism --maxWorkers=1 --testTimeout=30000"
+      },
+      "notes": "修复前后的动态证据保留各自实际 HEAD 与工作树标记，见同目录修复回执；此处仅将原始缺陷代码绑定至审计基线，不把后续红测冒充基线运行。 原始独立动态复现位于 independent-acceptance/im-outbox-finding.json（8779ecb 实测），MC029/ 保存修复者前后实测。仅证明本机 Mock 通道缺陷，不据此声称真实外部 IM 泄露。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-030",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P2",
+      "batch": 2,
+      "state": "open",
+      "title": "员工档案来源行业包硬编码为酒店，与工作区实际身份不一致",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/server/src/trpc/router.ts:1926@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "b9aebc7e3354bb1c4412629c0517a8a973328094a94d3223b7a74487786037c6",
+          "note": "C: original audit-baseline profile projection section read; baseline blob and line checked by script. Current complete router read separately at 0df04a9, and real tRPC/PostgreSQL red-green evidence is preserved under MC030."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/server/src/trpc/router.ts",
+        "line": 1926,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "roster.profile"
+      },
+      "trigger_path": "读取任意已安装员工档案，查询已取得 workspace.bundle_id，却将响应 bundle 固定投影为 workloom-hotel。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "交易/自定义/空值/空白和特殊标识；配置变更；并发；同租户异工作区与异租户；访客/只读及失效身份；输入和数据库故障。",
+          "expect": "返回当前工作区实际的非空 bundle_id；空值明确标为未配置；保持字符串契约、现有读取权限、跨租户/工作区隔离和其他档案字段。",
+          "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/roster-profile.pg.test.ts --no-file-parallelism --maxWorkers=1",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/server",
+              "exec",
+              "vitest",
+              "run",
+              "src/trpc/roster-profile.pg.test.ts",
+              "--no-file-parallelism",
+              "--maxWorkers=1"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "返回当前工作区实际的非空 bundle_id；空值明确标为未配置；保持字符串契约、现有读取权限、跨租户/工作区隔离和其他档案字段。",
+      "rollback": "普通 revert 本卡独立修复提交并重跑本卡断言；不修改业务数据和已有追加事件。",
+      "conflict_paths": [
+        "governance/apps/server/src/trpc/router.ts",
+        "governance/apps/server/src/trpc/roster-profile.pg.test.ts"
+      ],
+      "blast_radius": "仅修正档案来源身份投影；不改员工、Bundle、权限、围栏、评分或执行策略。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/server exec vitest run src/trpc/roster-profile.pg.test.ts --no-file-parallelism --maxWorkers=1"
+      },
+      "notes": "需 RUN_ROSTER_PROFILE_PG_TESTS=1 与任务自有本机 PostgreSQL 三角色连接。实际红绿收据独立保存，未改写为后续提交。P8 保留既有中文展示兜底：配置正常时显示当前行业包，缺失时显示未配置；API 返回实际标识。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-031",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "界面验收标题漂移且旅程未绑定真实动作和结果，错误页面可被计为成功",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/scripts/acceptance/ui-probe.mjs:144@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "7bffff82e5c219ff465d44f383d5186293c397a9ec6399034bcddcd50ab74e03",
+          "note": "A: implementation fully read in this task; exact audit blob and line checked mechanically. Actual independent browser findings and original red/green receipts retain their own source commits."
+        },
+        {
+          "type": "code",
+          "ref": "governance/scripts/acceptance/experience.mjs:258@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "076333bc2e8b91eb59b13c0302d76ac90d78ab19075b3695dd5aa5b96d9ce499",
+          "note": "A: implementation fully read in this task; exact audit blob and line checked mechanically. Actual independent browser findings and original red/green receipts retain their own source commits."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/scripts/acceptance/ui-probe.mjs",
+        "line": 144,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "ui-probe profile identity / experience EXP-01 through EXP-10"
+      },
+      "trigger_path": "真实页面37份员工档案被旧标题判失败；EXP05未找到输入仍直接API派活；EXP09在服务503和思考占位时由用户问题及静态文字判成功，其他旅程存在同类证据缺口。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "实际浏览器执行原CLI的正负HTML/JSON夹具；十条旅程完整ID集合、同对象回执、批量RPC、时延、配额、空态、登录错误、用户回显、加载、确认前后持久化差异与完整源身份。 补充真实命名/术语注册、异步访问加载、权威成员身份、正常拒答文字、窄栏抽屉与网格显示，每项包含正常及错误/缺失证据负例。",
+          "expect": "员工档案按实际标题、姓名、版本、来源、围栏和技能验收；十条旅程必须绑定真实界面动作、对应请求、对象身份及可见结果，保留原时延与步骤阈值；缺失证据标未验证，错误、加载、输入回显与无关文本不得通过。",
+          "command": "node --test governance/scripts/acceptance/lib/ui-evidence.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/ui-evidence.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "员工档案按实际标题、姓名、版本、来源、围栏和技能验收；十条旅程必须绑定真实界面动作、对应请求、对象身份及可见结果，保留原时延与步骤阈值；缺失证据标未验证，错误、加载、输入回显与无关文本不得通过。",
+      "rollback": "普通 revert 本卡源码与精确来源登记提交，并重跑本卡断言；不改写追加事件或客户数据。",
+      "conflict_paths": [
+        "governance/scripts/acceptance/ui-probe.mjs",
+        "governance/scripts/acceptance/experience.mjs",
+        "governance/scripts/acceptance/lib/ui-evidence.mjs",
+        "governance/scripts/acceptance/lib/ui-evidence.test.mjs"
+      ],
+      "blast_radius": "限当前本仓的验收证据与界面契约；保持交易评分、阈值、执行权限、模拟边界和原基座受控摘要。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/ui-evidence.test.mjs"
+      },
+      "notes": "仅修复执行器的证据契约，不把本地HTML夹具当产品业务能力。正式本机断言使用MC031_BROWSER_CHANNEL=chrome；CI使用已安装Chromium。原始独立0df页面观察与修复者同字节红绿均单独保留；最终须在干净提交上独立实际运行。 v2 follow-up: actual product at 2449df68 exposed five false negatives in registered display names, delayed access loading, mobile scope identity, normal mock response text and compact context drawers. Reuse actual naming, bind authoritative authenticated identity, and test both positive and negative states while preserving original latency/action thresholds. Original v1 receipts remain immutable; no missing event/night-shift/partner prerequisite is promoted to success.",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-032",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 2,
+      "state": "open",
+      "title": "名册装饰动画被隐藏于可访问性树但仍进入键盘焦点",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/loomball/LoomBall.tsx:172@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "9e561d754b0fced2caddd7a612ea23b55159755da6414e95d84a99caaf8c907a",
+          "note": "A: implementation fully read in this task; exact audit blob and line checked mechanically. Actual independent browser findings and original red/green receipts retain their own source commits."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/components/loomball/LoomBall.tsx",
+        "line": 172,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "LoomBall decorative focus"
+      },
+      "trigger_path": "P8的静态名册球启用hoverActivate，同时声明aria-hidden=true和tabIndex=0。独立axe取得37个serious节点，实际顺序Tab第56步进入不可读装饰球。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "静态/动态/显式hover开关、37个名册实例、指针进入退出、减少动态效果切换、禁用构建、卸载；精确修复登记、后续字节漂移、缺测试/卡号错误/可执行模式/符号链接负例。",
+          "expect": "aria-hidden装饰球及其子树不进入键盘焦点；真实查看/编辑控件保留键盘行为，指针与live动画、减少动态效果、尺寸、状态文字和卸载资源行为保持；只允许精确审核的源码及测试摘要通过客户端来源门禁。",
+          "command": "pnpm -C governance --filter @workloom/web exec vitest run src/components/loomball/LoomBall.accessibility.test.tsx src/components/loomball/LoomBall.test.tsx src/components/loomball/LoomBall.disabled.test.tsx",
+          "exec": {
+            "file": "pnpm",
+            "args": [
+              "-C",
+              "governance",
+              "--filter",
+              "@workloom/web",
+              "exec",
+              "vitest",
+              "run",
+              "src/components/loomball/LoomBall.accessibility.test.tsx",
+              "src/components/loomball/LoomBall.test.tsx",
+              "src/components/loomball/LoomBall.disabled.test.tsx"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "静态/动态/显式hover开关、37个名册实例、指针进入退出、减少动态效果切换、禁用构建、卸载；精确修复登记、后续字节漂移、缺测试/卡号错误/可执行模式/符号链接负例。",
+          "expect": "aria-hidden装饰球及其子树不进入键盘焦点；真实查看/编辑控件保留键盘行为，指针与live动画、减少动态效果、尺寸、状态文字和卸载资源行为保持；只允许精确审核的源码及测试摘要通过客户端来源门禁。",
+          "command": "node --test tests/client-repair-provenance.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/client-repair-provenance.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "aria-hidden装饰球及其子树不进入键盘焦点；真实查看/编辑控件保留键盘行为，指针与live动画、减少动态效果、尺寸、状态文字和卸载资源行为保持；只允许精确审核的源码及测试摘要通过客户端来源门禁。",
+      "rollback": "普通 revert 本卡源码与精确来源登记提交，并重跑本卡断言；不改写追加事件或客户数据。",
+      "conflict_paths": [
+        "governance/apps/web/src/components/loomball/LoomBall.tsx",
+        "governance/apps/web/src/components/loomball/LoomBall.accessibility.test.tsx",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "限当前本仓的验收证据与界面契约；保持交易评分、阈值、执行权限、模拟边界和原基座受控摘要。",
+      "regression": {
+        "command": "pnpm -C governance --filter @workloom/web exec vitest run src/components/loomball/LoomBall.accessibility.test.tsx src/components/loomball/LoomBall.test.tsx src/components/loomball/LoomBall.disabled.test.tsx"
+      },
+      "notes": "原始真实浏览器证据在final-acceptance/rdas-candidate-0df04a9d/followup-diagnostics；组件测试不冒充真实键盘验收，最终由未参与修复的独立会话复验axe和键盘。原基座state和校验器保持原摘要，sourceCommit绑定实际修复提交。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "fixed_by": null
+    },
+    {
+      "id": "MC-033",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 2,
+      "state": "open",
+      "title": "员工档案版本角标与技能版本受窄容器挤压而叠盖或竖排",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/hud/gamification.tsx:37@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "17a2ae4a7d854d41a4152760c357f3e86aecc576a7c32088a1ec427a59cbe057",
+          "note": "A: current 167-line file fully read; B: byte-identical to the original audit blob. Independent real-product screenshot at candidate 2449df68 reproduces the three-line version badge; actual phase evidence is preserved separately."
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/pages/p8/P8.tsx:616@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "02cdc45b7b9d38c431de021fda35ec8293a9792a873df8219b39dc619efb43ff",
+          "note": "A: repair actor fully read the 709-line P8 component. B: byte-identical audit/current file; real profile-390.png inspected by independent actor and root shows skill title and version compressed to vertical columns beside the non-shrinking installed-state text."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/components/hud/gamification.tsx",
+        "line": 37,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "LevelBadge absolute version label"
+      },
+      "trigger_path": "真实P8档案的第6.3版受40px头像包含块约束而折为三行；长版本还能遮挡相邻控件。390宽技能卡的固定状态文案挤压名称及版本，使技能能力与第0.1.0版呈竖排。两处均有独立真实截图。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实LevelBadge与P8页面、生产CSS；桌面和390窄屏、字体放大、当前版本、无版本、主理人、长合法版本、密集容器及已装/未装技能。",
+          "expect": "版本信息位于正常文档流并可完整读取；当前版本单行，长合法版本在可用宽度内折行；不覆盖头像、等级、段位或卡片，不增加窄屏横向溢出。技能名称、版本和状态有足够宽度阅读，技能中心导航仍可点击与键盘访问；主理人和无版本行为保持。",
+          "command": "node --test governance/scripts/acceptance/lib/level-badge-layout.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/level-badge-layout.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "精确来源登记、后续字节漂移、缺测试、错误卡号、可执行模式与符号链接负例。",
+          "expect": "只允许本卡精确审核的源码及测试摘要通过客户端来源门禁；其他客户端来源约束保持。",
+          "command": "node --test tests/client-repair-provenance.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/client-repair-provenance.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "将版本置于等级和段位信息列的正常文档流，头像保持固定宽度；P8技能卡把名称和版本置于可用宽度的信息列，状态允许换行；保留原文案、状态与导航，登记精确来源与真实布局回归。",
+      "rollback": "普通revert本卡源码与精确来源登记提交，并重跑本卡断言；不涉及数据库或业务状态。",
+      "conflict_paths": [
+        "governance/apps/web/src/components/hud/gamification.tsx",
+        "governance/apps/web/src/pages/p8/P8.tsx",
+        "governance/scripts/acceptance/lib/level-badge-layout.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "仅员工等级徽章和P8技能卡的版本布局与对应证据；不改命名文本、安装状态、导航目的地、等级规则、交易策略、权限或原基座受控摘要。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/level-badge-layout.test.mjs"
+      },
+      "notes": "独立真实产品证据在final-acceptance/rdas-candidate-2449df68/ui与roster-inspection。浏览器回归不以类名或伪造几何作为通过依据，最终由未参与修复的独立角色实际产品复验。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    },
+    {
+      "id": "MC-034",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 3,
+      "state": "open",
+      "title": "助手持续显示的未读数量使用低对比度文字而难以辨认",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/loommate/LoomMate.tsx:519@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "7713f3c1332937d2781720bc67d1fc7a4acee4641f30d863ae15bd2b212218f1",
+          "note": "A: full 758-line component read; B: current file byte-identical to audit baseline. Independent real-page axe result at candidate 2449df68 observed persistent unread badge white text on #ff7d7d at 2.47:1, 14px bold; full and expanded variants use the same colors and require direct browser regression."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/components/loommate/LoomMate.tsx",
+        "line": 519,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "LoomMate unread count spans in mini, expanded and fullscreen branches"
+      },
+      "trigger_path": "秘书未读事项数量大于零时，默认mini助手持续显示14px白色数字；实际9个路由共享同一2.47:1对比度缺陷。全屏与展开形态有同色数量文字，需按真实组件分别验证。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实LoomMate组件、生产CSS、三种显示形态，桌面与390窄屏，零/一条/多条未读；实际计算样式及axe检测。",
+          "expect": "所有可见未读数字对比度达到4.5:1，零未读保持隐藏；文字内容、数量更新、点击与键盘操作、背景颜色和尺寸保持原行为，无新增横向溢出。",
+          "command": "node --test governance/scripts/acceptance/lib/loommate-unread-contrast.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/loommate-unread-contrast.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "精确来源登记以及源码/测试漂移、缺测试、错误卡号、可执行模式与符号链接负例。",
+          "expect": "只有本卡审核的组件和回归测试摘要通过本仓客户端来源门禁；原基座state与原校验器保持不变。",
+          "command": "node --test tests/client-repair-provenance.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/client-repair-provenance.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "仅为三个未读数量span采用现有且经真实计算验证的深色文字token；保持红色背景、数字字号、尺寸、状态和交互。先以同一真实浏览器测试在原代码复现，再修改并运行全部形态。",
+      "rollback": "普通revert本卡源码和精确来源登记提交，再运行本卡断言；不修改数据库或业务状态。",
+      "conflict_paths": [
+        "governance/apps/web/src/components/loommate/LoomMate.tsx",
+        "governance/scripts/acceptance/lib/loommate-unread-contrast.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "仅未读计数可读性，不改全局主题、其他文字、通知数据、交易策略、权限或原基座受控摘要。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/loommate-unread-contrast.test.mjs"
+      },
+      "notes": "实测证据在final-acceptance/rdas-candidate-2449df68/roster-inspection/axe-agents-full-violations.json。规范依据为W3C WCAG 2.2 Understanding Contrast Minimum；14px/16px粗体仍按普通文字4.5:1检查，不能四舍五入放宽。最终由独立验收实际产品复验。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    },
+    {
+      "id": "MC-035",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 3,
+      "state": "open",
+      "title": "助手浮层的空间与裁切约束错误导致操作遮挡和未读数字缺损",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/loommate/LoomMate.tsx:379@5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+          "sha256": "7713f3c1332937d2781720bc67d1fc7a4acee4641f30d863ae15bd2b212218f1",
+          "note": "A: full original 758-line component read. B: actual component with production CSS and explicitly local HTTP fixtures at 390x844 shows the absolute team feed covering the urgent item's later action; large avatar plus 416px panel at 1440x900 places its close button outside the viewport. Root inspected the preserved fullscreen screenshot; no real backend or production claim."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/components/loommate/LoomMate.tsx",
+        "line": 379,
+        "commit": "5fc58513363f535de66ba7c4f4b7df1d7daa5578",
+        "symbol": "LoomMate fullscreen footer, non-fullscreen fixed stack and mini-avatar clipping boundary"
+      },
+      "trigger_path": "390x844全屏模式中多条真实形态的长提醒使底部团队实况增高，覆盖重要提醒的稍后按钮；大形象打开416px对话面板后总高度超出1440x900视口，关闭按钮无法鼠标点击；mini圆形按钮的overflow-hidden同时裁掉负偏移的未读角标及数字，真实深浅主题截图均可见。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实LoomMate及生产CSS、明示本地HTTP夹具；桌面1440x900、390x844和短高视口，mini/small/large/fullscreen、空/多条消息和长文案，鼠标与键盘实际操作。",
+          "expect": "助手关闭、切换、输入、重要提醒处理和稍后控件位于可用视口内，必要内容可滚动且不被团队实况覆盖；普通鼠标点击和键盘访问均实际成功，不使用force点击；mini未读数字完整可见且不被头像裁切；无新增横向溢出，既有拖拽、形态持久化及通知行为保持。",
+          "command": "node --test governance/scripts/acceptance/lib/loommate-viewport.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/loommate-viewport.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "同一LoomMate源码的MC034颜色修复与本卡布局修复均绑定精确来源和各自测试；修改、遗漏、错误卡号、模式及符号链接负例。",
+          "expect": "客户端来源门禁要求两张卡的对应测试均在场且摘要准确；原基座state和校验器不变，未审核客户端路径继续拒绝。",
+          "command": "node --test tests/client-repair-provenance.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/client-repair-provenance.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "在不改变默认形象和业务行为的前提下，为角落面板和全屏内容分配真实可用视口高度；团队实况占据自身布局空间，主要操作区域可滚动；mini仅在头像内裁切而保留角标完整；先以原组件执行失败断言，再验证最小布局修复。",
+      "rollback": "普通revert本卡布局及测试登记提交后重跑断言，保留MC034对比度修复；不涉及数据库或外部状态。",
+      "conflict_paths": [
+        "governance/apps/web/src/components/loommate/LoomMate.tsx",
+        "governance/scripts/acceptance/lib/loommate-viewport.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "仅助手在有限视口中的布局与操作可达性；保留MC034三处计数文字颜色，不改交易策略、通知数据、权限、模型调用、默认形态或原基座受控摘要。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/loommate-viewport.test.mjs"
+      },
+      "notes": "发现于MC034真实组件浏览器回归，原始失败与截图保留于outputs/tiger-audit/MC034/red及work/MC034-red.log。由独立会话承担本卡，MC034源码冻结后才可编辑；正式验收由未参与两卡修复的独立角色执行。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    }
+  ],
+  "gates": [],
+  "issue": {
+    "slug": "geniusdapeng-collab/workroom-tiger",
+    "number": 24
+  },
+  "pull_request": "https://github.com/geniusdapeng-collab/workroom-tiger/pull/25"
+}

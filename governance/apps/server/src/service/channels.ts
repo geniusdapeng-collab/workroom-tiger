@@ -152,17 +152,30 @@ export async function issueCToken(input: {
 
 export async function verifyCToken(token: string, secret: string): Promise<CTokenPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, key(secret), { issuer: "workloom-c" });
-    if (payload.scope !== "c-user") return null;
+    const { payload } = await jwtVerify(token, key(secret), {
+      issuer: "workloom-c", algorithms: ["HS256"], requiredClaims: ["iat", "exp"], maxTokenAge: "12h",
+    });
+    if (payload.scope !== "c-user"
+      || typeof payload.workspaceId !== "string" || !payload.workspaceId.trim()
+      || typeof payload.cUserId !== "string" || !payload.cUserId.trim()
+      || !(CHANNELS as readonly unknown[]).includes(payload.channel)
+      || !validLifetime(payload.iat, payload.exp, 12 * 3600)) return null;
     return {
-      workspaceId: String(payload.workspaceId),
-      cUserId: String(payload.cUserId),
+      workspaceId: payload.workspaceId,
+      cUserId: payload.cUserId,
       channel: payload.channel as Channel,
       scope: "c-user",
     };
   } catch {
     return null;
   }
+}
+
+/** 校验签发与到期的完整窗口；仅检查当前尚未过期会放过超长授权。 */
+function validLifetime(issuedAt: unknown, expiresAt: unknown, maximum: number): boolean {
+  return typeof issuedAt === "number" && Number.isFinite(issuedAt)
+    && typeof expiresAt === "number" && Number.isFinite(expiresAt)
+    && expiresAt > issuedAt && expiresAt - issuedAt <= maximum;
 }
 
 /**
@@ -197,8 +210,9 @@ export async function verifyH5EntryToken(token: string, secret: string): Promise
     const { payload } = await jwtVerify(token, key(secret), {
       issuer: "workloom-c-entry",
       audience: "workloom-c-h5",
+      algorithms: ["HS256"], requiredClaims: ["iat", "exp"], maxTokenAge: "15m",
     });
-    if (payload.scope !== "c-entry") return null;
+    if (payload.scope !== "c-entry" || !validLifetime(payload.iat, payload.exp, 15 * 60)) return null;
     const workspaceKey = typeof payload.workspaceKey === "string" ? payload.workspaceKey.trim() : "";
     const subject = typeof payload.subject === "string" ? payload.subject.trim() : "";
     const appId = typeof payload.appId === "string" ? payload.appId.trim() : "";

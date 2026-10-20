@@ -12,7 +12,7 @@
 
 示例：
   python main.py --demo                          # 离线演示
-  python main.py --universe full                 # 真实全市场（6000+只两级拉取）
+  python main.py --universe full                 # 请求所选市场列表，实际范围见报告
   python main.py --mode premarket --universe full
   python main.py --mode intraday --interval 300 --cycles 12
   python main.py --backtest --demo --bt-days 260
@@ -87,7 +87,7 @@ def _journal_section(stats: dict) -> str:
         return "## 十一、胜率追踪（信号日记）\n\n尚无已结算信号——账本从今天开始积累，" \
                "每笔放行信号将按出场规则自动结算。\n"
     lines = ["## 十一、胜率追踪（信号日记）", ""]
-    lines.append(f"- 已结算 **{stats['closed']}** 笔（持仓中 {stats['open']}）｜ "
+    lines.append(f"- 已结算 **{stats['closed']}** 笔（未结算信号 {stats['open']}）｜ "
                  f"累计 **{stats['total_r']}R**")
     lines.append(f"- 总胜率 **{stats['win_rate']:.1%}** ｜ 期望 **{stats['expectancy_r']}R** ｜ "
                  f"利润因子 {stats['profit_factor']}")
@@ -108,10 +108,38 @@ def _journal_section(stats: dict) -> str:
     return "\n".join(lines)
 
 
+def _research_daily_reports(args, result, reason: str) -> None:
+    """A blocked accounting boundary still produces a successful research run."""
+    json_path = to_json(result, args.out)
+    md_path = to_markdown(result, args.out)
+    with open(md_path, "a", encoding="utf-8") as handle:
+        handle.write("\n## 十一、账本状态\n\n" + reason
+                     + "\n本轮未更新信号日记、模拟盘、复盘与治理事件；既有账本原样保留。\n")
+    html_path = None
+    if args.html:
+        from trading_system.report_html import render_html
+        html_path = os.path.join(args.out, f"日报_{result.trade_date.replace('-', '')}.html")
+        with open(html_path, "w", encoding="utf-8") as handle:
+            handle.write(render_html(result))
+    plan_path = None
+    if args.mode == "premarket":
+        plan_path = os.path.join(args.out, f"盘前计划_{result.trade_date.replace('-', '')}.md")
+        with open(plan_path, "w", encoding="utf-8") as handle:
+            handle.write(f"# 盘前研究 — {result.trade_date}\n\n{reason}\n\n"
+                         "本轮仅提供研究，不生成开仓计划，也不执行既有仓位的模拟结算。\n")
+    print(f"\n研究报告已生成（交易记账已暂停）:\n  {md_path}\n  {json_path}"
+          + (f"\n  {html_path}" if html_path else "")
+          + (f"\n  {plan_path}" if plan_path else "") + f"\n  {reason}\n")
+    if not args.quiet:
+        print(render_markdown(result))
+
+
 def _daily(args, provider) -> None:
+    from trading_system.currency import CurrencyBoundaryError, require_usd_result
     from trading_system.journal import Journal
     from trading_system.providers import get_provider
     from trading_system.providers.base import is_synthetic
+    from trading_system.simulator import Bar, SimEngine
     from trading_system.state import purge_run_state
 
     # ---- 合成数据隔离闸门（v6.5）：demo 运行绝不写真实公开台账 ----
@@ -130,6 +158,14 @@ def _daily(args, provider) -> None:
         log.warning("演示模式（合成数据）：本轮台账与报告落盘到 %s，"
                     "不写 reports/ 下的真实公开台账", os.path.abspath(args.out))
 
+    # 校准样本在 pipeline 内写入；历史币种预检必须先于该派生账本更新。
+    history_error = None
+    try:
+        Journal(os.path.join(args.out, "journal.json"))
+        SimEngine(os.path.join(args.out, "sim_portfolio.json"), initial_cash=args.account)
+    except CurrencyBoundaryError as exc:
+        history_error = exc
+
     # 零基线纪律：每轮从零开始，先清除上一轮残留（搜索缓存/全市场清单缓存），
     # 白名单仅保留 journal.json（会计台账，不进入决策输入）。
     purged = purge_run_state()
@@ -144,12 +180,38 @@ def _daily(args, provider) -> None:
         account_usd=args.account,
         use_tuned=args.use_tuned,
         market=args.market,
+        accounting_blocked_reason=history_error.policy["reason"] if history_error else None,
     )
+    # 先核对本轮币种与两本历史账，再做任何记账。否则先写 journal、后发现
+    # sim 的历史原币记录，会留下半次运行；不能用标签替代汇率来修旧数字。
+    try:
+        policy = require_usd_result(result, scope="日报交易记账")
+        if history_error is not None:
+            raise history_error
+        j = Journal(os.path.join(args.out, "journal.json"))
+        sim = SimEngine(os.path.join(args.out, "sim_portfolio.json"), initial_cash=args.account)
+    except CurrencyBoundaryError as exc:
+        result.raw["accounting"] = {**exc.policy, "status": "blocked_currency"}
+        result.picks = []
+        result.raw["pick_rationale"] = {}
+        if result.action != "AVOID":
+            result.action = "WAIT"
+        if exc.policy["reason"] not in result.market_view:
+            result.market_view = ((result.market_view + "；" if result.market_view else "")
+                                  + exc.policy["reason"])
+        if exc.policy["reason"] not in result.notes:
+            result.notes.append(exc.policy["reason"])
+        for step in result.raw.get("redline", []):
+            if step["step"] == "review.daily":
+                step.update(status="passthrough", note=exc.policy["reason"])
+        log.warning("研究结果保留，交易记账已暂停: %s", exc)
+        _research_daily_reports(args, result, exc.policy["reason"])
+        return
+    result.raw["accounting"] = {**policy, "status": "pending"}
     json_path = to_json(result, args.out)
     md_path = to_markdown(result, args.out)
 
     # ---- 信号日记：落账 + 结算 + 统计 ----
-    j = Journal(os.path.join(args.out, "journal.json"))
     added = j.log_picks(result, args.account)
     settle_provider = get_provider(provider or ("demo" if args.demo else None))
     settled = j.settle(settle_provider)
@@ -159,11 +221,9 @@ def _daily(args, provider) -> None:
     if added or settled:
         logging.getLogger(__name__).info("信号日记: 新落账 %d，新结算 %d", added, settled)
 
-    # ---- 小G模拟盘：全AI掌控模拟盘（初始 $100,000，T+1 开盘价成交，无未来函数）----
+    # ---- 小G模拟盘：初始净值遵从 --account（默认 $100,000），T+1 开盘价成交 ----
     # 台账 sim_portfolio.json 为会计账（零基线白名单保留）；行情一律当日实时拉取。
     from trading_system.pipeline import _single_with_fallback
-    from trading_system.simulator import Bar, SimEngine
-    sim = SimEngine(os.path.join(args.out, "sim_portfolio.json"))
     _bar_cache: dict = {}
 
     def get_bar(ticker: str):
@@ -179,7 +239,7 @@ def _daily(args, provider) -> None:
                     if "Volume" in df.columns else 0.0
                 bar = Bar(open=float(row["Open"]), high=float(row["High"]),
                           low=float(row["Low"]), close=float(row["Close"]),
-                          adv=adv)
+                          adv=adv, date=str(df.index[-1].date()))
         except Exception as exc:
             logging.getLogger(__name__).warning("小G模拟盘取 %s 日K失败（顺延）: %s", ticker, exc)
         _bar_cache[ticker] = bar
@@ -187,6 +247,7 @@ def _daily(args, provider) -> None:
 
     sim_out = sim.step(result.trade_date, result, get_bar)
     sim.save()
+    result.raw["accounting"]["status"] = "updated"
 
     sim_payload = {"state": sim.state, "stats": sim.stats()}
     logging.getLogger(__name__).info("小G模拟盘: 净值 $%.0f，操作 %d 条",
@@ -453,7 +514,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AI 短线美股交易系统 v4.1")
     parser.add_argument("--mode", choices=["daily", "premarket", "intraday"], default="daily")
     parser.add_argument("--market", choices=["us", "cn", "hk"], default="us",
-                        help="目标市场（S4 多市场：框架不变、输入替换；默认 us 与现状一致）")
+                        help="研究市场（默认 us；cn/hk 保留原币研究，未接汇率前暂停交易记账）")
     parser.add_argument("--provider",
                         choices=["yahoo", "stooq", "tencent", "sina", "eastmoney",
                                  "agentgw", "demo"],
@@ -461,11 +522,12 @@ def main() -> None:
     parser.add_argument("--demo", action="store_true", help="离线演示模式（合成数据）")
     parser.add_argument("--universe", choices=["core", "extended", "full", "file"],
                         default="extended",
-                        help="full=官方全市场清单（纽交所+纳斯达克 6000+只，两级拉取）")
+                        help="full=请求所选市场股票列表，实际范围以输出中的来源和预筛记录为准")
     parser.add_argument("--universe-file", default=None)
     parser.add_argument("--top", type=int, default=config.SCAN_TOP_N, help="扫描精评候选数")
     parser.add_argument("--picks", type=int, default=config.MAX_PICKS_DEFAULT, help="最终放行标的数上限")
-    parser.add_argument("--account", type=float, default=100_000, help="账户净值（USD）")
+    parser.add_argument("--account", type=float, default=100_000,
+                        help="账户净值（仅 USD；不能用于 CNY/HKD 价格的仓位反推）")
     parser.add_argument("--out", default=config.REPORTS_DIR)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--backtest", action="store_true", help="运行无未来函数回测")

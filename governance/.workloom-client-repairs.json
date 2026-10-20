@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "workloom.tiger-client-repairs/v1",
+  "repository": "geniusdapeng-collab/workroom-tiger",
+  "taskId": "T-2026-1020-0901",
+  "authorization": {
+    "basis": "user-requested-repository-repair",
+    "issue": "https://github.com/geniusdapeng-collab/workroom-tiger/issues/24",
+    "pullRequest": "https://github.com/geniusdapeng-collab/workroom-tiger/pull/25"
+  },
+  "base": {
+    "version": "0.1.17",
+    "sourceCommit": "91610daf0962a6c24bc7b8cde6c802662eb8b2f7",
+    "stateSha256": "3f505fddc21c63d0a7ece0aaa473e503b3fc4b65955e0f03b315bd99179cca1a",
+    "verifierSha256": "fa1bb091d6b0b0e925367352837d817b59d4374a6c01c3183acba638ee8b0c31"
+  },
+  "repairs": [
+    {
+      "path": "apps/web/src/components/star-ring/StarRing.tsx",
+      "card": "MC-012",
+      "upstreamSha256": "08c7b91c784b166a2843547e89a3028264969ed50ef3f03f02d0c3e800eb8c18",
+      "repairedSha256": "12d6ef63b30552efb10539d6b89cd798e3118073061115a7ed8bb8712b9f64ad",
+      "sourceCommit": "1034e46a52d628c194ffbe7e566b3fed1d75f0c3",
+      "reason": "Restore continuation using the stored thread goal and append-only thread note receipts; retain existing UI structure."
+    },
+    {
+      "path": "apps/webc/src/lib/api.ts",
+      "card": "MC-018",
+      "upstreamSha256": "f4b5b688e8f9d7fa628733d825e0a4e7111b604aea5fcd619aadb28ae6f98cee",
+      "repairedSha256": "b1aa2abce6fddb4768b65de906e32e8eed3f788ab8fa3e58ee093c872eaa3f65",
+      "sourceCommit": "f75df2d1f1e9ad906fbe8f44e3f5e240e5f2b427",
+      "reason": "Align the existing chat request type with actual boolean confirmation, ticket drafts and idempotency keys in the gateway contract."
+    },
+    {
+      "path": "apps/web/consumer-e2e/clients.playwright.ts",
+      "card": "MC-015",
+      "upstreamSha256": "91fa35369fdad9280a15e647ffad72961b41a5d478d3c50d69e1df408a423e8f",
+      "repairedSha256": "aeb883b818774ca12c311d39cc978ba65d4526bd5910002898ed903521de8b56",
+      "sourceCommit": "bf260d75a6b80b300f957e0e2ebe481f246eb799",
+      "reason": "Bind the existing production login heading assertion to the controlled product manifest, retaining exact matching and every responsive interaction assertion."
+    },
+    {
+      "path": "apps/web/src/pages/onboarding/Onboarding.tsx",
+      "card": "MC-027",
+      "upstreamSha256": "b546b370419f42db8e014f3def1703e876ae91d7fec644d96e7383340ec638bd",
+      "repairedSha256": "887ffd3b3a7835c25776f618d9c2e2c0ee5da7e225deff85e882b52a85ec506b",
+      "sourceCommit": "f51f2dd907a0ea2a73a1dc018ab9cda6d30c6b30",
+      "reason": "Separate archive mode declaration from formal activation eligibility; show unconfigured and invalid values truthfully and retain the existing shell navigation exit."
+    },
+    {
+      "path": "apps/web/src/components/SimBanner.tsx",
+      "card": "MC-027",
+      "upstreamSha256": "068d845c135ee2f7cfd83fdc68d90b2940422559f09285a3eeddb57be477ede7",
+      "repairedSha256": "9e7367342c4baf6406791a92911a0aa2e4babe33c28d07369e53664f6c2d8239",
+      "sourceCommit": "d995fa74eb5f1f5c9af598dbd3a15faba5ebffb4",
+      "reason": "MC-027 reports archive declaration, default tool requirements and formal eligibility independently; MC-037 places the inline banner below the assistant while preserving those semantics. Both distinct regressions are required."
+    },
+    {
+      "path": "apps/web/src/components/loomball/LoomBall.tsx",
+      "card": "MC-032",
+      "upstreamSha256": "9e561d754b0fced2caddd7a612ea23b55159755da6414e95d84a99caaf8c907a",
+      "repairedSha256": "4a5f7d9a630136cb170170dcdbc32e471d77824952dab70b70466ee73939a576",
+      "sourceCommit": "3ff33c56b07c1ff6321e463b7ba5423373c7d151",
+      "reason": "Keep the aria-hidden decorative roster animation outside sequential keyboard focus while retaining pointer activation, live animation and reduced-motion behavior."
+    },
+    {
+      "path": "apps/web/src/components/hud/gamification.tsx",
+      "card": "MC-033",
+      "upstreamSha256": "17a2ae4a7d854d41a4152760c357f3e86aecc576a7c32088a1ec427a59cbe057",
+      "repairedSha256": "cbd00bbe3fe4f35305c17cdb7590be96fddcfb0a23ecd4c65d3574213937d2e4",
+      "sourceCommit": "ed0026c0e613e754a4cd1d8bbd20aad4d8b75b27",
+      "reason": "Keep employee versions in normal text flow with an unchanged avatar and level semantics; verify narrow and enlarged-text layouts with real browser geometry."
+    },
+    {
+      "path": "apps/web/src/pages/p8/P8.tsx",
+      "card": "MC-033",
+      "upstreamSha256": "02cdc45b7b9d38c431de021fda35ec8293a9792a873df8219b39dc619efb43ff",
+      "repairedSha256": "f002d7f13850bbf1ea95eced28a3ea13470eb7d409f1c061304154fcbc5b1ae8",
+      "sourceCommit": "ed0026c0e613e754a4cd1d8bbd20aad4d8b75b27",
+      "reason": "Give skill names, versions and installation state readable width while retaining existing labels, state and navigation; bind real pointer and keyboard regressions."
+    },
+    {
+      "path": "apps/web/src/components/loommate/LoomMate.tsx",
+      "card": "MC-034",
+      "upstreamSha256": "7713f3c1332937d2781720bc67d1fc7a4acee4641f30d863ae15bd2b212218f1",
+      "repairedSha256": "e58d7d0e24ae456258be028cf1e63c3066e1185859a97ce44ed0482838303cf5",
+      "sourceCommit": "1fa7462206778206da699ff1280564120a000d17",
+      "reason": "MC-034 corrects unread-count contrast; MC-035 bounds scrollable surfaces and preserves full numeric badges; MC-039 aggregates mini-mode notifications behind an explicit accessible control so ordinary task launch actions remain reachable. All three distinct regressions are required."
+    },
+    {
+      "path": "apps/web/src/components/SkillDistBanner.tsx",
+      "card": "MC-037",
+      "upstreamSha256": "2c72b9a5cf4a769c3aad4771aa89a624e935330aff3b8446f2ac933b7f206239",
+      "repairedSha256": "dc1c2fc217983be104b6212aa6739770d46ff13b42d30541be93bed877f63cdc",
+      "sourceCommit": "d995fa74eb5f1f5c9af598dbd3a15faba5ebffb4",
+      "reason": "Place pending and applied inline skill status banners below the assistant; preserve status semantics and higher-priority dialogs, with real pointer and keyboard regression evidence."
+    },
+    {
+      "path": "apps/web/src/pages/p6/P6.tsx",
+      "card": "MC-038",
+      "upstreamSha256": "e13d40b9b0d6c08d8461d3965d7d81daa66bf6491c199fcd6b8e6a3fee9e8b08",
+      "repairedSha256": "4e353e5281401a2c30f4aa9e2f70f23d671f6b8b073973bb4c9f06a0b015e392",
+      "sourceCommit": "1fa7462206778206da699ff1280564120a000d17",
+      "reason": "Give skill-suggestion copy and actions separate responsive rows while retaining confirmation, rejection and draft creation; verify ordinary pointer and keyboard actions across narrow and enlarged-text layouts."
+    },
+    {
+      "path": "apps/web/src/pages/p2/P2.tsx",
+      "card": "MC-041",
+      "upstreamSha256": "6e88605374bdc651f90a0d51c6fbe136aa42e332fff0a26e151f3fa07420250e",
+      "repairedSha256": "e709d6f0fccceed6fd4c90194d749ecb82a38a7ec03a2fa44b3b22feff240c42",
+      "sourceCommit": "3b09410d536dcb9df193878bb2da1cb218446263",
+      "reason": "Display saved task-plan labels in original order with truthful pending, empty, invalid and offline states; reject late or mismatched task responses and verify complete same-task visible labels within the original dispatch deadline."
+    }
+  ],
+  "testAdditions": [
+    {
+      "path": "apps/web/src/components/star-ring/StarRing.contract.test.tsx",
+      "card": "MC-012",
+      "sha256": "31e20148294c32a7970245839ebbfb7e91f5e0d77dc03b43eeb68ccf62b12af3"
+    },
+    {
+      "path": "apps/web/src/pages/onboarding/Onboarding.mode.test.tsx",
+      "card": "MC-027",
+      "sha256": "5e75ae201ad3cd4283f856d9991c6f47d9d9489b638076b59b5cfc9b6b515b6a"
+    },
+    {
+      "path": "apps/web/src/components/loomball/LoomBall.accessibility.test.tsx",
+      "card": "MC-032",
+      "sha256": "4f3eefb9d9efe45313d039e4cb446fcb67df4eeb99dc56be3d4466409f03d287"
+    },
+    {
+      "path": "scripts/acceptance/lib/level-badge-layout.test.mjs",
+      "card": "MC-033",
+      "sha256": "84432fd0a6301de4aabfe8c37366d06c6a8f5fdd61c2c7a267c9acd4150ee9ff"
+    },
+    {
+      "path": "scripts/acceptance/lib/loommate-unread-contrast.test.mjs",
+      "card": "MC-034",
+      "sha256": "660f9162a29f61272c75cbb39a774463f9b4633766457e00a043a15ea5cc64c4"
+    },
+    {
+      "path": "scripts/acceptance/lib/loommate-viewport.test.mjs",
+      "card": "MC-035",
+      "sha256": "935acae5987ee468567c32623701f5f92a981cab3412f5c48e29e80d8cbb0739"
+    },
+    {
+      "path": "scripts/acceptance/lib/loommate-stacking.test.mjs",
+      "card": "MC-037",
+      "sha256": "c17d345701637aa354d127442e0072e9ca651a99c999b8269ad43b780adf689e"
+    },
+    {
+      "path": "scripts/acceptance/lib/skill-suggestion-layout.test.mjs",
+      "card": "MC-038",
+      "sha256": "08d38c67c328b708b0a45e26c2c3c72d49a41ae7d6748c065e9b77ac2cbc4df4"
+    },
+    {
+      "path": "scripts/acceptance/lib/task-notification-interception.test.mjs",
+      "card": "MC-039",
+      "sha256": "3c796d9f309b9d61b933196513fc2cb9c68a5e303ff9cd8145e332a2f0878ae2"
+    },
+    {
+      "path": "scripts/acceptance/lib/task-plan-visibility.test.mjs",
+      "card": "MC-041",
+      "sha256": "2d252679cf6f61a8ac4e90d7854f528999b1b5590db2b5dce86ccc71b862e88b"
+    }
+  ]
+}

@@ -20,6 +20,14 @@ export interface OnboardingIdentity {
   role: string;
 }
 
+/** 可向客户端解释的向导状态冲突；数据库和其他内部异常继续走通用 5xx。 */
+export class OnboardingDraftError extends Error {
+  constructor(readonly code: "FORBIDDEN" | "CONFLICT" | "PRECONDITION_FAILED", message: string) {
+    super(message);
+    this.name = "OnboardingDraftError";
+  }
+}
+
 export interface WelcomeProgress {
   persisted: boolean;
   status: WelcomeStatus;
@@ -325,11 +333,11 @@ export async function saveWizardDraft(
     );
     const current = currentRows.rows[0];
     if (current && !canEditWizard(identity, current.responsible_member_id)) {
-      throw new Error("当前向导由其他成员负责，请联系责任人或管理员交接");
+      throw new OnboardingDraftError("FORBIDDEN", "当前向导由其他成员负责，请联系责任人或管理员交接");
     }
-    if (current && current.status === "completed") throw new Error("该落地向导已完成；如需变更请从配置中心发起新版本");
+    if (current && current.status === "completed") throw new OnboardingDraftError("PRECONDITION_FAILED", "该落地向导已完成；如需变更请从配置中心发起新版本");
     if ((current?.version ?? 0) !== input.expectedVersion) {
-      throw new Error(`向导草稿已由其他成员更新（当前版本 ${current?.version ?? 0}），请刷新后继续`);
+      throw new OnboardingDraftError("CONFLICT", `向导草稿已由其他成员更新（当前版本 ${current?.version ?? 0}），请刷新后继续`);
     }
     const id = current?.id ?? newId("obw");
     if (current) {
@@ -423,9 +431,9 @@ export async function completeWizardDraft(
        WHERE workspace_id=$1 AND journey_key='real-mode-setup' AND status='draft' FOR UPDATE`, [workspaceId],
     );
     const row = current.rows[0];
-    if (!row) throw new Error("落地向导草稿不存在或已经完成");
-    if (!canEditWizard(identity, row.responsible_member_id)) throw new Error("当前向导由其他成员负责，请联系责任人或管理员交接");
-    if (row.version !== expectedVersion) throw new Error(`向导草稿已更新（当前版本 ${row.version}），请刷新后继续`);
+    if (!row) throw new OnboardingDraftError("PRECONDITION_FAILED", "落地向导草稿不存在或已经完成");
+    if (!canEditWizard(identity, row.responsible_member_id)) throw new OnboardingDraftError("FORBIDDEN", "当前向导由其他成员负责，请联系责任人或管理员交接");
+    if (row.version !== expectedVersion) throw new OnboardingDraftError("CONFLICT", `向导草稿已更新（当前版本 ${row.version}），请刷新后继续`);
     await client.query(
       `UPDATE onboarding_wizard_drafts
        SET status='completed', current_step=4, version=version+1, completed_at=now(),

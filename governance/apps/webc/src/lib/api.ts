@@ -218,7 +218,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  chat: async (body: { conversationId?: string; text: string; confirmTicket?: string }) => {
+  chat: async (body: {
+    conversationId?: string;
+    text: string;
+    confirmTicket?: boolean;
+    ticketDraft?: { kind: string; title: string; payload: Record<string, unknown> };
+    idempotencyKey?: string;
+  }) => {
     const response = await request<ChatResponse>("/chat", { method: "POST", body: JSON.stringify(body) });
     const rawCards = response.cards ?? [];
     const cards = businessCardsOf(rawCards);

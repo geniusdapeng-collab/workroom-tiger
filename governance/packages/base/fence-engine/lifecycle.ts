@@ -7,11 +7,18 @@
  *  - withObjectLock：对象写锁（pg advisory try-lock；超时转「需介入」，禁强制抢锁，E2.5）
  */
 import type pg from "pg";
+import { isDeepStrictEqual } from "node:util";
 import { DRY_RUN_REPLAY_LIMIT, OBJECT_LOCK_TIMEOUT_MS, type BusinessEvent } from "@workloom/shared";
 import { judge, type JudgeVerdict, type RuntimeRule } from "./judge.js";
 import { checkCandidateAgainstBaseline } from "./dsl.js";
 
 /* ---------- dry-run 回放（F2.5） ---------- */
+
+/** 实际参与回放的候选输入，提交提案时必须与这份快照一致。 */
+export interface DryRunCandidateInput {
+  rules: RuntimeRule[];
+  defaultLevel: "auto" | "review" | "block";
+}
 
 export interface DryRunReport {
   ruleId: string;
@@ -23,6 +30,15 @@ export interface DryRunReport {
   impact: string; // 人读摘要
   /** 与现行规则集的差量（提供 baseline 时给出；HP-02 补 F2.5 证据缺口） */
   delta?: DryRunDelta;
+  /** 旧报告没有此字段，需重新回放后才能从提案 API 确认。 */
+  candidateInput?: DryRunCandidateInput;
+}
+
+export class DryRunInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DryRunInputError";
+  }
 }
 
 /**
@@ -109,6 +125,8 @@ export async function createDryRun(
     baseline?: { rules: RuntimeRule[]; defaultLevel: "auto" | "review" | "block" };
   },
 ): Promise<{ dryRunId: string; report: DryRunReport }> {
+  // 回放与持久化使用同一份独立快照，调用方后续编辑不会替换已回放的输入。
+  const candidateInput: DryRunCandidateInput = structuredClone({ rules: input.rules, defaultLevel: input.defaultLevel });
   const client = await app.connect();
   try {
     // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
@@ -121,7 +139,7 @@ export async function createDryRun(
       [scope.tenantId, scope.workspaceId, DRY_RUN_REPLAY_LIMIT],
     );
     const events = rows.rows.map((r) => r.payload);
-    const { verdicts } = replayRules(events, input.rules, input.defaultLevel);
+    const { verdicts } = replayRules(events, candidateInput.rules, candidateInput.defaultLevel);
     let delta: DryRunDelta | undefined;
     if (input.baseline) {
       const base = replayRules(events, input.baseline.rules, input.baseline.defaultLevel);
@@ -140,6 +158,7 @@ export async function createDryRun(
         `放行 ${verdicts.filter((v) => v.verdict.level === "auto").length}` +
         (delta ? ` · ${delta.summary}` : ""),
       delta,
+      candidateInput,
     };
     const dryRunId = `fdr-${input.ruleId.toLowerCase()}-${Date.now().toString(36)}`;
     await client.query(
@@ -258,7 +277,24 @@ export async function confirmDryRunOnTx(
   client: Pick<pg.PoolClient, "query">,
   scope: { workspaceId: string },
   dryRunId: string,
+  expectedInput?: DryRunCandidateInput,
 ): Promise<void> {
+  if (expectedInput) {
+    // 与 pending→confirmed 共用行锁和事务，避免验证后报告被并发确认或替换。
+    const existing = await client.query<{ report: Pick<DryRunReport, "candidateInput"> | null }>(
+      `SELECT report FROM fence_dry_runs WHERE id=$1 AND workspace_id=$2 AND status='pending' FOR UPDATE`,
+      [dryRunId, scope.workspaceId],
+    );
+    if (!existing.rows[0]) throw new Error(`dry-run ${dryRunId} 不存在或非 pending（幂等约束）`);
+    const savedInput = existing.rows[0].report?.candidateInput;
+    if (!savedInput) {
+      throw new DryRunInputError("dry-run 报告缺少候选输入快照，请重新执行模拟回放后提交");
+    }
+    // JSONB 会调整对象键顺序；深相等按字段值比较，不按 JSON 字符串序列比较。
+    if (!isDeepStrictEqual(savedInput, expectedInput)) {
+      throw new DryRunInputError("提交规则与 dry-run 回放输入不一致，请重新执行模拟回放后提交");
+    }
+  }
   const r = await client.query(
     `UPDATE fence_dry_runs SET status='confirmed' WHERE id=$1 AND workspace_id=$2 AND status='pending'`,
     [dryRunId, scope.workspaceId],

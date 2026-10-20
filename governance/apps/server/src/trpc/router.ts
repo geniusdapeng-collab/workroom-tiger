@@ -19,10 +19,10 @@ import {
   signDemoToken,
   type Identity,
 } from "@workloom/base/tenancy";
-import { gatewayAppend, gatewayAppendOnClient, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
-import { makeReadableId } from "@workloom/shared";
-import { capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
+import { gatewayAppend, gatewayAppendOnClient, insertWithReadableId, THREAD_ID_SOURCE, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
+import { actionProcedure, capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
 import { accountsRouter } from "./accounts-router.js";
+import { overlayRouter } from "./overlay-router.js";
 import {
   ApprovalError,
   batchApprove,
@@ -32,12 +32,14 @@ import {
 } from "@workloom/base/review-console";
 import { routeIntent, runAsk, runQuest } from "@workloom/runtime";
 import { LlmIntentClassifier, type IntentClassifier } from "@workloom/runtime";
+import { resolveDispatchPreset, type DispatchPresetResolution } from "../runtime/thread-runner.js";
+import { boundThreadRun, installedThreadAgent, type BoundThreadRun, type InstalledThreadAgent } from "../runtime/thread-binding.js";
 import { providerFromEnv, OpenAiCompatibleProvider } from "@workloom/base/model-router";
 import { routedLlmCall, resetLlmAssembly } from "../service/llm.js";
 import { creditsRouter, modelFeedbackRouter } from "./credits-router.js";
 import { runRouterReviewBeat } from "@workloom/base/model-router";
 import {
-  loadCharter, parseCharter, transition, defaultCharter,
+  loadCharter, parseCharter, transition, defaultCharter, charterSchema,
   runBriefingBeat, runQueueBeat, runDeviationBeat, runBreakerBeat, buildScorecard,
   runOutcomeReviewBeat, runHrReviewBeat, runBoardPackBeat, runOrgScanBeat, applyReplacement,
   buildFloor,
@@ -54,10 +56,12 @@ import {
 } from "@workloom/base/night-shift";
 import {
   activateRuleVersion,
-  confirmDryRun,
+  confirmDryRunOnTx,
   createDryRun,
+  DryRunInputError,
   fenceActivationFromProposal,
-  fenceRuleRowId,
+  nextRuleRowIdentity,
+  type DryRunCandidateInput,
 } from "@workloom/base/fence-engine";
 import { MAX_CONCURRENT_THREADS, PLAN_TIERS } from "@workloom/shared";
 import {
@@ -131,11 +135,19 @@ import {
   resolveAuthoritativeClientAccess,
 } from "../service/access-authority.js";
 import {
+  advanceWizardDraftOn,
+  completeWizardDraft,
+  getWizardDraft,
+  OnboardingDraftError,
   replayWelcome,
+  saveWizardDraft,
   saveWelcomeProgress,
   welcomeProgress,
   WELCOME_STEPS,
 } from "../service/onboarding-continuity.js";
+import { bundledServiceFrontAvailable, resolveServiceFrontPublication } from "../service/service-front-publication.js";
+import { llmConfigurationFingerprint, onboardingStatus, onboardingStatusOn } from "../service/onboarding-readiness.js";
+import { serviceTx } from "../service/events.js";
 import {
   buildEvolutionScorecard,
   decayMemories,
@@ -143,9 +155,14 @@ import {
   editMemoryContent,
   getFeedbackEnums,
   recallMemoriesByMember,
+  previewMemoryImpact,
+  reactivateMemory,
+  restoreMemories,
+  MemoryGovernanceError,
   runMemoryMinerBeat,
 } from "@workloom/base/evolve";
 import { getMemorySources, searchMemories } from "@workloom/base/workdata";
+import { projectThreadPlan } from "./thread-plan-display.js";
 
 /** system router：健康检查（公开） */
 const systemRouter = router({
@@ -210,16 +227,13 @@ function persistLlmEnv(cfg: { provider: string; baseUrl: string; apiKey: string;
   resetLlmAssembly(); // v3.0：模型池与行业策略缓存同步复位（写盘即全链生效免重启）
 }
 
-/** LLM 装配状态（真实=非 mock 且 baseUrl 齐备；apiKey 可空=免 key 网关） */
-function llmAssembly(): { provider: string; model: string; baseUrl: string; real: boolean } {
-  const provider = process.env.LLM_PROVIDER ?? "mock";
-  const baseUrl = process.env.LLM_BASE_URL ?? "";
-  return {
-    provider,
-    model: process.env.LLM_MODEL ?? "",
-    baseUrl,
-    real: provider !== "mock" && baseUrl.length > 0,
-  };
+async function wizardResult<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof OnboardingDraftError) throw new TRPCError({ code: error.code, message: error.message });
+    throw error;
+  }
 }
 
 /** 真实试调探针（落地向导「测试连接」：真实 round-trip 通过才允许保存） */
@@ -262,47 +276,35 @@ const onboardingRouter = router({
     role: ctx.identity.role,
   })),
 
-  /** 运行态总览（P0 横幅/落地向导同一事实源）：数据模式 + LLM 装配 + 工作区规模 */
-  status: protectedProcedure.query(async ({ ctx }) => {
-    const scope = scopeOf(ctx.identity);
-    const app = getAppPool();
-    const client = await app.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
-      await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-      const prof = await client.query<{ data_mode: string | null }>(
-        `SELECT archive->>'dataMode' AS data_mode FROM profiles WHERE workspace_id=$1`,
-        [scope.workspaceId],
-      );
-      const ws = await client.query<{ name: string; bundle_id: string | null; is_example: boolean }>(
-        `SELECT name, bundle_id, is_example FROM workspaces WHERE id=$1`, [scope.workspaceId]);
-      const n = async (sql: string) => Number((await client.query<{ n: string }>(sql, [scope.workspaceId])).rows[0]?.n ?? 0);
-      const [events, members, agents, memories] = await Promise.all([
-        n(`SELECT count(*)::text AS n FROM biz_events WHERE workspace_id=$1`),
-        n(`SELECT count(*)::text AS n FROM members WHERE workspace_id=$1`),
-        n(`SELECT count(*)::text AS n FROM agents WHERE workspace_id=$1`),
-        n(`SELECT count(*)::text AS n FROM org_memory WHERE workspace_id=$1`),
-      ]);
-      await client.query("COMMIT");
-      return {
-        // 缺省按模拟态处理（种子库/历史库均无标记时横幅常显，宁可多提示不可漏提示）
-        dataMode: (prof.rows[0]?.data_mode ?? "simulated") as "simulated" | "real",
-        llm: llmAssembly(),
-        workspace: { name: ws.rows[0]?.name ?? "", events, members, agents, memories },
-        workspaceId: scope.workspaceId,
-        bundle: { id: ws.rows[0]?.bundle_id ?? null, isExample: !!ws.rows[0]?.is_example },
-      };
-    } catch (err) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw err;
-    } finally {
-      client.release();
-    }
-  }),
+  wizardDraft: protectedProcedure.query(({ ctx }) => getWizardDraft(ctx.identity.workspaceId)),
+
+  saveWizardDraft: actionProcedure("workspace.configure")
+    .input(z.object({
+      expectedVersion: z.number().int().min(0),
+      currentStep: z.number().int().min(0).max(4),
+      payload: z.object({
+        provider: z.string().max(40).optional(), baseUrl: z.string().max(200).optional(),
+        model: z.string().max(80).optional(), businessName: z.string().max(60).optional(),
+        industry: z.string().max(40).optional(), note: z.string().max(300).optional(),
+        siteUrl: z.string().max(2000).optional(), documentTitle: z.string().max(200).optional(),
+        testQuestion: z.string().max(2000).optional(),
+      }).strict(),
+    }).strict())
+    .mutation(({ ctx, input }) => wizardResult(() => saveWizardDraft(ctx.identity.workspaceId, ctx.identity, input))),
+
+  completeWizardDraft: actionProcedure("workspace.configure")
+    .input(z.object({ expectedVersion: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => wizardResult(() => completeWizardDraft(ctx.identity.workspaceId, ctx.identity, input.expectedVersion))),
+
+  serviceFrontPublication: protectedProcedure.query(({ ctx }) => resolveServiceFrontPublication({
+    workspaceId: ctx.identity.workspaceId, bundledClientAvailable: bundledServiceFrontAvailable(),
+  })),
+
+  /** 页面与启用事务共用同一事实采集器；模型实测、装配和考试缺项均不能冒充就绪。 */
+  status: protectedProcedure.query(({ ctx }) => onboardingStatus(ctx.identity)),
 
   /** 第①步：真实大模型「测试连接」（真实 round-trip；不落盘、不留痕 key） */
-  testLlm: writeProcedure
+  testLlm: actionProcedure("workspace.configure")
     .input(z.object({
       baseUrl: z.string().url().min(1),
       apiKey: z.string().max(200).default(""),
@@ -318,7 +320,7 @@ const onboardingRouter = router({
     }),
 
   /** 第①步保存：真实试调通过 → 写 .env 四变量 + 即时生效 + 事件留痕（key 只记掩码；provider=mock 为还原操作，免实测） */
-  saveLlmConfig: writeProcedure
+  saveLlmConfig: actionProcedure("workspace.configure")
     .input(z.object({
       provider: z.string().min(1).max(40),
       baseUrl: z.string().max(200).default(""),
@@ -356,7 +358,7 @@ const onboardingRouter = router({
               provider: input.provider, base_url: input.baseUrl, model: input.model,
               key_mask: input.apiKey ? `***${input.apiKey.slice(-4)}` : "(免 key 网关)",
             },
-            after: { real: input.provider !== "mock" },
+            after: { real: input.provider !== "mock", probeVerified: input.provider !== "mock", configFingerprint: llmConfigurationFingerprint(input) },
             basis: ["落地向导：真实大模型装配（实测通过后写回 .env 四变量，全链即时生效）"],
           },
           rule_impact: [],
@@ -373,10 +375,10 @@ const onboardingRouter = router({
     }),
 
   /** 第②步：经营主体信息（工作区名 + 行业 + 简介 → 档案；事件留痕） */
-  setupWorkspace: writeProcedure
+  setupWorkspace: actionProcedure("workspace.configure")
     .input(z.object({
-      displayName: z.string().min(1).max(60),
-      industry: z.string().min(1).max(40),
+      displayName: z.string().trim().min(1).max(60),
+      industry: z.string().trim().min(1).max(40),
       note: z.string().max(300).default(""),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -387,10 +389,10 @@ const onboardingRouter = router({
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-        await client.query(`UPDATE workspaces SET name=$2, industry=$3 WHERE id=$1`, [scope.workspaceId, input.displayName, input.industry]);
+        await client.query(`UPDATE workspaces SET name=$2, industry=$3, is_example=false WHERE id=$1`, [scope.workspaceId, input.displayName, input.industry]);
         await client.query(
           `UPDATE profiles SET archive = jsonb_set(archive, '{business}', $2::jsonb), industry=$3, updated_at=now() WHERE workspace_id=$1`,
-          [scope.workspaceId, JSON.stringify({ name: input.displayName, note: input.note, onboarded_at: new Date().toISOString() }), input.industry],
+          [scope.workspaceId, JSON.stringify({ name: input.displayName, industry: input.industry, note: input.note, source: "user", configuredAt: new Date().toISOString() }), input.industry],
         );
         // D16（#1/A）：档案写与事件留痕同一事务同一 COMMIT
         await gatewayAppendOnClient(client, {
@@ -419,7 +421,7 @@ const onboardingRouter = router({
     }),
 
   /** 第③步：启用真实模式（dataMode simulated→real；横幅熄灭；事件留痕。模拟期事件保留为「演示期」历史，可经 reset.sh 整库重建清空） */
-  activateRealMode: writeProcedure.mutation(async ({ ctx }) => {
+  activateRealMode: actionProcedure("workspace.configure").mutation(async ({ ctx }) => {
     const scope = scopeOf(ctx.identity);
     const app = getAppPool();
     const client = await app.connect();
@@ -427,11 +429,21 @@ const onboardingRouter = router({
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+      const fingerprint = llmConfigurationFingerprint();
+      const status = await onboardingStatusOn(client, ctx.identity, true);
+      if (!status.activationGate.canActivate || fingerprint !== llmConfigurationFingerprint()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `尚不能启用正式模式：${status.activationGate.blockers.join("；") || "模型配置在检查期间发生变化，请重试"}` });
+      }
+      if (status.dataMode === "real") {
+        await client.query("COMMIT");
+        return { ok: true, dataMode: "real" as const };
+      }
       await client.query(
         `UPDATE profiles SET archive = jsonb_set(archive, '{dataMode}', '"real"'::jsonb), updated_at=now() WHERE workspace_id=$1`,
         [scope.workspaceId],
       );
-      // D16（#1/A）：dataMode 翻转与事件留痕同一事务同一 COMMIT
+      await advanceWizardDraftOn(client, scope.workspaceId, ctx.identity.memberId);
+      // D16（#1/A）：dataMode 翻转、向导进度与事件留痕同一事务同一 COMMIT
       await gatewayAppendOnClient(client, {
         ...scope, actor: { id: ctx.identity.memberNo, type: "human" }, sessionId: `onboarding-${scope.workspaceId}`,
       }, {
@@ -441,7 +453,7 @@ const onboardingRouter = router({
         decision: {
           action: "onboarding.real_mode_activated",
           params: { from: "simulated", to: "real" },
-          after: { dataMode: "real" },
+          after: { dataMode: "real", activationFingerprint: status.activationFingerprint },
           basis: ["落地向导收官：切换真实经营模式，模拟数据横幅熄灭；此后经营动作即真实数据"],
         },
         rule_impact: [],
@@ -603,7 +615,7 @@ const threadsRouter = router({
     .input(
       z.object({
         title: z.string().min(1).max(500), // F3.1：≤500 字
-        presetKey: z.string().default("pricing-agent"),
+        presetKey: z.string().trim().min(1).optional(),
         runImmediately: z.boolean().default(false),
       }),
     )
@@ -618,6 +630,8 @@ const threadsRouter = router({
       const app = getAppPool();
       const client = await app.connect();
       let threadId: string;
+      let agent: InstalledThreadAgent;
+      let selection: DispatchPresetResolution;
       try {
         // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
         await client.query("BEGIN");
@@ -634,17 +648,21 @@ const threadsRouter = router({
             message: `并发上限 ${MAX_CONCURRENT_THREADS}/工作区（L3.1/G11），已超出请稍后或排队`,
           });
         }
-        // 号源走 SECURITY DEFINER 函数（0016：全库最大值绕 RLS——主键全库唯一，按本区分配必撞他区；
-        // 历史教训：第二次派遣即 duplicate key，ASK/QUEST 主链路故障）
-        const max = await client.query<{ n: number }>(
-          `SELECT public.threads_max_t_no() AS n`,
-        );
-        threadId = makeReadableId("T", Number(max.rows[0]?.n ?? 100) + 1); // bigint 驱动返回 string，必须 Number() 防拼接（D29 教训）
-        await client.query(
-          `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by)
-           VALUES ($1,$2,$3,$4,$5,'queued',$6)`,
-          [threadId, scope.tenantId, scope.workspaceId, input.title, intent.mode, ctx.identity.memberNo],
-        );
+        // New tasks may use the installed-workforce selector. Existing tasks
+        // always retain their binding; invalid explicit references never fall back.
+        selection = input.presetKey === undefined
+          ? await resolveDispatchPreset(scope, input.title)
+          : { presetKey: input.presetKey, selection: "explicit" };
+        agent = await installedThreadAgent(client, scope, selection.presetKey);
+        // 0037 的号源直接分配序列值；与巡检派单共用 SAVEPOINT 重试，不能再次 +1。
+        threadId = (await insertWithReadableId(client, THREAD_ID_SOURCE, async (id) => {
+          await client.query(
+            `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by, agent_id)
+             VALUES ($1,$2,$3,$4,$5,'queued',$6,$7)`,
+            [id, scope.tenantId, scope.workspaceId, input.title, intent.mode, ctx.identity.memberNo, agent.id],
+          );
+          return id;
+        })).id;
         // D16（#1/A）：建线程与派遣事件同一事务（G8 留痕不再独立于状态）
         await gatewayAppendOnClient(client, {
           ...scope,
@@ -654,14 +672,19 @@ const threadsRouter = router({
           who: { type: "human", id: ctx.identity.memberNo },
           context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
           object: { type: "thread", id: threadId },
-          decision: { action: "thread.dispatch", after: { threadId, title: input.title, mode: intent.mode, rationale: intent.rationale } },
+          decision: { action: "thread.dispatch", after: {
+            threadId, title: input.title, mode: intent.mode, rationale: intent.rationale,
+            agentId: agent.id, presetKey: agent.presetKey, presetSelection: selection.selection,
+          } },
           rule_impact: [],
         });
+        // Commit failure must prevent execution: never run a task whose creation
+        // or assignment/audit record did not commit.
+        await client.query("COMMIT");
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw err;
       } finally {
-        await client.query("COMMIT").catch(() => undefined);
         client.release();
       }
       // 派遣事件已随建线程同事务落库（D16；G8 三段瀑布同口径）
@@ -669,17 +692,20 @@ const threadsRouter = router({
       // ask 问询：即时应答（B8——取数为真、模型可插拔；不依赖 runImmediately 按钮）
       if (intent.mode === "ask") {
         const ra = await runAsk(getAppPool(), getGatewayPool(), scope, {
-          threadId, goal: input.title, presetKey: "morning-briefing", llmCall: llmCall("ask-synthesize", scope),
+          threadId, goal: input.title, presetKey: agent.presetKey, llmCall: llmCall("ask-synthesize", scope),
         });
-        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: ra.status, answer: ra.answer };
+        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: ra.status, answer: ra.answer,
+          presetKey: agent.presetKey, presetSelection: selection.selection };
       }
       if (input.runImmediately && intent.mode === "quest") {
         const r = await runQuest(app, getGatewayPool(), scope, {
-          threadId, goal: input.title, presetKey: input.presetKey, llmCall: llmCall("quest-plan", scope),
+          threadId, goal: input.title, presetKey: agent.presetKey, llmCall: llmCall("quest-plan", scope),
         });
-        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: r.status, stepsDone: r.stepsDone, stepsTotal: r.stepsTotal };
+        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: r.status, stepsDone: r.stepsDone, stepsTotal: r.stepsTotal,
+          presetKey: agent.presetKey, presetSelection: selection.selection };
       }
-      return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: "queued" as const };
+      return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: "queued" as const,
+        presetKey: agent.presetKey, presetSelection: selection.selection };
     }),
 
   /** 线程详情（P2 线程头/信息面板；L7.1 越权返回空） */
@@ -693,17 +719,20 @@ const threadsRouter = router({
         // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
         const r = await client.query(
-          `SELECT id, title, mode, status, progress_done, progress_total, created_by, agent_id, created_at, updated_at
-           FROM threads WHERE workspace_id=$1 AND id=$2`,
-          [scope.workspaceId, input.threadId],
+          `SELECT id, title, mode, status, progress_done, progress_total, created_by, agent_id, created_at, updated_at, plan, plan_version
+           FROM threads WHERE workspace_id=$1 AND id=$2 AND tenant_id=$3`,
+          [scope.workspaceId, input.threadId, scope.tenantId],
         );
-        return r.rows[0] ?? null;
+        await client.query("COMMIT");
+        if (!r.rows[0]) return null;
+        const { plan, ...detail } = r.rows[0];
+        return { ...detail, ...projectThreadPlan(plan) };
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw err;
       } finally {
-        await client.query("COMMIT").catch(() => undefined);
         client.release();
       }
     }),
@@ -735,31 +764,56 @@ const threadsRouter = router({
       }
     }),
 
+  /** 留言只追加原线程的事件流；不能改变既定目标、进度或触发执行。 */
+  note: actionProcedure("task.dispatch")
+    .input(z.object({ threadId: z.string().min(1).max(200), text: z.string().trim().min(1).max(2000) }).strict())
+    .mutation(({ ctx, input }) => serviceTx(ctx.identity.workspaceId, async (client, scope) => {
+      const thread = await client.query(
+        `SELECT id FROM threads WHERE workspace_id=$1 AND id=$2 FOR UPDATE`, [scope.workspaceId, input.threadId],
+      );
+      if (!thread.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "任务不存在或不属于当前工作区" });
+      const result = await gatewayAppendOnClient(client, {
+        ...scope, actor: { id: ctx.identity.memberNo, type: "human" }, sessionId: input.threadId,
+      }, {
+        who: { id: ctx.identity.memberNo, type: "human" },
+        context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
+        object: { type: "thread", id: input.threadId },
+        decision: { action: "thread.note", after: { text: input.text }, basis: ["成员给现有任务留言；仅留痕，不触发执行"] },
+        rule_impact: [],
+      });
+      return { threadId: input.threadId, eventId: result.eventId };
+    })),
+
   /** 运行/续跑线程（replay 断点续跑幂等，E3.3/H-5；按线程模式分流：ask 应答 / agent 逐步确认 / quest 自主执行） */
   run: capabilityWriteProcedure("quest")
-    .input(z.object({ threadId: z.string(), goal: z.string(), presetKey: z.string().default("pricing-agent") }))
+    .input(z.object({
+      threadId: z.string().min(1),
+      // Kept for older clients; the stored task title remains authoritative.
+      goal: z.string().optional(),
+      presetKey: z.string().trim().min(1).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       const app = getAppPool();
       const client = await app.connect();
-      let mode: "ask" | "agent" | "quest" = "quest";
+      let binding: BoundThreadRun;
       try {
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
-        const t = await client.query<{ mode: string }>(`SELECT mode FROM threads WHERE id=$1 AND workspace_id=$2`, [input.threadId, scope.workspaceId]);
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+        binding = await boundThreadRun(client, scope, input.threadId, input.presetKey);
         await client.query("COMMIT");
-        if (t.rows[0]?.mode === "ask" || t.rows[0]?.mode === "agent") mode = t.rows[0].mode;
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw err;
       } finally {
         client.release();
       }
-      if (mode === "ask") {
-        return runAsk(app, getGatewayPool(), scope, { threadId: input.threadId, goal: input.goal, presetKey: input.presetKey, llmCall: llmCall("ask-synthesize", scope) });
+      if (binding.mode === "ask") {
+        return runAsk(app, getGatewayPool(), scope, { threadId: input.threadId, goal: binding.goal, presetKey: binding.agent.presetKey, llmCall: llmCall("ask-synthesize", scope) });
       }
       return runQuest(app, getGatewayPool(), scope, {
-        threadId: input.threadId, goal: input.goal, presetKey: input.presetKey, mode, llmCall: llmCall("quest-plan", scope),
+        threadId: input.threadId, goal: binding.goal, presetKey: binding.agent.presetKey, mode: binding.mode, llmCall: llmCall("quest-plan", scope),
       });
     }),
 });
@@ -1533,6 +1587,20 @@ const nightShiftRouter = router({
     }),
 });
 
+/** 回放与确认共用候选输入映射，避免两次请求的规则语义漂移。 */
+function fenceDryRunCandidate(rule: {
+  ruleId: string; name: string; level: "auto" | "review" | "block";
+  objectTypes: string[]; actions: string[]; when: string;
+}): DryRunCandidateInput {
+  return {
+    rules: [{
+      rule_id: rule.ruleId, version: "v-next", name: rule.name, level: rule.level,
+      is_baseline: false, objectTypes: rule.objectTypes, actions: rule.actions, when: rule.when,
+    }],
+    defaultLevel: "review",
+  };
+}
+
 /** fence router（F8 起 P5 数据源：规则版本化投影 + 30 天触发聚合 + dry-run 生命周期 F2.4/F2.5） */
 const fenceRouter = router({
   /** 规则列表（P5E2：级别 pill + 来源 + 30 天触发数；基线 🔒 集团强制 F2.3） */
@@ -1607,11 +1675,7 @@ const fenceRouter = router({
       return createDryRun(getAppPool(), scope, {
         ruleId: input.ruleId,
         ruleVersion: "v-next",
-        rules: [{
-          rule_id: input.ruleId, version: "v-next", name: input.name, level: input.level,
-          is_baseline: false, objectTypes: input.objectTypes, actions: input.actions, when: input.when,
-        }],
-        defaultLevel: "review",
+        ...fenceDryRunCandidate(input),
         createdBy: ctx.identity.memberNo,
       });
     }),
@@ -1627,9 +1691,8 @@ const fenceRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
-      await confirmDryRun(getAppPool(), scope, input.dryRunId);
       // 规则草稿进 pending_approval（激活须审批事件 ID，activateRuleVersion 在 P4 手势后调用——E1 已接线，见下方 decide/batchApprove）
-      // D16（#1/A）：规则草稿行、提案事件、审批行三者同一事务同一 COMMIT
+      // dry-run 确认、规则草稿行、提案事件、审批行同一事务同一 COMMIT
       const app = getAppPool();
       const client = await app.connect();
       let ev: { eventId: string };
@@ -1637,12 +1700,13 @@ const fenceRouter = router({
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
-        const rowId = fenceRuleRowId(input.rule.ruleId, scope.workspaceId);
+        await confirmDryRunOnTx(client, scope, input.dryRunId, fenceDryRunCandidate(input.rule));
+        const { rowId, version } = await nextRuleRowIdentity(client, scope, input.rule.ruleId);
+        const after = { ...input.rule, dryRunId: input.dryRunId, ruleRowId: rowId, version };
         await client.query(
           `INSERT INTO fence_rules (id, rule_id, version, workspace_id, name, level, match_spec, action, is_baseline, status, created_by)
-           VALUES ($1,$2,'v-next',$3,$4,$5,$6,$7,false,'pending_approval',$8)
-           ON CONFLICT (id) DO NOTHING`,
-          [rowId, input.rule.ruleId, scope.workspaceId, input.rule.name, input.rule.level,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,'pending_approval',$9)`,
+          [rowId, input.rule.ruleId, version, scope.workspaceId, input.rule.name, input.rule.level,
            JSON.stringify({ object_types: input.rule.objectTypes, actions: input.rule.actions, when: input.rule.when }),
            JSON.stringify({ result: input.rule.level }), ctx.identity.memberNo],
         );
@@ -1652,7 +1716,7 @@ const fenceRouter = router({
           who: { type: "human", id: ctx.identity.memberNo },
           context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
           object: { type: "staff", id: input.rule.ruleId },
-          decision: { action: "fence.rule.propose", after: { ...input.rule, dryRunId: input.dryRunId } },
+          decision: { action: "fence.rule.propose", after },
           rule_impact: [],
         });
         // E1 联调接线（PF.5/F2.4）：围栏变更提案进 P4 决断队列——高危（不可批量采纳，须逐条手势，F5.4/G6）
@@ -1662,11 +1726,14 @@ const fenceRouter = router({
            VALUES ($1,$2,$3,$4,'inapp','pending',$5)
            ON CONFLICT (event_id, channel) DO NOTHING`,
           [`apr-${ev.eventId.toLowerCase()}`, scope.tenantId, scope.workspaceId, ev.eventId,
-           JSON.stringify({ after: input.rule, high_risk: true })],
+           JSON.stringify({ after, high_risk: true })],
         );
         await client.query("COMMIT");
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
+        if (err instanceof DryRunInputError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
         throw err;
       } finally {
         client.release();
@@ -1847,6 +1914,7 @@ const rosterRouter = router({
 
         const ws = await client.query<{ name: string; bundle_id: string | null; is_example: boolean }>(
         `SELECT name, bundle_id, is_example FROM workspaces WHERE id=$1`, [scope.workspaceId]);
+        const bundleId = ws.rows[0]?.bundle_id;
 
         // 航道许可：fence_bindings 逐条对账 fence_rules 当前 active 版本（缺规则=声明悬空，标红 F2.10）
         const fences = agent.fence_bindings.length === 0 ? [] : (await client.query<{
@@ -1923,7 +1991,7 @@ const rosterRouter = router({
             constraints: agent.meta?.prompt?.constraints ?? [],
           },
           workspaceName: ws.rows[0]?.name ?? "",
-          bundle: "workloom-hotel", // 首版唯一行业 Bundle（D2）
+          bundle: bundleId?.trim() ? bundleId : "未配置",
           nightWindow: { open: inNightWindow(), range: "22:00–08:00" },
           fences: agent.fence_bindings.map((ruleId) => {
             const hit = fences.find((f) => f.rule_id === ruleId);
@@ -1962,12 +2030,17 @@ const rosterRouter = router({
  *  Mock 驱动默认（D4 同纪律：无真实凭据全流程可跑）；真实通道凭据在 dsh 设置页配置（dsh-im，D14），
  *  凭据永不经事件明文（L7.3）。server 层只做装配与错误映射，纪律全部内聚在 packages/base/im-channels。 */
 const imDriverKind = process.env.IM_DRIVER ?? "mock";
-const imDrivers = new Map<ApprovalChannel, MockChannelDriver>();
-function mockDriverFor(channel: ApprovalChannel): MockChannelDriver {
-  let d = imDrivers.get(channel);
+const imDrivers = new Map<string, MockChannelDriver>();
+/** 身份来自已刷新成员权限的 ctx；元组编码避免租户/工作区标识含分隔符时串线。 */
+function mockDriverKey(scope: { tenantId: string; workspaceId: string }, channel: ApprovalChannel): string {
+  return JSON.stringify([scope.tenantId, scope.workspaceId, channel]);
+}
+function mockDriverFor(scope: { tenantId: string; workspaceId: string }, channel: ApprovalChannel): MockChannelDriver {
+  const key = mockDriverKey(scope, channel);
+  let d = imDrivers.get(key);
   if (!d) {
     d = new MockChannelDriver(channel);
-    imDrivers.set(channel, d);
+    imDrivers.set(key, d);
   }
   return d;
 }
@@ -2060,7 +2133,7 @@ const imRouter = router({
         const sent = await sendApprovalCard(
           getGatewayPool(),
           scope,
-          mockDriverFor(input.channel),
+          mockDriverFor(scope, input.channel),
           { conversationId: input.conversationId },
           card,
           ctx.identity.memberNo,
@@ -2114,19 +2187,19 @@ const imRouter = router({
           getGatewayPool(),
           scope,
           input,
-          mockDriverFor(input.channel),
+          mockDriverFor(scope, input.channel),
         );
         return { ...r, unsigned: sig.unsigned };
       } catch (err) {
         imRethrow(err);
       }
     }),
-  /** mock 出站盒检视（IM_DRIVER=mock 联调/演示用；真实驱动下为空） */
+  /** mock 出站盒检视（IM_DRIVER=mock 联调/演示用；仅当前租户/工作区可见） */
   outbox: protectedProcedure
     .input(z.object({ channel: z.enum(["dingtalk", "wecom", "feishu"]) }))
-    .query(({ input }) => ({
+    .query(({ ctx, input }) => ({
       driver: imDriverKind,
-      outbox: imDrivers.get(input.channel)?.outbox ?? [],
+      outbox: imDrivers.get(mockDriverKey(scopeOf(ctx.identity), input.channel))?.outbox ?? [],
     })),
 });
 
@@ -2339,11 +2412,7 @@ const captainRouter = router({
   grant: capabilityWriteProcedure("quest")
     .input(z.object({
       clauses: z.array(z.string()),
-      autonomy: z.object({
-        price_band: z.tuple([z.number(), z.number()]),
-        procurement_cap: z.number(),
-        campaign_cap: z.number(),
-      }),
+      autonomy: charterSchema.shape.autonomy.removeDefault(),
       shadowDays: z.number().int().min(1).max(14).default(3),
       trialDays: z.number().int().min(3).max(30).default(7),
       identityConfirmed: z.boolean(), // §12.2 第⑤步身份核验（演示环境布尔确认）
@@ -2719,6 +2788,36 @@ const captainRouter = router({
 
 /** 组织记忆中心（D24 自我进化飞轮 M2：可读可改可禁用，纠偏与信任通道） */
 const memoryRouter = router({
+  impact: protectedProcedure
+    .input(z.object({
+      memoryId: z.string().min(1).optional(),
+      memoryIds: z.array(z.string().min(1)).max(50).optional(),
+      memberId: z.string().min(1).optional(),
+    }).strict())
+    .query(({ ctx, input }) => previewMemoryImpact(getAppPool(), scopeOf(ctx.identity), {
+      memoryIds: input.memoryId ? [input.memoryId] : input.memoryIds,
+      sourceMemberId: input.memberId,
+    })),
+
+  reactivate: actionProcedure("memory.manage")
+    .input(z.object({ memoryId: z.string().min(1) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await reactivateMemory(getAppPool(), getGatewayPool(), scopeOf(ctx.identity),
+          { memberNo: ctx.identity.memberNo }, input.memoryId);
+      } catch (error) {
+        if (error instanceof MemoryGovernanceError) {
+          throw new TRPCError({ code: error.code === "NOT_FOUND" ? "NOT_FOUND" : "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
+
+  restore: actionProcedure("memory.manage")
+    .input(z.object({ memoryIds: z.array(z.string().min(1)).min(1).max(50) }).strict())
+    .mutation(({ ctx, input }) => restoreMemories(getAppPool(), getGatewayPool(), scopeOf(ctx.identity),
+      { memberNo: ctx.identity.memberNo }, input.memoryIds)),
+
   /** 列表（作用域/种类/状态过滤 + 语义检索可选） */
   list: protectedProcedure
     .input(
@@ -2804,6 +2903,7 @@ export const appRouter = router({
   auth: authRouter,
   access: accessRouter,
   accounts: accountsRouter,
+  overlay: overlayRouter,
   members: membersRouter,
   threads: threadsRouter,
   approvals: approvalsRouter,

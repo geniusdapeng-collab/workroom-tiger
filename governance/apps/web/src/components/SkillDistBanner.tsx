@@ -63,7 +63,7 @@ export function SkillDistBanner() {
   // 待审批优先（执行面变化永不静默，必须人拍板）
   if (pending > 0) {
     return (
-      <div className="relative z-30 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/50 bg-amber-100/80 px-4 py-2 text-body text-amber-800 backdrop-blur">
+      <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/50 bg-amber-100/80 px-4 py-2 text-body text-amber-800 backdrop-blur">
         <Icon name="lock" size={16} />
         <span className="min-w-0 flex-1">
           官方技能更新有 <b>{pending}</b> 项涉及<b>新工具或新权限</b>，按治理纪律需要你拍板后才生效。
@@ -81,7 +81,7 @@ export function SkillDistBanner() {
   const names = loaded.slice(0, 2).map((x) => `「${clientChineseText(x.name, "技能能力")} ${versionText(x.version)}」`).join("、");
   const more = loaded.length > 2 ? ` 等 ${loaded.length} 个` : "";
   return (
-    <div className="relative z-30 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-teal-500/40 bg-teal-50/90 px-4 py-2 text-body text-teal-800 backdrop-blur">
+    <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-teal-500/40 bg-teal-50/90 px-4 py-2 text-body text-teal-800 backdrop-blur">
       <Icon name="star" size={16} />
       <span className="min-w-0 flex-1">
         夜班已自动更新 {loaded.length} 个技能：{names}{more}——全程留痕可回溯、可一键回滚。

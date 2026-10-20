@@ -17,18 +17,142 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
+import tempfile
 import time
+from contextlib import ExitStack, contextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .. import config
+from ..ledger_io import write_json_atomic
 from . import monthly, weekly
 from .attribution import VIOLATIONS, attribute_journal
-from .monthly import Proposal, list_proposals, load_proposal, save_proposal
+from .monthly import (
+    Proposal, _approval_lock, _load_proposal_unlocked, _save_proposal_unlocked,
+    list_proposals,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _read_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _restore_bytes(path: Path, value: bytes | None) -> None:
+    """Restore the exact previous bytes, including non-JSON tuned files."""
+    if value is None:
+        path.unlink(missing_ok=True)
+        return
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.name}.",
+            suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _recover_approval(journal: Path, transaction: dict) -> bool:
+    """Under approval locks, refuse any observed bytes outside the transaction."""
+    states = []
+    for item in transaction["files"]:
+        path = Path(item["path"])
+        before = (base64.b64decode(item["before"], validate=True)
+                  if item["before"] is not None else None)
+        after = base64.b64decode(item["after"], validate=True)
+        current = _read_bytes(path)
+        if current not in (before, after):
+            raise RuntimeError(f"审批恢复发现外部修改，保留事务记录: {path}")
+        states.append((path, before, after, current))
+    committed = all(current == after for _, _, after, current in states)
+    if committed:
+        logger.info("审批事务两文件已提交，恢复收尾: %s", journal)
+    else:
+        for path, before, _, current in states:
+            if current != before:
+                _restore_bytes(path, before)
+        logger.warning("审批事务未完成，已恢复原文件: %s", journal)
+    journal.unlink()
+    return committed
+
+
+@contextmanager
+def _approval_guard(proposals_dir: str, tuned_path: str | None = None):
+    """Recover an interrupted approval before any subsequent approval/rejection.
+
+    The journal protects crash recovery, not simultaneous visibility of two
+    ordinary files. Proposal readers fail closed while it exists. Other tuned
+    writers (e.g. the separate WFA command) do not participate in these locks;
+    conflicting bytes stop recovery rather than being silently overwritten.
+    """
+    root = Path(proposals_dir).resolve()
+    journal = root / monthly.APPROVAL_TRANSACTION
+    with _approval_lock(root / ".approval.lock"), ExitStack() as stack:
+        raw = _read_bytes(journal)
+        transaction = json.loads(raw) if raw is not None else None
+        targets = {Path(tuned_path).resolve()} if tuned_path is not None else set()
+        if transaction is not None:
+            targets.add(Path(transaction["files"][1]["path"]))
+        for target in sorted(targets):
+            if target in (journal, root / ".approval.lock"):
+                raise ValueError("调优文件与审批事务文件重合")
+            stack.enter_context(_approval_lock(
+                target.with_name(f".{target.name}.approval.lock")))
+        recovered = None
+        if transaction is not None and _recover_approval(journal, transaction):
+            recovered = transaction
+        yield journal, recovered
+
+
+def _commit_approval(proposal_path: Path, proposal: Proposal,
+                     tuned_path: Path, blob: dict, journal: Path) -> None:
+    """Journal old bytes, publish complete JSON files, compensate on failure.
+
+    The proposal is published first so tuned consumers never see a new file
+    before its approval record exists. The unfinished journal makes that
+    intermediate proposal unavailable to review readers. File flushes and
+    atomic replacements do not promise a multi-file or power-loss transaction.
+    """
+    files = []
+    for path, value in ((proposal_path, asdict(proposal)), (tuned_path, blob)):
+        before = _read_bytes(path)
+        # Match write_json_atomic's text-mode newline translation on Windows.
+        after = json.dumps(value, ensure_ascii=False, indent=2,
+                           allow_nan=False).replace("\n", os.linesep).encode("utf-8")
+        files.append({"path": str(path),
+                      "before": (base64.b64encode(before).decode("ascii")
+                                 if before is not None else None),
+                      "after": base64.b64encode(after).decode("ascii")})
+    transaction = {"proposal_id": proposal.proposal_id, "files": files}
+    write_json_atomic(journal, transaction)
+    try:
+        write_json_atomic(proposal_path, asdict(proposal))
+        write_json_atomic(tuned_path, blob)
+    except Exception:
+        logger.exception("审批持久化失败，开始恢复原文件: %s", proposal.proposal_id)
+        try:
+            _recover_approval(journal, transaction)
+        except Exception as recovery_error:
+            logger.exception("审批恢复失败，保留事务记录: %s", journal)
+            raise RuntimeError(f"审批恢复未完成: {journal}；请修复存储后重试") from recovery_error
+        raise
+    journal.unlink()
 
 
 def _read_journal(path: str) -> list[dict]:
@@ -176,30 +300,48 @@ class ReviewChief:
         下一轮 --use-tuned 显式加载（pipeline 默认不加载）；effective_from
         为次日，apply_tuned_params 在生效日前拒绝加载（次日生效的机器执行）。
         """
-        p = load_proposal(self.proposals_dir, proposal_id)
-        if p.status != "pending_review":
-            raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，"
-                             "仅 pending_review 可批准")
-        tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
-        p.status = "approved"
-        p.approved_at = datetime.now().isoformat(timespec="seconds")
-        p.effective_from = tomorrow
-        save_proposal(p, self.proposals_dir)
-
-        blob = {
-            "tuned_at": p.approved_at,
-            "params": p.grid_result.get("recommended_params") or {},
-            "oos_aggregate": p.oos_aggregate,
-            "dsr": p.dsr,
-            "proposal_id": p.proposal_id,
-            "effective_from": tomorrow,
-            "disclosure": f"复盘提案 {p.proposal_id} 经审批批准，"
-                          f"自 {tomorrow} 起随 --use-tuned 显式启用（次日生效；"
-                          "默认仍不加载：零基线纪律），本披露写入日报与复盘纪要；"
-                          f"DSR={p.dsr}，OOS期望={p.oos_expectancy}R",
-        }
-        with open(tuned_path, "w", encoding="utf-8") as f:
-            json.dump(blob, f, ensure_ascii=False, indent=2)
+        try:
+            proposal_path = Path(monthly._proposal_path(
+                self.proposals_dir, proposal_id)).resolve()
+            target = Path(tuned_path).resolve()
+            if (target == proposal_path
+                    or (target.exists() and proposal_path.exists()
+                        and target.samefile(proposal_path))):
+                raise ValueError("调优文件与提案文件不能是同一文件")
+            with _approval_guard(self.proposals_dir, tuned_path) as (journal, recovered):
+                p = _load_proposal_unlocked(self.proposals_dir, proposal_id)
+                if (p.status == "approved" and recovered is not None
+                        and recovered["proposal_id"] == proposal_id
+                        and Path(recovered["files"][1]["path"]) == target):
+                    # The previous invocation committed both files but could
+                    # not finish journal cleanup. A retry acknowledges that
+                    # exact commit; ordinary repeated approval stays invalid.
+                    blob = json.loads(base64.b64decode(recovered["files"][1]["after"]))
+                    tomorrow = p.effective_from
+                elif p.status != "pending_review":
+                    raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，"
+                                     "仅 pending_review 可批准")
+                else:
+                    tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
+                    p.status = "approved"
+                    p.approved_at = datetime.now().isoformat(timespec="seconds")
+                    p.effective_from = tomorrow
+                    blob = {
+                        "tuned_at": p.approved_at,
+                        "params": p.grid_result.get("recommended_params") or {},
+                        "oos_aggregate": p.oos_aggregate,
+                        "dsr": p.dsr,
+                        "proposal_id": p.proposal_id,
+                        "effective_from": tomorrow,
+                        "disclosure": f"复盘提案 {p.proposal_id} 经审批批准，"
+                                      f"自 {tomorrow} 起随 --use-tuned 显式启用（次日生效；"
+                                      "默认仍不加载：零基线纪律），本披露写入日报与复盘纪要；"
+                                      f"DSR={p.dsr}，OOS期望={p.oos_expectancy}R",
+                    }
+                    _commit_approval(proposal_path, p, target, blob, journal)
+        except Exception:
+            logger.exception("提案 %s 审批失败", proposal_id)
+            raise
 
         self._emit(
             action="review.proposal.approve", object_id=p.proposal_id,
@@ -215,14 +357,19 @@ class ReviewChief:
         if not reason or not reason.strip():
             raise ValueError("驳回必须填写原因（--reason \"...\"），"
                              "驳回样本需回流组织记忆（三手势纪律）")
-        p = load_proposal(self.proposals_dir, proposal_id)
-        if p.status != "pending_review":
-            raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，"
-                             "仅 pending_review 可驳回")
-        p.status = "rejected"
-        p.reason = reason.strip()
-        p.rejected_at = datetime.now().isoformat(timespec="seconds")
-        save_proposal(p, self.proposals_dir)
+        try:
+            with _approval_guard(self.proposals_dir):
+                p = _load_proposal_unlocked(self.proposals_dir, proposal_id)
+                if p.status != "pending_review":
+                    raise ValueError(f"提案 {proposal_id} 状态为 {p.status}，"
+                                     "仅 pending_review 可驳回")
+                p.status = "rejected"
+                p.reason = reason.strip()
+                p.rejected_at = datetime.now().isoformat(timespec="seconds")
+                _save_proposal_unlocked(p, self.proposals_dir)
+        except Exception:
+            logger.exception("提案 %s 驳回持久化失败", proposal_id)
+            raise
         self._emit(
             action="review.proposal.reject", object_id=p.proposal_id,
             basis=[f"驳回原因: {p.reason}"],
@@ -246,7 +393,7 @@ class ReviewChief:
         lines.append("## 一、日度归因")
         lines.append("")
         lines.append(f"- 台账 {len(att['attributions'])} 笔：已结算 {len(closed)}，"
-                     f"持仓中 {len(open_)}")
+                     f"未结算信号 {len(open_)}")
         if att["attributions"]:
             lines.append("")
             lines.append("| 信号日 | 标的 | 信号层（MRS区间/主线/链/模板） | "

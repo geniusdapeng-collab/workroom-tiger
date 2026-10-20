@@ -1,0 +1,26 @@
+{
+  "kind": "portable-audit-specification",
+  "sourceLedgerSha256": "33f3d6dac6124e0d67a161d43a528b9f0f00436c884b6e08868ec05f38913e2d",
+  "sourceLedger": "outputs/tiger-audit/audit-e530d4a-plan-visibility/ledger.json",
+  "auditCommit": "e530d4a18c2a77cfe720a33c6b001a0ece1dde1e",
+  "cards": [
+    "MC-041"
+  ],
+  "executed": false,
+  "normalization": "node/python3/pnpm resolved by the user's prepared environment",
+  "copiedAuditArtifacts": [
+    {
+      "path": "audit-evidence/mc041-persisted-plan.json",
+      "sha256": "5ed38ded3d5f5d12c5d3c096e9ca4b535013c1bed3b1d612721d5c1f70caa73a"
+    },
+    {
+      "path": "audit-evidence/mc041-visible-detail.json",
+      "sha256": "3410dde88c9f07169f608e55168fff9307883aeec9e394a3f1a1ba6dd00d0470"
+    }
+  ],
+  "portableExecutables": [
+    "node",
+    "pnpm"
+  ],
+  "assertions": 2
+}

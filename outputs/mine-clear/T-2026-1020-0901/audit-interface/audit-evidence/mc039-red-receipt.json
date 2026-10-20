@@ -1,0 +1,4154 @@
+{
+  "card": "MC-039",
+  "actor": "repair",
+  "environment": "local-preview",
+  "startedAt": "2026-10-20T17:23:34.082Z",
+  "fixture": "Actual main/App /tasks, production CSS, explicit local HTTP only",
+  "browserChannel": "chrome",
+  "sourceBefore": {
+    "governance/apps/web/src/components/loommate/LoomMate.tsx": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
+    "governance/apps/web/src/main.tsx": "9ec9eea9ce0a5ae01330512e7ca202b07ee3d725fbb1ffeaed00f3a094e289ec",
+    "governance/apps/web/src/App.tsx": "7f691c714d911671e796abc6d490196704e2f40e25b90122cc80fbbb4b98082a",
+    "governance/apps/web/src/pages/p1/P1.tsx": "ddd85271dbf7e6016b5a9c5b43336114f63d210fa685d47ea129e65791f845d5",
+    "governance/apps/web/src/components/hud/DispatchBar.tsx": "9aaa1fa1dec5342c88aaf68b68896394e76cea10891f1adcd6531ff8fc87f7d9",
+    "governance/apps/web/src/components/CreditsPanel.tsx": "55c4c914f2d790775b38dd64bf4e5409386448af80e13891170d09acca4b2f70",
+    "governance/apps/web/src/components/SimBanner.tsx": "9e7367342c4baf6406791a92911a0aa2e4babe33c28d07369e53664f6c2d8239",
+    "governance/apps/web/src/components/SkillDistBanner.tsx": "dc1c2fc217983be104b6212aa6739770d46ff13b42d30541be93bed877f63cdc",
+    "governance/apps/web/src/components/BackendGate.tsx": "0afaf41d49b9dfe49803d90b5f6ecf51511575a16db5041db4ebc87cf46371f2",
+    "governance/apps/web/src/components/loommate/MateLive2D.tsx": "bafa929d8e72cc9b69bab5468e36b655c385bd7e68bd37d516b95c2185e54abc",
+    "governance/apps/web/src/shell/Bridge.tsx": "7f8d670a2a559052defe61e37684bfda5182f1c8aac552ae7bc359004e4ee99c",
+    "governance/apps/web/src/shell/NavigationAccess.tsx": "b77125a40da6af752f1da8e60112ce2752c7e19058f2271c954c5776d25d2757",
+    "governance/apps/web/src/shell/SideNav.tsx": "5c0fcc2e61b9ee750b4822643e717503a12ec1c6f2b56cb1414dfc44c6dac0cc",
+    "governance/apps/web/src/components/star-ring/StarRing.tsx": "12d6ef63b30552efb10539d6b89cd798e3118073061115a7ed8bb8712b9f64ad",
+    "governance/apps/web/src/lib/trpc.ts": "292cd48a997b79e71cccabc03ef002837aba21b432b261ec49c3b640cbee5812",
+    "governance/apps/web/src/lib/product.ts": "ae02364359cae62af8ba8fb94d46aaaabcb0ffee29d6b59a0d2ba22d3b1ef879",
+    "governance/apps/web/src/lib/useAskRail.ts": "caa3939e518033b08e7fe0962988a0d1fc00fd4c7b8241858fa1f9a9c356737c",
+    "governance/apps/web/src/styles/tokens.css": "cc8a4da15772a62b9d122ea6afbe49262ec6d12f301c0450ed019ca9a407302e",
+    "governance/apps/web/src/styles/subtitle.css": "20729481d6a885c54e6c381810cd00f0b30871fc6b3ad4a5e49fac8e7cef4bf1",
+    "governance/apps/web/node_modules/@workloom/ui/dist/tokens.css": "f0ea76e55488e114556ee0dcd8abd40cdfaa63caca4eb833dec43a65c32fbc29",
+    "governance/apps/web/node_modules/@workloom/ui/dist/components.css": "11c5d3aea838f0227b47c594701f13a20da3ce93cd4d13731001ef141eb21df6",
+    "governance/apps/web/node_modules/@workloom/ui/dist/content-safety.css": "457c11f8fcfec43c8bf4ab0136313b97fbb26a924da615d2f3196fbc892f6020",
+    "governance/apps/web/node_modules/@workloom/ui/dist/managed-surface.js": "0c9b4bc40dfb46b0974f48b88e3fa029cfea6814e8abf44b6c01483a401c0da1",
+    "governance/apps/web/node_modules/@workloom/ui/dist/overlay-stack.js": "74b23ae388b619e031aff4a9f04da2e092b0d5d3ffc87e95aeb9445ee253d256",
+    "governance/apps/web/node_modules/@workloom/ui/dist/overlay-manager.js": "0b98b6a77c8722c438fa2cab110ec3415bbfd9dcc91ab584e29f164c0cd7c6ba",
+    "governance/apps/web/node_modules/@workloom/ui/dist/modal-document-state.js": "90532142b721007fa96c34c20f3a8f822879c69d0d3cf8c402588abb5dc392f4",
+    "governance/apps/web/vite.config.ts": "df78fa7098772cb1e10d344a14461290c8005676e545491962a93f0e87e98307",
+    "product.manifest.json": "793ee1ff8e0def98b2ca6da08f6334d36c483b8c33fa67937a9f0b5cd4192eaa"
+  },
+  "runnerSha256": "3c796d9f309b9d61b933196513fc2cb9c68a5e303ff9cd8145e332a2f0878ae2",
+  "observations": [
+    {
+      "label": "1440x900-unread-0",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 0,
+      "options": {},
+      "passed": true,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [
+        {
+          "name": "launch-task",
+          "method": "ordinary pointer click"
+        }
+      ],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 864.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 884px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><button role=\"button\" title=\"小织（班组待机 · 拖拽挪位置 · 点击聊聊）\" aria-label=\"小织助手；回车打开对话，方向键移动，按住 Shift 可加速移动\" aria-keyshortcuts=\"Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight\" class=\"relative block h-16 w-16 rounded-full border-2 border-gold/60 bg-bg900 shadow-xl transition-transform hover:scale-110\"><span class=\"flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-bg900\"><div title=\"班组待机\" role=\"presentation\" aria-hidden=\"true\" data-loomball=\"on\" data-loomball-emotion=\"02\" data-loomball-active=\"0\" style=\"width: 56px; height:"
+        },
+        {
+          "name": "launch-task",
+          "phase": "after",
+          "rect": {
+            "x": 995,
+            "y": 760.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<span class=\"relative z-10 inline-flex items-center gap-1\">启航 <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11.5L21 3l-8.5 18-2.3-7.2z\"></path><path d=\"M10.2 13.8L21 3\"></path></svg></span>"
+        },
+        {
+          "name": "horizontal-overflow",
+          "width": 1440,
+          "scrollWidth": 1440
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "readback": {
+        "threadId": "MC039-created",
+        "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+        "dataMode": "simulated",
+        "listQueries": 3
+      },
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.dispatch",
+          "method": "POST",
+          "input": {
+            "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+            "presetKey": "local-agent-1"
+          }
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x900-unread-1",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 1,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 864.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 884px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><div class=\"w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur border-alert/60 bg-alert/10\"><div class=\"flex items-start justify-between gap-2\"><div class=\"flex items-center gap-1.5 text-body font-semibold text-ink\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3L2.8 20h18.4z\"></path><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path></svg>本地模拟提醒 1</div><button class=\"shrin"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x900-unread-10",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 10,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 864.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 884px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><div class=\"w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur border-alert/60 bg-alert/10\"><div class=\"flex items-start justify-between gap-2\"><div class=\"flex items-center gap-1.5 text-body font-semibold text-ink\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3L2.8 20h18.4z\"></path><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path></svg>本地模拟提醒 1</div><button class=\"shrin"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x844-unread-0",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "count": 0,
+      "options": {},
+      "passed": true,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [
+        {
+          "name": "launch-task",
+          "method": "ordinary pointer click"
+        }
+      ],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 708.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<span class=\"relative z-10 inline-flex items-center gap-1\">启航 <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11.5L21 3l-8.5 18-2.3-7.2z\"></path><path d=\"M10.2 13.8L21 3\"></path></svg></span>"
+        },
+        {
+          "name": "launch-task",
+          "phase": "after",
+          "rect": {
+            "x": 46,
+            "y": 708.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<span class=\"relative z-10 inline-flex items-center gap-1\">启航 <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11.5L21 3l-8.5 18-2.3-7.2z\"></path><path d=\"M10.2 13.8L21 3\"></path></svg></span>"
+        },
+        {
+          "name": "horizontal-overflow",
+          "width": 390,
+          "scrollWidth": 390
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "readback": {
+        "threadId": "MC039-created",
+        "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+        "dataMode": "simulated",
+        "listQueries": 3
+      },
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.dispatch",
+          "method": "POST",
+          "input": {
+            "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+            "presetKey": "local-agent-1"
+          }
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x844-unread-1",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "count": 1,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 708.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x844-unread-10",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "count": 10,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 708.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x360-unread-0",
+      "viewport": {
+        "width": 1440,
+        "height": 360
+      },
+      "count": 0,
+      "options": {},
+      "passed": true,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [
+        {
+          "name": "launch-task",
+          "method": "ordinary pointer click"
+        }
+      ],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 324.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 344px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><button role=\"button\" title=\"小织（班组待机 · 拖拽挪位置 · 点击聊聊）\" aria-label=\"小织助手；回车打开对话，方向键移动，按住 Shift 可加速移动\" aria-keyshortcuts=\"Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight\" class=\"relative block h-16 w-16 rounded-full border-2 border-gold/60 bg-bg900 shadow-xl transition-transform hover:scale-110\"><span class=\"flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-bg900\"><div title=\"班组待机\" role=\"presentation\" aria-hidden=\"true\" data-loomball=\"on\" data-loomball-emotion=\"02\" data-loomball-active=\"0\" style=\"width: 56px; height:"
+        },
+        {
+          "name": "launch-task",
+          "phase": "after",
+          "rect": {
+            "x": 995,
+            "y": 220.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<span class=\"relative z-10 inline-flex items-center gap-1\">启航 <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11.5L21 3l-8.5 18-2.3-7.2z\"></path><path d=\"M10.2 13.8L21 3\"></path></svg></span>"
+        },
+        {
+          "name": "horizontal-overflow",
+          "width": 1440,
+          "scrollWidth": 1440
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "readback": {
+        "threadId": "MC039-created",
+        "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+        "dataMode": "simulated",
+        "listQueries": 3
+      },
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.dispatch",
+          "method": "POST",
+          "input": {
+            "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+            "presetKey": "local-agent-1"
+          }
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x360-unread-1",
+      "viewport": {
+        "width": 1440,
+        "height": 360
+      },
+      "count": 1,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 324.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 344px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><div class=\"w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur border-alert/60 bg-alert/10\"><div class=\"flex items-start justify-between gap-2\"><div class=\"flex items-center gap-1.5 text-body font-semibold text-ink\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3L2.8 20h18.4z\"></path><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path></svg>本地模拟提醒 1</div><button class=\"shrin"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x360-unread-10",
+      "viewport": {
+        "width": 1440,
+        "height": 360
+      },
+      "count": 10,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 324.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\"><button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button></div>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x360-unread-0",
+      "viewport": {
+        "width": 390,
+        "height": 360
+      },
+      "count": 0,
+      "options": {},
+      "passed": true,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [
+        {
+          "name": "launch-task",
+          "method": "ordinary pointer click"
+        }
+      ],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 224.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<span class=\"relative z-10 inline-flex items-center gap-1\">启航 <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11.5L21 3l-8.5 18-2.3-7.2z\"></path><path d=\"M10.2 13.8L21 3\"></path></svg></span>"
+        },
+        {
+          "name": "launch-task",
+          "phase": "after",
+          "rect": {
+            "x": 46,
+            "y": 224.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<span class=\"relative z-10 inline-flex items-center gap-1\">启航 <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11.5L21 3l-8.5 18-2.3-7.2z\"></path><path d=\"M10.2 13.8L21 3\"></path></svg></span>"
+        },
+        {
+          "name": "horizontal-overflow",
+          "width": 390,
+          "scrollWidth": 390
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "readback": {
+        "threadId": "MC039-created",
+        "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+        "dataMode": "simulated",
+        "listQueries": 3
+      },
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.dispatch",
+          "method": "POST",
+          "input": {
+            "title": "本地模拟：生成本周运行复盘，列出三项下一步任务；编号１２３。",
+            "presetKey": "local-agent-1"
+          }
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x360-unread-1",
+      "viewport": {
+        "width": 390,
+        "height": 360
+      },
+      "count": 1,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 224.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x360-unread-10",
+      "viewport": {
+        "width": 390,
+        "height": 360
+      },
+      "count": 10,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 224.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证窄屏换行和真实滚动；不会触发任何外部业务。</div>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x900-dispatch-failure-retry",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 10,
+      "options": {
+        "failDispatch": true
+      },
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-failing-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 864.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 884px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><div class=\"w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur border-alert/60 bg-alert/10\"><div class=\"flex items-start justify-between gap-2\"><div class=\"flex items-center gap-1.5 text-body font-semibold text-ink\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3L2.8 20h18.4z\"></path><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path></svg>本地模拟提醒 1</div><button class=\"shrin"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x900-readonly",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 10,
+      "options": {
+        "denied": true
+      },
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "knownConsoleErrors": [],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: getByRole('button', { name: /^(查看|收起)未读提醒/ })\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" getByRole('button', { name: /^(查看|收起)未读提醒/ }) with timeout 5000ms\n  - waiting for getByRole('button', { name: /^(查看|收起)未读提醒/ })\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "1440x900-expanded-then-mini",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 10,
+      "options": {
+        "expanded": true
+      },
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [
+        {
+          "name": "collapse-large-assistant",
+          "method": "ordinary pointer click"
+        }
+      ],
+      "geometry": [
+        {
+          "name": "collapse-large-assistant",
+          "phase": "before",
+          "rect": {
+            "x": 870,
+            "y": 858.71875,
+            "width": 42,
+            "height": 24.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<button title=\"收起为小球（不挡界面）\" class=\"rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100\">收起</button>"
+        },
+        {
+          "name": "collapse-large-assistant",
+          "phase": "after",
+          "rect": {
+            "x": 870,
+            "y": 858.71875,
+            "width": 42,
+            "height": 24.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<button title=\"收起为小球（不挡界面）\" class=\"rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100\">收起</button>"
+        },
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 996,
+            "y": 864.625,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div data-wl-managed-surface=\"assistant-companion\" data-wl-surface-modal=\"false\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&amp;&gt;*]:shrink-0 items-end\" style=\"font-family: inherit; max-height: 884px; max-width: 856px; position: fixed; right: 328px; bottom: 8px; z-index: var(--wl-z-assistant);\"><div class=\"w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur border-alert/60 bg-alert/10\"><div class=\"flex items-start justify-between gap-2\"><div class=\"flex items-center gap-1.5 text-body font-semibold text-ink\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3L2.8 20h18.4z\"></path><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path></svg>本地模拟提醒 1</div><button class=\"shrin"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x360-dispatch-failure-retry",
+      "viewport": {
+        "width": 390,
+        "height": 360
+      },
+      "count": 10,
+      "options": {
+        "failDispatch": true
+      },
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [
+        {
+          "name": "launch-failing-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 224.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证窄屏换行和真实滚动；不会触发任何外部业务。</div>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"mt-1 text-body leading-relaxed text-ink2\">本地模拟提醒：已完成事项需要核对负责人、处理日期、异常说明与输出凭证。较长中文与编号１２３用于验证…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x360-readonly",
+      "viewport": {
+        "width": 390,
+        "height": 360
+      },
+      "count": 10,
+      "options": {
+        "denied": true
+      },
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "knownConsoleErrors": [],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: getByRole('button', { name: /^(查看|收起)未读提醒/ })\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" getByRole('button', { name: /^(查看|收起)未读提醒/ }) with timeout 5000ms\n  - waiting for getByRole('button', { name: /^(查看|收起)未读提醒/ })\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "390x360-expanded-then-mini",
+      "viewport": {
+        "width": 390,
+        "height": 360
+      },
+      "count": 10,
+      "options": {
+        "expanded": true
+      },
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [
+        {
+          "name": "collapse-large-assistant",
+          "method": "ordinary pointer click"
+        }
+      ],
+      "geometry": [
+        {
+          "name": "collapse-large-assistant",
+          "phase": "before",
+          "rect": {
+            "x": 173,
+            "y": 318.71875,
+            "width": 42,
+            "height": 24.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<button title=\"收起为小球（不挡界面）\" class=\"rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100\">收起</button>"
+        },
+        {
+          "name": "collapse-large-assistant",
+          "phase": "after",
+          "rect": {
+            "x": 173,
+            "y": 318.71875,
+            "width": 42,
+            "height": 24.890625
+          },
+          "inside": true,
+          "receives": true,
+          "hit": "<button title=\"收起为小球（不挡界面）\" class=\"rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100\">收起</button>"
+        },
+        {
+          "name": "launch-task",
+          "phase": "before",
+          "rect": {
+            "x": 46,
+            "y": 224.53125,
+            "width": 78,
+            "height": 34.890625
+          },
+          "inside": true,
+          "receives": false,
+          "hit": "<button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button>"
+        }
+      ],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  3 × retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <button class=\"rounded-lg bg-gradient-to-br from-gold to-gold2 px-3 py-1 text-body font-semibold text-ongold\">查看事项</button> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "label": "notification-poll-preserves-collapsed-state",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "count": 1,
+      "options": {},
+      "passed": false,
+      "preconditions": "Fresh context with authorized synthetic identity, actual /tasks and default product shell",
+      "expected": "Unread reminders aggregate by default; task launch creates exactly one synthetic task and reads it back; explicit reminder controls remain accessible",
+      "actions": [],
+      "geometry": [],
+      "pageErrors": [],
+      "consoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "knownConsoleErrors": [
+        "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+      ],
+      "blockedRequests": [],
+      "unexpectedProcedures": [],
+      "fontFallbacks": [
+        "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      ],
+      "error": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: getByRole('button', { name: /^(查看|收起)未读提醒/ })\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" getByRole('button', { name: /^(查看|收起)未读提醒/ }) with timeout 5000ms\n  - waiting for getByRole('button', { name: /^(查看|收起)未读提醒/ })\n",
+      "calls": [
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.settings",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "service.secretary.inbox",
+          "method": "GET",
+          "input": {
+            "unreadOnly": true
+          }
+        },
+        {
+          "name": "access.me",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.balance",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "credits.packs",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "onboarding.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "skills.skillOps.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "inspection.status",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "approvals.list",
+          "method": "GET",
+          "input": {
+            "status": "pending"
+          }
+        },
+        {
+          "name": "workspace.profile",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "workspace.agents",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "members.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "threads.list",
+          "method": "GET",
+          "input": {}
+        },
+        {
+          "name": "nightShift.current",
+          "method": "GET",
+          "input": {}
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "name": "source-stability",
+      "passed": true
+    }
+  ],
+  "cleanupErrors": [],
+  "browserVersion": "155.0.8059.85",
+  "sourceAfter": {
+    "governance/apps/web/src/components/loommate/LoomMate.tsx": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
+    "governance/apps/web/src/main.tsx": "9ec9eea9ce0a5ae01330512e7ca202b07ee3d725fbb1ffeaed00f3a094e289ec",
+    "governance/apps/web/src/App.tsx": "7f691c714d911671e796abc6d490196704e2f40e25b90122cc80fbbb4b98082a",
+    "governance/apps/web/src/pages/p1/P1.tsx": "ddd85271dbf7e6016b5a9c5b43336114f63d210fa685d47ea129e65791f845d5",
+    "governance/apps/web/src/components/hud/DispatchBar.tsx": "9aaa1fa1dec5342c88aaf68b68896394e76cea10891f1adcd6531ff8fc87f7d9",
+    "governance/apps/web/src/components/CreditsPanel.tsx": "55c4c914f2d790775b38dd64bf4e5409386448af80e13891170d09acca4b2f70",
+    "governance/apps/web/src/components/SimBanner.tsx": "9e7367342c4baf6406791a92911a0aa2e4babe33c28d07369e53664f6c2d8239",
+    "governance/apps/web/src/components/SkillDistBanner.tsx": "dc1c2fc217983be104b6212aa6739770d46ff13b42d30541be93bed877f63cdc",
+    "governance/apps/web/src/components/BackendGate.tsx": "0afaf41d49b9dfe49803d90b5f6ecf51511575a16db5041db4ebc87cf46371f2",
+    "governance/apps/web/src/components/loommate/MateLive2D.tsx": "bafa929d8e72cc9b69bab5468e36b655c385bd7e68bd37d516b95c2185e54abc",
+    "governance/apps/web/src/shell/Bridge.tsx": "7f8d670a2a559052defe61e37684bfda5182f1c8aac552ae7bc359004e4ee99c",
+    "governance/apps/web/src/shell/NavigationAccess.tsx": "b77125a40da6af752f1da8e60112ce2752c7e19058f2271c954c5776d25d2757",
+    "governance/apps/web/src/shell/SideNav.tsx": "5c0fcc2e61b9ee750b4822643e717503a12ec1c6f2b56cb1414dfc44c6dac0cc",
+    "governance/apps/web/src/components/star-ring/StarRing.tsx": "12d6ef63b30552efb10539d6b89cd798e3118073061115a7ed8bb8712b9f64ad",
+    "governance/apps/web/src/lib/trpc.ts": "292cd48a997b79e71cccabc03ef002837aba21b432b261ec49c3b640cbee5812",
+    "governance/apps/web/src/lib/product.ts": "ae02364359cae62af8ba8fb94d46aaaabcb0ffee29d6b59a0d2ba22d3b1ef879",
+    "governance/apps/web/src/lib/useAskRail.ts": "caa3939e518033b08e7fe0962988a0d1fc00fd4c7b8241858fa1f9a9c356737c",
+    "governance/apps/web/src/styles/tokens.css": "cc8a4da15772a62b9d122ea6afbe49262ec6d12f301c0450ed019ca9a407302e",
+    "governance/apps/web/src/styles/subtitle.css": "20729481d6a885c54e6c381810cd00f0b30871fc6b3ad4a5e49fac8e7cef4bf1",
+    "governance/apps/web/node_modules/@workloom/ui/dist/tokens.css": "f0ea76e55488e114556ee0dcd8abd40cdfaa63caca4eb833dec43a65c32fbc29",
+    "governance/apps/web/node_modules/@workloom/ui/dist/components.css": "11c5d3aea838f0227b47c594701f13a20da3ce93cd4d13731001ef141eb21df6",
+    "governance/apps/web/node_modules/@workloom/ui/dist/content-safety.css": "457c11f8fcfec43c8bf4ab0136313b97fbb26a924da615d2f3196fbc892f6020",
+    "governance/apps/web/node_modules/@workloom/ui/dist/managed-surface.js": "0c9b4bc40dfb46b0974f48b88e3fa029cfea6814e8abf44b6c01483a401c0da1",
+    "governance/apps/web/node_modules/@workloom/ui/dist/overlay-stack.js": "74b23ae388b619e031aff4a9f04da2e092b0d5d3ffc87e95aeb9445ee253d256",
+    "governance/apps/web/node_modules/@workloom/ui/dist/overlay-manager.js": "0b98b6a77c8722c438fa2cab110ec3415bbfd9dcc91ab584e29f164c0cd7c6ba",
+    "governance/apps/web/node_modules/@workloom/ui/dist/modal-document-state.js": "90532142b721007fa96c34c20f3a8f822879c69d0d3cf8c402588abb5dc392f4",
+    "governance/apps/web/vite.config.ts": "df78fa7098772cb1e10d344a14461290c8005676e545491962a93f0e87e98307",
+    "product.manifest.json": "793ee1ff8e0def98b2ca6da08f6334d36c483b8c33fa67937a9f0b5cd4192eaa"
+  },
+  "sourceStable": true,
+  "runnerStable": true,
+  "finishedAt": "2026-10-20T17:24:47.423Z",
+  "error": null,
+  "passed": false
+}

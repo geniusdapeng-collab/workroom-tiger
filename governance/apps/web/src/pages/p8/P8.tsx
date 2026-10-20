@@ -611,10 +611,16 @@ function AgentProfilePage({ agentId }: { agentId: string }) {
                         type="button"
                         onClick={() => nav("/skills")}
                         title="前往技能中心"
-                        className="flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-2 rounded-lg border border-line bg-bg800/40 px-2.5 py-1.5 text-left text-body hover:border-gline"
+                        className="flex w-full min-w-0 cursor-pointer flex-col items-start gap-1.5 rounded-lg border border-line bg-bg800/40 px-2.5 py-1.5 text-left text-body hover:border-gline"
                       >
-                        <span className="flex min-w-0 flex-1 items-center gap-1 break-words text-ink2"><Icon name="package" size={13} className="shrink-0" /> {clientChineseText(s.name, "技能能力")} <span className="text-body text-ink3">{versionText(s.version)}</span></span>
-                        <span className={`shrink-0 text-body ${s.installed ? "text-go" : "text-warn"}`}>
+                        <span className="flex w-full min-w-0 items-start gap-1 text-left leading-normal text-ink2">
+                          <Icon name="package" size={13} className="mt-0.5 shrink-0" />
+                          <span className="min-w-0 flex-1 break-words">
+                            <span className="block">{clientChineseText(s.name, "技能能力")}</span>
+                            <span className="block text-body text-ink3">{versionText(s.version)}</span>
+                          </span>
+                        </span>
+                        <span className={`min-w-0 max-w-full break-words text-left text-body leading-normal ${s.installed ? "text-go" : "text-warn"}`}>
                           {s.installed ? `已装备 · ${s.fence_bindings.length} 条关联安全规则` : "未安装"}
                         </span>
                       </button>

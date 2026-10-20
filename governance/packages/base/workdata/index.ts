@@ -10,4 +10,5 @@ export * from "./event-sequence.js";
 export * from "./pii.js";
 export * from "./recall.js";
 export * from "./memory.js";
+export * from "./memory-id.js";
 export * from "./readable-id.js";

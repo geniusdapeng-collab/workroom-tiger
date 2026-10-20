@@ -1,0 +1,37 @@
+# 测试专用基线：保留 fence-engine.test.ts 原有 R1/R2/R4/R6 的判定场景。
+# 本仓不分发 hotel 行业包；此夹具不参与生产装配、种子或围栏生成。
+version: fence-engine-test/v1
+default_level: review
+rules:
+  - rule_id: R1
+    name: 涨幅范围内自动放行
+    level: auto
+    is_baseline: true
+    match:
+      object_types: [room_price]
+      actions: [price.adjust]
+    when: abs(after.price - before.price) / before.price <= 0.08
+  - rule_id: R2
+    name: 保底价熔断
+    level: block
+    is_baseline: true
+    match:
+      object_types: [room_price]
+      actions: [price.adjust]
+    when: after.price < 380
+  - rule_id: R4
+    name: 大额退款必审
+    level: review
+    is_baseline: true
+    match:
+      object_types: [order]
+      actions: [order.refund]
+    when: params.amount >= 500
+  - rule_id: R6
+    name: 差评回复必审
+    level: review
+    is_baseline: true
+    match:
+      object_types: [review]
+      actions: [review.reply]
+    when: params.rating <= 3

@@ -1,5 +1,5 @@
 /**
- * Drizzle schema —— 类型源（D5 式纪律：DDL 事实源是 migrations/0001_init.sql 手写 SQL，
+ * Drizzle schema —— 类型源（D5 式纪律：DDL 事实源是 migrations/ 下的手写 SQL，
  * 本文件仅镜像其结构供类型化查询；两者必须同步演进）。
  * 表注释回引 PRD V2.5 编号。共 18 表（总纲 §3）。
  */
@@ -211,8 +211,12 @@ export const threads = pgTable(
     title: text("title").notNull(),
     /** ask / agent / quest（F3.3 三态） */
     mode: text("mode").notNull().default("quest"),
-    /** queued / running / pending_review / completed / failed / paused */
+    /** queued / running / pending_review / completed / failed / paused / cancelled */
     status: text("status").notNull().default("queued"),
+    /** 0036：NULL 表示尚未规划；非空步骤数组用于 replay，避免重新规划使审批漂移。 */
+    plan: jsonb("plan"),
+    /** 0036：未规划为 0，首次规划为 1，显式重规划递增。 */
+    planVersion: integer("plan_version").notNull().default(0),
     progressDone: integer("progress_done").notNull().default(0),
     progressTotal: integer("progress_total").notNull().default(0),
     currentAction: text("current_action"),
@@ -242,7 +246,7 @@ export const approvals = pgTable(
     eventId: text("event_id").notNull(),
     /** inapp / dingtalk / wecom / feishu / slack */
     channel: text("channel").notNull().default("inapp"),
-    /** pending / approved / edited / rejected / expired */
+    /** pending / approved / edited / rejected / expired / superseded */
     status: text("status").notNull().default("pending"),
     /** { type: approve|edit|reject, weight: 1|2|3, reason_enum, reason_text, edited_after } */
     gesture: jsonb("gesture"),
@@ -250,6 +254,8 @@ export const approvals = pgTable(
     snapshot: jsonb("snapshot").notNull().default({}),
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** 0036：NULL 表示未消费；高风险授权与执行事件在同一事务内一次性消费。 */
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

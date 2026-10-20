@@ -14,6 +14,7 @@ import math
 
 from .. import config
 from ..chains import CHAINS, chain_name_zh
+from ..currency import usd_execution_policy
 from ..data_models import (
     ChainState, MRSResult, SectorScore, StockCandidate, TradePick,
 )
@@ -44,6 +45,10 @@ class RiskManagerAgent(BaseAgent):
 
         # ---- S4 多市场：市场规格 / 合规围栏前置 / 轻仓通道毕业门槛（D7）----
         spec = context.get("market_spec")                # MarketSpec | None
+        currency_policy = usd_execution_policy(spec, tickers=(c.ticker for c in candidates))
+        context["currency_policy"] = currency_policy
+        if currency_policy["execution_blocked"]:
+            notes.append(currency_policy["reason"])
         grad = context.get("market_grad") or {"graduated": True, "settled": 0,
                                               "required": config.MARKET_GRAD_MIN_SETTLED}
         grad_forced = not grad.get("graduated", True)
@@ -66,6 +71,9 @@ class RiskManagerAgent(BaseAgent):
                 view = f"MRS*={mrs.mrs_star}（{mrs.regime}）— 禁止新开波段仓，防守/对冲/空仓"
                 notes.append("理论§5.3：MRS*<4.0，除对冲白名单外不开新仓")
             context["market_view"] = view
+            if currency_policy["execution_blocked"]:
+                context["market_view"] += "；" + currency_policy["reason"]
+                context["pick_rationale"] = {}
             context["picks"] = []
             context["notes"] = notes
             return []
@@ -137,6 +145,10 @@ class RiskManagerAgent(BaseAgent):
 
             # TOS 排序分（归一化 0-10）
             c.tos = round(mrs.mrs_star * shs * c.tss_final * c.c_liq / 100, 2)
+
+            # 保留评分、原币价格和合规判定；不能用 USD 风险预算除原币价差。
+            if currency_policy["execution_blocked"]:
+                continue
 
             # R 仓位反推（v6.0：结构化止损价优先，正则仅作历史数据兜底）
             stop = c.stop_price if c.stop_price > 0 else self._stop_price(c)
@@ -260,6 +272,8 @@ class RiskManagerAgent(BaseAgent):
             action, view = "BUY", "可按推荐仓位建仓（分批 40/40/20）"
         if not picks:
             action, view = "WAIT", "无达标标的 — 宁可错过，不可做错（理论§1.3）"
+        if currency_policy["execution_blocked"]:
+            action, view = "WAIT", currency_policy["reason"]
 
         context["action"] = action
         context["market_view"] = view

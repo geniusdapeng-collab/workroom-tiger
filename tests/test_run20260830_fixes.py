@@ -74,8 +74,10 @@ def test_all_sources_none_raises(monkeypatch):
     """全链 None → 抛错（由调用方按口径记缺失，绝不静默成功）。"""
     bad = _FakeProvider("bad", result=None)
     monkeypatch.setattr(pl, "_channel_chain", lambda: [])
-    with pytest.raises(RuntimeError, match="None"):
+    with pytest.raises(pl.ProviderDataError) as caught:
         pl._single_with_fallback(bad, "vol_index_for", "VIX9D", days=400)
+    assert caught.value.provider == "bad" and caught.value.method == "vol_index_for"
+    assert caught.value.error_type == "RuntimeError"
 
 
 def test_capability_aware_skip(monkeypatch):
@@ -131,6 +133,7 @@ def test_hold_day_signal_fills_next_open(tmp_path):
     eng.step("2026-08-30", _result("HOLD", [_pick("BDX", shares=100, stop=90.0)]),
              lambda t: None)
     eng.step("2026-08-31", _result("HOLD"),
-             lambda t: Bar(open=100.0, high=101.0, low=99.0, close=100.5))
+             lambda t: Bar(open=100.0, high=101.0, low=99.0, close=100.5,
+                           date="2026-08-31"))
     assert len(eng.state["positions"]) == 1
     assert eng.state["positions"][0]["ticker"] == "BDX"

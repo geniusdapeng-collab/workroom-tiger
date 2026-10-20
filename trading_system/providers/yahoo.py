@@ -1,8 +1,8 @@
 """Yahoo Finance 数据供应商（生产默认）。
 
 依赖 yfinance（免费、无需 key）。
-注意：Yahoo ^TNX 为收益率×10 的指数（42.5 表示 4.25%），本 provider
-统一 ÷10 还原为百分数收益率。
+Yahoo / yfinance 的 ^TNX Close 已按百分数收益率发布
+（5.136 表示 5.136%），与 DataProvider 契约一致，不再缩放。
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class YahooProvider(DataProvider):
 
     def tnx_yield(self, days: int = 400) -> pd.Series:
         df = self._download("^TNX", days)
-        return (df["Close"] / 10.0).dropna()   # 还原为百分数收益率
+        return df["Close"].dropna()   # Yahoo 已是百分数收益率
 
     def vix(self, days: int = 400) -> pd.Series:
         return self._download("^VIX", days)["Close"].dropna()
@@ -116,7 +116,7 @@ class YahooProvider(DataProvider):
             put_vol = float(puts["volume"].fillna(0).sum())
             # 平值 IV：现价 ±5% 内合约的 IV 加权均值
             try:
-                px = float(tk.fast_info.get("last_price"))
+                px = float(tk.fast_info.get("lastPrice"))
             except Exception:
                 px = float(self.ohlcv(ticker, days=5)["Close"].iloc[-1])
             near = calls[(calls["strike"] - px).abs() <= px * 0.05]
@@ -133,20 +133,39 @@ class YahooProvider(DataProvider):
             return None
 
     def quote(self, ticker: str) -> dict | None:
-        """盘中实时报价（fast_info.last_price）；拿不到时回退日线收盘价。
+        """盘中报价保留源端市场时间；无可验证时间时回退日线收盘价。
 
-        fast_info 在限流/休市/字段缺失时可能返回 None —— 旧实现直接
-        float(None) 崩溃后才回退；现在显式校验，回退路径 kind="eod_close"
-        如实披露（不得冒充实时价）。
+        fast_info 与 get_history_metadata 使用同一 Ticker 的行情缓存；
+        regularMarketTime 是源端成交时间，不能用本机取数时间代替。
+        回退路径 kind="eod_close" 如实披露，不把旧价重新盖章成实时价。
         """
+        import math
+        from datetime import datetime
+        from numbers import Integral, Real
+
         import yfinance as yf
         try:
-            fi = yf.Ticker(ticker).fast_info
-            px = fi.get("last_price", None)
-            if px is None:
-                raise ValueError("fast_info.last_price 缺失")
+            tk = yf.Ticker(ticker)
+            px = tk.fast_info.get("lastPrice", None)
+            if (isinstance(px, bool) or not isinstance(px, Real)
+                    or not math.isfinite(px) or px <= 0):
+                raise ValueError("fast_info.lastPrice 缺失或无效")
+            source_time = tk.get_history_metadata().get("regularMarketTime")
+            # yfinance 元数据格式化后为带时区 Timestamp；未格式化时为 epoch 秒。
+            if isinstance(source_time, Integral) and not isinstance(source_time, bool):
+                if source_time <= 0:
+                    raise ValueError("regularMarketTime 无效")
+                quoted_at = pd.Timestamp(int(source_time), unit="s", tz="UTC")
+            elif isinstance(source_time, datetime):
+                quoted_at = pd.Timestamp(source_time)
+            else:
+                raise ValueError("regularMarketTime 缺失或格式不可验证")
+            if pd.isna(quoted_at) or quoted_at.tzinfo is None:
+                raise ValueError("regularMarketTime 缺失时区或无效")
             return {"price": float(px),
-                    "ts": pd.Timestamp.now().isoformat(),
+                    "ts": quoted_at.isoformat(),
                     "kind": "realtime"}
-        except Exception:
+        except Exception as exc:
+            logger.debug("Yahoo 报价缺有效价格或源时间 %s（%s），回退日线收盘价",
+                         ticker, type(exc).__name__)
             return super().quote(ticker)

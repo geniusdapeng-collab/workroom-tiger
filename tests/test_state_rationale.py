@@ -103,8 +103,10 @@ def test_html_rationale_sections():
     html_text = _re.sub(r"data:image/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+", "IMG", html_text)
     for kw in ("市场环境体检", "板块选择理由", "产业链景气", "个股质地",
                "交易计划与风控", "失效与离场条件", "系统审计底稿",
-               "单笔最大亏损", "今日优先级", "主线地位"):
+               "计划风险", "今日优先级", "主线地位"):
         assert kw in html_text, f"决策依据缺少: {kw}"
+    for false_promise in ("单笔最大亏损", "亏损锁定", "从此不亏钱"):
+        assert false_promise not in html_text, f"计划止损不能承诺实际亏损上限: {false_promise}"
     # 业务语言纪律：不出现内部公式与核心参数
     for leak in ("MRS_raw", "TOS", "仓位系数", "bonus_hint"):
         assert leak not in html_text, f"内部信息外泄: {leak}"

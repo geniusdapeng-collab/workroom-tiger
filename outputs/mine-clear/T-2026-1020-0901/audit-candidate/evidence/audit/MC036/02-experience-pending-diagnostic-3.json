@@ -1,0 +1,305 @@
+{
+  "schema": "tiger.independent-pending-inspection/v1",
+  "actor": "/root/final_local_acceptance",
+  "purpose": "Read existing Node client metadata only; no browser page actions or pending callback mutations",
+  "instrumentation": {
+    "debuggerActivatedBy": "SIGUSR1",
+    "loopbackOnly": true,
+    "paused": false,
+    "requestBodiesOrHeadersCollected": false
+  },
+  "observation": {
+    "pid": 13237,
+    "at": "2026-10-20T15:02:38.939Z",
+    "uptimeSeconds": 1681.357872166,
+    "pendingCallbacks": [
+      {
+        "id": 94,
+        "type": "Response",
+        "method": "body"
+      }
+    ],
+    "pages": [
+      {
+        "guid": "page@7894fbcbff48836ff1570e4ffe317272",
+        "url": "http://127.0.0.1:3020/approvals",
+        "closed": false
+      }
+    ],
+    "requestCount": 454,
+    "responseCount": 450,
+    "pendingServerCalls": [
+      {
+        "id": "call@94",
+        "type": "Response",
+        "method": "body",
+        "timeout": 0,
+        "location": {
+          "file": "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/workroom-tiger/governance/scripts/acceptance/experience.mjs",
+          "line": 169,
+          "column": 35
+        },
+        "response": {
+          "path": "http://127.0.0.1:3020/trpc/captain.theater,captain.chairmanQueue",
+          "status": 200,
+          "contentLength": "16007",
+          "contentType": "application/json",
+          "responseEnd": -1,
+          "finished": false
+        }
+      }
+    ],
+    "unfinishedResponses": [
+      {
+        "path": "http://127.0.0.1:3020/trpc/captain.theater,captain.chairmanQueue",
+        "status": 200,
+        "contentLength": "16007",
+        "contentType": "application/json",
+        "responseEnd": -1,
+        "finished": false
+      }
+    ],
+    "recentResponses": [
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status",
+        "status": 200,
+        "contentLength": "2334",
+        "contentType": "application/json",
+        "responseEnd": 39.53,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 17.284,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status,skills.skillOps.status,approvals.list",
+        "status": 200,
+        "contentLength": "7396",
+        "contentType": "application/json",
+        "responseEnd": 51.864,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.scan",
+        "status": 200,
+        "contentLength": "33",
+        "contentType": "application/json",
+        "responseEnd": 146.202,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.settings,service.secretary.inbox",
+        "status": 200,
+        "contentLength": "4559",
+        "contentType": "application/json",
+        "responseEnd": 31.741,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 139.869,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status",
+        "status": 200,
+        "contentLength": "2334",
+        "contentType": "application/json",
+        "responseEnd": 38.034,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.scan",
+        "status": 200,
+        "contentLength": "33",
+        "contentType": "application/json",
+        "responseEnd": 48.275,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.settings,service.secretary.inbox",
+        "status": 200,
+        "contentLength": "4559",
+        "contentType": "application/json",
+        "responseEnd": 17.807,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 9.666,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status,skills.skillOps.status,approvals.list",
+        "status": 200,
+        "contentLength": "7396",
+        "contentType": "application/json",
+        "responseEnd": 1315.172,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.scan",
+        "status": 200,
+        "contentLength": "33",
+        "contentType": "application/json",
+        "responseEnd": 71.257,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.settings,service.secretary.inbox",
+        "status": 200,
+        "contentLength": "4559",
+        "contentType": "application/json",
+        "responseEnd": 31.072,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 20.12,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status",
+        "status": 200,
+        "contentLength": "2334",
+        "contentType": "application/json",
+        "responseEnd": 48.398,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 24.936,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status,skills.skillOps.status,approvals.list",
+        "status": 200,
+        "contentLength": "7396",
+        "contentType": "application/json",
+        "responseEnd": 66.321,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.scan",
+        "status": 200,
+        "contentLength": "33",
+        "contentType": "application/json",
+        "responseEnd": 157.989,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.settings,service.secretary.inbox",
+        "status": 200,
+        "contentLength": "4559",
+        "contentType": "application/json",
+        "responseEnd": 11.967,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 164.181,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status",
+        "status": 200,
+        "contentLength": "2334",
+        "contentType": "application/json",
+        "responseEnd": 29.176,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.scan",
+        "status": 200,
+        "contentLength": "33",
+        "contentType": "application/json",
+        "responseEnd": 27.85,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.settings,service.secretary.inbox",
+        "status": 200,
+        "contentLength": "4559",
+        "contentType": "application/json",
+        "responseEnd": 11.566,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 7.059,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status,skills.skillOps.status,approvals.list",
+        "status": 200,
+        "contentLength": "7396",
+        "contentType": "application/json",
+        "responseEnd": 61.283,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.scan",
+        "status": 200,
+        "contentLength": "33",
+        "contentType": "application/json",
+        "responseEnd": 34.098,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/service.secretary.settings,service.secretary.inbox",
+        "status": 200,
+        "contentLength": "4559",
+        "contentType": "application/json",
+        "responseEnd": 19.44,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 11.6,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/onboarding.status",
+        "status": 200,
+        "contentLength": "2334",
+        "contentType": "application/json",
+        "responseEnd": 30.128,
+        "finished": true
+      },
+      {
+        "path": "http://127.0.0.1:3020/trpc/approvals.list",
+        "status": 200,
+        "contentLength": "4887",
+        "contentType": "application/json",
+        "responseEnd": 127.038,
+        "finished": true
+      }
+    ]
+  }
+}

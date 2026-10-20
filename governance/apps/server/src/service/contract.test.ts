@@ -6,14 +6,14 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
+import { createServiceFixture, serviceFixtureIdentity } from "./test-fixtures.js";
 
-process.env.DATABASE_URL ??= "postgres://postgres:workloom@localhost:5432/workloom";
-process.env.DATABASE_APP_URL ??= "postgres://workloom_app:workloom_dev_app@localhost:5432/workloom";
-process.env.DATABASE_GATEWAY_URL ??= "postgres://workloom_gateway:workloom_dev_gateway@localhost:5432/workloom";
 process.env.SERVICE_C_DEMO_AUTH = "true";
 
 let app: Hono;
 const RUN = `contract-${Date.now().toString(36)}`;
+const fixture = serviceFixtureIdentity(RUN);
+process.env.SERVICE_C_WORKSPACE_ID = fixture.workspaceId;
 const IP = "198.51.100.77"; // TEST-NET-2，与其它用例隔离限流桶
 
 async function req(path: string, init?: RequestInit, token?: string): Promise<Response> {
@@ -35,6 +35,7 @@ async function makeSession(openid: string): Promise<{ token: string; user: Recor
 }
 
 beforeAll(async () => {
+  await createServiceFixture(fixture);
   ({ serviceGateway: app } = await import("./gateway.js"));
 });
 
@@ -70,16 +71,16 @@ describe("契约 · session（S2）", () => {
 });
 
 describe("契约 · member / orders / notifications（H6）", () => {
-  it("未绑定会员：/member 返回 {level,points,benefits[],demo,bindRequired}，/orders 空集+bindRequired", async () => {
+  it("Tiger 未装配业务适配器时，订单与会员查询明确拒绝且不回退酒店数据", async () => {
     const { token } = await makeSession(`${RUN}-guest`);
-    const m = (await (await req("/member", {}, token)).json()) as Record<string, unknown>;
-    expect(m).toMatchObject({ level: "游客", points: 0, bindRequired: true });
-    expect(Array.isArray(m.benefits)).toBe(true);
-    expect(typeof m.hint).toBe("string");
-
-    const o = (await (await req("/orders", {}, token)).json()) as Record<string, unknown>;
-    expect(o).toMatchObject({ bindRequired: true });
-    expect(o.orders).toEqual([]);
+    for (const path of ["/member", "/orders"]) {
+      const response = await req(path, {}, token);
+      expect(response.status).toBe(503);
+      const body = await response.json() as Record<string, unknown>;
+      expect(body.code).toBe("BUSINESS_ADAPTER_UNAVAILABLE");
+      expect(body).not.toHaveProperty("orders");
+      expect(body).not.toHaveProperty("points");
+    }
   });
 
   it("/notifications 每项含 read:false 占位", async () => {
@@ -147,7 +148,7 @@ describe("契约 · chat（H5/H6/M9）", () => {
     const { token } = await makeSession(`${RUN}-c`);
     const r = (await (await req("/chat", {
       method: "POST",
-      body: JSON.stringify({ text: "退房时间是几点？" }),
+      body: JSON.stringify({ text: "决策日报几点发？" }),
     }, token)).json()) as Record<string, unknown>;
     expect(r).toMatchObject({ intent: "kb_qa" });
     expect(typeof r.answer).toBe("string");

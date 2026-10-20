@@ -393,7 +393,8 @@ export function StarRing() {
 
   const pushMsg = useCallback((m: Omit<RingMsg, "id">) => {
     msgSeq.current += 1;
-    setMsgs((cur) => [...cur, { ...m, id: msgSeq.current }]);
+    const id = msgSeq.current;
+    setMsgs((cur) => [...cur, { ...m, id }]);
   }, []);
 
   /**
@@ -426,9 +427,6 @@ export function StarRing() {
       const secretary = trpc.service as unknown as {
         secretary: { chat: { mutate: (i: { text: string }) => Promise<{ reply: string }> } };
       };
-      const threads = trpc.threads as unknown as {
-        note: { mutate: (i: { threadId: string; text: string }) => Promise<{ eventId: string; threadId: string }> };
-      };
       // ① 我的域：记事 / 提醒 / 查任务 / 找人（原小织面板，铁律：不替用户做业务决策）
       if (intent === "personal") {
         const r = await secretary.secretary.chat.mutate({ text });
@@ -441,7 +439,7 @@ export function StarRing() {
       // ② 留言：只写账本，不派活、不回答、不推进
       if (intent === "note") {
         if (ctxThreadId) {
-          const r = await threads.note.mutate({ threadId: ctxThreadId, text });
+          const r = await trpc.threads.note.mutate({ threadId: ctxThreadId, text });
           pushMsg({
             role: "agent", intent, action: INTENT_LABEL.note, receipt: "synced", refId: r.eventId,
             text: `已给任务${clientIdentifierText(ctxThreadId)}留言，写入事件账本（${clientIdentifierText(r.eventId)}）；留言只留痕，不触发执行。`,
@@ -477,10 +475,13 @@ export function StarRing() {
           return;
         }
         /**
-         * N-06：不把用户这句口语当规划目标——续跑复用线程既定计划（GR-01 计划持久化），
-         * 以前传 goal 会把计划按"继续/推进吧"重新洗一遍（漂移、空计划、误匹配都由此而来）。
+         * N-06：续跑仍需传入既定目标，先回读当前工作区线程，不能用“继续/推进吧”覆盖目标。
+         * 线程已删除、无权读取或目标缺失时停止，由下方失败回执保留输入供重试。
          */
-        const r = await trpc.threads.run.mutate({ threadId: ctxThreadId }) as {
+        const thread = await trpc.threads.get.query({ threadId: ctxThreadId });
+        const goal = typeof thread?.title === "string" ? thread.title.trim() : "";
+        if (!goal) throw new Error("任务目标不存在或当前无权读取，请刷新任务后重试。");
+        const r = await trpc.threads.run.mutate({ threadId: ctxThreadId, goal }) as {
           status?: string; stepsDone?: number; stepsTotal?: number;
         };
         pushMsg({

@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 # R 分布直方图分桶（附录D 口径：流程分布，不评判单笔运气）
 _R_BUCKETS = ((-9e9, -1.0, "≤-1R"), (-1.0, 0.0, "-1~0R"),
-              (0.0, 1.0, "0~1R"), (1.0, 2.0, "1~2R"), (2.0, 9e9, "≥2R"))
+              (0.0, 1.0, "0~1R"), (1.0, 2.0, "1~2R"), (2.0, 9e9, ">2R"))
 
 
 def r_distribution(rs: list[float]) -> dict[str, int]:
-    """已结算 R 值分布（含边界：-1R 归 -1~0R，2R 归 ≥2R）。"""
+    """已结算 R 值分布：各桶左开右闭，-1R 归 ≤-1R，2R 归 1~2R。"""
     dist = {label: 0 for _, _, label in _R_BUCKETS}
     for r in rs:
         for lo, hi, label in _R_BUCKETS:

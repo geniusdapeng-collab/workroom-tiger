@@ -64,6 +64,7 @@
     "test:media": "node --test --test-concurrency=1 scripts/acceptance/lib/live/media-decoder.test.mjs scripts/acceptance/lib/live/live-cli-browser.test.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@types/node": "^24.0.0",
     "concurrently": "^9.1.0",
     "jsdom": "^30.0.1",

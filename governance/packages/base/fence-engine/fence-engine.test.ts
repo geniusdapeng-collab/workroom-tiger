@@ -2,7 +2,7 @@
  * B4 测试：表达式求值器 / 判定器语义 / 单调守卫 / dry-run 回放 / 对象写锁
  * PG 集成（dry-run 入库/激活门禁/写锁超时）仅 RUN_DB_TESTS=1 启用。
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { evalCondition, FenceEvalError } from "./expr.js";
 import { judge, judgeSubCall, type RuntimeRule } from "./judge.js";
 import { checkMonotonic, loadFencePack } from "./dsl.js";
@@ -10,10 +10,11 @@ import { fenceActivationFromProposal, fenceRuleRowId } from "./lifecycle.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
-const BUNDLE_YML = join(
+const TEST_BASELINE_YML = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../../../bundles/hotel/fences/hotel-baseline.yml",
+  "fixtures/baseline.yml",
 );
 
 describe("表达式求值器（L2.5 沙箱）", () => {
@@ -45,8 +46,8 @@ describe("表达式求值器（L2.5 沙箱）", () => {
   });
 });
 
-describe("判定器（F2.1/E2.1/E2.2，真实基线包）", () => {
-  const pack = loadFencePack(readFileSync(BUNDLE_YML, "utf-8"));
+describe("判定器（F2.1/E2.1/E2.2，测试基线包）", () => {
+  const pack = loadFencePack(readFileSync(TEST_BASELINE_YML, "utf-8"));
 
   it("R1 涨幅 ≤8% → auto 放行；>8% 无命中 → default review", () => {
     const ok = judge(
@@ -105,7 +106,7 @@ describe("判定器（F2.1/E2.1/E2.2，真实基线包）", () => {
 });
 
 describe("单调守卫（F2.3/H-3）", () => {
-  const pack = loadFencePack(readFileSync(BUNDLE_YML, "utf-8"));
+  const pack = loadFencePack(readFileSync(TEST_BASELINE_YML, "utf-8"));
 
   it("放宽基线被拒且留痕（R2 block→review 降级）", () => {
     const patch = pack.rules.map((r) =>
@@ -137,14 +138,40 @@ d("PG 集成（dry-run / 激活门禁 / 对象写锁）", async () => {
   const pg = (await import("pg")).default;
   const { createDryRun, confirmDryRun, activateRuleVersion, withObjectLock, ObjectLockTimeout } =
     await import("./lifecycle.js");
+  const { gatewayAppend } = await import("../workdata/gateway.js");
   const appPool = new pg.Pool({ connectionString: process.env.DATABASE_APP_URL });
   const gwPool = new pg.Pool({ connectionString: process.env.DATABASE_GATEWAY_URL });
-  const scope = { tenantId: "tenant-demo", workspaceId: "ws-yunqi" };
-  const pack = loadFencePack(readFileSync(BUNDLE_YML, "utf-8"));
+  const ownerPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const suffix = randomUUID();
+  const scope = { tenantId: `fence-test-tenant-${suffix}`, workspaceId: `fence-test-ws-${suffix}` };
+  const pack = loadFencePack(readFileSync(TEST_BASELINE_YML, "utf-8"));
+
+  beforeAll(async () => {
+    if (!process.env.DATABASE_URL || !process.env.DATABASE_GATEWAY_URL) {
+      throw new Error("围栏 PG 测试需要专用 DATABASE_URL / DATABASE_APP_URL / DATABASE_GATEWAY_URL");
+    }
+    await ownerPool.query("INSERT INTO tenants (id,name) VALUES ($1,'围栏引擎测试租户')", [scope.tenantId]);
+    await ownerPool.query(
+      "INSERT INTO workspaces (id,tenant_id,slug,name,industry) VALUES ($1,$2,$1,'围栏引擎测试工作区','test')",
+      [scope.workspaceId, scope.tenantId],
+    );
+    // 不依赖任何行业种子；回放样本同样经过真实网关和追加账本。
+    for (let i = 0; i < 10; i += 1) {
+      await gatewayAppend(gwPool, { ...scope, actor: { type: "human", id: "MEM-TEST" } }, {
+        who: { type: "human", id: "MEM-TEST" },
+        context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "test" },
+        object: { type: "room_price", id: `sample-${i}` },
+        decision: { action: "price.adjust", before: { price: 400 }, after: { price: 420 } },
+        rule_impact: [],
+      });
+    }
+  });
+
+  afterAll(async () => { await Promise.all([appPool.end(), gwPool.end(), ownerPool.end()]); });
 
   it("dry-run 回放最近 10 条 → 报告入库 pending（F2.5）", async () => {
     const r = await createDryRun(appPool, scope, {
-      ruleId: "R1", ruleVersion: "hotel-baseline/v1", rules: pack.rules,
+      ruleId: "R1", ruleVersion: pack.version, rules: pack.rules,
       defaultLevel: pack.defaultLevel, createdBy: "MEM-001",
     });
     expect(r.report.replayed).toBe(10);
@@ -153,20 +180,20 @@ d("PG 集成（dry-run / 激活门禁 / 对象写锁）", async () => {
 
   it("未确认 dry-run 禁止激活（L2.4）", async () => {
     const dr = await createDryRun(appPool, scope, {
-      ruleId: "R2", ruleVersion: "hotel-baseline/v1", rules: pack.rules,
+      ruleId: "R2", ruleVersion: pack.version, rules: pack.rules,
       defaultLevel: pack.defaultLevel, createdBy: "MEM-001",
     });
     await expect(
-      activateRuleVersion(appPool, scope, { ruleRowId: "fr-r2-v1-ws-yunqi", dryRunId: dr.dryRunId, approvalEventId: "E-8804" }),
+      activateRuleVersion(appPool, scope, { ruleRowId: `fr-r2-v1-${scope.workspaceId}`, dryRunId: dr.dryRunId, approvalEventId: "E-NOT-APPROVED" }),
     ).rejects.toThrow(/未确认/);
   });
 
   it("对象写锁：持锁期间他人超时转「需介入」（E2.5）", async () => {
     await expect(
-      withObjectLock(gwPool, "room_price:RT-DLX-KING", async (hold) => {
+      withObjectLock(gwPool, `${scope.workspaceId}:room_price:sample`, async (hold) => {
         // 持锁期间，另一个连接尝试同对象 → 500ms 超时
         await expect(
-          withObjectLock(gwPool, "room_price:RT-DLX-KING", async () => "never", 500),
+          withObjectLock(gwPool, `${scope.workspaceId}:room_price:sample`, async () => "never", 500),
         ).rejects.toThrow(ObjectLockTimeout);
         // 不真正写库，仅验证锁语义
         await hold.query("SELECT 1");
@@ -176,7 +203,7 @@ d("PG 集成（dry-run / 激活门禁 / 对象写锁）", async () => {
 
   it("confirmDryRun 幂等约束：重复确认报错", async () => {
     const dr = await createDryRun(appPool, scope, {
-      ruleId: "R3", ruleVersion: "hotel-baseline/v1", rules: pack.rules,
+      ruleId: "R3", ruleVersion: pack.version, rules: pack.rules,
       defaultLevel: pack.defaultLevel, createdBy: "MEM-001",
     });
     await confirmDryRun(appPool, scope, dr.dryRunId);
@@ -189,23 +216,36 @@ d("PG 集成（dry-run / 激活门禁 / 对象写锁）", async () => {
 describe("fenceActivationFromProposal（E1 审批→激活接线）", () => {
   const WS = "ws-yunqi";
 
-  it("fenceRuleRowId 生成口径稳定（与 confirmDryRun 入库一致）", () => {
-    expect(fenceRuleRowId("R7", WS)).toBe("fr-r7-vnext-ws-yunqi");
+  it("fenceRuleRowId 携带版本，不同提案使用独立行 ID", () => {
+    expect(fenceRuleRowId("R7", WS, "v2")).toBe("fr-r7-v2-ws-yunqi");
+    expect(fenceRuleRowId("R7", WS, "v3")).toBe("fr-r7-v3-ws-yunqi");
   });
 
-  it("fence.rule.propose 事件 → 提取 ruleRowId + dryRunId", () => {
+  it("fence.rule.propose 事件 → 提取显式 ruleRowId + dryRunId", () => {
     const payload = {
-      decision: { action: "fence.rule.propose", after: { ruleId: "R7", dryRunId: "fdr-r7-abc" } },
+      decision: { action: "fence.rule.propose", after: { ruleId: "R7", ruleRowId: "fr-r7-v2-ws-yunqi", version: "v2", dryRunId: "fdr-r7-abc" } },
     };
     expect(fenceActivationFromProposal(payload, WS)).toEqual({
-      ruleRowId: "fr-r7-vnext-ws-yunqi",
+      ruleRowId: "fr-r7-v2-ws-yunqi",
       dryRunId: "fdr-r7-abc",
+    });
+  });
+
+  it("旧提案携带 version 时仍可派生行 ID，并保留显式 when 改写确认", () => {
+    const payload = {
+      decision: { action: "fence.rule.propose", after: { ruleId: "R7", version: "v3", dryRunId: "fdr-r7-def", allowWhenChange: true } },
+    };
+    expect(fenceActivationFromProposal(payload, WS)).toEqual({
+      ruleRowId: "fr-r7-v3-ws-yunqi",
+      dryRunId: "fdr-r7-def",
+      allowWhenChange: true,
     });
   });
 
   it("非提案事件 / 缺字段 → null（不激活）", () => {
     expect(fenceActivationFromProposal({ decision: { action: "price.adjust" } }, WS)).toBeNull();
     expect(fenceActivationFromProposal({ decision: { action: "fence.rule.propose", after: { ruleId: "R7" } } }, WS)).toBeNull();
+    expect(fenceActivationFromProposal({ decision: { action: "fence.rule.propose", after: { ruleId: "R7", dryRunId: "fdr-r7-abc" } } }, WS)).toBeNull();
     expect(fenceActivationFromProposal(null, WS)).toBeNull();
     expect(fenceActivationFromProposal({}, WS)).toBeNull();
   });

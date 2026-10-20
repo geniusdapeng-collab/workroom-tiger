@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from . import config
+from .currency import ACCOUNT_CURRENCY, require_usd_records, require_usd_result
 from .ledger_io import write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -48,9 +49,11 @@ class Journal:
             for record in records
         ):
             raise ValueError(f"信号日记 {self.path} 结构无效，已停止以保留原账本")
+        require_usd_records(records, scope=f"信号日记 {self.path}")
         return records
 
     def save(self) -> None:
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         write_json_atomic(self.path, self.records)
 
     # ------------------------------------------------------------
@@ -59,6 +62,8 @@ class Journal:
         """把本次放行的 picks 落账（同日同票去重）。返回新增条数。"""
         from .providers.base import source_label
 
+        require_usd_result(result, scope="信号日记输入")
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         source = source_label(getattr(result, "provider", ""))   # v6.5 来源留痕
         existing = {(r["date"], r["ticker"]) for r in self.records}
         added = 0
@@ -69,6 +74,8 @@ class Journal:
             self.records.append({
                 "date": result.trade_date,
                 "ticker": p.ticker,
+                "account_currency": ACCOUNT_CURRENCY,
+                "quote_currency": ACCOUNT_CURRENCY,
                 "mode": "标准做多" if "标准" in p.card else "轻仓试错",
                 "template": p.entry_template or "无",
                 "sector": p.sector or "",
@@ -94,6 +101,7 @@ class Journal:
 
     def settle(self, provider, horizon_days: int = 30) -> int:
         """结算 open 记录：模拟与回测一致的出场规则。返回本次结算条数。"""
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         today = datetime.now().date()
         settled = 0
         changed = False
@@ -103,7 +111,7 @@ class Journal:
                 continue
             sig_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
             age = (today - sig_date).days
-            if age < 2:                      # 入场日未到，跳过
+            if age < 1:                      # 信号日不得当日入场
                 continue
             try:
                 df = provider.ohlcv(rec["ticker"], days=min(90, horizon_days * 3))
@@ -115,14 +123,19 @@ class Journal:
             if df is None or len(df) == 0:
                 self.last_failed.append(rec["ticker"])
                 continue
-            df = df[df.index.date >= sig_date]
+            # 保留信号前的覆盖证据；先裁去未来行，不能用未来行情结算。
+            df = df[df.index.date <= today]
             if len(df) < 1:
                 continue
-            prev_status = rec["status"]
+            if df.index.min().date() > sig_date:
+                # 滚动历史已越过信号日：无法证明哪一根才是真实 T+1，等待补齐。
+                self.last_failed.append(rec["ticker"])
+                continue
+            previous = rec.copy()
             self._settle_one(rec, df)
             if rec["status"] == "closed":
                 settled += 1
-            if rec["status"] != prev_status:      # closed 或 void（作废）均需落盘
+            if rec != previous:                 # 入场日期/浮动状态同样属于会计事实
                 changed = True
         if settled or changed:
             self.save()
@@ -140,17 +153,25 @@ class Journal:
         """
         from .exit_engine import cost_adj_buy, simulate_trade
 
+        if df is None or len(df) == 0:
+            return
+        df = df.sort_index()
+        dates = [d.date() for d in df.index]
+        signal_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
+        if dates[0] > signal_date:
+            return                              # 历史窗口不覆盖信号，不捏造入场
+        entry_i = next((i for i, day in enumerate(dates) if day > signal_date), None)
+        if entry_i is None:
+            return                              # 只有信号日或更早数据，尚不可成交
+
         stop0 = float(rec["stop"])
         time_stop = int(rec.get("time_stop_days") or config.TIME_STOP_DAYS[1])
         o, h, l_, c = (df["Open"].values, df["High"].values,
                        df["Low"].values, df["Close"].values)
-        dates = [d.date() for d in df.index]
-
-        # 入场：信号日之后第一个交易日开盘
-        entry_i = 1 if len(o) > 1 else 0
         # v6.1 公司行动检测（必须先于引擎判定：拆股重定基后开盘价必然
         # "跌破止损"，会被通用作废逻辑拦截而丢失拆股语义）
-        ref = (float(c[0]) if len(c) and float(c[0]) > 0
+        signal_i = next((i for i, day in enumerate(dates) if day == signal_date), None)
+        ref = (float(c[signal_i]) if signal_i is not None and float(c[signal_i]) > 0
                else float(rec.get("entry_ref") or 0))
         if ref > 0 and entry_i < len(o):
             open_next = float(o[entry_i])
@@ -184,6 +205,7 @@ class Journal:
     # ------------------------------------------------------------
 
     def stats(self) -> dict:
+        require_usd_records(self.records, scope=f"信号日记 {self.path}")
         closed = [r for r in self.records if r["status"] == "closed" and r.get("r") is not None]
         open_n = sum(1 for r in self.records if r["status"] == "open")
         rs = [r["r"] for r in closed]

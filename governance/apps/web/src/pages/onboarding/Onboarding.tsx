@@ -1,5 +1,5 @@
 /**
- * 落地向导（D24）——从「全模拟运行态」到「真实经营」的五步自动流程
+ * 落地向导（D24）——配置核验与正式启用的五步流程
  *
  * ① 环境自检（自动跑：DB/事件库/模型/数据模式）
  * ② 真实大模型（预设一键填 → 真实试调 → 通过才保存；保存即全链即时真实化，无需重启）
@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CustomizeWizard from "./CustomizeWizard";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
-import type { OnboardingStatus } from "../../components/SimBanner";
+import { onboardingModeSummary, type OnboardingStatus } from "../../components/SimBanner";
 import { UrlQrCode } from "../../components/UrlQrCode";
 import { Icon, clientChineseText } from "@workloom/ui";
 import { modelTestReplyText, onboardingStatusSystemText, publicationSystemText } from "./systemText";
@@ -152,7 +152,7 @@ export default function Onboarding() {
       const businessReady = Boolean(s.activationGate?.checks.find((check) => check.key === "business")?.ok);
       if (businessReady) setBizDone(true);
       if (draft?.status === "completed") { setStep(4); setDone(true); }
-      else if (s.dataMode === "real") setStep(4);
+      else if (onboardingModeSummary(s).formalModeActive) setStep(4);
       else if (draft) setStep(Math.max(0, Math.min(4, draft.currentStep)));
       else if (s.llm.real && businessReady) setStep(3);
       else if (s.llm.real) setStep(2);
@@ -161,12 +161,14 @@ export default function Onboarding() {
 
   const checks = useMemo(() => {
     if (!st) return [];
+    const mode = onboardingModeSummary(st);
     return [
       { label: "数据库连接", ok: true, detail: "事件库在线" },
       { label: "事件库规模", ok: st.workspace.events > 0, detail: `${st.workspace.events} 条五元事件（哈希链可验）` },
       { label: "数字团队", ok: st.workspace.agents > 0, detail: `${st.workspace.agents} 名员工 · ${st.workspace.members} 名人类成员 · ${st.workspace.memories} 条组织经验` },
       { label: "大模型", ok: st.llm.real, detail: st.llm.real ? `${st.llm.provider} · ${st.llm.model}（真实推理且试调凭据有效）` : "内置模拟模型，或当前模型配置没有有效试调凭据" },
-      { label: "数据模式", ok: st.dataMode === "real", detail: st.dataMode === "real" ? "真实经营模式" : "模拟演示数据" },
+      { label: "数据模式声明", ok: st.declaredDataMode === "real" || st.declaredDataMode === "simulated", detail: `${mode.dataModeText}；${mode.toolModeText}` },
+      { label: "正式启用", ok: mode.formalModeActive, detail: mode.formalModeActive ? "正式启用资格已确认；执行结果以任务回执为准" : "未正式启用；当前启用凭据或条件尚未全部满足" },
     ];
   }, [st]);
 
@@ -290,7 +292,7 @@ export default function Onboarding() {
       const beforeActivation = await saveDraft(3);
       await trpc.onboarding.activateRealMode.mutate();
       const updated = await reload();
-      if (updated.dataMode !== "real") throw new Error("服务端未确认正式模式生效，请按门禁提示补齐配置");
+      if (!onboardingModeSummary(updated).formalModeActive) throw new Error("服务端未确认正式模式生效，请按门禁提示补齐配置");
       const advancedDraft = await trpc.onboarding.wizardDraft.query() as WizardDraft | null;
       setDraftVersion(advancedDraft?.version ?? beforeActivation.version);
       setDraftResponsible(advancedDraft?.responsible ?? beforeActivation.responsible);
@@ -344,13 +346,13 @@ export default function Onboarding() {
 
   const inputCls = "w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-ink3 focus:border-gline";
   const btnCls = "max-w-full whitespace-normal break-words rounded-lg border border-gline bg-gold/10 px-4 py-2 text-center text-sm text-gold transition-colors hover:bg-gold/20 disabled:opacity-40";
+  const formalModeActive = st ? onboardingModeSummary(st).formalModeActive : false;
 
   return (
-    <div className="min-h-screen bg-[#07070d] px-4 py-8 text-ink">
+    <div className="min-h-screen bg-[#07070d] px-4 pb-8 pt-16 text-ink">
       <div className="mx-auto max-w-2xl">
         {/* 头 */}
         <div className="mb-4 flex min-w-0 flex-wrap items-center gap-3">
-          <a href="/" className="rounded border border-line px-2.5 py-1 text-body text-ink3 no-underline hover:border-gline">← 返回经营主页</a>
           <h1 className="bg-gradient-to-r from-[#f0f4f9] to-gold bg-clip-text text-lg font-bold text-transparent">
             {customizeMode ? "定制我的行业版" : "落地向导 · 接入真实数据"}
           </h1>
@@ -486,7 +488,7 @@ export default function Onboarding() {
         {step === 3 && !done && (
           <div className="space-y-4 rounded-xl border border-gline bg-panel/70 p-5">
             <div className="break-words text-sm font-bold text-gold">正式运行服务端门禁</div>
-            <p className="break-words text-body leading-relaxed text-ink2">只有以下事实全部通过，服务端才会把数据模式切换为正式；页面跳步或旧的状态标记都不能绕过。</p>
+            <p className="break-words text-body leading-relaxed text-ink2">只有以下事实全部通过，服务端才会登记正式启用并保存非模拟声明；页面跳步或旧标记都不能绕过。各任务的执行结果仍以回执为准。</p>
             <div className="space-y-2">
               {(st?.activationGate?.checks ?? []).map((check) => (
                 <div key={check.key} className="flex min-w-0 items-start gap-2 rounded-lg border border-line bg-card px-3 py-2 text-body">
@@ -605,9 +607,9 @@ export default function Onboarding() {
         {done && (
           <div className="space-y-4 rounded-xl border border-go/50 bg-go/5 p-6 text-center">
             <Icon name="celebrate" size={28} className="mx-auto text-go" />
-            <div className="text-sm font-bold text-go">{st?.dataMode === "real" ? "真实经营模式已启用" : "向导进度已保存"}</div>
+            <div className="text-sm font-bold text-go">{formalModeActive ? "正式启用资格已确认" : "向导进度已保存"}</div>
             <div className="text-body leading-relaxed text-ink3">
-              {st?.dataMode === "real" ? "服务端正式模式激活事件已留痕，数字团队将按正式配置继续工作。" : "正式运行门禁尚未全绿，系统仍保持模拟状态；您可以稍后继续补齐。"}
+              {formalModeActive ? "当前启用凭据与条件均有效；各任务实际数据来源和执行结果以回执为准。" : "未正式启用；当前启用凭据或条件尚未全部满足。数据来源和执行结果以任务回执为准，您可以稍后继续补齐。"}
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <a href="/" className="inline-block rounded-lg border border-gline bg-gold/10 px-5 py-2 text-sm text-gold no-underline hover:bg-gold/20">回到经营主页 →</a>

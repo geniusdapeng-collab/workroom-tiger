@@ -1,9 +1,9 @@
 /**
  * service · 对话（接口对齐 packages/base/service-dialog 签名；表结构为底座迁移版）
  * 意图流水线（M8：与 packages/base/service-dialog/intents.ts 同一张规则表 ruleBasedIntent）：
- *   complaint（投诉）> biz_query（订单/会员/房价/工单进度）> service_request（报修服务类，产 ticketDraft）
+ *   complaint（投诉）> biz_query（活动适配器业务/通用工单进度）> service_request（人工协助，产 ticketDraft）
  *   > kb_qa（KB 检索三档分流）> chat（规则未命中兜底）
- *   疑问句（几点/时间/吗/呢/怎么/如何）优先 kb_qa 不建单；「修/修一下/坏了」直连 service_request。
+ *   行业对象与履约词由当前已验证适配器解释；通用规则未命中时先查询工作区知识库。
  * 置信度三档（H5：检索 score 归一化 0..1，复用 base scoreChunkFallback）：
  *   ≥0.72 直接作答（带引用）；0.45–0.72 作答但附「可能不完全准确」提示；<0.45 诚实拒答 + ticketDraft。
  * 命中 KB 必带 citations，无据不答（诚实拒答）。
@@ -15,6 +15,8 @@ import { searchKB, type KbHit } from "./kb.js";
 import { llmCall } from "./llm.js";
 import { serviceTx, svcQuery } from "./events.js";
 import type { Channel } from "./channels.js";
+import { resolveWorkspaceBusinessAdapter } from "./adapters/business-registry.js";
+import { BusinessAdapterError, projectBusinessDialogMatch, type ServiceFrontBusinessAdapter } from "./adapters/business.js";
 
 export type Intent = "chat" | "kb_qa" | "biz_query" | "service_request" | "complaint";
 export type BizToolName = "query_order" | "query_member" | "query_catalog" | "query_ticket";
@@ -41,37 +43,22 @@ function newId(prefix: string): string {
 
 /** 工单进度查询（server 侧特有 biz_query 子类，先于规则表判定） */
 const RE_TICKET_STATUS = /工单.*(进度|状态|怎么样)|进度.*工单/;
-const RE_ORDER = /订单|预订|订房|入住记录|房费|账单/;
-const RE_MEMBER = /会员|积分|等级|权益|余额/;
-const RE_CATALOG = /房价|房型|多少钱|价格/;
-/**
- * 客房价格查询直连（server 侧目录查询子类，先于规则表判定）：
- * 「豪华大床房多少钱一晚」= 房型目录业务查询（query_catalog）——判定锚是**房型名词**，
- * 与「面膜多少钱」「加床一张多少钱」类通用询价严格区分（后者无房型词，仍走 kb_qa 查 FAQ，
- * M8 评测口径 R04/A16/A19/A24 不破坏；base 规则表保持行业无关，D17/D18 不受影响）。
- */
-const RE_ROOM_RATE = /房价|房型|大床房|双床房|单人房|标准间|套房|海景房|钟点房/;
-
-export function classify(text: string): { intent: Intent; tool?: BizToolName } {
-  if (RE_TICKET_STATUS.test(text)) return { intent: "biz_query", tool: "query_ticket" };
-  if (RE_ROOM_RATE.test(text)) return { intent: "biz_query", tool: "query_catalog" };
+export function classify(text: string, adapter?: ServiceFrontBusinessAdapter | null): {
+  intent: Intent; tool?: BizToolName; answer?: string; params?: Record<string, unknown>;
+} {
   const ruled = ruleBasedIntent(text);
   if (ruled === "complaint") return { intent: "complaint" };
+  if (RE_TICKET_STATUS.test(text)) return { intent: "biz_query", tool: "query_ticket", answer: "为您查询到工单进度：" };
+  const match = projectBusinessDialogMatch(adapter?.classify(text) ?? null);
+  if (match) return { intent: "biz_query", ...match };
   if (ruled === "service_request") return { intent: "service_request" };
-  if (ruled === "biz_query") {
-    if (RE_MEMBER.test(text)) return { intent: "biz_query", tool: "query_member" };
-    if (RE_CATALOG.test(text)) return { intent: "biz_query", tool: "query_catalog" };
-    return { intent: "biz_query", tool: "query_order" };
-  }
   if (ruled === "kb_qa") return { intent: "kb_qa" };
   return { intent: "kb_qa" }; // 规则未命中：默认先查知识库（低置信走诚实拒答三档）
 }
 
-/** service_request 文本 → 工单类型（修/坏类 → repair；送/拿/打扫类 → delivery；其余 other） */
-export function ticketKindOf(text: string): "repair" | "delivery" | "other" {
-  if (/维修|修|坏|故障|异常|中断|缺口|不刷新|漏水|不制冷|不制热|空调|热水|马桶/.test(text)) return "repair";
-  if (/订阅|开通|订购|补发|送|拿|打扫|换床单|加一|多要|再来/.test(text)) return "delivery";
-  return "other";
+/** 具体履约类型由当前已验证适配器提供，通用请求保守使用 other。 */
+export function ticketKindOf(text: string, adapter?: ServiceFrontBusinessAdapter | null): string {
+  return adapter?.ticketKind?.(text) ?? "other";
 }
 
 /* ================= 置信度三档（H5） ================= */
@@ -138,24 +125,22 @@ export async function handleMessage(input: {
   workspaceId: string; cUserId: string; channel: Channel; text: string; conversationId?: string;
 }): Promise<DialogResult> {
   await ensureServiceSchema();
+  const binding = await resolveWorkspaceBusinessAdapter(input.workspaceId);
+  if (binding.state !== "ready" && binding.state !== "adapter-not-declared") {
+    throw new BusinessAdapterError("当前服务前台暂不可用，请联系管理员", 503, "SERVICE_FRONT_UNAVAILABLE");
+  }
   const t0 = Date.now();
   const llm = llmCall();
   const mock = !llm;
   const conversationId = await ensureConversation(input);
   await logMessage({ workspaceId: input.workspaceId, conversationId, role: "user", content: input.text });
 
-  const cls = classify(input.text);
+  const cls = classify(input.text, binding.adapter);
   let result: Omit<DialogResult, "conversationId" | "latencyMs" | "mock">;
 
   if (cls.intent === "biz_query") {
     const tool = cls.tool!;
-    const answers: Record<BizToolName, string> = {
-      query_order: "为您查询到以下订单：",
-      query_member: "为您查询到会员信息：",
-      query_catalog: "为您查询到房型价格：",
-      query_ticket: "为您查询到工单进度：",
-    };
-    result = { intent: "biz_query", answer: answers[tool], confidence: 0.95, citations: [], toolCall: { tool, params: {} } };
+    result = { intent: "biz_query", answer: cls.answer!, confidence: 0.95, citations: [], toolCall: { tool, params: cls.params ?? {} } };
   } else if (cls.intent === "complaint") {
     result = {
       intent: "complaint",
@@ -165,7 +150,7 @@ export async function handleMessage(input: {
       ticketDraft: { kind: "complaint", title: input.text.slice(0, 40), payload: { text: input.text } },
     };
   } else if (cls.intent === "service_request") {
-    const kind = ticketKindOf(input.text);
+    const kind = ticketKindOf(input.text, binding.adapter);
     result = {
       intent: "service_request",
       answer: "好的，我可以为您生成服务工单，相关部门会尽快处理。请确认是否提交？",

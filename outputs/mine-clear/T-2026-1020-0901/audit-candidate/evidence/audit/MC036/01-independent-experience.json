@@ -1,0 +1,68 @@
+{
+  "schema": "workloom.evidence-run/v1",
+  "id": "independent-experience",
+  "command": "\"/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node\" \"--import\" \"/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/final-acceptance-browser-scope.mjs\" \"scripts/acceptance/experience.mjs\" \"--out\" \"/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-34de5b08/experience\" \"--env\" \"local-preview\" \"--profile\" \"/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/workroom-tiger/governance/outputs/final-local-acceptance/candidate-34de5b08/local-profile.json\" \"--evidence-root\" \"/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-34de5b08\"",
+  "exec": {
+    "file": "/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "args": [
+      "--import",
+      "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/final-acceptance-browser-scope.mjs",
+      "scripts/acceptance/experience.mjs",
+      "--out",
+      "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-34de5b08/experience",
+      "--env",
+      "local-preview",
+      "--profile",
+      "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/workroom-tiger/governance/outputs/final-local-acceptance/candidate-34de5b08/local-profile.json",
+      "--evidence-root",
+      "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-34de5b08"
+    ]
+  },
+  "actor": "/root/final_local_acceptance",
+  "role": "acceptance",
+  "subject": {
+    "step": "experience",
+    "environmentKind": "local-preview",
+    "runnerSha256": "07f0ed0009130b8f18df5e5640da02e57e5d247b45a9fec280e4922b87d3e1de",
+    "actorSource": {
+      "tool": "collaboration.spawn_agent",
+      "taskPath": "/root/final_local_acceptance",
+      "initialContext": "01a1587b-ec70-7a50-84c8-03f1eb727c2b"
+    }
+  },
+  "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+  "working_tree_dirty": false,
+  "started_at": "2026-10-20T14:34:37.517Z",
+  "finished_at": "2026-10-20T15:04:38.102Z",
+  "exit_code": 1,
+  "signal": "ETIMEDOUT",
+  "validation": {
+    "ok": false,
+    "errors": [
+      "Missing stage output experience/experience-report.json: Error"
+    ]
+  },
+  "result": "fail",
+  "outputs": [
+    {
+      "path": "execution/independent-experience.log",
+      "sha256": "050d72d0d013de8c96ec7ff449546f630d7158c4e9593ebbf2f5b8e8f0167bda",
+      "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20"
+    },
+    {
+      "path": "execution/independent-experience.json",
+      "sha256": "43b698e7abca67c387342f992a648b75710f17f7d23bf531abdb2e597b88eea0",
+      "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20"
+    },
+    {
+      "path": "experience/shots/exp-01-first-value.png",
+      "sha256": "02751ddb7f03c74c688addacc0e53af26845f742c2153a60bf7489f46bddf733",
+      "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20"
+    },
+    {
+      "path": "experience/shots/exp-02-approval.png",
+      "sha256": "781486d4479f084a5cd3737ed3640ddef56ad3c6be8309eb934b1d711f485a23",
+      "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20"
+    }
+  ]
+}

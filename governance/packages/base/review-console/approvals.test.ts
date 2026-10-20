@@ -151,7 +151,7 @@ d("PG 集成审批流（种子队列）", async () => {
       type: "reject", reasonEnum: "amount_too_large", reasonText: "超出门店免赔额度",
     });
     expect(r.status).toBe("rejected");
-    const mem = await qApp("SELECT kind, content FROM org_memory WHERE memory_id='mem-reject-amount_too_large'");
+    const mem = await qApp("SELECT kind, content FROM org_memory WHERE $1=ANY(source_events)", [r.gestureEventId]);
     expect(mem.rows.length).toBe(1);
     expect(mem.rows[0]!.kind).toBe("preference");
   });

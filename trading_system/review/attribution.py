@@ -54,12 +54,12 @@ def mrs_band(mrs_star) -> str:
 
 
 def exit_type(rec: dict) -> str:
-    """出场类型：结构止损 / 时间止损 / 盈利保护 / 到期 / 作废 / 持仓中。"""
+    """出场类型：结构止损 / 时间止损 / 盈利保护 / 到期 / 作废 / 持仓中 / 待成交。"""
     status = rec.get("status")
     if status == "void":
         return "作废"
     if status == "open":
-        return "持仓中"
+        return "持仓中" if rec.get("entry") is not None else "待成交"
     note = rec.get("note") or ""
     for key, label in _EXIT_TYPES:
         if key in note:

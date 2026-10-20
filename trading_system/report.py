@@ -10,6 +10,65 @@ from . import config
 from .data_models import PipelineResult
 
 
+def _market_name(raw: dict) -> str:
+    """报告市场只能由本轮元数据确定；旧报告缺字段时保留未知。"""
+    market = raw.get("market") or {}
+    return str(market.get("short_name") or
+               {"us": "美股", "cn": "A股", "hk": "港股"}.get(market.get("market_id"))
+               or "市场未知")
+
+
+def _market_currency(raw: dict) -> str:
+    """只展示输入声明的行情币种；不由市场名推断或进行换算。"""
+    return str((raw.get("market") or {}).get("currency") or "币种未知")
+
+
+def _execution_blocked(raw: dict) -> bool:
+    return any((raw.get(key) or {}).get("execution_blocked")
+               for key in ("accounting", "currency_policy"))
+
+
+def _accounting_note(raw: dict) -> str:
+    for key in ("accounting", "currency_policy"):
+        policy = raw.get(key) or {}
+        if policy.get("execution_blocked"):
+            return str(policy.get("reason") or "USD 账户币种边界受阻，交易记账已暂停。")
+    if raw.get("account_currency") or raw.get("currency_policy"):
+        return "账户净值、风险预算与交易账本以 USD 计；原币报价未经汇率换算不得入账。"
+    return ""
+
+
+def _universe_note(raw: dict) -> str:
+    """请求模式、实际列表来源与扫描数量是三个不同的事实。"""
+    modes = {"core": "内置核心池", "extended": "内置扩展池",
+             "full": "请求全量清单", "file": "自定义文件"}
+    sources = {"core": "内置核心池", "extended": "内置扩展池",
+               "embedded": "内置列表", "file": "自定义文件",
+               "nasdaqtrader": "Nasdaq Trader 官方列表", "eastmoney": "东方财富列表",
+               "cache": "缓存列表", "fallback": "降级备选列表"}
+    mode = raw.get("universe_mode")
+    source = raw.get("universe_source")
+    note = (f"股票池模式：{modes.get(mode, mode or '未知')}；"
+            f"清单来源：{sources.get(source, source or '未知')}；"
+            "数量表示本轮扫描池，不代表上市股票全量覆盖")
+    if raw.get("prefilter"):
+        note += f"；预筛记录：{raw['prefilter']}"
+    return note
+
+
+def _freshness_note(raw: dict) -> str:
+    """仅展示已提供的基准日K日期，不把它推广为全部股票的时点。"""
+    freshness = raw.get("freshness") or {}
+    benchmarks = (raw.get("market") or {}).get("benchmarks") or {}
+    label = benchmarks.get("index_label") or benchmarks.get("index") or "基准"
+    latest = freshness.get("benchmark_last_bar")
+    note = (f"基准最新日K：{label} {latest}" if latest else "基准最新日K日期未知")
+    lag = freshness.get("benchmark_lag_days")
+    if lag is not None:
+        note += f"；相对预期交易日滞后 {lag} 个自然日"
+    return note + "；个股时点以各自行情为准"
+
+
 def to_json(result: PipelineResult, out_dir: str = config.REPORTS_DIR) -> str:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     ts = result.trade_date.replace("-", "")
@@ -58,14 +117,23 @@ def render_markdown(r: PipelineResult) -> str:
     mk = r.raw.get("market") or {}
     mk_grad = r.raw.get("market_grad") or {}
     lines: list[str] = []
-    lines.append(f"# AI 短线{mk.get('short_name', '美股')}交易日报 — {r.trade_date}")
+    lines.append(f"# AI 短线{_market_name(r.raw)}交易日报 — {r.trade_date}")
     lines.append("")
     lines.append(f"> 数据源: {r.provider} ｜ 股票池: {r.raw.get('universe_mode')} "
                  f"（覆盖 {r.raw.get('data_coverage')}）｜ 耗时 {r.raw.get('elapsed_s')}s")
+    lines.append(f"> {_universe_note(r.raw)}")
+    lines.append(f"> {_freshness_note(r.raw)}")
+    lines.append(f"> 行情报价币种：{_market_currency(r.raw)}")
+    if _accounting_note(r.raw):
+        lines.append(f"> {_accounting_note(r.raw)}")
     if mk:
         grad_txt = ("标准通道已开放" if mk_grad.get("graduated", True)
                     else f"新市场验证期（{mk_grad.get('settled', 0)}"
                          f"/{mk_grad.get('required', 50)}）·强制轻仓")
+        if _execution_blocked(r.raw):
+            grad_txt = ("毕业条件已满足" if mk_grad.get("graduated", True) else
+                        f"新市场验证期（{mk_grad.get('settled', 0)}"
+                        f"/{mk_grad.get('required', 50)}）·轻仓门槛保留") + "；交易记账已暂停"
         lines.append(f"> 市场: **{mk.get('name')}**（{mk.get('market_id')} ｜ "
                      f"{mk.get('timezone')} ｜ 结算 {mk.get('settlement')} ｜ "
                      f"{mk.get('limit_note')}）｜ 通道状态: {grad_txt}")
@@ -83,7 +151,9 @@ def render_markdown(r: PipelineResult) -> str:
         lines.append(f"3. **主线板块**：{main_txt}" +
                      (f" ｜ 次主线: " + "；".join(f"{s.etf}(SHS {s.shs})" for s in sub_sectors) if sub_sectors else ""))
         lines.append(f"4. **允许交易标的**：{len(r.picks)} 只 → " +
-                     ("、".join(p.ticker for p in r.picks) if r.picks else "无达标标的，等待"))
+                     ("、".join(p.ticker for p in r.picks) if r.picks else
+                      "币种执行边界受阻，仅供研究" if _execution_blocked(r.raw) else
+                      "无达标标的，等待"))
     lines.append("")
     lines.append(f"**系统指令**：`{r.action}` — {r.market_view}")
     lines.append("")
@@ -100,7 +170,7 @@ def render_markdown(r: PipelineResult) -> str:
             score_txt = d.score if d.score is not None else "缺失·已剔除"
             lines.append(f"| {key} | {score_txt} | {detail}{miss} |")
         lines.append("")
-        lines.append(f"MRS_raw={m.mrs_raw} → Δ={m.delta}（五维极差）→ k={m.k} → **MRS*={m.mrs_star}**")
+        lines.append(f"MRS_raw={m.mrs_raw} → Δ={m.delta}（可用维度极差）→ k={m.k} → **MRS*={m.mrs_star}**")
         lines.append("")
 
     # ---- SHS ----
@@ -138,9 +208,9 @@ def render_markdown(r: PipelineResult) -> str:
     # ---- 扫描统计 ----
     ss = r.raw.get("scan_stats", {})
     if ss:
-        lines.append("## 五、全市场扫描（替代硬编码 watchlist）")
+        lines.append("## 五、本轮股票池扫描")
         lines.append("")
-        lines.append(f"- 股票池: {ss.get('universe_size')} 只 → 通过硬过滤: {ss.get('passed')} 只 → 精评候选: {ss.get('selected')} 只")
+        lines.append(f"- 本轮扫描池: {ss.get('universe_size')} 只 → 通过硬过滤: {ss.get('passed')} 只 → 精评候选: {ss.get('selected')} 只")
         rej = ss.get("rejected", {})
         lines.append(f"- 过滤明细: 低价 {rej.get('price', 0)} ｜ 流动性不足 {rej.get('adv', 0)} ｜ "
                      f"历史不足 {rej.get('history', 0)} ｜ 波动病态 {rej.get('atr', 0)} ｜ 无数据 {rej.get('nodata', 0)}")
@@ -225,6 +295,9 @@ def render_markdown(r: PipelineResult) -> str:
             for v in violations:
                 lines.append(f"  - ❌ {v.get('ticker')} {v.get('side')}: "
                              f"{v.get('reason')}（{v.get('rule_id')}）")
+        elif _execution_blocked(r.raw):
+            lines.append(f"  - 本轮市场规则校验 {len(comp)} 笔，未命中违反项；"
+                         "币种边界仍阻止交易记账")
         else:
             lines.append(f"  - 本轮校验 {len(comp)} 笔买入请求，全部放行（无违反项）")
         if not mk_grad.get("graduated", True):

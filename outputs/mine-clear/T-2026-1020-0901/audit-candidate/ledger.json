@@ -1,0 +1,260 @@
+{
+  "schema": "workloom.mine-clear/ledger@1",
+  "task_id": "T-2026-1020-0901",
+  "repo": "workroom-tiger",
+  "repo_path": ".",
+  "title": "候选34de独立整页验收追加问题",
+  "created_at": "2026-10-20T15:12:58.048Z",
+  "updated_at": "2026-10-20T16:31:08.063168+00:00",
+  "baseline": {
+    "audit": {
+      "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+      "branch": "task/T-2026-1020-0901",
+      "remote": "origin",
+      "fetched_at": "2026-10-20T15:12:57.986Z",
+      "fetch_status": "success",
+      "notes": "本地 HEAD 不是 origin/main 最新（云端 5fc58513 / 本地 34de5b08）——按 §1.2 先对齐基线"
+    },
+    "repair": {
+      "commit": null,
+      "reverified_problem_ids": []
+    },
+    "acceptance": {
+      "commit": null,
+      "is_descendant_of_repair": null
+    }
+  },
+  "environment": {
+    "kind": "local-preview",
+    "notes": "Portable audit-only specification; open/not-run is intentional. Actual repair and independent acceptance receipts are separate delivery artifacts."
+  },
+  "invariants": [
+    {
+      "id": "INV-1",
+      "text": "租户边界覆盖数据库 RLS、运行时上下文、事件、缓存和外部连接器。",
+      "source": "AGENTS.md#4.1"
+    },
+    {
+      "id": "INV-2",
+      "text": "经营事件、审批和关键回执只增不改；纠正通过新事件表达，不静默覆盖证据。",
+      "source": "AGENTS.md#4.2"
+    },
+    {
+      "id": "INV-3",
+      "text": "所有外部或变更性动作及其子调用，统一经过权限、PII、围栏和审批链路。",
+      "source": "AGENTS.md#4.3"
+    },
+    {
+      "id": "INV-4",
+      "text": "涉钱、敏感数据、群发、公开发布、交易和破坏性变更必须按高风险处理并由人审批。",
+      "source": "AGENTS.md#4.4"
+    },
+    {
+      "id": "INV-5",
+      "text": "没有真实回执就不能标记完成；mock、模拟和体验模式在数据结构与界面上都要明确区分。",
+      "source": "AGENTS.md#4.5"
+    },
+    {
+      "id": "INV-6",
+      "text": "客户原始经营数据不得上行；蜂群只接受白名单化、最小化、匿名化且可审计的元数据或派生经验。",
+      "source": "AGENTS.md#4.6"
+    },
+    {
+      "id": "INV-7",
+      "text": "租户覆盖层只能收紧围栏，不能放宽平台不可变红线。",
+      "source": "AGENTS.md#4.7"
+    },
+    {
+      "id": "INV-8",
+      "text": "模型、提示词、技能、bundle、策略和热更新必须先评测再灰度，且始终可回滚。",
+      "source": "AGENTS.md#4.8"
+    },
+    {
+      "id": "INV-9",
+      "text": "platform-ops、平台账户运营和平台秘密只属于 Andromeda。",
+      "source": "AGENTS.md#4.9"
+    },
+    {
+      "id": "INV-10",
+      "text": "Tiger 在获得单独的合规审查和用户明确授权前，只能模拟或纸面交易。",
+      "source": "AGENTS.md#4.10"
+    },
+    {
+      "id": "INV-11",
+      "text": "令牌、密码、API key、私钥、客户凭证和私密客户数据不得进入源码、文档、上下文、提示词、日志或提交。",
+      "source": "AGENTS.md#4.11"
+    },
+    {
+      "id": "INV-12",
+      "text": "个性化与行业扩展不得形成公共机制的第二事实源。",
+      "source": "AGENTS.md#4.12"
+    }
+  ],
+  "cards": [
+    {
+      "id": "MC-036",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 3,
+      "state": "open",
+      "title": "体验观察器等待未结束响应体而阻断旅程收尾与报告写出",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/scripts/acceptance/experience.mjs:169@34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+          "sha256": "8cb9be7800d80b3e702bbaff6260828f91fd263671e886ce096da7002066643d",
+          "note": "A: fully read 854-line experience collector and direct dependencies. response.json has no body-read deadline and stop awaits all pending bodies; the error path silently replaces any failure with null."
+        },
+        {
+          "type": "receipt",
+          "ref": "evidence/audit/MC036/01-independent-experience.json",
+          "sha256": "28cc1047db05509ff3991419000b16b8ed5b6bd12c9020b6dda3eb19d5242aa1",
+          "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+          "note": "B: independent actual run 2026-10-20T14:34:37.517Z to 15:04:38.102Z reached its pre-existing 30-minute ETIMEDOUT, exit1; experience-report.json absent. Original run was not interrupted early."
+        },
+        {
+          "type": "receipt",
+          "ref": "evidence/audit/MC036/02-experience-pending-diagnostic-3.json",
+          "sha256": "78d7b27a261a6e957e53d05a309d633732aaa766d297584fde43661f93b60f26",
+          "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+          "note": "B: read-only Node protocol metadata shows sole call@94 Response.body at line169, timeout0; finite JSON HTTP200 captain.theater,captain.chairmanQueue, content-length16007, responseEnd-1."
+        },
+        {
+          "type": "receipt",
+          "ref": "evidence/audit/MC036/03-readback.json",
+          "sha256": "e66081e6d4844b3c4d4f1351b828fa43db72e46c850a0c7aa8ab60a757547f77",
+          "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+          "note": "B: subsequent independent database readback passed 4/4, including one actual approve gesture persisted at14:34:48.360Z. The finished UI action is distinct from the failed observer/report completion."
+        }
+      ],
+      "root_cause": {
+        "file": "governance/scripts/acceptance/experience.mjs",
+        "line": 169,
+        "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+        "symbol": "observe onResponse response.json and stop Promise.all(pending)"
+      },
+      "trigger_path": "同一旅程观察到一个已收HTTP头但JSON响应体永不结束的后台或关键请求；UI动作和页面判据已执行，finally中的stop仍无限等待，最终整段体验进程达到30分钟超时，报告未写出。原始实测为审批页后台captain批量查询，并非已证实SSE或GPU原因。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "原有8秒响应等待预算；真实本地HTTP部分JSON响应与Chrome；正常/批量/聊天、后台及关键请求不结束、非法JSON、读取拒绝、导航失败、页面关闭、迟到resolve/reject与下一旅程。",
+          "expect": "每个响应读取至多占用原8秒预算，stop使用剩余时间并可靠收尾；失败以脱敏code留证，不能制造成功响应或污染下一旅程；真实审批完整时仍通过，关键审批响应缺失或无效时保持不通过，所有情况下写出最终报告。",
+          "command": "node --test governance/scripts/acceptance/lib/response-observer.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/response-observer.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "原MC031纯判据与真实CLI浏览器正负夹具，业务判据和阈值未更改；夹具复制新增观察模块。",
+          "expect": "既有对象、输入、身份、可见回执和业务成功判定全部保持；欺骗、失配、旧回执和无效交互仍被拒绝。",
+          "command": "node --test governance/scripts/acceptance/lib/ui-evidence.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/ui-evidence.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "抽离同一观察器为有界response-observer模块；单请求只结算一次，8秒超时与requestfailed/pageclose记录明确失败；stop解除新事件后只等待已有读取的剩余预算；迟到结果有成功/拒绝处理但不能改证据。体验报告按旅程保留读取诊断，继续使用原业务判据，不因无关后台失败自动推翻已证实业务结果。",
+      "rollback": "普通revert本卡四文件及对应CI登记提交，重跑原MC031回归；没有数据库、模型、外部动作或业务策略状态迁移。",
+      "conflict_paths": [
+        "governance/scripts/acceptance/experience.mjs",
+        "governance/scripts/acceptance/lib/response-observer.mjs",
+        "governance/scripts/acceptance/lib/response-observer.test.mjs",
+        "governance/scripts/acceptance/lib/ui-evidence.test.mjs"
+      ],
+      "blast_radius": "仅体验验收观察和证据收尾；不改变页面UI、产品请求、不取消网络动作、不放宽业务成功判据和阈值、不增加重试，不影响交易策略或权限。根scripts/acceptance/experience.mjs与CI/client来源清单由父会话控制且本卡不修改。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/response-observer.test.mjs governance/scripts/acceptance/lib/ui-evidence.test.mjs"
+      },
+      "notes": "新缺陷的审计基线为34de5b08；旧5fc审计台账不倒填。receipt路径当前相对于outputs/tiger-audit/MC036，注入其他phase时应重新计算相对路径或复制原始证据并保持SHA。正式独立验收需由未参与本卡修复的角色执行。 Root packaging: original audit receipts copied byte-for-byte into this ledger evidence/audit/MC036; original paths and copy bindings retained in MC036-audit-copy-bindings.json. No audit commit or result changed.",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    },
+    {
+      "id": "MC-037",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 3,
+      "state": "open",
+      "title": "页内状态横幅与助手使用同一层级，后绘制横幅遮挡助手及提醒操作",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/SimBanner.tsx:78@34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+          "sha256": "69a2378681ed5be11b10b2c5b572d53722328dbe8bebabaeb2868f7c787039f3",
+          "note": "A: 全文精读 SimBanner 108 行；三个显示分支均使用 relative z-30，与真实 LoomMate assistant token 30 同层。App 先挂 LoomMate 后挂 page-host 内的 P8/Bridge 与 P0，后者横幅在相同层级中后绘制。"
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/SkillDistBanner.tsx:66@34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+          "sha256": "2c72b9a5cf4a769c3aad4771aa89a624e935330aff3b8446f2ac933b7f206239",
+          "note": "A: 全文精读 SkillDistBanner 105 行；待审批和已加载两分支具有同一 relative z-30 层级原因，需要同卡修复。"
+        },
+        {
+          "type": "ui",
+          "ref": "evidence/audit/MC037-original-loommate-inspection.json",
+          "note": "B: 独立真实本地应用 /agents 在390x360普通指针trial被行业示例横幅拦截20秒。对应截图已人工查看(C)。此前准备笔记将路径写为/members，现依据原观察器第280行更正为/agents；原证据未删除。其他三处axe bgOverlap为未验证，不作为已证实色值失败。",
+          "sha256": "9c7adc461b46b53222b0786fbce38e84a861df40175bf8958cf2927523e5699b",
+          "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20"
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/components/SimBanner.tsx",
+        "line": 78,
+        "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+        "symbol": "SimBanner and SkillDistBanner inline relative z-30 roots"
+      },
+      "trigger_path": "真实 main/App 的 /agents→P8→Bridge 和 /→P0 将状态横幅绘制在较早挂载的 LoomMate 之后；横幅与助手同为层级30，窄短视口中两者重叠时横幅挡住助手及通知。原5fc基线已包含此同层设置，当前问题不得称为MC035引入的回归。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实main/App与生产CSS；/agents、/两处横幅挂载；示例/配置警示/查询错误/技能待审批/技能更新五分支；桌面与移动和短高视口；明确本地HTTP夹具、普通鼠标和连续Tab/方向键；真实P30预览Modal及移动导航。",
+          "expect": "真实交集处的助手接收普通指针；mini展开、对话打开/关闭、连续Tab与键盘、通知稍后和更高优先级Modal实际可用；失败恢复、当日关闭重载、权限拒绝及无横向溢出通过。原axe结果原样保留：仅bgOverlap可单列unverified，绝不计入contrastPassed；其他incomplete、实际violations或空评估仍失败。MC034独立严格正向对比度回归必须通过。",
+          "command": "node --test governance/scripts/acceptance/lib/loommate-stacking.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/loommate-stacking.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "修复已实施：SimBanner第66/78/95行及SkillDistBanner第66/84行五处z-30改为z-10。最终同字节40场景红绿对照为25个横幅拦截失败→40场景通过；原MC03424场景、MC03554场景及web类型检查通过。真实App的16个bgOverlap仍为未验证，完整保留，未修改LoomMate/颜色/renderer/token以迎合检查器。",
+      "rollback": "普通revert本卡两处banner文件和新增回归测试登记；不涉及数据库或外部状态；保留之前各卡修复。",
+      "conflict_paths": [
+        "governance/apps/web/src/components/SimBanner.tsx",
+        "governance/apps/web/src/components/SkillDistBanner.tsx",
+        "governance/scripts/acceptance/lib/loommate-stacking.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "只调整两类页内状态横幅的绘制层级；LoomMate、StarRing、基座token及既有状态语义不变，不新增真实模型、通知、交易或权限操作。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/loommate-stacking.test.mjs"
+      },
+      "notes": "补充审计基线34de5b08，与MC036同属补充审计；原35卡5fc审计不重写。修复actor /root/resume_mc037，前置准备actor /root/fix_loommate_stacking；root负责CI/provenance/提交。源码三文件已冻结；浏览器/端口已归还。此文件是卡草稿：open仅表示尚未由root绑定候选提交及正式assertion run/evidence，本地修复工作已完成而独立验收尚待执行。不得将本地HTTP夹具称为真实后端或生产。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    }
+  ],
+  "gates": []
+}

@@ -360,20 +360,22 @@ export default function P6() {
             {/* P6E1 AwarenessBanner：主建议卡 + 待确认折叠（组件口径：横幅单卡带「待确认 N 条」计数） */}
             {suggestions.length > 0 && (
               <div className="mb-3 rounded-lg border border-holo/35 bg-card px-4 py-3">
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
                   <Icon name="agents" size={18} />
-                  <div className="flex-1">
-                    <b className="text-body text-ink">AI 副官建议</b>
-                    {suggestions.length > 1 && (
-                      <span className="ml-2 rounded border border-holo/40 px-1.5 py-0.5 text-body text-holo">待确认 {suggestions.length} 条</span>
-                    )}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <b className="whitespace-nowrap text-body text-ink">AI 副官建议</b>
+                      {suggestions.length > 1 && (
+                        <span className="whitespace-nowrap rounded border border-holo/40 px-1.5 py-0.5 text-body text-holo">待确认 {suggestions.length} 条</span>
+                      )}
+                    </div>
                     <div className="mt-0.5 text-body text-ink2">
                       检测到高频任务：「{suggestionActionText(suggestions[0]!.actionCategory)}（{suggestionObjectText(suggestions[0]!.objectType)}）」近 {suggestions[0]!.windowDays} 天共 <b className="text-holo">{suggestions[0]!.count}</b> 次
                       （每周达到 {suggestions[0]!.threshold} 次时生成建议{suggestions[0]!.threshold > 3 ? "；频率已根据历史驳回结果调整" : ""}）
                     </div>
                   </div>
                   {canManage && (
-                    <div className="wl-action-row flex flex-wrap gap-2">
+                    <div className="wl-action-row col-span-2 flex flex-wrap gap-2">
                       <button
                         type="button"
                         disabled={busy === `sug-${suggestions[0]!.key}`}
@@ -402,19 +404,19 @@ export default function P6() {
                 </div>
                 {/* 其余待确认建议（紧凑行；同三手势） */}
                 {suggestions.slice(1).map((s) => (
-                  <div key={s.key} className="mt-2 flex items-center gap-2.5 border-t border-line/60 pt-2 text-body">
-                    <span className="flex-1 text-ink2">
+                  <div key={s.key} className="mt-2 grid gap-2.5 border-t border-line/60 pt-2 text-body">
+                    <span className="text-ink2">
                       「{suggestionActionText(s.actionCategory)}（{suggestionObjectText(s.objectType)}）」共 <b className="text-holo">{s.count}</b> 次，统计周期 {s.windowDays} 天
                     </span>
                     {canManage && (
-                      <>
+                      <div className="flex flex-wrap gap-2.5">
                         <button type="button" disabled={busy === `sug-${s.key}`} onClick={() => void confirmTrigger(s)}
                           className="cursor-pointer rounded border border-gline px-2 py-0.5 text-body font-bold text-goldhi hover:border-gold/60 disabled:opacity-40"><Icon name="lightning" size={13} className="inline" /> 固化</button>
                         <button type="button" onClick={() => nav("/skills/create", { state: { name: suggestionActionText(s.actionCategory), trigger: `出现「${suggestionObjectText(s.objectType)}」类 ${suggestionActionText(s.actionCategory)} 任务时（高频样本 ${s.count} 次）`, fromSuggestion: s.key } })}
                           className="cursor-pointer rounded border border-line px-2 py-0.5 text-body text-ink2 hover:border-gline"><Icon name="customize" size={13} className="inline" /> 草稿</button>
                         <button type="button" disabled={busy === `sug-${s.key}`} onClick={() => void rejectSug(s)}
                           className="cursor-pointer rounded border border-line px-2 py-0.5 text-body text-ink3 hover:border-alert/40 hover:text-alert disabled:opacity-40">驳回</button>
-                      </>
+                      </div>
                     )}
                   </div>
                 ))}

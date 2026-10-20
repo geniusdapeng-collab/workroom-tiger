@@ -4,7 +4,7 @@
 索引为日期，列名为 Open/High/Low/Close/Volume。
 
 yield 类数据（TNX）统一约定为【百分数收益率】（如 4.25 表示 4.25%），
-由 provider 负责单位还原（Yahoo ^TNX 为收益率×10）。
+由 provider 按上游实际单位归一化；Yahoo ^TNX Close 已是百分数。
 """
 
 from __future__ import annotations

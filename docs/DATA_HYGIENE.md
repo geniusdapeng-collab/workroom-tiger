@@ -59,7 +59,7 @@
 | **eastmoney（v6.2）** | 东财 push2his/push2(delay) 免费接口 | 按公开契约实现；K 线端点 available() 环境自适应，fqt=1 服务端前复权 |
 | **agentgw（根修）** | **agent-gw 服务端转发 yahoo_finance 数据源** | **不经本地出口，已实证全链路独立跑通** |
 | ifind_gw | agent-gw 服务端转发同花顺 iFinD | 个股主力，指数/ETF 覆盖不稳定 |
-| tiingo | 官方 REST（需 TIINGO_API_KEY） | 可选强化环 |
+| tiingo | 官方 REST（需 TIINGO_API_KEY） | 使用源端完整复权 OHLCV；实际额度与可用性以账户套餐为准 |
 
 降级链（v6.2 七环制）：yahoo → stooq → tencent → sina → eastmoney →
 agentgw → ifind_gw → tiingo；全败 → 硬依赖（SPY/TNX/VIX）立即中止
@@ -67,6 +67,13 @@ agentgw → ifind_gw → tiingo；全败 → 硬依赖（SPY/TNX/VIX）立即中
 注：新浪/腾讯美股 K 线为未复权原始价，provider 内置拆股/并股检测 +
 自动前复权（整数倍比例 ±6% 容差，事件记日志披露）——未复权数据直接
 进指标 = 拆股日假暴跌，属"看着正常实际是错的"数据造假。
+
+Tiingo 按[官方 EOD 字段契约](https://www.tiingo.com/documentation/end-of-day)
+统一采用 `adjOpen/adjHigh/adjLow/adjClose/adjVolume`，复权由源端处理拆股与分红。
+任一行缺少复权字段、价量非有限或价格非正、成交量为负、OHLC 范围不一致、
+日期无效或重复时，整标的取数失败；不会用原始字段补洞、猜测复权比例或静默删行。
+只有整批验证成功后才更新进程内缓存，读取副本避免调用方修改污染后续指标。
+该契约由合成公司行动夹具回归验证；认证接口的实时可用性仍需有效账户验证。
 
 ## 六、S3 数据层新缓存的清除口径（v3 小节，v6.3 S3）
 

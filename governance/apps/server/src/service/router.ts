@@ -9,7 +9,10 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router, scopeOf, writeProcedure } from "../trpc/context.js";
+import {
+  navigationPermissionProcedure, navigationPermissionWriteProcedure,
+  protectedProcedure, router, scopeOf, writeProcedure,
+} from "../trpc/context.js";
 import {
   createCollectionOn, listCollections, listDocuments, setDocumentStatusOn, upsertDocumentOn,
   registerSiteSourceOn, crawlAndStructure, diffScan, searchKB,
@@ -20,7 +23,7 @@ import { appendEventOn, serviceTx, svcQuery } from "./events.js";
 import { llmCall } from "./llm.js";
 import { ensureServiceSchema } from "./store.js";
 import {
-  activeInstall, clearBundle, clearPreview, generateStaffing,
+  activeInstall, clearBundle, clearPreview, confirmAndAssembleStaffing, customizationStatus, generateStaffing,
   onboardingExam, rollbackSnapshot,
 } from "./bundle.js";
 import {
@@ -447,6 +450,10 @@ const bundleRouter = router({
   activeInstall: protectedProcedure.query(async ({ ctx }) => {
     return { install: await activeInstall(scopeOf(ctx.identity).workspaceId) };
   }),
+  /** 刷新后从当前工作区的服务端事实恢复定制进度。 */
+  customizationStatus: protectedProcedure.query(async ({ ctx }) => {
+    return customizationStatus(scopeOf(ctx.identity).workspaceId);
+  }),
   /** 清空预览（明示范围：将卸什么/将留什么） */
   clearPreview: protectedProcedure.query(async ({ ctx }) => {
     return clearPreview(scopeOf(ctx.identity).workspaceId);
@@ -465,12 +472,20 @@ const bundleRouter = router({
   generateStaffing: writeProcedure
     .input(z.object({ industryText: z.string().min(4).max(2000) }))
     .mutation(async ({ ctx, input }) => {
-      return generateStaffing(scopeOf(ctx.identity).workspaceId, input.industryText);
+      return generateStaffing(scopeOf(ctx.identity).workspaceId, input.industryText, { id: ctx.identity.memberNo, type: "human" });
+    }),
+  /** 人审确认精确草案指纹，只创建停用候选装配。 */
+  confirmAndAssembleStaffing: writeProcedure
+    .input(z.object({ draftId: z.string().min(1), expectedDraftHash: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      return confirmAndAssembleStaffing(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 上岗考（exam 门禁：达标才 activated） */
-  onboardingExam: writeProcedure.mutation(async ({ ctx }) => {
-    return onboardingExam(scopeOf(ctx.identity).workspaceId);
-  }),
+  onboardingExam: writeProcedure
+    .input(z.object({ installId: z.string().min(1), expectedAssemblyHash: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      return onboardingExam(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
+    }),
 });
 
 /**
@@ -479,15 +494,15 @@ const bundleRouter = router({
  */
 const devtoolsRouter = router({
   /** 设备台账（含未安装适配器的指引——真运行态纪律） */
-  tools: protectedProcedure.query(async ({ ctx }) => {
+  tools: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListTools(scopeOf(ctx.identity).workspaceId);
   }),
   /** 重新探测本机机床（PATH 扫描+版本握手） */
-  refreshTools: writeProcedure.mutation(async ({ ctx }) => {
+  refreshTools: navigationPermissionWriteProcedure("ai-pm.development.read").mutation(async ({ ctx }) => {
     return devRefreshTools(scopeOf(ctx.identity).workspaceId, { id: ctx.identity.memberNo, type: "human" });
   }),
   /** 客户自行接入新机床（声明式标准协议 YAML 落盘+热加载） */
-  addCustomTool: writeProcedure
+  addCustomTool: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({
       tool_key: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
       display_name: z.string().min(1).max(100),
@@ -507,10 +522,10 @@ const devtoolsRouter = router({
       return devSaveCustomTool(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 仓库白名单 */
-  repos: protectedProcedure.query(async ({ ctx }) => {
+  repos: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListRepos(scopeOf(ctx.identity).workspaceId);
   }),
-  registerRepo: writeProcedure
+  registerRepo: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({
       name: z.string().min(1).max(100), path: z.string().min(1).max(500),
       baselineBranch: z.string().max(100).optional(), allowedDirs: z.array(z.string()).max(20).optional(),
@@ -518,16 +533,16 @@ const devtoolsRouter = router({
     .mutation(async ({ ctx, input }) => {
       return devRegisterRepo(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
-  setRepoStatus: writeProcedure
+  setRepoStatus: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ repoId: z.string(), status: z.enum(["active", "disabled"]) }))
     .mutation(async ({ ctx, input }) => {
       return devSetRepoStatus(scopeOf(ctx.identity).workspaceId, input.repoId, input.status, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 任务单（S2） */
-  tasks: protectedProcedure.query(async ({ ctx }) => {
+  tasks: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListTasks(scopeOf(ctx.identity).workspaceId);
   }),
-  createTask: writeProcedure
+  createTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({
       prdRef: z.string().max(300).optional(), repoId: z.string(),
       title: z.string().min(1).max(200), prdSummary: z.string().min(1).max(8000),
@@ -540,48 +555,48 @@ const devtoolsRouter = router({
       return devCreateTask(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S2 拆解确认（确认才进 S3） */
-  confirmTask: writeProcedure
+  confirmTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return devConfirmTask(scopeOf(ctx.identity).workspaceId, input.taskId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S3 派发（异步：立即返回 sessionId，会话后台跑） */
-  dispatchTask: writeProcedure
+  dispatchTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return devDispatchTask(scopeOf(ctx.identity).workspaceId, input.taskId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S5 打回（一句话意见回灌重排） */
-  rejectTask: writeProcedure
+  rejectTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string(), note: z.string().min(1).max(1000) }))
     .mutation(async ({ ctx, input }) => {
       return devRejectTask(scopeOf(ctx.identity).workspaceId, input.taskId, input.note, { id: ctx.identity.memberNo, type: "human" });
     }),
-  cancelTask: writeProcedure
+  cancelTask: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return devCancelTask(scopeOf(ctx.identity).workspaceId, input.taskId, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** S5 批准 → S6 版本台账（合并/tag/changelog/release 一气落库） */
-  approveRelease: writeProcedure
+  approveRelease: navigationPermissionWriteProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string(), version: z.string().max(40).optional(), changelog: z.string().max(4000).optional() }))
     .mutation(async ({ ctx, input }) => {
       return devApproveRelease(scopeOf(ctx.identity).workspaceId, input.taskId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 任务详情（会话/变更集/围栏留痕） */
-  taskDetail: protectedProcedure
+  taskDetail: navigationPermissionProcedure("ai-pm.development.read")
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {
       return devTaskDetail(scopeOf(ctx.identity).workspaceId, input.taskId);
     }),
   /** 会话事件流（增量轮询） */
-  sessionEvents: protectedProcedure
+  sessionEvents: navigationPermissionProcedure("ai-pm.development.read")
     .input(z.object({ sessionId: z.string(), afterSeq: z.number().int().min(0).default(0) }))
     .query(async ({ ctx, input }) => {
       return devSessionEvents(scopeOf(ctx.identity).workspaceId, input.sessionId, input.afterSeq);
     }),
   /** 版本台账（时间线） */
-  releases: protectedProcedure.query(async ({ ctx }) => {
+  releases: navigationPermissionProcedure("ai-pm.development.read").query(async ({ ctx }) => {
     return devListReleases(scopeOf(ctx.identity).workspaceId);
   }),
 });

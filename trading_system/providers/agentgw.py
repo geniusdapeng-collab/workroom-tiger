@@ -102,7 +102,7 @@ class AgentGwProvider(DataProvider):
                     if df is not None and len(df):
                         out[t] = df
                 except Exception as e:
-                    log.info("agentgw 拉取 %s 失败: %s", t, e)
+                    log.info("agentgw.ohlcv_batch 拉取 %s 失败（%s）", t, type(e).__name__)
                 if time.time() - started > self.batch_budget_s:
                     break
         except Exception:
@@ -116,8 +116,8 @@ class AgentGwProvider(DataProvider):
 
     def tnx_yield(self, days: int = 400) -> pd.Series:
         s = self._fetch("^TNX", days)["Close"].dropna()
-        # 单位自适配：Yahoo 原始 ^TNX 为收益率×10（42.5=4.25%）；
-        # 服务端通道已实测返回真实收益率（4.62）。>20 判定为×10 口径。
+        # 保留网关历史口径兼容：部分通道曾返回收益率×10（42.5=4.25%）；
+        # Yahoo/yfinance 直接返回百分数。此处仅对网关 >20 的旧口径还原。
         if len(s) and float(s.median()) > 20.0:
             s = s / 10.0
         return s

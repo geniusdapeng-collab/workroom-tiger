@@ -1,0 +1,17 @@
+{
+  "actor": "/root/fix_task_notification_interception",
+  "suite": "mc039",
+  "argv": [
+    "/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "--test",
+    "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/workroom-tiger/governance/scripts/acceptance/lib/task-notification-interception.test.mjs"
+  ],
+  "cwd": "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/workroom-tiger",
+  "head": "e750605583a4b41bce459ec97215c8cfdddfec91",
+  "startedAt": "2026-10-20T17:23:33.688290+00:00",
+  "runnerSha256": "3c796d9f309b9d61b933196513fc2cb9c68a5e303ff9cd8145e332a2f0878ae2",
+  "exitCode": 1,
+  "finishedAt": "2026-10-20T17:24:47.517909+00:00",
+  "runnerStable": true,
+  "logSha256": "7931623152523d53e499aab864d21a44a063e34000702aa636fe50c7f96d9565"
+}

@@ -1,0 +1,35 @@
+{
+  "kind": "portable-audit-specification",
+  "sourceLedgerSha256": "c65475424d7f7bd9f47621225b0b4dcb22bd95056a492aca1e3b8a5973aa8e9c",
+  "sourceLedger": "outputs/tiger-audit/supplemental-audit-e750605/ledger.json",
+  "auditCommit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+  "cards": [
+    "MC-038",
+    "MC-039",
+    "MC-040"
+  ],
+  "executed": false,
+  "normalization": "node/python3/pnpm resolved by the user's prepared environment",
+  "copiedAuditArtifacts": [
+    {
+      "path": "audit-evidence/mc038-red-receipt.json",
+      "sha256": "934bb383b887033c4d5c73e42a3f7106dd7621a5973ef89acc929fca8a094146"
+    },
+    {
+      "path": "audit-evidence/mc039-red-receipt.json",
+      "sha256": "04c327a4a02d9a1a0e91e4db5d8d027325e90b1ae229533720923991091853dc"
+    },
+    {
+      "path": "audit-evidence/mc039-red-process.json",
+      "sha256": "7408129c8ffb840e4d567b52e533b3c4582bef6662173e25e9d2bd72d99d9fb1"
+    },
+    {
+      "path": "audit-evidence/mc040-routes.json",
+      "sha256": "89a95c7ab54731b97456a3569349dd5f745af1e361e577b915d5514330281a03"
+    }
+  ],
+  "portableExecutables": [
+    "node"
+  ],
+  "assertions": 3
+}

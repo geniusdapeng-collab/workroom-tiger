@@ -1,0 +1,803 @@
+{
+  "schema": "tiger.independent-visual-routes/v1",
+  "actor": "/root/resume_independent_acceptance",
+  "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+  "startedAt": "2026-10-20T17:00:44.713Z",
+  "routes": [
+    {
+      "surface": "pc",
+      "route": "/",
+      "index": 1,
+      "screenshot": "01-pc-home.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 962,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\nAI 助手\n正在协助：经营首页\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n老虎交易工作台\n经营主页 · 公司负责人\n职场\n舞台\n影子模式\n已自主完成\n125\n项作业\n待您拍板\n0\n项\n团队在岗\n37\n人\n视听\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n总部办公区\n·\n0 工作中\n·\n0 请您定\n·\n37 待命\n悬停看岗位 · 点员工派活 · 点举手者审批 · 拖任务卡到员工身上\n任务卡 →\n查看盘前研究\n复核风险提示\n检查模拟组合\n阅读归因复盘\n昨夜班组运行正常，今日请指示。\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n问询应答 · 归因分析师\n问询应答 · 归因分析师\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n问询应答 · 归因分析师\n问询应答 · 归因分析师\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n问询应答 · 归因分析师\n问询应答 · 归因分析师\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n问询应答 · 归因分析师\n问询应答 · 归因分析师\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n问询应答 · 归因分析师\n问询应答 · 归因分析师\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n问询应答 · 归因分析师\n问询应答 · 归因分析师\n外发消息 · IM 渠道\n公司负责人晨报 · 公司负责人\n今日怎么样\n批一下请示\n昨夜夜班汇报\n发送\n团队全员就位\n向您报到，老板\n跳过开场，直接进入 \n欢迎老板 · 首次开启\n您的专属 AI 智能经营系统 —— 全体员工列队欢迎",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": [
+          {
+            "url": "http://127.0.0.1:3020/trpc/onboarding.saveWelcomeProgress",
+            "at": "2026-10-20T17:00:47.447Z"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/tasks",
+      "index": 2,
+      "screenshot": "02-pc-tasks.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 1881,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：任务中心\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n昨夜经营有什么异常\n今天优先级最高的三件事\n发送\n企业数字员工即时协作 · B 端工作台\n会话\n上下文\n专业版\n夜班 · 已就绪 22:00 出征\n紧急制动\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n任务会话\n任务线程 · 最多 10 项并行\n任务 ···446\n2/2\n生成一份本周运行复盘，并列出三项下一步任务\n任务 ···445\n0/0\n请问现在有哪些事项需要我决定？\n任务 ···444\n0/0\n请问当前工作区最近有哪些关键进展？\n任务 ···368\n2/2\n生成一份本周运行复盘，并列出三项下一步任务\n任务 ···367\n0/0\n请问现在有哪些事项需要我决定？\n任务 ···366\n0/0\n请问当前工作区最近有哪些关键进展？\n任务 ···280\n2/2\n生成一份本周运行复盘，并列出三项下一步任务\n任务 ···279\n0/0\n请问现在有哪些事项需要我决定？\n任务 ···278\n0/0\n请问当前工作区最近有哪些关键进展？\n任务 ···192\n2/2\n为下周三的客房促销活动写一条发布计划，本周五前交付\n任务 ···191\n2/2\n生成一份本周运行复盘，并列出三项下一步任务\n任务 ···190\n0/0\n请问现在有哪些事项需要我决定？\n任务 ···189\n0/0\n请问当前工作区最近有哪些关键进展？\n任务 ···188\n2/2\n生成一份本周运行复盘，并列出三项下一步任务\n任务 ···187\n0/0\n请问现在有哪些事项需要我决定？\n任务 ···186\n0/0\n请问当前工作区最近有哪些关键进展？\n工作台 · 总览\n 积分账本与加油包（三池余额 / 消耗流水）\n01:00 · 老虎交易工作台 · 投资者 已上线\n夜班中心尚未出征\n开启夜班后，明早 08:30 日报送达\n进行中任务\n0 项\n截至 01:00\n待人工决策\n0 项\n截至 01:00\n巡检正常项\n0/0\n截至 01:00\n可用数字员工\n37 位\n截至 01:00\n昨夜一切正常，雷达全域清净\n系统成员\n尾号 446\n已生效\n主线任务\n生成一份本周运行复盘，并列出三项下一步任务（进度 2/2）\n 归因分析师\n 系统成员\n 空方研究员\n 多方研究员\n 校准官\n 产业链周期官\n主线任务\n闲聊\n夜班\n启航\n老虎交易工作台\n阶段：信息待确认",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "企业数字员工即时协作 · B 端工作台",
+          "工作台 · 总览"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+          "Error: <path> attribute d: Expected number, \"…-1 0 1 1 3-1 6-3l-6 6-4-2z\"."
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      },
+      "dispatchDiagnostic": {
+        "businessSubmit": false,
+        "filled": true,
+        "trialClick": "failed",
+        "buttonCount": 1,
+        "buttonEnabled": true,
+        "geometry": {
+          "rect": {
+            "left": 996,
+            "right": 1074,
+            "top": 872.625,
+            "bottom": 907.515625
+          },
+          "text": "启航 ",
+          "disabled": false,
+          "hits": [
+            {
+              "tag": "DIV",
+              "text": "任务完成啦稍后「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。看成品任务完成啦稍后「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。看成品任务完成啦稍后「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取",
+              "className": "flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end",
+              "targetOrDescendant": false
+            },
+            {
+              "tag": "SPAN",
+              "text": "启航",
+              "className": "relative z-10 inline-flex items-center gap-1",
+              "targetOrDescendant": true
+            },
+            {
+              "tag": "BUTTON",
+              "text": "启航",
+              "className": "relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none",
+              "targetOrDescendant": true
+            },
+            {
+              "tag": "DIV",
+              "text": "主线任务闲聊夜班启航",
+              "className": "flex flex-wrap items-center gap-3",
+              "targetOrDescendant": false
+            },
+            {
+              "tag": "DIV",
+              "text": "主线任务闲聊夜班启航 老虎交易工作台阶段：信息待确认",
+              "className": "rounded-msg border border-gline bg-card p-3 shadow-[0_0_30px_rgba(255,160,60,.10)]",
+              "targetOrDescendant": false
+            },
+            {
+              "tag": "DIV",
+              "text": "归因分析师 系统成员 空方研究员 多方研究员 校准官 产业链周期官主线任务闲聊夜班启航 老虎交易工作台阶段：信息待确认",
+              "className": "mt-4 space-y-2",
+              "targetOrDescendant": false
+            }
+          ]
+        },
+        "error": "TimeoutError: locator.click: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^启航/ }).first()\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" class=\"relative cursor-pointer overflow-hidden rounded-lg gold-grad px-4 py-2 text-body font-black text-ongold shadow-[0_0_18px_rgba(255,160,60,.45)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none\">…</button>\u001b[22m\n\u001b[2m  - attempting click action (trial run)\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    3 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m      - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action (trial run)\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - <div class=\"wl-action-row mt-2 flex flex-wrap gap-1.5\">…</div> from <div data-wl-surface-modal=\"false\" data-wl-managed-surface=\"assistant-companion\" class=\"flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 items-end\">…</div> subtree intercepts pointer events\u001b[22m\n\u001b[2m  - retrying click action (trial run)\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n"
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/approvals",
+      "index": 3,
+      "screenshot": "03-pc-approvals.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 900,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：审批中心\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n企业数字员工即时协作 · B 端工作台\n会话\n上下文\n专业版\n夜班 · 已就绪 22:00 出征\n紧急制动\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n待办收件箱\n今日已审\n采纳 3 · 编辑后采纳 0 · 驳回 0\n驳回原因会用于后续提案校准\n审批中心\n今日待办消息已清空\n\n手势统计：采纳 3 · 编辑后采纳 0 · 驳回 0",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "企业数字员工即时协作 · B 端工作台",
+          "审批中心"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/reports",
+      "index": 4,
+      "screenshot": "04-pc-reports.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 900,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：经营报告\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n掌上日报\n夜班交接\n夜班中心尚未出征\n\n前往规则与权限配置夜班，明早 08:30 日报送达。\n\n去配置 →",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/guardrails",
+      "index": 5,
+      "screenshot": "05-pc-guardrails.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 1741,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n安全规则\n事件账本\n上岗考试\n组织经验\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：安全规则\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n企业数字员工即时协作 · B 端工作台\n会话\n上下文\n专业版\n夜班 · 已就绪 22:00 出征\n紧急制动\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n规则版本记录\n第 1 版\n运行中\n19 条规则\n生效范围\n本店规则 3 条 + 基线 16 条\n集团强制\n安全基线只可加严，不可被工作区规则放宽。\n规则与权限\n···1 未命名规则\n当前工作区 · 第 1 版 · 系统操作\n人工复核\n0\n30 天触发\n···2 单票上限收紧示例（20%→15%）\n当前工作区 · 第 1 版 · 系统操作、调整\n人工复核\n0\n30 天触发\n···3 每日新开仓笔数上限示例\n当前工作区 · 第 1 版 · 系统操作\n人工复核\n0\n30 天触发\n···0 编排自治动作（模拟盘阶段）\n当前工作区 · 第 1 版 · 系统操作、系统操作、系统操作、发布、系统操作、系统操作、系统操作\n自动放行\n0\n30 天触发\n···1 结构/时间止损触及必执行\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···10 未命名规则\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···11 未命名规则\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···12 轻仓通道仓位未×0.30–0.40\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···13 未命名规则\n当前工作区 · 第 1 版 · 系统操作、调整\n硬阻断\n0\n30 天触发\n···14 数据硬依赖全断仍产出报告\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···15 全链路环节缺失\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···2 未命名规则\n当前工作区 · 第 1 版 · 系统操作、系统操作\n硬阻断\n0\n30 天触发\n···3 标准开仓三分数联动不满足\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···4 轻仓通道门槛不满足\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···5 单条产业链累计风险超限\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···6 未命名规则\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···7 未命名规则\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···8 未命名规则\n当前工作区 · 第 1 版 · 系统操作\n硬阻断\n0\n30 天触发\n···9 单票仓位超 20% 净值\n当前工作区 · 第 1 版 · 系统操作、调整\n硬阻断\n0\n30 天触发\n所有直接操作、子任务和自动化触发都经过同一套安全规则；平台硬约束优先于工作区自定规则。 断网时仍按最近一次有效规则拦截；行业默认值由当前行业包提供，基座不内置行业数值。",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "企业数字员工即时协作 · B 端工作台",
+          "规则与权限"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/skills",
+      "index": 6,
+      "screenshot": "06-pc-skills.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 16723,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n夜班中心\n模型与成本\n技能中心\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：技能中心\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n企业数字员工即时协作 · B 端工作台\n会话\n上下文\n专业版\n夜班 · 已就绪 22:00 出征\n紧急制动\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n技能分类\n官方技能\n金边 · 58\n团队技能\n银边 · 0\n行业共享\n铜边 · 7\n← 返回工作台\n技能中心\n数字员工能力广场\nAI 副官建议待确认 8 条\n检测到高频任务：「系统操作（成员）」近 7 天共 49 次 （每周达到 3 次时生成建议）\n 一键固化为定时任务\n 生成装备草稿\n驳回并减少同类建议\n「系统操作（状态待确认）」共 24 次，统计周期 7 天\n 固化\n 草稿\n驳回\n「问询应答（状态待确认）」共 10 次，统计周期 7 天\n 固化\n 草稿\n驳回\n「系统操作（状态待确认）」共 6 次，统计周期 7 天\n 固化\n 草稿\n驳回\n「快照（状态待确认）」共 6 次，统计周期 7 天\n 固化\n 草稿\n驳回\n「公司负责人晨报（状态待确认）」共 4 次，统计周期 7 天\n 固化\n 草稿\n驳回\n「外发消息（状态待确认）」共 4 次，统计周期 7 天\n 固化\n 草稿\n驳回\n「系统操作（待审核）」共 3 次，统计周期 7 天\n 固化\n 草稿\n驳回\n官方技能 · 随行业包分发\n传说 · 官方\n日度归因专家\n技能说明待补充\n22 次调用 · 采纳率 —\n已装备\n归因分析师 →\n复盘负责人诸葛 →\n卸载\n传说 · 官方\n数据卫生审计专家\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n数据质量官 →\n卸载\n传说 · 官方\n多空辩论主持专家\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n空方研究员 →\n多方研究员 →\n辩论主持官 →\n卸载\n传说 · 官方\n全球资产配置方法论\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n全球资产配置官 →\n卸载\n传说 · 官方\n全球宏观哨兵监控\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n全球宏观哨兵 →\n卸载\n传说 · 官方\n组合风险预算口径\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n组合风险官 →\n卸载\n传说 · 官方\n盘前计划专家\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n盘中交易员 →\n盘前交易员 →\n卸载\n传说 · 官方\n监管跟踪巡检专家\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n合规官 →\n卸载\n传说 · 官方\n收益稳定性评估方法论\n—用可验证统计口径守护\"持续良好的稳定收益\"。\n近 30 天暂无调用记录\n已装备\n收益稳定官 →\n卸载\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n吊销测试\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n重复吊销\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n装配吊销\n技能说明待补充\n已关联 1 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n版本通道\n技能说明待补充\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n调参与 校正专家\n技能说明待补充\n近 30 天暂无调用记录\n已装备\n数字员工 →\n策略优化师 →\n卸载\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n传说 · 官方\n测试用技能\n测试用技能，不是产品技能\n已关联 2 条安全规则\n近 30 天暂无调用记录\n 装备到船员\n团队技能（银边 · 本工作区自建）\n还没有团队技能——可用下方「打造新装备」零代码创建\n行业共享（已脱敏）\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n共享 · 行业\n已脱敏\n干净描述\n干净描述\n近 30 天暂无调用记录\n 装备到船员\n 打造新装备（零代码）",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "企业数字员工即时协作 · B 端工作台",
+          "技能中心"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/agents",
+      "index": 7,
+      "screenshot": "07-pc-agents.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 5107,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n公司与工作区\n定制中心\n资料录入\n行业方案\n数字员工\n成员管理\n伙伴授权\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：数字员工\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n企业数字员工即时协作 · B 端工作台\n会话\n上下文\n专业版\n夜班 · 已就绪 22:00 出征\n紧急制动\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n团队概览\n人类成员 · 1\n1 人在线（近 24h 留痕）\n数字员工 · 37 个岗位\n当前行业包装配 · 夜班窗口内 28 名在线\n夜班岗位会在 22:00–08:00 自动上线，窗口外转为待命\n团队成员\n人机混编通讯录\n人类成员 · 1\n投\n投资者\n经营者 · 审批人\n投\n等级 2\n青铜\n紧急制动 · 规则制定 · 成员任免\n30 天审批 3\n派遣 16\n沉淀 0\n数字员工 · 37 个岗位 · 夜班岗位在 22:00–08:00 自动上线\n归因分析师\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n1 个技能包\n查看档案 →\n韩栖迟\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n1 个技能包\n查看档案 →\n空方研究员\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n多方研究员\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n校准官\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n查看档案 →\n产业链周期官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n链风险预警官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n链舆情分析官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n清洗员·语义标注\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n清洗员·规则底座\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n合规官\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n1 个技能包\n查看档案 →\n全球联动分析员\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n数据质量官\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n辩论主持官\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n全球资产配置官\n第 0.1 版\n修改别名\n已关联 1 条安全规则\n待机\n1 个技能包\n查看档案 →\n全球宏观哨兵\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n盘中交易员\n第 0.1 版\n修改别名\n已关联 8 条安全规则\n夜班值守\n1 个技能包\n查看档案 →\n台账与触发器\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n大盘许可官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n叙事分析官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n期权指标员\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n组合管理员\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n组合风险官\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n盘前交易员\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n1 个技能包\n查看档案 →\n报告签发官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n收益稳定官\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n1 个技能包\n查看档案 →\n复盘负责人诸葛\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n1 个技能包\n查看档案 →\n风控闸门官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n搜索调度官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n搜索源集群\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n板块主线官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n统计员\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n查看档案 →\n策略优化师\n第 0.1 版\n修改别名\n只读岗位 · 无写入工具\n只读\n待机\n1 个技能包\n查看档案 →\n链融合官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n链监测员\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n买点精评官\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n全市场扫描员\n第 6.3 版\n修改别名\n只读岗位 · 无写入工具\n只读\n夜班值守\n查看档案 →\n加装数字员工岗位\n没绑定规则的数字员工只能看不能动——它的任何改动操作都会被系统拦下。",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "企业数字员工即时协作 · B 端工作台",
+          "团队成员"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/inbox",
+      "index": 8,
+      "screenshot": "08-pc-inbox.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 900,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：统一待办\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n统一待办\n\n您在 0 家店有 0 项待审批——点任意一家进入处理\n\n暂无工作区成员关系——接受邀请或注册开通后，这里会聚合您所有店的待办",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "统一待办"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/nights",
+      "index": 9,
+      "screenshot": "09-pc-nights.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 900,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：当前页面\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n当前在夜班频道：说一句给班组，默认按「留言」留痕\n给班组留言\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n页面不存在\n\n这个地址可能已失效、输入有误，或对应能力尚未安装。\n\n返回经营首页",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "pc",
+      "route": "/executive",
+      "index": 10,
+      "screenshot": "10-pc-executive.png",
+      "geometry": {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "documentWidth": 1440,
+        "documentHeight": 1335,
+        "scrollY": 0,
+        "text": "WorkLoom\n企业数字员工即时协作\n收起主导航\n搜索主导航\n今日\n经营首页\n统一待办\n协作\n任务中心\n审批中心\n经营\n经营报告\n服务前台\n老板视图\n安全与留痕\n自动化\n组织管理\n我的\n个人与偏好\n隐藏\n恢复默认\n视图\n任务完成啦\n稍后\n「为下周三的客房促销活动写一条发布计划，本周五前交付」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问当前工作区最近有哪些关键进展？」已经交付，成品在任务页可以直接取。\n看成品\n任务完成啦\n稍后\n「请问现在有哪些事项需要我决定？」已经交付，成品在任务页可以直接取。\n看成品\nz\nz\nz\n10\nAI 助手\n正在协助：老板视图\n我的\n一个框，四种落点：\n问 → 直接回答 · 派 → 立项\n留言 → 只写账本 · 推进 → 续跑当前任务\n选择下方常用问题，或直接输入内容开始\n汇报当前经营概况\n今天有哪些业务关卡需要我确认\n发送\n企业数字员工即时协作 · B 端工作台\n会话\n上下文\n专业版\n夜班 · 已就绪 22:00 出征\n紧急制动\n当前装配：行业示例版（老虎交易工作台）。已声明模拟模式；未正式启用。通用工具可返回本地模拟回执；当前使用内置模拟模型。具体数据来源与执行结果以任务回执为准。可按引导定制您的专属行业版。\n定制我的行业版 →\n治理状态\n影子模式（模拟决策不执行）\n授权人 系统成员\n2026/10/20 签署\n\n待审分层\n公司负责人审批 0 件\n集团负责人审批 0 件\n请示老板 0 件\n成绩单（30 天）\n审批 0 · 简报 0 · 立项 0\n谨慎上浮 0 · 熔断 0 · 影子决策 0\n命中率 样本积累中\n分级 微0·常0·重0\n老板视图 · 数字负责人\n\n您只做两件事：听汇报、批少数关键决策。其余工作由公司负责人带领数字团队完成。\n\n简报与决策流\n···22202\n公司负责人晨报\n影子·未执行\n2026/10/21 00:48:55\n【晨报 · 公司CEO】\n一、经营概况：事件库规模 86 条（哈希链可验）\n二、系统动态（近窗）该字段 ×6 ·该字段 ×6 ·该字段 ×37 ·该字段 ×3 ·该字段 ×3 ·该字段 ×2 ·该字段 ×2 ·该字段 ×16\n三、请示与裁决 待我裁决 0 件 · 待集团 0 件 · * 请示老板 0 件**\n四、风险：近 7 天断点 0 起\n以上数字均来自事件库实时取数，可下钻溯源。\n···19894\n公司负责人晨报\n影子·未执行\n2026/10/20 22:32:24\n【晨报 · 公司CEO】\n一、经营概况：事件库规模 60 条（哈希链可验）\n二、系统动态（近窗）该字段 ×8 ·该字段 ×5 ·该字段 ×5 ·该字段 ×22 ·该字段 ×2 ·该字段 ×2 ·该字段 ×13 ·该字段 ×1\n三、请示与裁决 待我裁决 0 件 · 待集团 0 件 · * 请示老板 0 件**\n四、风险：近 7 天断点 0 起\n以上数字均来自事件库实时取数，可下钻溯源。\n···16267\n公司负责人晨报\n影子·未执行\n2026/10/20 19:31:57\n【晨报 · 公司CEO】\n一、经营概况：事件库规模 38 条（哈希链可验）\n二、系统动态（近窗）该字段 ×6 ·该字段 ×4 ·该字段 ×4 ·该字段 ×11 ·该字段 ×10 ·该字段 ×1 ·该字段 ×1 ·该字段 ×1\n三、请示与裁决 待我裁决 0 件 · 待集团 0 件 · * 请示老板 0 件**\n四、风险：近 7 天断点 0 起\n以上数字均来自事件库实时取数，可下钻溯源。\n···12639\n公司负责人晨报\n影子·未执行\n2026/10/20 18:09:53\n【晨报 · 公司CEO】\n一、经营概况：事件库规模 15 条（哈希链可验）\n二、系统动态（近窗）该字段 ×6 ·该字段 ×4 ·该字段 ×2 ·该字段 ×2 ·该字段 ×1\n三、请示与裁决 待我裁决 0 件 · 待集团 0 件 · * 请示老板 0 件**\n四、风险：近 7 天断点 0 起\n以上数字均来自事件库实时取数，可下钻溯源。",
+        "headings": [
+          "今日",
+          "协作",
+          "经营",
+          "我的",
+          "企业数字员工即时协作 · B 端工作台",
+          "老板视图 · 数字负责人"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+        ],
+        "pageErrors": [],
+        "failedRequests": [
+          {
+            "url": "https://fonts.googleapis.com/css2",
+            "failure": {
+              "errorText": "net::ERR_BLOCKED_BY_CLIENT.Inspector"
+            }
+          }
+        ],
+        "posts": []
+      }
+    },
+    {
+      "surface": "bMobile",
+      "route": "/",
+      "index": 11,
+      "screenshot": "11-bMobile-home.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n打开主导航\n今日\n投资者 · 当前工作区\n刷新当前页面\n今天需要关注什么\n\n先看需要你决定的事，再看数字员工运行进度。\n\n当前身份：投资者 · 负责人\n待我审批\n0\n范围：当前待办\n来源：审批服务\n更新于 接口未提供更新时间\n运行中任务\n0\n范围：当前任务\n来源：任务事件\n更新于 接口未提供更新时间\n夜班需介入\n0\n范围：最近班次\n来源：夜班交接\n更新于 接口未提供更新时间\n已完成任务\n16\n范围：当前任务列表\n来源：任务事件\n更新于 接口未提供更新时间\n数字员工正在做\n查看全部\n目前没有运行中的任务\n\n新任务创建后，会在这里展示执行者、阶段、依据和需要你的动作。\n\n夜班状态\n尚未配置\n需要人工处理：0 项\n查看夜班\n今日\n待办\n任务\n经营\n我的",
+        "headings": [
+          "今日",
+          "今天需要关注什么",
+          "数字员工正在做",
+          "夜班状态"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": []
+      }
+    },
+    {
+      "surface": "bMobile",
+      "route": "/inbox",
+      "index": 12,
+      "screenshot": "12-bMobile-inbox.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n打开主导航\n待办\n投资者 · 当前工作区\n刷新当前页面\n待办与审批\n\n每次决定都会写入事件账本；审批成功不等于外部执行成功。\n\n待人类裁决\n\n待确认的经营动作\n高风险\n拟执行动作\n批准后由受控执行链继续处理\n决策摘要\n由数字员工发起，当前状态为已批准。\n变更前\n等待人工确认这条模拟验收记录。\n变更后\n仅将本次确认记录到本地事件账本，不执行任何外部操作。\n影响范围\n仅将本次确认记录到本地事件账本，不执行任何外部操作。\n回滚方式\n审批前不会执行；执行后的回滚方式以对应任务回执为准。\n命中围栏\n高风险动作必须由人类明确裁决\n证据\n审批事件已进入待办\n来源：事件账本\n事件账本回执\n尾号 22204\n\n待人类裁决\n\n待确认的经营动作\n高风险\n拟执行动作\n批准后由受控执行链继续处理\n决策摘要\n由数字员工发起，当前状态为已批准。\n变更前\n等待人工确认这条模拟验收记录。\n变更后\n仅将本次确认记录到本地事件账本，不执行任何外部操作。\n影响范围\n仅将本次确认记录到本地事件账本，不执行任何外部操作。\n回滚方式\n审批前不会执行；执行后的回滚方式以对应任务回执为准。\n命中围栏\n高风险动作必须由人类明确裁决\n证据\n审批事件已进入待办\n来源：事件账本\n事件账本回执\n尾号 19896\n\n待人类裁决\n\n待确认的经营动作\n高风险\n拟执行动作\n批准后由受控执行链继续处理\n决策摘要\n由数字员工发起，当前状态为已批准。\n变更前\n等待人工确认这条模拟验收记录。\n变更后\n仅将本次确认记录到本地事件账本，不执行任何外部操作。\n影响范围\n仅将本次确认记录到本地事件账本，不执行任何外部操作。\n回滚方式\n审批前不会执行；执行后的回滚方式以对应任务回执为准。\n命中围栏\n高风险动作必须由人类明确裁决\n证据\n审批事件已进入待办\n来源：事件账本\n事件账本回执\n尾号 16269\n今日\n待办\n任务\n经营\n我的",
+        "headings": [
+          "待办",
+          "待办与审批",
+          "待确认的经营动作",
+          "待确认的经营动作",
+          "待确认的经营动作"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": []
+      }
+    },
+    {
+      "surface": "bMobile",
+      "route": "/tasks",
+      "index": 13,
+      "screenshot": "13-bMobile-tasks.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n打开主导航\n任务\n投资者 · 当前工作区\n刷新当前页面\n任务\n\n查看谁在做、做到哪、为什么停住，以及下一步是否需要你。\n\n发起任务\n\n请写清目标、对象和时间；信息不足时系统会先反问，不会偷偷创建任务。\n\n任务目标\n预览并创建任务\n\n数字员工 · 人类责任人 投资者\n\n生成一份本周运行复盘，并列出三项下一步任务\n未发现风险\n当前阶段\n已完成\n进度\n2/2\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/21 00:48。\n\n任务请求回执\n尾号 446\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问现在有哪些事项需要我决定？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/21 00:48。\n\n任务请求回执\n尾号 445\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问当前工作区最近有哪些关键进展？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/21 00:48。\n\n任务请求回执\n尾号 444\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n生成一份本周运行复盘，并列出三项下一步任务\n未发现风险\n当前阶段\n已完成\n进度\n2/2\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 22:32。\n\n任务请求回执\n尾号 368\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问现在有哪些事项需要我决定？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 22:32。\n\n任务请求回执\n尾号 367\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问当前工作区最近有哪些关键进展？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 22:32。\n\n任务请求回执\n尾号 366\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n生成一份本周运行复盘，并列出三项下一步任务\n未发现风险\n当前阶段\n已完成\n进度\n2/2\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 19:31。\n\n任务请求回执\n尾号 280\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问现在有哪些事项需要我决定？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 19:31。\n\n任务请求回执\n尾号 279\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问当前工作区最近有哪些关键进展？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 19:31。\n\n任务请求回执\n尾号 278\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n为下周三的客房促销活动写一条发布计划，本周五前交付\n未发现风险\n当前阶段\n已完成\n进度\n2/2\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:14。\n\n任务请求回执\n尾号 192\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n生成一份本周运行复盘，并列出三项下一步任务\n未发现风险\n当前阶段\n已完成\n进度\n2/2\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:09。\n\n任务请求回执\n尾号 191\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问现在有哪些事项需要我决定？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:09。\n\n任务请求回执\n尾号 190\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问当前工作区最近有哪些关键进展？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:09。\n\n任务请求回执\n尾号 189\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n生成一份本周运行复盘，并列出三项下一步任务\n未发现风险\n当前阶段\n已完成\n进度\n2/2\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:03。\n\n任务请求回执\n尾号 188\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问现在有哪些事项需要我决定？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:03。\n\n任务请求回执\n尾号 187\n恢复方式：失败可重试，关键动作可由人类接管\n\n数字员工 · 人类责任人 投资者\n\n请问当前工作区最近有哪些关键进展？\n未发现风险\n当前阶段\n已完成\n进度\n0 项已完成\n\n依据：状态和进度来自当前工作区的任务事件；创建于 10/20 18:03。\n\n任务请求回执\n尾号 186\n恢复方式：失败可重试，关键动作可由人类接管\n今日\n待办\n任务\n经营\n我的",
+        "headings": [
+          "任务",
+          "任务",
+          "发起任务",
+          "生成一份本周运行复盘，并列出三项下一步任务",
+          "请问现在有哪些事项需要我决定？",
+          "请问当前工作区最近有哪些关键进展？",
+          "生成一份本周运行复盘，并列出三项下一步任务",
+          "请问现在有哪些事项需要我决定？",
+          "请问当前工作区最近有哪些关键进展？",
+          "生成一份本周运行复盘，并列出三项下一步任务",
+          "请问现在有哪些事项需要我决定？",
+          "请问当前工作区最近有哪些关键进展？",
+          "为下周三的客房促销活动写一条发布计划，本周五前交付",
+          "生成一份本周运行复盘，并列出三项下一步任务",
+          "请问现在有哪些事项需要我决定？",
+          "请问当前工作区最近有哪些关键进展？",
+          "生成一份本周运行复盘，并列出三项下一步任务",
+          "请问现在有哪些事项需要我决定？",
+          "请问当前工作区最近有哪些关键进展？"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": []
+      }
+    },
+    {
+      "surface": "bMobile",
+      "route": "/operations",
+      "index": 14,
+      "screenshot": "14-bMobile-operations.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n打开主导航\n经营\n投资者 · 当前工作区\n刷新当前页面\n经营\n\n行业内容由当前行业包生成；这里不使用任何默认行业兜底。\n\n当前经营对象\n\n老虎交易工作台\n\n当前阶段：信息待确认。行业字段由已安装的行业包提供。\n\n巡检正常\n0/0\n需要关注\n0\n数字员工\n37\n最近巡检\n尚无\n行业移动看板插槽\n\n已安装行业包可在此追加业务对象、阶段和受控快捷动作，但不能新增基础导航或覆盖公共组件。\n\n今日\n待办\n任务\n经营\n我的",
+        "headings": [
+          "经营",
+          "经营",
+          "老虎交易工作台",
+          "行业移动看板插槽"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": []
+      }
+    },
+    {
+      "surface": "bMobile",
+      "route": "/account",
+      "index": 15,
+      "screenshot": "15-bMobile-account.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n打开主导航\n我的\n投资者 · 当前工作区\n刷新当前页面\n我的\n\n身份、工作区、通知与治理入口。\n\n投资者\n\n负责人 · 已开通版本\n\n身份已验证\n我的工作区\n\n示例身份没有可切换的正式工作区。\n\n治理与自动化\n事件账本\n上岗考试\n组织经验\n夜班中心\n模型与成本\n安全规则\n数字员工\n成员\n退出登录\n今日\n待办\n任务\n经营\n我的",
+        "headings": [
+          "我的",
+          "我的",
+          "投资者",
+          "我的工作区",
+          "治理与自动化"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": []
+      }
+    },
+    {
+      "surface": "cMobile",
+      "route": "#chat",
+      "index": 16,
+      "screenshot": "16-cMobile-chat.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n老虎交易 · 小虎模拟盘 · AI 服务前台\n\n演示身份已连接\n演示数据\n\n虎\n查净值\n数据服务\n异常申报\n常见问题\n01:01\n你好，帮我查一下当前模拟盘净值和今日放行清单\n虎\n您好！小虎模拟盘以 100,000 美元虚拟资金起步，最新净值与持仓可在上方卡片实时查看；今日放行清单与市场环境评分已随《决策日报》推送，点击即可回看。提醒：当前仅模拟盘运行，不构成投资建议。\n没解决？\n转工单\n转人工\n系统会不会因为感觉要涨就加仓？\n虎\n不会。语义判断归大模型，数值判断归确定性规则；只有市场状态、产业链健康和技术强度三道规则门槛全部通过，系统才会建议开仓。实际阈值始终由当前策略配置版本提供，模型无法越过。\n没解决？\n转工单\n转人工\n虎\n您好，欢迎来到老虎交易 · 小虎模拟盘。我是 AI 服务前台小虎，可以帮\n咨询内容\n发送\n对话\n服务\n工单\n消息\n我的",
+        "headings": [
+          "老虎交易 · 小虎模拟盘 · AI 服务前台"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": [
+          {
+            "url": "http://127.0.0.1:3022/c/session",
+            "at": "2026-10-20T17:01:28.595Z"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "cMobile",
+      "route": "#service",
+      "index": 17,
+      "screenshot": "17-cMobile-service.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n服务大厅\n订\n数据服务\n研报速递 / 个股深度 / 产业链监测订阅\n开通后每日自动推送\n报\n异常申报\n行情 / 信号 / 账户 / 报表异常一键申报\n加急 15 分钟内响应\n诉\n投诉建议\n您的意见让我们更好\n值班负责人 2 小时内回复\n他\n其他需求\n合规咨询 / 发票 / 更多服务\n服务专员 30 分钟内响应\n对话\n服务\n工单\n消息\n我的",
+        "headings": [
+          "服务大厅"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": [
+          {
+            "url": "http://127.0.0.1:3022/c/session",
+            "at": "2026-10-20T17:01:30.512Z"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "cMobile",
+      "route": "#tickets",
+      "index": 18,
+      "screenshot": "18-cMobile-tickets.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n我的工单\n↓ 下拉刷新\n暂无工单\n\n有服务需求时，可到「服务」页选择对应入口提交\n\n对话\n服务\n工单\n消息\n我的",
+        "headings": [
+          "我的工单"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": [
+          {
+            "url": "http://127.0.0.1:3022/c/session",
+            "at": "2026-10-20T17:01:32.406Z"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "cMobile",
+      "route": "#messages",
+      "index": 19,
+      "screenshot": "19-cMobile-messages.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n消息通知\n↓ 下拉刷新\n暂无通知\n\n服务受理、完成与其他状态变更会出现在这里\n\n对话\n服务\n工单\n消息\n我的",
+        "headings": [
+          "消息通知"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": [
+          {
+            "url": "http://127.0.0.1:3022/c/session",
+            "at": "2026-10-20T17:01:34.374Z"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "cMobile",
+      "route": "#me",
+      "index": 20,
+      "screenshot": "20-cMobile-me.png",
+      "geometry": {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "scrollY": 0,
+        "text": "跳到主要内容\n我的\n演示数据\n老\n\n老虎交易 · 小虎模拟盘用户\n\n模拟盘服务身份\n\n演示身份\n\n历史会话\n\n继续与 小虎 的对话\n\n联系客服\n\n400-800-1234\n\n退出当前服务\n对话\n服务\n工单\n消息\n我的",
+        "headings": [
+          "我的"
+        ]
+      },
+      "captured": true,
+      "events": {
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "pageErrors": [],
+        "failedRequests": [],
+        "posts": [
+          {
+            "url": "http://127.0.0.1:3022/c/session",
+            "at": "2026-10-20T17:01:36.329Z"
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [],
+  "scope": "First viewport of all declared 20 routes through ordinary navigation. No business submit. Tasks input is locally filled only for a non-submitting trial click, then cleared.",
+  "modelProvider": "mock",
+  "externalModelsAllowed": false,
+  "requestedBusinessMutations": 0,
+  "finishedAt": "2026-10-20T17:01:38.206Z",
+  "stableSource": true,
+  "executorSha256": "be6607a9aa12b2401694b0bc4968fef9cb3df17e837dcb86c56f0f2f58610ae5",
+  "captured": 20,
+  "expected": 20,
+  "allCaptured": true
+}

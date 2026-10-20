@@ -8,10 +8,10 @@ ReturnSteward：组合净值曲线稳定性评估（最大回撤/滚动夏普/�
 
 from __future__ import annotations
 
-import glob
 import json
 import math
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 
@@ -95,29 +95,88 @@ class ReturnSteward:
         self.below_high_warn_days = below_high_warn_days
 
     @staticmethod
-    def _curve(out_dir: str) -> list[float]:
+    def _curve(out_dir: str) -> dict[str, float]:
+        """按观测日期读取净值；乱序排序，重复日期拒绝猜测有效余额。
+
+        一条无效记录使该市场整条曲线不可用，不能删掉坏点后把缺口当休市。
+        读取/校验失败交由 assess 按市场披露，不改写原台账。
+        """
         f = Path(out_dir) / "sim_portfolio.json"
-        if not f.exists():
-            return []
-        try:
-            s = json.loads(f.read_text())
-            return [float(p["equity"]) for p in (s.get("equity_curve") or [])]
-        except Exception:
-            return []
+        s = json.loads(f.read_text(encoding="utf-8"))
+        if not isinstance(s, dict):
+            raise ValueError("净值台账必须是对象")
+        points = s.get("equity_curve")
+        if points is None:
+            return {}
+        if not isinstance(points, list):
+            raise ValueError("净值曲线必须是数组")
+        curve = {}
+        for i, p in enumerate(points, 1):
+            if not isinstance(p, dict):
+                raise ValueError(f"第 {i} 条净值记录必须是对象")
+            day = p.get("date")
+            try:
+                valid_day = isinstance(day, str) and date.fromisoformat(day).isoformat() == day
+            except ValueError:
+                valid_day = False
+            if not valid_day:
+                raise ValueError(f"第 {i} 条日期无效，须为 YYYY-MM-DD")
+            if day in curve:
+                raise ValueError(f"重复日期 {day}，无法确定当日净值")
+            value = p.get("equity")
+            try:
+                equity = float(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(f"第 {i} 条净值无效") from exc
+            if isinstance(value, bool) or not math.isfinite(equity):
+                raise ValueError(f"第 {i} 条净值须为有限数值")
+            curve[day] = equity
+        return dict(sorted(curve.items()))
 
     def assess(self, out_dirs: dict[str, str]) -> StabilityReport:
-        # 组合日净值 = 三市当日净值加总（按日期对齐，缺失日沿用前值）
-        curves = {m: self._curve(d) for m, d in out_dirs.items()}
-        curves = {m: c for m, c in curves.items() if c}
+        # 沿用现有账户金额加总口径；只在已有观测之后前向延续，不补造初始余额。
+        curves = {}
         notes: list = []
+        for m, d in out_dirs.items():
+            try:
+                curve = self._curve(d)
+            except (OSError, UnicodeError, ValueError) as exc:
+                notes.append(f"{m}: 净值曲线不可用（{exc}），未纳入组合统计")
+                continue
+            if curve:
+                curves[m] = curve
+            else:
+                notes.append(f"{m}: 无净值曲线数据，未纳入组合统计")
         if not curves:
             return StabilityReport(days=0, total_return=0.0, max_drawdown=0.0,
                                    sharpe_rolling=None, days_below_high=0,
-                                   verdict="关注", notes=["无净值曲线数据（积累中，不作结论）"])
-        n = min(len(c) for c in curves.values())
-        series = [sum(c[i] for c in curves.values()) for i in range(n)]
-        base = series[0] if series else 1.0
-        total_ret = (series[-1] / base - 1.0) if base else 0.0
+                                   verdict="关注", notes=["无净值曲线数据（积累中，不作结论）", *notes])
+        # 组合成分固定：从所有有效市场均有已知净值的首日起统计，避免把新增
+        # 市场的首笔余额记作收益。日期只取观测并集，不为全市场缺失的日子造点。
+        start = max(next(iter(c)) for c in curves.values())
+        dates = sorted({day for c in curves.values() for day in c})
+        latest, series = {}, []
+        for day in dates:
+            for m, curve in curves.items():
+                if day in curve:
+                    latest[m] = curve[day]
+            if day >= start:
+                series.append(sum(latest.values()))
+        n = len(series)
+        end = dates[-1]
+        notes.append(f"组合统计自 {start} 起至 {end}，仅含观测日期并集；缺失日沿用前值")
+        for m, curve in curves.items():
+            last = next(reversed(curve))
+            stale_days = (date.fromisoformat(end) - date.fromisoformat(last)).days
+            notes.append(f"{m}: 最后净值观测 {last}，距统计末日滞后 {stale_days} 个自然日"
+                         + ("（末值沿用）" if stale_days else ""))
+        base = series[0]
+        if not math.isfinite(base) or base <= 0 or any(not math.isfinite(v) for v in series):
+            notes.append("组合基准净值非正或合计净值非有限数值，收益与回撤不可计算（不作结论）")
+            return StabilityReport(days=n, total_return=0.0, max_drawdown=0.0,
+                                   sharpe_rolling=None, days_below_high=0,
+                                   verdict="关注", notes=notes)
+        total_ret = series[-1] / base - 1.0
         # 最大回撤
         peak, mdd, below_high = series[0], 0.0, 0
         for v in series:
@@ -129,7 +188,9 @@ class ReturnSteward:
             below_high += 1
         # 滚动夏普（日频，年化 √252；样本 <10 不输出）
         sharpe = None
-        if n >= 10:
+        if n >= 10 and any(v <= 0 for v in series[:-1]):
+            notes.append("组合净值存在非正收益率分母，滚动夏普不可计算")
+        elif n >= 10:
             rets = [series[i] / series[i - 1] - 1.0 for i in range(1, n)]
             mu = sum(rets) / len(rets)
             var = sum((r - mu) ** 2 for r in rets) / len(rets)

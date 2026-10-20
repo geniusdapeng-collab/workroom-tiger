@@ -9,6 +9,8 @@
  * 红线：三条主链路未全部通过 → 禁止发布（本脚本 exit 1）
  *
  * 用法：pnpm release:gate（需要 server 运行于 SERVER_BASE，默认 http://localhost:8787）
+ * RELEASE_PRESET_KEY 可精确指定目标工作区已安装且启用的岗位；未指定时仍只选非只读岗位。
+ * 显式只读岗位仅提供只读核心结构正例，不证明写任务或生产能力。
  */
 import pg from "pg";
 import { existsSync, readFileSync } from "node:fs";
@@ -18,6 +20,10 @@ import { charterSchema } from "@workloom/base/captain";
 import { signDemoToken, type Identity } from "@workloom/base/tenancy";
 // R2-F4/M6-F2：摘要解析器抽为独立模块（scripts/chain-summary.ts），可被断言脚本导入复验
 import { parseChainSummary } from "./chain-summary.js";
+import {
+  assertCompletedQuestDispatch, assertCompletedQuestThread, assertQuestEventEvidence, assertSameQuestEvidence,
+  type QuestEventEvidence, type QuestEvidenceScope,
+} from "./release-gate-quest.js";
 
 const BASE = process.env.SERVER_BASE ?? "http://localhost:8787";
 /**
@@ -31,6 +37,7 @@ const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const APP_URL = process.env.DATABASE_APP_URL ?? "postgres://workloom_app:workloom_dev_app@localhost:5432/workloom";
 const OWNER_URL = process.env.DATABASE_URL ?? "postgres://postgres:workloom@localhost:5432/workloom";
 const REQUESTED_WORKSPACE_ID = process.env.RELEASE_WORKSPACE_ID?.trim() || null;
+const REQUESTED_PRESET_KEY = process.env.RELEASE_PRESET_KEY?.trim() || null;
 
 /* ================= 判定框架 ================= */
 interface CheckResult { id: string; name: string; ok: boolean; detail: string; ms: number }
@@ -231,6 +238,7 @@ interface ReleaseTarget {
   memberRole: Identity["role"];
   plan: Identity["plan"];
   presetKey: string;
+  presetReadonly: boolean;
 }
 
 let TARGET: ReleaseTarget | null = null;
@@ -242,10 +250,10 @@ let TARGET: ReleaseTarget | null = null;
     const result = await owner.query<{
       tenant_id: string; id: string; slug: string; name: string;
       member_id: string; member_no: string; member_name: string; member_role: Identity["role"]; plan: Identity["plan"];
-      preset_key: string;
+      preset_key: string; preset_readonly: boolean;
     }>(
       `SELECT w.tenant_id, w.id, w.slug, w.name, m.id AS member_id, m.member_no, m.name AS member_name, m.role AS member_role,
-              COALESCE(t.plan, 'community') AS plan, a.preset_key
+              COALESCE(t.plan, 'community') AS plan, a.preset_key, a.readonly AS preset_readonly
        FROM workspaces w
        LEFT JOIN tenants t ON t.id = w.tenant_id
        JOIN LATERAL (
@@ -254,14 +262,16 @@ let TARGET: ReleaseTarget | null = null;
          ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, member_no LIMIT 1
        ) m ON true
        JOIN LATERAL (
-         SELECT preset_key FROM agents
-         WHERE workspace_id=w.id AND status IN ('ready','active') AND readonly=false
+         SELECT preset_key, readonly FROM agents
+         WHERE workspace_id=w.id AND status IN ('ready','active')
+           AND ($2::text IS NULL OR preset_key=$2)
+           AND ($2::text IS NOT NULL OR readonly=false)
          ORDER BY preset_key LIMIT 1
        ) a ON true
        WHERE w.is_example=true AND ($1::text IS NULL OR w.id=$1)
        ORDER BY w.created_at DESC NULLS LAST, w.id
        LIMIT 1`,
-      [REQUESTED_WORKSPACE_ID],
+      [REQUESTED_WORKSPACE_ID, REQUESTED_PRESET_KEY],
     );
     const row = result.rows[0];
     if (row) TARGET = {
@@ -275,15 +285,23 @@ let TARGET: ReleaseTarget | null = null;
       memberRole: row.member_role,
       plan: row.plan,
       presetKey: row.preset_key,
+      presetReadonly: row.preset_readonly,
     };
   } finally {
     await owner.end();
   }
   console.log(`工作区探测：${TARGET ? `${TARGET.name}（${TARGET.workspaceId}）` : "（无可验收示例工作区）"}\n`);
+  if (TARGET) {
+    console.log(`验收岗位：${JSON.stringify(TARGET.presetKey)} · readonly=${TARGET.presetReadonly} · ${REQUESTED_PRESET_KEY ? "显式 RELEASE_PRESET_KEY" : "默认非只读岗位"}`);
+    if (TARGET.presetReadonly) console.log("验收范围：只读核心结构正例，不证明写任务或生产能力；完成状态与逐步回执要求不变。");
+  }
 }
 if (!TARGET) {
-  results.push({ id: "G-01", name: "工作区探测", ok: false, detail: "无可验收的示例工作区（请先播种当前 Bundle）", ms: 0 });
-  console.log("✗ G-01 工作区探测 —— 无可验收的示例工作区（请先播种当前 Bundle）");
+  const detail = REQUESTED_PRESET_KEY
+    ? `指定验收岗位不可用（RELEASE_PRESET_KEY=${JSON.stringify(REQUESTED_PRESET_KEY)}，RELEASE_WORKSPACE_ID=${JSON.stringify(REQUESTED_WORKSPACE_ID)}）；须为目标示例工作区已安装的 ready/active 岗位，拒绝回退到其他岗位`
+    : "无可验收的示例工作区（请先播种当前 Bundle）";
+  results.push({ id: "G-01", name: "工作区探测", ok: false, detail, ms: 0 });
+  console.log(`✗ G-01 工作区探测 —— ${detail}`);
 }
 const gateIdentity = TARGET ? await resolveGateToken(TARGET).catch((err: unknown) => {
   console.log(`✗ 身份通道不可用 —— ${err instanceof Error ? err.message : String(err)}`);
@@ -313,37 +331,53 @@ for (const [i, question] of ASK_SCENARIOS.entries()) {
 }
 
 /* ---------- 链路二：QUEST 任务模式 ---------- */
+let completedQuest: { scope: QuestEvidenceScope; evidence: QuestEventEvidence } | null = null;
 await check("Q-01", "QUEST · 一句话目标自动拆解多步骤", async () => {
   assert(TARGET && token, "无可执行的验收工作区身份");
-  const r = await call<{ kind: string; mode?: string; threadId?: string; status?: string; stepsTotal?: number; stepsDone?: number }>(
+  assert(Number.isSafeInteger(QUEST_TIMEOUT_MS) && QUEST_TIMEOUT_MS > 0 && QUEST_TIMEOUT_MS <= 2_147_483_647,
+    "GATE_QUEST_TIMEOUT_MS 必须是有效的正整数毫秒数（不超过 2147483647）");
+  const deadline = Date.now() + QUEST_TIMEOUT_MS;
+  const remaining = () => {
+    const ms = deadline - Date.now();
+    assert(ms > 0, "QUEST 完成及回执回读超时");
+    return ms;
+  };
+  const r = await call<unknown>(
       "threads.dispatch", token,
       { title: "生成一份本周运行复盘，并列出三项下一步任务", presetKey: TARGET.presetKey, runImmediately: true },
-      QUEST_TIMEOUT_MS,
+      remaining(),
     );
-  assert(r.kind === "routed" && r.mode === "quest", `未按 quest 路由（${r.kind}/${r.mode}）`);
-  assert(r.threadId, "未建线程");
-  assert(typeof r.stepsTotal === "number" && r.stepsTotal >= 2, `未拆解多步骤（stepsTotal=${r.stepsTotal}）`);
-  // 任务创建→拆解→执行流程完整：线程可查、进度在推进或已完成
-  const t = await call<{ id: string; status: string }>("threads.get", token, { threadId: r.threadId }, 30000, "query");
-  assert(t && t.id === r.threadId, "线程回读失败");
-  return `拆解 ${r.stepsTotal} 步 · 已执行 ${r.stepsDone} 步 · 状态 ${r.status}`;
+  // runImmediately 同步等待 runQuest；失败、待审批、暂停或仍在执行都不能冒充完成。
+  const quest = assertCompletedQuestDispatch(r);
+  const t = await call<unknown>("threads.get", token, { threadId: quest.threadId }, remaining(), "query");
+  assertCompletedQuestThread(quest, t);
+  const scope: QuestEvidenceScope = {
+    ...quest, tenantId: TARGET.tenantId, workspaceId: TARGET.workspaceId, memberNo: TARGET.memberNo,
+  };
+  const events = await call<unknown>("threads.events", token, { threadId: quest.threadId, limit: 200 }, remaining(), "query");
+  const evidence = assertQuestEventEvidence(events, scope);
+  completedQuest = { scope, evidence };
+  return `线程 ${quest.threadId} · 已完成 ${quest.stepsTotal}/${quest.stepsTotal} 步 · 核验回执 ${evidence.executionEventIds.length} 条 · 来源 ${evidence.receiptModes.join("/")}`;
 });
 await check("Q-02", "QUEST · 任务事件流留痕可回读", async () => {
-  assert(TARGET, "无可执行的验收工作区");
-  // 复用 Q-01 的线程：近 30 分钟内应有 quest 线程及其事件
+  assert(completedQuest, "Q-01 未取得已完成 QUEST 的可信回执，不能验证留痕");
+  const { scope, evidence } = completedQuest;
+  // 只回读本次 Q-01 的确切租户/工作区/线程；其他 ASK 或历史成功任务不得替代。
   const app = new pg.Client({ connectionString: APP_URL });
   await app.connect();
   try {
-    await app.query("SELECT set_config('app.tenant_id',$1,false)", [TARGET.tenantId]);
-    const wsId = TARGET.workspaceId;
-    await app.query("SELECT set_config('app.workspace_id',$1,false)", [wsId]);
-    const r = await app.query(
-      `SELECT count(DISTINCT session_id) tc, count(*) ec FROM biz_events
-       WHERE workspace_id=$1 AND session_id IS NOT NULL AND created_at > now() - interval '30 minutes'`,
-      [wsId],
+    await app.query("SELECT set_config('app.tenant_id',$1,false)", [scope.tenantId]);
+    await app.query("SELECT set_config('app.workspace_id',$1,false)", [scope.workspaceId]);
+    const r = await app.query<{ tenant_id: string; workspace_id: string; session_id: string; payload: unknown }>(
+      `SELECT tenant_id, workspace_id, session_id, payload FROM biz_events
+       WHERE tenant_id=$1 AND workspace_id=$2 AND session_id=$3 ORDER BY seq`,
+      [scope.tenantId, scope.workspaceId, scope.threadId],
     );
-    assert(Number(r.rows[0].tc) >= 1 && Number(r.rows[0].ec) >= 1, "无线程事件留痕");
-    return `线程事件 ${r.rows[0].ec} 条`;
+    assert(r.rows.every((row) => row.tenant_id === scope.tenantId && row.workspace_id === scope.workspaceId && row.session_id === scope.threadId),
+      "QUEST 账本回读作用域不一致");
+    const stored = assertQuestEventEvidence(r.rows.map((row) => row.payload), scope);
+    assertSameQuestEvidence(evidence, stored);
+    return `线程 ${scope.threadId} · 派发 ${stored.dispatchEventId} · 执行回执 ${stored.executionEventIds.length} 条与 API 一致`;
   } finally {
     await app.end();
   }
@@ -440,3 +474,4 @@ if (failed.length > 0) {
   process.exit(1);
 }
 console.log(`\n✅ 三条主链路全部通过（ASK ×${ASK_SCENARIOS.length} / QUEST ×2 / 编排 ×3），准许发布。环境：${envLabel}`);
+if (TARGET?.presetReadonly) console.log("范围限定：本次为只读核心结构正例，不证明写任务或生产能力。");

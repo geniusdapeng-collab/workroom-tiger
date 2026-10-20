@@ -82,7 +82,8 @@ def test_journal_and_sim_stamp_data_source(tmp_path):
 
     sim = SimEngine(str(tmp_path / "sim.json"))
     sim.step("2026-09-29", _result("demo", [_pick("MSFT")]),
-             lambda t: Bar(open=100.0, high=101.0, low=99.0, close=100.5, adv=1e9))
+             lambda t: Bar(open=100.0, high=101.0, low=99.0, close=100.5, adv=1e9,
+                           date="2026-09-29"))
     assert sim.state["pending"][0]["source"] == "demo"
     assert sim.state["ops_log"][-1]["source"] == "demo"
 

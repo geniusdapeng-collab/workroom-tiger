@@ -256,26 +256,45 @@ class TestUsRegression:
 # ============================================================ ⑥ 轻仓通道强制
 
 class TestLightChannel:
-    def test_ungraduated_market_forces_light_size(self):
-        """CN 默认未达标（0/50，DSR 未过关）→ 全部 picks 强制轻仓 ×0.35。"""
+    def test_ungraduated_cn_preserves_graduation_but_blocks_currency_execution(self):
+        """CN 验证期保留；没有 FX 时毕业门槛不能授权美元账户执行。"""
         r = run_pipeline(provider_name="demo", universe_mode="extended",
                          top_n=10, max_picks=5, market="cn")
         grad = r.raw["market_grad"]
         assert grad["graduated"] is False and grad["settled"] == 0
         expect_light = round(sum(config.MARKET_LIGHT_SIZE) / 2, 4)
         assert expect_light == 0.35
-        assert r.picks, "demo 剧情下 CN 应有放行标的以验证轻仓强制"
-        for p in r.picks:
-            rt = r.raw["pick_rationale"][p.ticker]
-            assert rt["size_ratio"] == expect_light
-            assert "新市场轻仓" in rt["mode"]
-            assert "验证期 0/50" in rt["mode"]
-            assert rt["market_grad"]["graduated"] is False
+        assert r.picks == [] and r.raw["pick_rationale"] == {}
+        assert r.raw["currency_policy"]["execution_blocked"] is True
+        assert r.watchlist, "币种执行受阻不能抹掉已评估的原币研究名单"
         # 日报披露验证期计数
         from trading_system.report import render_markdown
         md = render_markdown(r)
         assert "新市场验证期（0/50）" in md
         assert "A股" in md
+
+    def test_ungraduated_usd_market_still_forces_exact_light_size(self, monkeypatch):
+        """使用 USD 报价验证原有 D7 仓位计算，避免以原币除美元伪造回归。"""
+        from trading_system.agents.risk_manager_agent import RiskManagerAgent
+        from trading_system.data_models import MRSResult, SectorScore, StockCandidate
+
+        monkeypatch.setitem(config.MARKET_GRADUATION, "us",
+                            {"settled_trades": 0, "dsr_pass": False})
+        context = {
+            "mrs": MRSResult(8.0, 2.0, 1.0, 8.0, position_cap=(0.7, 0.9)),
+            "sectors": [SectorScore("SMH", 8.0, in_main_pool=True)],
+            "watchlist": [StockCandidate("NVDA", chain_id="semis", price=100.0,
+                                          stop_price=95.0, tss_final=8.0, atr_pct=0.03)],
+            "market_spec": US, "market_grad": US.graduation(),
+            "market_data": {"stock_ohlcv": {}}, "trade_date": "2026-08-28",
+        }
+        picks = RiskManagerAgent(None, account_usd=100_000).execute(context)
+        assert len(picks) == 1
+        assert (picks[0].shares, picks[0].risk_usd, picks[0].position_pct) == (56, 280, 0.056)
+        rt = context["pick_rationale"]["NVDA"]
+        assert rt["size_ratio"] == 0.35
+        assert "新市场轻仓" in rt["mode"] and "验证期 0/50" in rt["mode"]
+        assert rt["market_grad"]["graduated"] is False
 
     def test_graduated_market_not_forced(self, monkeypatch):
         """达标市场（50 笔 + DSR 过关）→ 不强制新市场轻仓文案。"""
@@ -284,9 +303,8 @@ class TestLightChannel:
         r = run_pipeline(provider_name="demo", universe_mode="extended",
                          top_n=10, max_picks=5, market="cn")
         assert r.raw["market_grad"]["graduated"] is True
-        for p in r.picks:
-            rt = r.raw["pick_rationale"][p.ticker]
-            assert "新市场轻仓" not in rt["mode"]
+        assert r.picks == [] and r.raw["currency_policy"]["execution_blocked"] is True
+        assert not any("新市场验证期" in note for note in r.notes)
 
     def test_ah_topics_auto_enabled_for_cn_hk(self):
         r_cn = run_pipeline(provider_name="demo", universe_mode="core",

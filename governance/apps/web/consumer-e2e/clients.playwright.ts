@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+const product = JSON.parse(readFileSync(new URL("../../../product.manifest.json", import.meta.url), "utf8"));
 
 interface FirstClientFrame {
   client: string;
@@ -105,7 +108,7 @@ test("B 端 PC：生产登录主入口和首帧不横向溢出", async ({ page }
   for (const width of [1024, 640]) {
     await page.setViewportSize({ width, height: 640 });
     await page.goto("http://127.0.0.1:4310/login");
-    await expect(page.getByRole("heading", { name: "登录 WorkLoom" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: `登录 ${product.displayName}`, exact: true })).toBeVisible();
     await page.getByRole("button", { name: "邮箱密码" }).click();
     await expect(page.getByLabel("邮箱")).toBeVisible();
     await expect(page.getByLabel("密码")).toBeVisible();
