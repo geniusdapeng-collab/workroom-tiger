@@ -132,31 +132,97 @@ export async function runBriefingBeat(
 
 /* ================= 节拍②：L2 队列裁决（公司CEO 自主闭环） ================= */
 
+interface QueueAuthority {
+  charter: Charter;
+  charterText: string | null;
+  profileVersion: string;
+  workspaceVersion: string;
+}
+
+interface QueueApproval {
+  approval_id: string;
+  event_id: string;
+  snapshot: Record<string, unknown>;
+  snapshot_text: string;
+  row_version: string;
+  status: string;
+  tier: string;
+  consumed_at: Date | null;
+}
+
+// xmin is an ephemeral row-version token for this beat, never a persisted ID.
+// Lock the scope before its profile; a non-key tenant change must also conflict.
+async function lockQueueAuthority(client: pg.PoolClient, scope: Scope): Promise<QueueAuthority | null> {
+  const workspace = await client.query<{ row_version: string }>(
+    `SELECT xmin::text AS row_version FROM workspaces WHERE id=$1 AND tenant_id=$2 FOR SHARE`,
+    [scope.workspaceId, scope.tenantId],
+  );
+  if (!workspace.rows[0]) return null;
+  const profile = await client.query<{
+    archive: Record<string, unknown>; charter_text: string | null; row_version: string;
+  }>(
+    `SELECT archive, (archive->'charter')::text AS charter_text, xmin::text AS row_version
+     FROM profiles WHERE workspace_id=$1 AND tenant_id=$2 FOR UPDATE`,
+    [scope.workspaceId, scope.tenantId],
+  );
+  if (!profile.rows[0]) return null;
+  return {
+    charter: parseCharter(profile.rows[0].archive.charter),
+    charterText: profile.rows[0].charter_text,
+    profileVersion: profile.rows[0].row_version,
+    workspaceVersion: workspace.rows[0].row_version,
+  };
+}
+
+function queueAuthoritySkip(charter: Charter): string | undefined {
+  const deadline = charter.mode === "trial" ? charter.grant?.trial_ends_at
+    : charter.mode === "active" ? charter.grant?.retain_until : null;
+  if (deadline != null && !Number.isFinite(Date.parse(deadline))) return "宪章授权截止时间无效：无执行权";
+  if (!canExecute(charter.mode) && !isShadow(charter.mode)) {
+    return `${charter.mode}：无执行权（suspended 仅汇报 / disabled 静默）`;
+  }
+  return undefined;
+}
+
+// CASE guards the cast: one malformed deadline must neither authorize an item
+// nor poison/starve the eligible batch. Use wall time, including lock waits.
+const queueApprovalUnexpired = `CASE
+  WHEN a.snapshot->>'expires_at' IS NULL THEN true
+  WHEN jsonb_typeof(a.snapshot->'expires_at') = 'string'
+    AND pg_input_is_valid(a.snapshot->>'expires_at', 'timestamptz')
+  THEN isfinite((a.snapshot->>'expires_at')::timestamptz)
+    AND (a.snapshot->>'expires_at')::timestamptz > clock_timestamp()
+  ELSE false END`;
+
 export async function runQueueBeat(
   app: pg.Pool, scope: Scope,
   opts: { llmCall?: (prompt: string) => Promise<string> } = {},
 ): Promise<{ decided: number; escalated: number; skipped?: string; tiers?: Record<string, number> }> {
-  let charter = await loadCharter(app, scope);
-  charter = await applyExpiryIfDue(app, scope, charter);
-  const dryRun = isShadow(charter.mode);
-  if (!canExecute(charter.mode) && !dryRun) {
-    return { decided: 0, escalated: 0, skipped: `${charter.mode}：无执行权（suspended 仅汇报 / disabled 静默）` };
-  }
-  const rows = await inTx(app, scope, async (c) => {
-    const r = await c.query<{
-      approval_id: string; event_id: string; snapshot: Record<string, unknown>;
-    }>(
-      `SELECT a.approval_id, a.event_id, a.snapshot
-       FROM approvals a WHERE a.workspace_id=$1 AND a.status='pending' AND a.tier='l2_captain'
-         -- B-03 修复（端口 growth 排雷 T-2026-0929-0003）：AI 裁决节拍不得批准已过期审批
-         -- （与 review-console.decide() 的过期检查同口径）
-         AND (a.snapshot->>'expires_at' IS NULL OR (a.snapshot->>'expires_at')::timestamptz > now())
+  const captured = await inTx(app, scope, async (c) => {
+    const authority = await lockQueueAuthority(c, scope);
+    if (!authority) return { skipped: "tenant/workspace/profile 归属不匹配：队列未读取" };
+    authority.charter = await applyExpiryInTx(c, scope, authority.charter);
+    const skipped = queueAuthoritySkip(authority.charter);
+    if (skipped) return { skipped };
+    const r = await c.query<QueueApproval>(
+      `SELECT a.approval_id, a.event_id, a.snapshot, a.snapshot::text AS snapshot_text,
+              a.xmin::text AS row_version, a.status, a.tier, a.consumed_at
+       FROM approvals a WHERE a.workspace_id=$1 AND a.tenant_id=$2
+         AND a.status='pending' AND a.tier='l2_captain' AND a.consumed_at IS NULL
+         AND (${queueApprovalUnexpired})
        ORDER BY a.approval_id LIMIT 20`,
-      [scope.workspaceId],
+      [scope.workspaceId, scope.tenantId],
     );
-    return r.rows;
+    return { authority, rows: r.rows };
   });
+  if (captured.skipped || !captured.authority || !captured.rows) {
+    return { decided: 0, escalated: 0, skipped: captured.skipped };
+  }
+  const { authority, rows } = captured;
+  const charter = authority.charter;
+  const dryRun = isShadow(charter.mode);
   let decided = 0, escalated = 0;
+  let skipped: string | undefined;
   const tiers: Record<string, number> = { micro: 0, standard: 0, major: 0 };
   for (const row of rows) {
     const snap = (row.snapshot ?? {}) as Record<string, unknown>;
@@ -213,34 +279,54 @@ ${item.action} ${JSON.stringify(item.params)}
     } else {
       verdict = decideForCaptain(charter, item);
     }
-    await inTx(app, scope, async (c) => {
-      // P0-4 裁决守卫：UPDATE 必须命中仍 pending 的行（并发下他处已裁决/上浮则 rowCount=0），
-      // 未命中即跳过事件写入——杜绝「状态未变但 ceo.decision 留痕已落」的双写失真
-      let applied = true;
-      if (dryRun) {
-        // Shadow counts advisory verdicts; neither escalation nor a decision may
-        // change approval state. The diagnostic event below carries dry_run.
-        if (verdict.kind === "escalate") escalated++;
-        else decided++;
-      } else if (verdict.kind === "escalate") {
+    // Reasoning above holds no database locks. Revalidate its exact authority
+    // and inputs under short locks before committing any state or evidence.
+    const result = await inTx(app, scope, async (c) => {
+      const current = await lockQueueAuthority(c, scope);
+      if (!current || current.workspaceVersion !== authority.workspaceVersion
+        || current.profileVersion !== authority.profileVersion || current.charterText !== authority.charterText) {
+        return { applied: false, skipped: "宪章或工作区归属已变更：旧裁决作废" };
+      }
+      const locked = await c.query<QueueApproval>(
+        `SELECT a.approval_id, a.event_id, a.snapshot, a.snapshot::text AS snapshot_text,
+                a.xmin::text AS row_version, a.status, a.tier, a.consumed_at
+         FROM approvals a WHERE a.approval_id=$1 AND a.workspace_id=$2 AND a.tenant_id=$3 FOR UPDATE`,
+        [row.approval_id, scope.workspaceId, scope.tenantId],
+      );
+      const approval = locked.rows[0];
+      if (!approval || approval.status !== "pending" || approval.tier !== "l2_captain"
+        || approval.consumed_at !== null || approval.row_version !== row.row_version
+        || approval.event_id !== row.event_id || approval.snapshot_text !== row.snapshot_text) return { applied: false };
+      // Same reentrant lock as workdata/events.ts. Validate deadlines only after
+      // both approval and event-chain waits, before either business/event write.
+      await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`event-chain:${scope.tenantId}:${scope.workspaceId}`]);
+      current.charter = await applyExpiryInTx(c, scope, current.charter);
+      const authoritySkip = queueAuthoritySkip(current.charter);
+      if (authoritySkip) return { applied: false, skipped: authoritySkip };
+      const valid = await c.query<{ eligible: boolean }>(
+        `SELECT (${queueApprovalUnexpired}) AS eligible FROM approvals a
+         WHERE a.approval_id=$1 AND a.workspace_id=$2 AND a.tenant_id=$3`,
+        [row.approval_id, scope.workspaceId, scope.tenantId],
+      );
+      if (!valid.rows[0]?.eligible) return { applied: false };
+      if (!dryRun && verdict.kind === "escalate") {
         const u = await c.query(
           `UPDATE approvals SET tier='l4_chairman', snapshot = snapshot || $3::jsonb
-           WHERE approval_id=$1 AND workspace_id=$2 AND status='pending'`,
-          [row.approval_id, scope.workspaceId, JSON.stringify({ ceo_escalated: true, ceo_rationale: verdict.rationale })],
+           WHERE approval_id=$1 AND workspace_id=$2 AND tenant_id=$4
+             AND status='pending' AND tier='l2_captain' AND consumed_at IS NULL`,
+          [row.approval_id, scope.workspaceId, JSON.stringify({ ceo_escalated: true, ceo_rationale: verdict.rationale }), scope.tenantId],
         );
-        applied = (u.rowCount ?? 0) > 0;
-        if (applied) escalated++;
-      } else {
+        if (!u.rowCount) return { applied: false };
+      } else if (!dryRun) {
         const u = await c.query(
           `UPDATE approvals SET status=$3, gesture=$4::jsonb, decided_by=$5, decided_at=now()
-           WHERE approval_id=$1 AND workspace_id=$2 AND status='pending'`,
+           WHERE approval_id=$1 AND workspace_id=$2 AND tenant_id=$6
+             AND status='pending' AND tier='l2_captain' AND consumed_at IS NULL`,
           [row.approval_id, scope.workspaceId, verdict.kind === "approve" ? "approved" : "rejected",
-           JSON.stringify({ type: verdict.kind, weight: 1, reason_text: verdict.rationale }), CEO_ACTOR.id],
+           JSON.stringify({ type: verdict.kind, weight: 1, reason_text: verdict.rationale }), CEO_ACTOR.id, scope.tenantId],
         );
-        applied = (u.rowCount ?? 0) > 0;
-        if (applied) decided++;
+        if (!u.rowCount) return { applied: false };
       }
-      if (!applied) return; // 他处已裁决：本拍不再写 ceo.decision 事件（P0-4）
       const expected: ExpectedOutcome = {
         metric: "occ_hold",
         target: 0.7, // 基线：决策后 OCC 不低于宪章下限（行业事实面注册后可细化）
@@ -268,9 +354,16 @@ ${item.action} ${JSON.stringify(item.params)}
         after: { memo, analysis: analysis ?? undefined },
         basis: memo.basis,
       }, { dryRun });
+      return { applied: true };
     });
+    // Counters reflect committed writes (or committed shadow diagnostics).
+    if (result.applied) {
+      if (verdict.kind === "escalate") escalated++;
+      else decided++;
+    }
+    if (result.skipped) { skipped = result.skipped; break; }
   }
-  return { decided, escalated, tiers };
+  return { decided, escalated, tiers, ...(skipped ? { skipped } : {}) };
 }
 
 /* ================= 节拍③：目标偏差扫描（主动性源头） ================= */
