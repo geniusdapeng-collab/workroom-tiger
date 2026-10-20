@@ -1,8 +1,8 @@
 """Yahoo Finance 数据供应商（生产默认）。
 
 依赖 yfinance（免费、无需 key）。
-注意：Yahoo ^TNX 为收益率×10 的指数（42.5 表示 4.25%），本 provider
-统一 ÷10 还原为百分数收益率。
+Yahoo / yfinance 的 ^TNX Close 已按百分数收益率发布
+（5.136 表示 5.136%），与 DataProvider 契约一致，不再缩放。
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class YahooProvider(DataProvider):
 
     def tnx_yield(self, days: int = 400) -> pd.Series:
         df = self._download("^TNX", days)
-        return (df["Close"] / 10.0).dropna()   # 还原为百分数收益率
+        return df["Close"].dropna()   # Yahoo 已是百分数收益率
 
     def vix(self, days: int = 400) -> pd.Series:
         return self._download("^VIX", days)["Close"].dropna()

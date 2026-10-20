@@ -13,8 +13,8 @@
 
 注意（公式勘误，详见 docs/UPGRADE_REPORT.md）：
 - 一致性 Δ 为五维评分的【极差】(max-min)，不是标准差（旧代码用错）。
-- TNX 数据源若为 Yahoo ^TNX（收益率×10 的指数点位），需先 ÷10 还原为
-  百分数收益率，再计算 bp 变化；本模块统一约定输入为百分数收益率。
+- TNX 输入统一为百分数收益率，差值乘 100 得到 bp；Yahoo ^TNX Close
+  已是该单位，不应再次除以 10。归一化由 provider 按实际源契约负责。
 """
 
 from __future__ import annotations
