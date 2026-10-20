@@ -434,6 +434,7 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
                     or not isinstance(call.get("index"), int)
                     or isinstance(call.get("index"), bool)
                     or not isinstance(call.get("method"), str) or not call["method"]
+                    or any(c in call["method"] for c in "\r\n")
                     or "input_ref" not in call
                     or ("output_ref" in call) == ("error_ref" in call)
                     or set(call) != {"index", "method", "input_ref",
@@ -441,8 +442,16 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
                 raise EvidenceInvalid("RESULT_INVALID", "I/O evidence schema differs", stage=stage)
             for name in ("input_ref", "output_ref", "error_ref"):
                 if name in call:
-                    read_snapshot(root, call[name], run_id=run_id, stage=stage,
-                                  role="input" if name == "input_ref" else "output")
+                    value = read_snapshot(root, call[name], run_id=run_id, stage=stage,
+                                          role="input" if name == "input_ref" else "output")
+                    if name == "error_ref" and (
+                            not isinstance(value, dict)
+                            or set(value) != {"error_type", "message", "outcome_observed"}
+                            or not isinstance(value["error_type"], str) or not value["error_type"]
+                            or value["message"] != "External call failed"
+                            or not isinstance(value["outcome_observed"], bool)):
+                        raise EvidenceInvalid("RESULT_INVALID", "I/O error payload differs",
+                                              stage=stage)
                     refs[call[name]["path"]] = call[name]
         previous_output = end["output_ref"]
     return {"event_count": len(events), "stage_count": len(specs),

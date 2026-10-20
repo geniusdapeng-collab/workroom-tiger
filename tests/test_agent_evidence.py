@@ -152,6 +152,83 @@ def test_missing_or_modified_child_snapshot_fails(tmp_path):
         verify_events(tmp_path, execution.run_id, daily_stage_contract())
 
 
+def rewrite_first_io(root, mutate, error_payload=None, *, use_error=False):
+    """Keep every digest/link valid so rejection must come from I/O semantics."""
+    rows = [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()]
+    output = read_json(root, rows[1]["output_ref"]["path"])
+    call = output["value"]["io_calls"][0]
+
+    def save(blob):
+        content = json_bytes(blob)
+        relative = f"evidence/{digest(content)}.json"
+        atomic_bytes(root, relative, content)
+        return file_ref(root, relative, blob["schema"])
+
+    if use_error:
+        child = read_json(root, call.pop("output_ref")["path"])
+        child["value"] = error_payload
+        call["error_ref"] = save(child)
+    mutate(call)
+    replacement = save(output)
+
+    def relink(events):
+        events[1]["output_ref"] = replacement
+        for event in events[2:4]:
+            event["previous_stage_ref"] = replacement
+    rewrite_chain(root, relink)
+
+
+@pytest.mark.parametrize("method", ["test.\nread", "test.\rread"])
+def test_rehashed_multiline_io_method_is_rejected(tmp_path, method):
+    execution = complete(tmp_path)
+    rewrite_first_io(tmp_path, lambda call: call.update(method=method))
+    with pytest.raises(EvidenceInvalid, match="I/O evidence schema"):
+        verify_events(tmp_path, execution.run_id, daily_stage_contract())
+
+
+@pytest.mark.parametrize("payload", [
+    None, [], {},
+    {"error_type": "OSError", "message": "External call failed"},
+    {"error_type": "OSError", "message": "External call failed",
+     "outcome_observed": True, "extra": "unbound"},
+    {"error_type": 1, "message": "External call failed", "outcome_observed": True},
+    {"error_type": "", "message": "External call failed", "outcome_observed": True},
+    {"error_type": "OSError", "message": None, "outcome_observed": True},
+    {"error_type": "OSError", "message": "Uncontrolled error body", "outcome_observed": True},
+    {"error_type": "OSError", "message": "External call failed", "outcome_observed": 1},
+    {"error_type": "OSError", "message": "External call failed", "outcome_observed": "false"},
+])
+def test_rehashed_malformed_io_error_payload_is_rejected(tmp_path, payload):
+    execution = complete(tmp_path)
+    rewrite_first_io(tmp_path, lambda _call: None, payload, use_error=True)
+    with pytest.raises(EvidenceInvalid, match="I/O error payload"):
+        verify_events(tmp_path, execution.run_id, daily_stage_contract())
+
+
+@pytest.mark.parametrize("observed", [True, False])
+def test_actual_controlled_io_error_payload_remains_valid(tmp_path, observed):
+    execution = context(tmp_path)
+    for spec in daily_stage_contract():
+        with execution.step(spec["name"], {"fixture": "controlled IO failure"}) as scope:
+            if spec["driver"] == "llm":
+                scope.passthrough("fixture model unavailable")
+            handle = execution.begin_io("test.read", {"stage": spec["name"]})
+            execution.finish_io(handle, error=OSError("private external error"),
+                                outcome_observed=observed)
+            scope.output({"fallback": "fixture"})
+    execution.assert_complete()
+    result = verify_events(tmp_path, execution.run_id, daily_stage_contract())
+    assert result["stage_count"] == 39
+    assert result["event_count"] == 78
+    first = execution.summary()[0]
+    output = read_snapshot(tmp_path, first["output_ref"], run_id=execution.run_id,
+                           stage="daily.preflight", role="output")
+    error = read_snapshot(tmp_path, output["io_calls"][0]["error_ref"],
+                          run_id=execution.run_id, stage="daily.preflight", role="output")
+    assert error == {"error_type": "OSError", "message": "External call failed",
+                     "outcome_observed": observed}
+
+
 @pytest.mark.parametrize("relative", [
     "../escape.json", "/absolute.json", "a/../b", "a//b", "a/./b", "a\\b", "\0",
 ])
