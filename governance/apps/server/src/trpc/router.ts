@@ -2025,12 +2025,17 @@ const rosterRouter = router({
  *  Mock 驱动默认（D4 同纪律：无真实凭据全流程可跑）；真实通道凭据在 dsh 设置页配置（dsh-im，D14），
  *  凭据永不经事件明文（L7.3）。server 层只做装配与错误映射，纪律全部内聚在 packages/base/im-channels。 */
 const imDriverKind = process.env.IM_DRIVER ?? "mock";
-const imDrivers = new Map<ApprovalChannel, MockChannelDriver>();
-function mockDriverFor(channel: ApprovalChannel): MockChannelDriver {
-  let d = imDrivers.get(channel);
+const imDrivers = new Map<string, MockChannelDriver>();
+/** 身份来自已刷新成员权限的 ctx；元组编码避免租户/工作区标识含分隔符时串线。 */
+function mockDriverKey(scope: { tenantId: string; workspaceId: string }, channel: ApprovalChannel): string {
+  return JSON.stringify([scope.tenantId, scope.workspaceId, channel]);
+}
+function mockDriverFor(scope: { tenantId: string; workspaceId: string }, channel: ApprovalChannel): MockChannelDriver {
+  const key = mockDriverKey(scope, channel);
+  let d = imDrivers.get(key);
   if (!d) {
     d = new MockChannelDriver(channel);
-    imDrivers.set(channel, d);
+    imDrivers.set(key, d);
   }
   return d;
 }
@@ -2123,7 +2128,7 @@ const imRouter = router({
         const sent = await sendApprovalCard(
           getGatewayPool(),
           scope,
-          mockDriverFor(input.channel),
+          mockDriverFor(scope, input.channel),
           { conversationId: input.conversationId },
           card,
           ctx.identity.memberNo,
@@ -2177,19 +2182,19 @@ const imRouter = router({
           getGatewayPool(),
           scope,
           input,
-          mockDriverFor(input.channel),
+          mockDriverFor(scope, input.channel),
         );
         return { ...r, unsigned: sig.unsigned };
       } catch (err) {
         imRethrow(err);
       }
     }),
-  /** mock 出站盒检视（IM_DRIVER=mock 联调/演示用；真实驱动下为空） */
+  /** mock 出站盒检视（IM_DRIVER=mock 联调/演示用；仅当前租户/工作区可见） */
   outbox: protectedProcedure
     .input(z.object({ channel: z.enum(["dingtalk", "wecom", "feishu"]) }))
-    .query(({ input }) => ({
+    .query(({ ctx, input }) => ({
       driver: imDriverKind,
-      outbox: imDrivers.get(input.channel)?.outbox ?? [],
+      outbox: imDrivers.get(mockDriverKey(scopeOf(ctx.identity), input.channel))?.outbox ?? [],
     })),
 });
 
