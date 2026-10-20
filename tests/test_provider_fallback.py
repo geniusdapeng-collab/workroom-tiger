@@ -55,5 +55,7 @@ def test_single_fallback_stooq_failure_propagates(monkeypatch):
     monkeypatch.setattr(pipeline, "_channel_chain", lambda: [])   # 服务端通道不可用场景
     class _DeadStooq(_DeadProvider):
         name = "stooq"
-    with pytest.raises(ValueError):
+    with pytest.raises(pipeline.ProviderDataError) as caught:
         pipeline._single_with_fallback(_DeadStooq(), "ohlcv", "SPY", days=10)
+    assert caught.value.provider == "stooq" and caught.value.method == "ohlcv"
+    assert caught.value.error_type == "ValueError"

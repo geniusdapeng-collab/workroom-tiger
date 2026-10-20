@@ -49,6 +49,16 @@ _HEALTH: dict[str, dict] = {}
 _DATA_ISSUES: list[dict] = []
 
 
+class ProviderDataError(RuntimeError):
+    """回退链耗尽的安全诊断，不保留源端异常正文或异常对象。"""
+
+    def __init__(self, provider: str, method: str, error_type: str):
+        self.provider = provider
+        self.method = method
+        self.error_type = error_type
+        super().__init__(f"{provider}.{method} 数据获取失败（{error_type}）")
+
+
 def _provider_source(provider) -> str:
     """来源标签必须遵守 synthetic 标记，合成源改名也不能伪装成真实源。"""
     return "demo" if is_synthetic(provider) else provider.name
@@ -169,13 +179,13 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
     except Exception as e:
         _health_record(provider.name, False, time.time() - t0)
         _data_issue(provider, method, list(args[:1]), "provider_error", error=e)
+        failure = ProviderDataError(provider.name, method, type(e).__name__)
         chain: list = []
         if provider.name == "yahoo":
             from .providers.stooq import StooqProvider
             chain.append(StooqProvider())
         chain.extend(p for p in _channel_chain()
                      if p.name != provider.name and _supports(p, method))
-        last = e
         for alt in chain:
             if not is_synthetic(provider) and is_synthetic(alt):
                 _data_issue(alt, method, list(args[:1]), "synthetic_fallback_rejected")
@@ -183,7 +193,8 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
                 continue
             t1 = time.time()
             try:
-                logger.warning("%s.%s 失败（%s），降级 %s", provider.name, method, last, alt.name)
+                logger.warning("%s.%s 失败（%s），降级 %s",
+                               failure.provider, method, failure.error_type, alt.name)
                 out = getattr(alt, method)(*args, **kwargs)
                 if _missing_data(out):
                     kind = "None" if out is None else "空数据（含全 NaN）"
@@ -196,8 +207,9 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
             except Exception as e2:
                 _health_record(alt.name, False, time.time() - t1)
                 _data_issue(alt, method, list(args[:1]), "provider_error", error=e2)
-                last = e2
-        raise last
+                failure = ProviderDataError(alt.name, method, type(e2).__name__)
+    # 离开原异常处理块再抛出，避免 __context__ / traceback 带出源端正文。
+    raise failure from None
 
 
 def _quote_stale(q: dict, max_lag_days: int = 3) -> bool:
@@ -313,7 +325,8 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
             batch = src.ohlcv_batch(missing, days=days)
         except Exception as exc:
             _data_issue(src, "ohlcv_batch", missing, "provider_error", error=exc, label=label)
-            logger.warning("%s 批量拉取异常（%s），跳过该环继续降级", src.name, exc)
+            logger.warning("%s.ohlcv_batch 批量拉取异常（%s），跳过该环继续降级",
+                           src.name, type(exc).__name__)
             return {}
         if not isinstance(batch, dict):
             _data_issue(src, "ohlcv_batch", missing, "invalid_data", label=label)
@@ -561,7 +574,7 @@ def run_pipeline(
                     f"[{spec.market_id}] {bmk['rate']} 数据获取失败（含降级源），"
                     f"MRS 无法计算: {exc}") from exc
             logger.warning("[%s] 利率基准 %s 不可得（%s）→ 宏观维缺失再归一化",
-                           spec.market_id, bmk["rate"], exc)
+                           spec.market_id, bmk["rate"], str(exc))
             market_data["tnx"] = None
         # 波动率基准：同上
         try:
@@ -573,7 +586,7 @@ def run_pipeline(
                     f"[{spec.market_id}] {bmk['vol']} 数据获取失败（含降级源），"
                     f"MRS 无法计算: {exc}") from exc
             logger.warning("[%s] 波动率基准 %s 不可得（%s）→ 情绪维缺失再归一化",
-                           spec.market_id, bmk["vol"], exc)
+                           spec.market_id, bmk["vol"], str(exc))
             market_data["vix"] = None
         try:
             market_data["vix9d"] = (_single_with_fallback(

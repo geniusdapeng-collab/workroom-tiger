@@ -102,7 +102,7 @@ class AgentGwProvider(DataProvider):
                     if df is not None and len(df):
                         out[t] = df
                 except Exception as e:
-                    log.info("agentgw 拉取 %s 失败: %s", t, e)
+                    log.info("agentgw.ohlcv_batch 拉取 %s 失败（%s）", t, type(e).__name__)
                 if time.time() - started > self.batch_budget_s:
                     break
         except Exception:

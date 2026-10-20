@@ -144,6 +144,7 @@ def test_invalid_batch_container_continues_fallback(monkeypatch, payload):
 
 
 def test_batch_total_outage_retains_explicit_missing_evidence(monkeypatch, caplog):
+    caplog.set_level("WARNING")
     primary = _Provider("stooq", result={})
     broken = _Provider("tencent", error=TimeoutError("down"))
     empty = _Provider("sina", result={"A": pd.DataFrame()})
@@ -211,8 +212,10 @@ def test_single_total_outage_preserves_error_and_failure_evidence(monkeypatch):
     primary = _Provider("primary", result=pd.DataFrame())
     last = _Provider("tencent", error=ValueError("last source unavailable"))
     monkeypatch.setattr(pipeline, "_channel_chain", lambda: [last])
-    with pytest.raises(ValueError, match="last source unavailable"):
+    with pytest.raises(pipeline.ProviderDataError) as caught:
         pipeline._single_with_fallback(primary, "ohlcv", "A", days=30)
+    assert caught.value.provider == "tencent" and caught.value.method == "ohlcv"
+    assert caught.value.error_type == "ValueError"
     assert [i["provider"] for i in pipeline._DATA_ISSUES] == ["primary", "tencent"]
     assert pipeline._LINEAGE == []
 

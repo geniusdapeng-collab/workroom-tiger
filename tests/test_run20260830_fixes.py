@@ -74,8 +74,10 @@ def test_all_sources_none_raises(monkeypatch):
     """全链 None → 抛错（由调用方按口径记缺失，绝不静默成功）。"""
     bad = _FakeProvider("bad", result=None)
     monkeypatch.setattr(pl, "_channel_chain", lambda: [])
-    with pytest.raises(RuntimeError, match="None"):
+    with pytest.raises(pl.ProviderDataError) as caught:
         pl._single_with_fallback(bad, "vol_index_for", "VIX9D", days=400)
+    assert caught.value.provider == "bad" and caught.value.method == "vol_index_for"
+    assert caught.value.error_type == "RuntimeError"
 
 
 def test_capability_aware_skip(monkeypatch):
