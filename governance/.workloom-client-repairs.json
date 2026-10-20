@@ -50,9 +50,9 @@
       "path": "apps/web/src/components/SimBanner.tsx",
       "card": "MC-027",
       "upstreamSha256": "068d845c135ee2f7cfd83fdc68d90b2940422559f09285a3eeddb57be477ede7",
-      "repairedSha256": "69a2378681ed5be11b10b2c5b572d53722328dbe8bebabaeb2868f7c787039f3",
-      "sourceCommit": "f51f2dd907a0ea2a73a1dc018ab9cda6d30c6b30",
-      "reason": "Report archive declaration, default tool requirements and formal eligibility independently; do not relabel missing or invalid data modes as simulated execution."
+      "repairedSha256": "9e7367342c4baf6406791a92911a0aa2e4babe33c28d07369e53664f6c2d8239",
+      "sourceCommit": "d995fa74eb5f1f5c9af598dbd3a15faba5ebffb4",
+      "reason": "MC-027 reports archive declaration, default tool requirements and formal eligibility independently; MC-037 places the inline banner below the assistant while preserving those semantics. Both distinct regressions are required."
     },
     {
       "path": "apps/web/src/components/loomball/LoomBall.tsx",
@@ -85,6 +85,14 @@
       "repairedSha256": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
       "sourceCommit": "9df5cdb84d3dd5c8873fe7cc6ed7bc186486e842",
       "reason": "MC-034 corrects unread-count contrast with existing tokens; MC-035 bounds scrollable surfaces and preserves full numeric badges, avatar dimensions and ordinary pointer and keyboard controls. Both distinct regressions are required."
+    },
+    {
+      "path": "apps/web/src/components/SkillDistBanner.tsx",
+      "card": "MC-037",
+      "upstreamSha256": "2c72b9a5cf4a769c3aad4771aa89a624e935330aff3b8446f2ac933b7f206239",
+      "repairedSha256": "dc1c2fc217983be104b6212aa6739770d46ff13b42d30541be93bed877f63cdc",
+      "sourceCommit": "d995fa74eb5f1f5c9af598dbd3a15faba5ebffb4",
+      "reason": "Place pending and applied inline skill status banners below the assistant; preserve status semantics and higher-priority dialogs, with real pointer and keyboard regression evidence."
     }
   ],
   "testAdditions": [
@@ -117,6 +125,11 @@
       "path": "scripts/acceptance/lib/loommate-viewport.test.mjs",
       "card": "MC-035",
       "sha256": "d3f43a6af1e15797ed217ced24924a77d68aa22ad62d2c51240f23fed9d7a038"
+    },
+    {
+      "path": "scripts/acceptance/lib/loommate-stacking.test.mjs",
+      "card": "MC-037",
+      "sha256": "388a826fff5705ad452a407c18994c6d344eb63d04a097c4bb41f6283634656f"
     }
   ]
 }
