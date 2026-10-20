@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "workloom.tiger-client-repairs/v1",
+  "repository": "geniusdapeng-collab/workroom-tiger",
+  "taskId": "T-2026-1020-0901",
+  "authorization": {
+    "basis": "user-requested-repository-repair",
+    "issue": "https://github.com/geniusdapeng-collab/workroom-tiger/issues/24",
+    "pullRequest": "https://github.com/geniusdapeng-collab/workroom-tiger/pull/25"
+  },
+  "base": {
+    "version": "0.1.17",
+    "sourceCommit": "91610daf0962a6c24bc7b8cde6c802662eb8b2f7",
+    "stateSha256": "3f505fddc21c63d0a7ece0aaa473e503b3fc4b65955e0f03b315bd99179cca1a",
+    "verifierSha256": "fa1bb091d6b0b0e925367352837d817b59d4374a6c01c3183acba638ee8b0c31"
+  },
+  "repairs": [
+    {
+      "path": "apps/web/src/components/star-ring/StarRing.tsx",
+      "card": "MC-012",
+      "upstreamSha256": "08c7b91c784b166a2843547e89a3028264969ed50ef3f03f02d0c3e800eb8c18",
+      "repairedSha256": "12d6ef63b30552efb10539d6b89cd798e3118073061115a7ed8bb8712b9f64ad",
+      "sourceCommit": "1034e46a52d628c194ffbe7e566b3fed1d75f0c3",
+      "reason": "Restore continuation using the stored thread goal and append-only thread note receipts; retain existing UI structure."
+    },
+    {
+      "path": "apps/webc/src/lib/api.ts",
+      "card": "MC-018",
+      "upstreamSha256": "f4b5b688e8f9d7fa628733d825e0a4e7111b604aea5fcd619aadb28ae6f98cee",
+      "repairedSha256": "b1aa2abce6fddb4768b65de906e32e8eed3f788ab8fa3e58ee093c872eaa3f65",
+      "sourceCommit": "f75df2d1f1e9ad906fbe8f44e3f5e240e5f2b427",
+      "reason": "Align the existing chat request type with actual boolean confirmation, ticket drafts and idempotency keys in the gateway contract."
+    }
+  ],
+  "testAdditions": [
+    {
+      "path": "apps/web/src/components/star-ring/StarRing.contract.test.tsx",
+      "card": "MC-012",
+      "sha256": "31e20148294c32a7970245839ebbfb7e91f5e0d77dc03b43eeb68ccf62b12af3"
+    }
+  ]
+}

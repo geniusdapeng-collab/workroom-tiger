@@ -66,7 +66,7 @@ jobs:
       - name: 禁止 UI 分叉并校验三端版本
         run: node "$WORKLOOM_DIR/scripts/verify-ui-consumer.mjs" --repo "$WORKLOOM_DIR" --require-governance-state
       - name: 校验三端应用壳指纹与行业扩展边界
-        run: node "$WORKLOOM_DIR/scripts/verify-client-foundation-consumer.mjs" --repo "$WORKLOOM_DIR"
+        run: node scripts/ci/verify-tiger-client-repairs.mjs
       - name: 校验产品身份与全量行业包治理
         run: |
           (cd "$WORKLOOM_DIR" && node scripts/verify-product-content.mjs)
@@ -74,12 +74,16 @@ jobs:
       - name: 执行仓库已有测试
         run: |
           set -euo pipefail
-          node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs
+          node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs tests/client-repair-provenance.test.mjs
           pnpm -C "$WORKLOOM_DIR" test
           RUN_DB_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test fence-engine/fence-engine.test.ts
           # The sequence assertions share one database and must run serially.
           RUN_RUNTIME_SCHEMA_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/runtime" test src/runtime-schema.pg.test.ts
           RUN_RUNTIME_SCHEMA_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/apps/server" test src/trpc/thread-number.pg.test.ts
+          # Fault-injection tests temporarily hold table DDL locks; keep each command serial.
+          RUN_SERVICE_GATEWAY_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/apps/server" test src/service/gateway.pg.test.ts
+          RUN_MEMORY_SCOPE_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test review-console/approval-memory.pg.test.ts workdata/memory-id.test.ts
+          RUN_CAPTAIN_BREAKER_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test captain/breaker.pg.test.ts captain/kpi.test.ts
           pnpm -C "$WORKLOOM_DIR" suite
           if [ -f requirements.txt ] && [ -d tests ] && find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
             python -m pip install --disable-pip-version-check -r requirements.txt
