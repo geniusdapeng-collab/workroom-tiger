@@ -29,6 +29,14 @@
       "repairedSha256": "b1aa2abce6fddb4768b65de906e32e8eed3f788ab8fa3e58ee093c872eaa3f65",
       "sourceCommit": "f75df2d1f1e9ad906fbe8f44e3f5e240e5f2b427",
       "reason": "Align the existing chat request type with actual boolean confirmation, ticket drafts and idempotency keys in the gateway contract."
+    },
+    {
+      "path": "apps/web/consumer-e2e/clients.playwright.ts",
+      "card": "MC-015",
+      "upstreamSha256": "91fa35369fdad9280a15e647ffad72961b41a5d478d3c50d69e1df408a423e8f",
+      "repairedSha256": "aeb883b818774ca12c311d39cc978ba65d4526bd5910002898ed903521de8b56",
+      "sourceCommit": "bf260d75a6b80b300f957e0e2ebe481f246eb799",
+      "reason": "Bind the existing production login heading assertion to the controlled product manifest, retaining exact matching and every responsive interaction assertion."
     }
   ],
   "testAdditions": [

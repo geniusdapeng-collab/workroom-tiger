@@ -11,6 +11,7 @@ const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const star = "apps/web/src/components/star-ring/StarRing.tsx";
 const api = "apps/webc/src/lib/api.ts";
+const consumer = "apps/web/consumer-e2e/clients.playwright.ts";
 const regression = "apps/web/src/components/star-ring/StarRing.contract.test.tsx";
 const manifestFile = ".workloom-client-repairs.json";
 const write = (root, path, content) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); };
@@ -19,7 +20,7 @@ function fixture(t, repaired = true) {
   const root = mkdtempSync(join(tmpdir(), "tiger-client-repairs-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const g = join(root, "governance");
-  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api];
+  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer];
   for (const path of entries) write(g, path, `original:${path}\n`);
   write(g, ".workloom-ui.json", JSON.stringify({ version: "0.1.17" }));
   const state = {
@@ -38,7 +39,7 @@ function fixture(t, repaired = true) {
     repairs: [], testAdditions: [],
   };
   if (repaired) {
-    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"]]) {
+    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"]]) {
       write(g, path, `reviewed repair:${path}\n`);
       manifest.repairs.push({ path, card, upstreamSha256: state.managedFiles[path].sha256, repairedSha256: digest(readFileSync(join(g, path))), sourceCommit: "a".repeat(40), reason: "Reviewed contract repair with focused behavioral regression coverage." });
     }
@@ -67,6 +68,10 @@ test("an unregistered managed source change still fails", (t) => {
 });
 test("changing a registered repair after review fails its exact hash", (t) => {
   const f = fixture(t); write(f.g, star, "unreviewed follow-up\n");
+  assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+});
+test("the product-specific consumer assertion remains bound to its reviewed bytes", (t) => {
+  const f = fixture(t); write(f.g, consumer, "unreviewed weakened assertion\n");
   assert.ok(verifyTigerClientRepairs(f.root).length > 0);
 });
 test("changing or omitting the bound regression file fails", (t) => {

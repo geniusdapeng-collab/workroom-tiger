@@ -13,6 +13,7 @@ const TASK = "T-2026-1020-0901";
 const REPAIR_PATHS = new Map([
   ["apps/web/src/components/star-ring/StarRing.tsx", "MC-012"],
   ["apps/webc/src/lib/api.ts", "MC-018"],
+  ["apps/web/consumer-e2e/clients.playwright.ts", "MC-015"],
 ]);
 const TEST_PATH = "apps/web/src/components/star-ring/StarRing.contract.test.tsx";
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -85,7 +86,7 @@ export function verifyTigerClientRepairs(repoRoot) {
   } catch (error) {
     errors.push(`Tiger 本仓修复登记无效：${error.message}`);
   }
-  // Only the three exact, hash-bound differences may be accepted. Missing files,
+  // Only the four exact, hash-bound differences may be accepted. Missing files,
   // modes, versions, symlinks and every other original gate error remain failures.
   return [...new Set([...original.filter((error) => errors.length > 0 || !registered.has(error)), ...errors])];
 }
@@ -96,6 +97,6 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     for (const error of errors) console.error(error);
     process.exitCode = 1;
   } else if (existsSync(resolve("governance", MANIFEST))) {
-    console.log("✅ 原客户端基座与校验器摘要保留；本任务两项客户端修复及回归测试已逐文件核验，其余受管文件零漂移");
+    console.log("✅ 原客户端基座与校验器摘要保留；本任务三项客户端修复及回归测试已逐文件核验，其余受管文件零漂移");
   } else console.log("✅ Tiger 客户端原基座严格校验通过；无本仓修复登记");
 }
