@@ -217,7 +217,12 @@ ${item.action} ${JSON.stringify(item.params)}
       // P0-4 裁决守卫：UPDATE 必须命中仍 pending 的行（并发下他处已裁决/上浮则 rowCount=0），
       // 未命中即跳过事件写入——杜绝「状态未变但 ceo.decision 留痕已落」的双写失真
       let applied = true;
-      if (verdict.kind === "escalate") {
+      if (dryRun) {
+        // Shadow counts advisory verdicts; neither escalation nor a decision may
+        // change approval state. The diagnostic event below carries dry_run.
+        if (verdict.kind === "escalate") escalated++;
+        else decided++;
+      } else if (verdict.kind === "escalate") {
         const u = await c.query(
           `UPDATE approvals SET tier='l4_chairman', snapshot = snapshot || $3::jsonb
            WHERE approval_id=$1 AND workspace_id=$2 AND status='pending'`,
@@ -225,7 +230,7 @@ ${item.action} ${JSON.stringify(item.params)}
         );
         applied = (u.rowCount ?? 0) > 0;
         if (applied) escalated++;
-      } else if (!dryRun) {
+      } else {
         const u = await c.query(
           `UPDATE approvals SET status=$3, gesture=$4::jsonb, decided_by=$5, decided_at=now()
            WHERE approval_id=$1 AND workspace_id=$2 AND status='pending'`,
@@ -234,8 +239,6 @@ ${item.action} ${JSON.stringify(item.params)}
         );
         applied = (u.rowCount ?? 0) > 0;
         if (applied) decided++;
-      } else {
-        decided++; // shadow：完整推理但不落审批状态
       }
       if (!applied) return; // 他处已裁决：本拍不再写 ceo.decision 事件（P0-4）
       const expected: ExpectedOutcome = {
