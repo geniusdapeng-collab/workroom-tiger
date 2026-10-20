@@ -109,6 +109,7 @@ export function LoomMate() {
   const railW = useAskRailPadding();
   const navW = useSideNavWidth();
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [surfaceWidth, setSurfaceWidth] = useState(0);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [open, setOpen] = useState<"none" | "chat" | "settings" | "memory">("none");
@@ -133,16 +134,21 @@ export function LoomMate() {
   const availableWidth = Math.max(96, viewport.width - railW - navW - 32);
   const widgetW = size === "large" ? Math.min(480, availableWidth) : Math.min(120, availableWidth);
   const widgetH = size === "large" ? Math.min(560, Math.round(widgetW * 1.17)) : 170;
+  // 面板和控制条可能比小形象更宽；移动边界以实际浮层宽度为准。
+  const footprintW = surfaceWidth || (mini ? 80 : widgetW + 16);
   const clampPos = (x: number, y: number) => ({
-    x: Math.min(Math.max(navW, x), Math.max(navW, viewport.width - railW - widgetW)),
-    y: Math.min(Math.max(0, y), Math.max(0, viewport.height - widgetH)),
+    x: Math.min(Math.max(navW + 8, x), Math.max(navW + 8, viewport.width - railW - footprintW - 8)),
+    y: Math.min(Math.max(8, y), Math.max(8, viewport.height - widgetH - 8)),
   });
-  const defaultPos = () => ({
-    x: Math.max(navW, viewport.width - railW - widgetW - 16),
-    y: Math.max(0, viewport.height - widgetH - 16),
-  });
+  const defaultPos = () => {
+    const rect = mateSurface.ref.current?.getBoundingClientRect();
+    return rect ? { x: rect.left, y: rect.top } : {
+      x: Math.max(navW + 8, viewport.width - railW - footprintW - 8),
+      y: Math.max(8, viewport.height - widgetH - 8),
+    };
+  };
   const docked: "left" | "right" = pos
-    ? (pos.x + widgetW / 2 < navW + (viewport.width - railW - navW) / 2 ? "left" : "right")
+    ? (pos.x + footprintW / 2 < navW + (viewport.width - railW - navW) / 2 ? "left" : "right")
     : "right";
   const onDragStart = (e: React.PointerEvent) => {
     const base = pos ?? defaultPos();
@@ -164,9 +170,9 @@ export function LoomMate() {
     setPos((p) => {
       if (!p) return p;
       const snapped = {
-        x: p.x + widgetW / 2 < navW + (viewport.width - railW - navW) / 2
-          ? navW + 16
-          : Math.max(navW, viewport.width - railW - widgetW - 16),
+        x: p.x + footprintW / 2 < navW + (viewport.width - railW - navW) / 2
+          ? navW + 8
+          : Math.max(navW + 8, viewport.width - railW - footprintW - 8),
         y: p.y,
       };
       persistLocal("loommate.pos", JSON.stringify(snapped));
@@ -277,7 +283,7 @@ export function LoomMate() {
     };
   // clampPos 按当前左右栏/尺寸计算；这些值变化时重新校正一次即可。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navW, railW, viewport.width, viewport.height, widgetW, widgetH]);
+  }, [navW, railW, viewport.width, viewport.height, widgetW, widgetH, footprintW]);
   // 20s 心跳：先扫描事件源再拉收件箱
   useEffect(() => {
     const h = setInterval(async () => {
@@ -317,6 +323,16 @@ export function LoomMate() {
     restoreFocusOnClose: size === "fullscreen",
     returnFocusRef: sizeToggleRef,
   });
+  useEffect(() => {
+    if (size === "fullscreen" || hidden) return;
+    const surface = mateSurface.ref.current;
+    if (!surface) return;
+    const measure = () => setSurfaceWidth(surface.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, [size, hidden, mateSurface.ref]);
 
   const moveByKeyboard = (event: React.KeyboardEvent<HTMLElement>) => {
     const movement: Partial<Record<"ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight", [number, number]>> = {
@@ -376,22 +392,29 @@ export function LoomMate() {
   // —— 全屏屏保模式：她守着整个场，有事直接喊你 ——
   if (size === "fullscreen") {
     return (
-      <div {...mateSurface} className="fixed inset-0 flex flex-col items-center justify-center bg-bg950/98"
+      <div {...mateSurface} className="fixed inset-0 flex min-h-0 flex-col overflow-hidden bg-bg950/98"
         style={{ zIndex: "var(--wl-z-assistant)" }}
         role="dialog" aria-modal="true" aria-label="小织屏保">
         {/* 环境微光背景 */}
         <div className="pointer-events-none absolute inset-0 opacity-30"
           style={{ background: "radial-gradient(ellipse at 50% 62%, rgba(232,160,191,.25), transparent 60%)" }} />
-        <button ref={sizeToggleRef} onClick={() => void toggleSize()}
-          className="absolute right-5 top-5 rounded-full border border-line bg-bg900/80 px-3 py-1.5 text-body text-ink2 hover:text-ink">
-          退出屏保（Esc）
-        </button>
-        <button onClick={() => void openPanel("chat")} className="relative cursor-pointer transition-transform hover:scale-[1.02]">
+        <div className="relative flex w-full shrink-0 justify-end p-5 pb-2">
+          <button ref={sizeToggleRef} onClick={() => void toggleSize()}
+            className="rounded-full border border-line bg-bg900/80 px-3 py-1.5 text-body text-ink2 hover:text-ink">
+            退出屏保（Esc）
+          </button>
+        </div>
+        {/* 主内容独立滚动，长提醒不会被底部实况遮挡。形象尺寸保持原值。 */}
+        <div className="relative flex min-h-0 w-full flex-1 flex-col items-center overflow-x-hidden overflow-y-auto px-4 pb-5">
+        <div className="my-auto flex w-full shrink-0 flex-col items-center">
+        <button onClick={() => void openPanel("chat")} className="relative flex max-w-full shrink-0 items-center justify-center cursor-pointer transition-transform hover:scale-[1.02]">
+          <span className="pointer-events-none shrink-0">
           {webglOk
             ? <MateLive2D size={Math.min(520, Math.round((typeof window !== "undefined" ? window.innerHeight : 900) * 0.55))} mood={mood} gesture={mateGesture} />
             : <MateAvatar size={Math.min(520, Math.round((typeof window !== "undefined" ? window.innerHeight : 900) * 0.55))} excited={unread > 0} />}
+          </span>
           {unread > 0 && (
-            <span className="absolute right-4 top-4 flex h-10 min-w-10 items-center justify-center rounded-full bg-alert px-2 text-[16px] font-bold text-white shadow-xl">
+            <span className="absolute right-4 top-4 flex h-10 min-w-10 items-center justify-center rounded-full bg-alert px-2 text-[16px] font-bold text-bg950 shadow-xl">
               {unread}
             </span>
           )}
@@ -412,8 +435,10 @@ export function LoomMate() {
             </div>
           </div>
         ))}
+        </div>
+        </div>
         {/* 底部团队运行串话条 */}
-        <div className="absolute bottom-0 left-0 right-0 border-t border-line bg-bg900/80 px-6 py-2.5 backdrop-blur">
+        <div className="relative max-h-[25vh] w-full shrink-0 overflow-y-auto border-t border-line bg-bg900/80 px-6 py-2.5 backdrop-blur">
           <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-1 overflow-hidden text-body text-ink2">
             <span className="shrink-0 text-gold">● 团队实况</span>
             {items.length === 0 && <span className="animate-pulse">各部门运行正常，一切井然有序……（有事我喊你）</span>}
@@ -424,7 +449,7 @@ export function LoomMate() {
         </div>
         {/* 面板（聊/设置/记忆）在全屏态同样可用 */}
         {open !== "none" && (
-          <div className="absolute bottom-16 right-5 top-16 w-[var(--wl-assistant-expanded)]">
+          <div className="absolute bottom-4 right-4 top-16 flex min-h-0 w-[min(var(--wl-assistant-expanded),calc(100vw-2rem))] flex-col">
             <MatePanel
               open={open} setOpen={setOpen} openPanel={openPanel}
               chat={chat} busy={busy} input={input} setInput={setInput} send={send}
@@ -456,10 +481,13 @@ export function LoomMate() {
 
   const rootStyle: React.CSSProperties = pos
     ? { position: "fixed", left: pos.x, top: pos.y, zIndex: "var(--wl-z-assistant)" }
-    : { position: "fixed", right: railW + 16, bottom: 16, zIndex: "var(--wl-z-assistant)" };
+    : { position: "fixed", right: railW + 8, bottom: 8, zIndex: "var(--wl-z-assistant)" };
 
   return (
-    <div {...mateSurface} className={`flex flex-col gap-2 ${docked === "left" ? "items-start" : "items-end"}`} style={{ fontFamily: "inherit", ...rootStyle }}>
+    <div {...mateSurface}
+      className={`flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 ${docked === "left" ? "items-start" : "items-end"}`}
+      style={{ fontFamily: "inherit", maxHeight: Math.max(0, viewport.height - (pos?.y ?? 8) - 8),
+        maxWidth: Math.max(96, viewport.width - railW - navW - 16), ...rootStyle }}>
       {/* 气泡提醒（最多叠 3 条） */}
       {open === "none" && items.slice(0, 3).map((it) => (
         <div key={it.id} className={`w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur ${LEVEL_STYLE[it.level]}`}>
@@ -504,19 +532,19 @@ export function LoomMate() {
               void openPanel("chat");
             }
           }}
-          className="relative block h-16 w-16 overflow-hidden rounded-full border-2 border-gold/60 bg-bg900 shadow-xl transition-transform hover:scale-110"
+          className="relative block h-16 w-16 rounded-full border-2 border-gold/60 bg-bg900 shadow-xl transition-transform hover:scale-110"
         >
           {loomBallEnabled ? (
             /* 小角落态：静态小头像 → 织球（班组此刻在干什么，一眼看得见；
                形象本体与人格不进这颗球——那是大形象的职责） */
-            <span className="flex h-full w-full items-center justify-center bg-bg900">
+            <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-bg900">
               <LoomBall emotion={systemEmotion} size={56} live followGaze={false} title={`班组${systemEmotionText}`} />
             </span>
           ) : (
-            <img src="/live2d/mao/poster.png" alt={personaName} draggable={false} className="h-full w-full object-cover" />
+            <img src="/live2d/mao/poster.png" alt={personaName} draggable={false} className="h-full w-full rounded-full object-cover" />
           )}
           {unread > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-alert px-1 text-body font-bold text-white shadow-lg">
+            <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-alert px-1 text-body font-bold leading-none text-bg950 shadow-lg">
               {unread}
             </span>
           )}
@@ -533,7 +561,7 @@ export function LoomMate() {
             ? <MateLive2D size={dim} mood={mood} gesture={mateGesture} />
             : <MateAvatar size={dim} excited={unread > 0} />}
           {unread > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-alert px-1 text-body font-bold text-white shadow-lg">
+            <span className="absolute -right-1 -top-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-alert px-1 text-body font-bold text-bg950 shadow-lg">
               {unread}
             </span>
           )}
@@ -590,8 +618,8 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
   setMemory: React.Dispatch<React.SetStateAction<Record<string, MemRow[]> | null>>;
 }) {
   return (
-<div className="flex h-[min(26rem,calc(100vh-2rem))] w-[var(--wl-assistant-expanded)] max-w-full flex-col rounded-2xl border border-gline bg-bg900/95 shadow-2xl backdrop-blur" role="region" aria-label="小织助手面板">
-          <div className="flex items-center justify-between border-b border-line px-3 py-2">
+<div className="flex h-[min(26rem,calc(100vh-2rem))] min-h-0 max-h-full w-[var(--wl-assistant-expanded)] max-w-full flex-col rounded-2xl border border-gline bg-bg900/95 shadow-2xl backdrop-blur" role="region" aria-label="小织助手面板">
+          <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-2">
             <div className="flex gap-1">
               {([["chat", "聊聊"], ["settings", "设置"], ["memory", "记忆"]] as const).map(([k, label]) => (
                 <button key={k} onClick={() => void openPanel(k)}
@@ -604,7 +632,7 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
           </div>
           {open === "chat" && (
             <>
-              <div className="flex-1 space-y-2 overflow-y-auto p-3">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
                 {chat.map((m, i) => (
                   <div key={i} className={m.from === "me" ? "text-right" : ""}>
                     <span className={`inline-block max-w-[85%] rounded-2xl px-3 py-1.5 text-body leading-relaxed ${
@@ -615,7 +643,7 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
                 ))}
                 {busy && <div className="text-body text-ink3">{personaName}正在思考…</div>}
               </div>
-              <div className="border-t border-line p-2">
+              <div className="shrink-0 border-t border-line p-2">
                 <div className="mb-1.5 flex gap-1">
                   {["任务怎么样了", "明早八点提醒我过审批", "找总经理"].map((chip) => (
                     <button key={chip} onClick={() => void send(chip)}
@@ -643,7 +671,7 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
               }} />
           )}
           {open === "memory" && (
-            <div className="flex-1 overflow-y-auto p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <div className="mb-2 text-body text-ink2">它记住了您什么，全在这里——逐条可删，绝不偷记。</div>
               {memory && Object.entries(memory).map(([layer, rows]) => rows.length > 0 && (
                 <div key={layer} className="mb-3">
@@ -678,7 +706,7 @@ function SettingsPanel({ settings, personaName, onSave }: {
   const [s, setS] = useState(settings);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((x) => ({ ...x, [k]: v }));
   return (
-    <div className="flex-1 space-y-2.5 overflow-y-auto p-3 text-body">
+    <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3 text-body">
       <label className="block">
         <span className="text-ink2">它怎么称呼您</span>
         <input value={s.display_name} onChange={(e) => set("display_name", e.target.value)}
