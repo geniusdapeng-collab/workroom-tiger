@@ -1,0 +1,122 @@
+{
+  "schema": "tiger.independent-approval-fixture/v1",
+  "actor": "/root/final_local_acceptance",
+  "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+  "mode": "readback",
+  "environment": "local-preview",
+  "startedAt": "2026-10-20T15:04:39.791Z",
+  "status": "pass",
+  "checks": [
+    {
+      "id": "readback-is-bound-to-this-phase",
+      "expected": "Successful prepare receipt for this commit, actor and simulated workspace",
+      "actual": {
+        "schema": "tiger.independent-approval-fixture/v1",
+        "mode": "prepare",
+        "status": "pass",
+        "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+        "actor": "/root/final_local_acceptance",
+        "workspace": "trading"
+      },
+      "pass": true,
+      "evidenceGrade": "B"
+    },
+    {
+      "id": "readback-retains-harmless-shape",
+      "expected": "The same proposal remains non-executable and was not consumed",
+      "actual": {
+        "rows": 1,
+        "harmlessShape": true,
+        "consumedAt": null
+      },
+      "pass": true,
+      "evidenceGrade": "B"
+    },
+    {
+      "id": "actual-ui-decision-was-persisted",
+      "expected": "Approved by the manifest member with one approve gesture",
+      "actual": {
+        "status": "approved",
+        "gesture": {
+          "type": "approve",
+          "weight": 1
+        },
+        "decidedBy": "MEM-T001",
+        "decidedAt": "2026-10-20T14:34:48.360Z"
+      },
+      "pass": true,
+      "evidenceGrade": "B"
+    },
+    {
+      "id": "one-real-gesture-event-links-the-proposal",
+      "expected": "Exactly one matching human event links the actual proposal and has no task session",
+      "actual": {
+        "rows": 1,
+        "eventId": "E-19983",
+        "sessionId": null,
+        "who": {
+          "id": "MEM-T001",
+          "type": "human"
+        },
+        "links": [
+          "E-19896"
+        ],
+        "approvalId": "apr-suite-rdas-17925067474852900",
+        "gesture": "approve"
+      },
+      "pass": true,
+      "evidenceGrade": "B"
+    }
+  ],
+  "externalActionsAllowed": false,
+  "cleanupDeletionAttempted": false,
+  "fixture": {
+    "schema": "tiger.independent-fixture-identity/v1",
+    "actor": "/root/final_local_acceptance",
+    "commit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+    "manifest": {
+      "path": "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/work/workroom-tiger/governance/product.manifest.json",
+      "sha256": "793ee1ff8e0def98b2ca6da08f6334d36c483b8c33fa67937a9f0b5cd4192eaa"
+    },
+    "productId": "workroom-tiger",
+    "workspace": {
+      "id": "trading",
+      "tenantId": "tiger",
+      "slug": "tiger-trading",
+      "industry": "trading",
+      "bundleId": "trading",
+      "isExample": true,
+      "dataMode": "simulated"
+    },
+    "member": {
+      "member_no": "MEM-T001",
+      "role": "owner",
+      "status": "active"
+    },
+    "activeInstall": {
+      "id": "bi-trading-trading",
+      "bundle_id": "trading"
+    },
+    "database": "workloom_tiger_acceptance",
+    "databaseMutation": false
+  },
+  "priorFixture": {
+    "path": "/Users/mac/Documents/Codex/2026-10-20/n-she-wn/outputs/tiger-audit/final-acceptance/rdas-candidate-34de5b08/approval-fixture/fixture.json",
+    "sha256": "7918864c11922376469449041039a464ae8b3fee3e16e80f3cb816b6831a916d"
+  },
+  "approvalId": "apr-suite-rdas-17925067474852900",
+  "proposalEventId": "E-19896",
+  "actualApproval": {
+    "status": "approved",
+    "gesture": {
+      "type": "approve",
+      "weight": 1
+    },
+    "decidedBy": "MEM-T001",
+    "decidedAt": "2026-10-20T14:34:48.360Z"
+  },
+  "gestureEventId": "E-19983",
+  "databaseMutation": false,
+  "finishedAt": "2026-10-20T15:04:40.078Z",
+  "limitation": "One synthetic local approval only. Actual UI evidence remains separately evaluated; no general approval coverage or external action is inferred."
+}

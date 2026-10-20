@@ -14,6 +14,7 @@ import { cliArgs, findRepoRoot, loadProfile, urlsOf } from "./lib/profile.mjs";
 import { loadChromium } from "./lib/playwright.mjs";
 import { loginAsMember, productIdOf } from "./lib/session.mjs";
 import { canonicalJson, dailyDecisionEvidence, evaluateJourney, pageStateEvidence, rpcExchange, visibleIdentifier, workspaceIdentityEvidence } from "./lib/ui-evidence.mjs";
+import { observeResponses } from "./lib/response-observer.mjs";
 
 const args = cliArgs();
 const REPO_ROOT = findRepoRoot();
@@ -44,7 +45,7 @@ const T = profile.thresholds;
 const WORKSPACE_SLUG = profile.identity?.workspaceSlug ?? null;
 const MEMBER_NO = profile.identity?.human ?? "MEM-001";
 
-const REPORT = { at: new Date().toISOString(), spec: "docs/REAL-DEVICE-ACCEPTANCE-SPEC.md@rdas/v1", profileWarnings, checks: [], dimensions: {}, issues: [] };
+const REPORT = { at: new Date().toISOString(), spec: "docs/REAL-DEVICE-ACCEPTANCE-SPEC.md@rdas/v1", profileWarnings, checks: [], dimensions: {}, issues: [], responseObservations: [] };
 const only = (() => {
   const i = process.argv.indexOf("--only");
   return i >= 0 ? new Set(String(process.argv[i + 1]).split(",")) : null;
@@ -142,56 +143,12 @@ async function waitUntil(target, predicate, timeout = 8000) {
 }
 
 /** Observe browser requests, never substitute a direct mutation for a UI action.
- * Request headers/tokens are deliberately neither retained nor reported. */
-function observe(target) {
-  const responses = [];
-  const requests = [];
-  const pending = new Set();
-  const requestTimes = new WeakMap();
-  const inputOf = (request) => {
-    try { return request.postDataJSON(); }
-    catch { return null; }
-  };
-  const onRequest = (request) => {
-    requestTimes.set(request, now());
-    const url = new URL(request.url());
-    if (request.method() !== "POST") return;
-    const names = url.pathname.includes("/trpc/") ? decodeURIComponent(url.pathname.split("/trpc/")[1]).split(",") : url.pathname === "/c/chat" ? ["c.chat"] : [];
-    for (const procedure of names) requests.push({ procedure, at: now() });
-  };
-  const onResponse = (response) => {
-    const request = response.request();
-    const url = new URL(request.url());
-    const names = url.pathname.includes("/trpc/") ? decodeURIComponent(url.pathname.split("/trpc/")[1]).split(",") : url.pathname === "/c/chat" ? ["c.chat"] : [];
-    if (names.length === 0) return;
-    const task = (async () => {
-      let json;
-      try { json = await response.json(); }
-      catch { json = null; }
-      for (const procedure of names) {
-        const exchange = procedure === "c.chat"
-          ? { procedure, input: inputOf(request), data: json, status: response.status(), ok: response.ok() && typeof json?.answer === "string" && Boolean(json.answer.trim()) }
-          : rpcExchange(request.url(), request.method(), inputOf(request), response.status(), json, procedure);
-        if (exchange) responses.push({ ...exchange, method: request.method(), requestAt: requestTimes.get(request) ?? null, at: now() });
-      }
-    })();
-    pending.add(task);
-    void task.finally(() => pending.delete(task));
-  };
-  target.on("request", onRequest);
-  target.on("response", onResponse);
-  return {
-    responses, requests,
-    latest: (name, match = () => true) => responses.findLast((entry) => entry.procedure === name && match(entry)) ?? null,
-    async wait(name, match = () => true, timeout = 8000) {
-      await waitUntil(target, () => Boolean(this.latest(name, match)), timeout);
-      return this.latest(name, match);
-    },
-    async stop() {
-      target.off("request", onRequest); target.off("response", onResponse);
-      await Promise.all(pending);
-    },
-  };
+ * Read failures are diagnostics; the existing journey predicates still require
+ * their own successful, bound response and cannot pass on missing evidence. */
+function observe(target, journeyId) {
+  const watcher = observeResponses(target);
+  REPORT.responseObservations.push({ journeyId, readFailures: watcher.failures });
+  return watcher;
 }
 
 // These reads corroborate UI results; every mutating operation remains a real
@@ -215,7 +172,7 @@ function checked(entry, actual) {
 }
 
 async function firstValue() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-01");
   try {
     const t0 = now();
     await page.goto(`${URLs.pc}${R.home}`, { waitUntil: "domcontentloaded" });
@@ -254,7 +211,7 @@ async function firstValue() {
 }
 
 async function approval() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-02");
   try {
     await page.goto(`${URLs.pc}${R.approvals}`, { waitUntil: "domcontentloaded" });
     const initial = await watcher.wait("approvals.list");
@@ -308,7 +265,7 @@ async function approval() {
 }
 
 async function traceability() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-03");
   try {
     await page.goto(`${URLs.pc}${R.events}`, { waitUntil: "domcontentloaded" });
     await watcher.wait("threads.events");
@@ -352,7 +309,7 @@ async function traceability() {
 }
 
 async function brake() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-04");
   try {
     let entry = null;
     let where = null;
@@ -391,7 +348,7 @@ async function brake() {
 }
 
 async function dispatch() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-05");
   try {
     await page.goto(`${URLs.pc}${R.tasks}`, { waitUntil: "domcontentloaded" });
     const input = page.locator('input[placeholder^="说出一句话目标"], textarea[placeholder^="说出一句话目标"]').first();
@@ -445,7 +402,7 @@ async function dispatch() {
 }
 
 async function inbox() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-06");
   try {
     await page.goto(`${URLs.pc}${R.inbox}`, { waitUntil: "domcontentloaded" });
     const source = await watcher.wait("accounts.inbox.unified");
@@ -484,7 +441,7 @@ async function mobileStaff() {
     localStorage.removeItem(k.replace("access-token", "guest"));
   }, { t: TOKEN, slug: WORKSPACE_SLUG, k: key });
   const mobile = await context.newPage();
-  const watcher = observe(mobile);
+  const watcher = observe(mobile, "EXP-07");
   try {
     await mobile.goto(`${URLs.bMobile}${R.tasks}`, { waitUntil: "domcontentloaded" });
     const source = await watcher.wait("threads.list", () => true, 10000);
@@ -514,7 +471,7 @@ async function mobileStaff() {
 }
 
 async function partnerScope() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-08");
   try {
     await page.goto(`${URLs.pc}${R.partners}`, { waitUntil: "domcontentloaded" });
     const source = await watcher.wait("accounts.admin.grants");
@@ -576,7 +533,7 @@ async function chatSnapshot(target) {
 async function guestService() {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN" });
   const cPage = await context.newPage();
-  const watcher = observe(cPage);
+  const watcher = observe(cPage, "EXP-09");
   try {
     await cPage.goto(`${URLs.cMobile}/`, { waitUntil: "domcontentloaded" });
     const input = cPage.locator('input[placeholder="请输入您的需求…"], textarea[placeholder="请输入您的需求…"]').first();
@@ -644,7 +601,7 @@ async function fenceSnapshot() {
 }
 
 async function dryRun() {
-  const watcher = observe(page);
+  const watcher = observe(page, "EXP-10");
   try {
     await page.goto(`${URLs.pc}${R.guardrails}`, { waitUntil: "domcontentloaded" });
     await watcher.wait("fence.rules");
@@ -834,6 +791,17 @@ md.push("");
 md.push("| 走查 | 角色 | 旅程 | 维度 | 预期 | 实测 | 结论 |");
 md.push("|---|---|---|---|---|---|---|");
 for (const c of REPORT.checks) md.push(`| ${c.id} ${c.name} | ${c.persona} | ${c.journey} | ${c.dimension} | ${c.expected} | ${JSON.stringify(c.actual)} | ${c.pass ? "通过" : "**未通过**"} |`);
+const readFailures = REPORT.responseObservations.flatMap((entry) => entry.readFailures.map((failure) => ({ journeyId: entry.journeyId, ...failure })));
+if (readFailures.length) {
+  md.push("");
+  md.push("## 响应读取诊断");
+  md.push("");
+  md.push("以下响应未形成可用证据；业务结论仍按各旅程的请求、对象和页面回执独立判定。");
+  md.push("");
+  md.push("| 走查 | 接口 | 读取结果 |");
+  md.push("|---|---|---|");
+  for (const failure of readFailures) md.push(`| ${failure.journeyId} | ${failure.procedure} | ${failure.readError.code} |`);
+}
 if (REPORT.dimensions.terminology) {
   md.push("");
   md.push("## 术语一致性扫描");

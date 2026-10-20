@@ -393,6 +393,7 @@ async function runFixture(name, kind, mode, onlyIds = null) {
   const source = readFileSync(join(SOURCE, sourceName), "utf8");
   writeFileSync(join(scripts, sourceName), source);
   if (existsSync(join(SOURCE, "lib/ui-evidence.mjs"))) writeFileSync(join(scripts, "lib/ui-evidence.mjs"), readFileSync(join(SOURCE, "lib/ui-evidence.mjs")));
+  if (existsSync(join(SOURCE, "lib/response-observer.mjs"))) writeFileSync(join(scripts, "lib/response-observer.mjs"), readFileSync(join(SOURCE, "lib/response-observer.mjs")));
   // Exercise the exact product naming and display modules, including the
   // installed UI language implementation. Do not copy its policy into tests.
   const clientLib = join(temp, "apps/web/src/lib");

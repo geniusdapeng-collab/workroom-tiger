@@ -120,15 +120,21 @@ jobs:
       - name: 安装 Chromium
         run: pnpm -C "$WORKLOOM_DIR/apps/web" exec playwright install --with-deps chromium
       - name: 验证体验探针绑定真实界面动作与结果
-        run: cd "$WORKLOOM_DIR" && node --test scripts/acceptance/lib/ui-evidence.test.mjs
+        env:
+          MC036_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC036
+        run: |
+          set -euo pipefail
+          cd "$WORKLOOM_DIR"
+          node --test --test-concurrency=1 scripts/acceptance/lib/ui-evidence.test.mjs scripts/acceptance/lib/response-observer.test.mjs
       - name: 验证版本徽标、未读数量与助手视口布局
         env:
           MC033_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC033
           MC034_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC034
           MC035_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC035
+          MC037_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC037
         run: |
           cd "$WORKLOOM_DIR"
-          node --test --test-concurrency=1 scripts/acceptance/lib/level-badge-layout.test.mjs scripts/acceptance/lib/loommate-unread-contrast.test.mjs scripts/acceptance/lib/loommate-viewport.test.mjs
+          node --test --test-concurrency=1 scripts/acceptance/lib/level-badge-layout.test.mjs scripts/acceptance/lib/loommate-unread-contrast.test.mjs scripts/acceptance/lib/loommate-viewport.test.mjs scripts/acceptance/lib/loommate-stacking.test.mjs
       - name: 三端生产预览主入口与首帧横向溢出冒烟
         run: CI=true pnpm -C "$WORKLOOM_DIR/apps/web" test:consumer
       - name: 留存三端浏览器冒烟证据

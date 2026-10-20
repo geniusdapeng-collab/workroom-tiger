@@ -63,7 +63,7 @@ export function SimBanner() {
     };
   }, []);
   if (!st) return loadFailed ? (
-    <div role="status" className="relative z-30 border-b border-amber-500/50 bg-amber-100/80 px-4 py-2 text-body text-amber-800">
+    <div role="status" className="relative z-10 border-b border-amber-500/50 bg-amber-100/80 px-4 py-2 text-body text-amber-800">
       运行状态暂时无法确认，请稍后重试；具体执行结果以任务回执为准。
     </div>
   ) : null;
@@ -75,7 +75,7 @@ export function SimBanner() {
   // V4 §2：示例版银带（深空银辉语义——不是警告，是身份说明；与黄色模拟态警示分色）
   if (st.bundle?.isExample) {
     return (
-      <div className="relative z-30 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-bg800/90 px-4 py-1.5 text-body text-ink2 backdrop-blur">
+      <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-bg800/90 px-4 py-1.5 text-body text-ink2 backdrop-blur">
         <Icon name="star" size={15} className="text-gold" />
         <span className="min-w-0 flex-1 break-words">
           当前装配：<b className="text-ink">行业示例版</b>（{st.workspace.name}）。{modeText}
@@ -92,7 +92,7 @@ export function SimBanner() {
   }
   if (st.declaredDataMode === "real" && mode.formalModeActive && st.llm.real) return null;
   return (
-    <div className="relative z-30 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/50 bg-amber-100/80 px-4 py-2 text-body text-amber-800 backdrop-blur">
+    <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/50 bg-amber-100/80 px-4 py-2 text-body text-amber-800 backdrop-blur">
       <Icon name="warning" size={16} />
       <span className="min-w-0 flex-1 break-words">
         {modeText} 请进入「落地向导」查看并补齐配置。

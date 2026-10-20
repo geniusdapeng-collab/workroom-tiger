@@ -1,0 +1,34 @@
+{
+  "kind": "portable-audit-specification",
+  "sourceLedgerSha256": "99d67b64c4e2700c98f840b3108ef8e5c72ee768d9b3e0eeaee5d1f45071820a",
+  "sourceLedger": "outputs/tiger-audit/supplemental-audit-34de5b08/ledger.json",
+  "auditCommit": "34de5b08c80b08c75c9d336cb3b5e64c2c481b20",
+  "cards": [
+    "MC-036",
+    "MC-037"
+  ],
+  "executed": false,
+  "normalization": "node/python3/pnpm resolved by the user's prepared environment",
+  "copiedAuditArtifacts": [
+    {
+      "path": "evidence/audit/MC036/01-independent-experience.json",
+      "sha256": "28cc1047db05509ff3991419000b16b8ed5b6bd12c9020b6dda3eb19d5242aa1"
+    },
+    {
+      "path": "evidence/audit/MC036/02-experience-pending-diagnostic-3.json",
+      "sha256": "78d7b27a261a6e957e53d05a309d633732aaa766d297584fde43661f93b60f26"
+    },
+    {
+      "path": "evidence/audit/MC036/03-readback.json",
+      "sha256": "e66081e6d4844b3c4d4f1351b828fa43db72e46c850a0c7aa8ab60a757547f77"
+    },
+    {
+      "path": "evidence/audit/MC037-original-loommate-inspection.json",
+      "sha256": "9c7adc461b46b53222b0786fbce38e84a861df40175bf8958cf2927523e5699b"
+    }
+  ],
+  "portableExecutables": [
+    "node"
+  ],
+  "assertions": 3
+}
