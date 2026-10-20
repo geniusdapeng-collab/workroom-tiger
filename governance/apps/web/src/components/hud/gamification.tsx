@@ -7,7 +7,7 @@ import { versionText } from "../../lib/display";
 import { Icon } from "@workloom/ui";
 
 /** LevelBadge 等级徽章：等级数字 + 段位小字（全息青）
- *  主理人=圆形头像金描边；船员=方形头像+版本角标。段位阶梯：青铜→白银→黄金→铂金→星钻 */
+ *  主理人=圆形头像金描边；船员=方形头像+版本信息。段位阶梯：青铜→白银→黄金→铂金→星钻 */
 export function LevelBadge({
   level,
   rank,
@@ -21,9 +21,10 @@ export function LevelBadge({
   name: string;
   version?: string;
 }) {
+  const showVersion = !captain && Boolean(version);
   return (
-    <div className="flex items-center gap-2.5">
-      <div className="relative">
+    <div className="flex flex-wrap items-center gap-2.5">
+      <div className="shrink-0">
         <div
           className={`flex h-10 w-10 items-center justify-center border-2 font-orb text-body font-black ${
             captain
@@ -33,15 +34,15 @@ export function LevelBadge({
         >
           {name.slice(0, 1)}
         </div>
-        {!captain && version && (
-          <span className="absolute -right-1.5 -bottom-1 rounded border border-line bg-bg900 px-1 font-mono text-body text-ink3">
+      </div>
+      <div className={showVersion ? "min-w-0 flex-1 basis-24" : "min-w-0"}>
+        <div className="font-orb text-body font-bold tracking-wider text-goldhi">等级 {level}</div>
+        <div className="text-body text-holo">{rank}</div>
+        {showVersion && (
+          <span className="mt-0.5 block w-fit max-w-full rounded border border-line bg-bg900 px-1 font-mono text-body text-ink3">
             {versionText(version)}
           </span>
         )}
-      </div>
-      <div>
-        <div className="font-orb text-body font-bold tracking-wider text-goldhi">等级 {level}</div>
-        <div className="text-body text-holo">{rank}</div>
       </div>
     </div>
   );
