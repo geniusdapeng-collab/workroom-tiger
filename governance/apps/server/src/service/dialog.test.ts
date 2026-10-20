@@ -1,7 +1,6 @@
 /**
  * server · dialog 意图/置信度纯函数单测（不触 DB）
- * M8：与 base intents 同一张规则表——complaint>biz_query>service_request>kb_qa；
- *     疑问句优先 kb_qa；「修/修一下/坏了」直连 service_request。
+ * M8：通用投诉/人工协助/工单进度保持可用；行业业务词没有已验证适配器时走知识问答。
  * H5：置信度归一化三档边界（≥0.72 直答 / 0.5–0.72 附提示 / <0.5 拒答）。
  */
 import { describe, expect, it } from "vitest";
@@ -10,14 +9,16 @@ import { classify, tierOfScore, ticketKindOf, CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
 describe("classify 意图规则（M8 与 base 同表）", () => {
   const cases: Array<[string, string, string?]> = [
     ["我要投诉房间太吵", "complaint"],
-    ["查一下我的订单", "biz_query", "query_order"],
-    ["我的会员积分还有多少", "biz_query", "query_member"],
-    ["豪华大床房多少钱一晚", "biz_query", "query_catalog"],
+    ["查一下我的订单", "kb_qa"],
+    ["我的会员积分还有多少", "kb_qa"],
+    ["豪华大床房多少钱一晚", "kb_qa"],
     ["我的工单进度怎么样了", "biz_query", "query_ticket"],
     ["送站巴士几点发车", "kb_qa"],            // 含「送」但疑问句 → kb_qa 不建单
     ["系统什么情况下会开仓", "kb_qa"],
-    ["空调坏了，帮我修一下", "service_request"], // 坏了/修 直连建单
-    ["帮我送两瓶矿泉水", "service_request"],
+    ["空调坏了，帮我修一下", "kb_qa"], // 行业履约词不能自动启用业务规则
+    ["帮我送两瓶矿泉水", "kb_qa"],
+    ["请处理我的服务申请", "service_request"],
+    ["我需要人工协助", "service_request"],
     ["附近地铁站怎么走", "kb_qa"],            // 无规则命中 → 默认 kb_qa（低置信拒答）
   ];
   for (const [text, intent, tool] of cases) {
@@ -30,9 +31,9 @@ describe("classify 意图规则（M8 与 base 同表）", () => {
 });
 
 describe("ticketKindOf service_request → 工单类型", () => {
-  it("修/坏类 → repair；送/拿类 → delivery；其余 → other", () => {
-    expect(ticketKindOf("空调坏了，帮我修一下")).toBe("repair");
-    expect(ticketKindOf("帮我送两瓶矿泉水")).toBe("delivery");
+  it("缺行业适配器时，行业履约词均落通用 other 草稿", () => {
+    expect(ticketKindOf("空调坏了，帮我修一下")).toBe("other");
+    expect(ticketKindOf("帮我送两瓶矿泉水")).toBe("other");
     expect(ticketKindOf("帮我安排一个安静点的房间")).toBe("other");
   });
 });

@@ -9,24 +9,16 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import pg from "pg";
+import { createServiceFixture, serviceFixtureIdentity } from "./test-fixtures.js";
+import { fixtureDatabaseUrls } from "../test-fixtures/governance.js";
 
 const PORT = 8795;
 const BASE = `http://localhost:${PORT}`;
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const RUN = `e2e-${Date.now().toString(36)}`;
 const DEV_C_SECRET = "workloom-c-dev-secret-change-me";
-// 仓库无关的 DB 解析：优先环境变量，其次读仓库根 .env（vitest 不自动加载），最后回退 workloom
-import { readFileSync } from "node:fs";
-function resolveDbUrl(): string {
-  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
-  try {
-    const env = readFileSync(new URL("../../../../.env", import.meta.url), "utf-8");
-    const m = env.match(/^DATABASE_URL=(.+)$/m);
-    if (m?.[1]?.trim()) return m[1].trim();
-  } catch { /* 无 .env 回退 */ }
-  return "postgres://postgres:workloom@localhost:5432/workloom";
-}
-const DB_URL = resolveDbUrl();
+const fixture = serviceFixtureIdentity(RUN);
+const DB_URL = fixtureDatabaseUrls().owner;
 
 let server: ChildProcess;
 let db: pg.Client;
@@ -76,33 +68,8 @@ async function trpc(proc: string, opts: { input?: unknown; token?: string; metho
   return { status: res.status, data: body.result?.data ?? null, error: body.error ?? null };
 }
 
-/** 与 C 端网关同一工作区解析口径（SERVICE_C_WORKSPACE_ID ?? 酒店回归域优先 ?? 首个工作区），多工作区仓库（如视频版）下保证 B/C 同域 */
-function serviceCWorkspaceId(): string | null {
-  if (process.env.SERVICE_C_WORKSPACE_ID) return process.env.SERVICE_C_WORKSPACE_ID;
-  try {
-    const env = readFileSync(new URL("../../../../.env", import.meta.url), "utf-8");
-    const m = env.match(/^SERVICE_C_WORKSPACE_ID=(.+)$/m);
-    if (m?.[1]?.trim()) return m[1].trim();
-  } catch { /* 无 .env 回退 */ }
-  return null;
-}
-
-async function resolveWorkspaceSlug(): Promise<string> {
-  const pg = (await import("pg")).default;
-  const pool = new pg.Pool({ connectionString: DB_URL });
-  try {
-    const wsId = serviceCWorkspaceId();
-    if (wsId) {
-      const r = await pool.query(`SELECT slug FROM workspaces WHERE id=$1`, [wsId]);
-      if (r.rows[0]?.slug) return String(r.rows[0].slug);
-    }
-    const r = await pool.query(`SELECT slug FROM workspaces ORDER BY (slug='yunqi-hotel') DESC, created_at LIMIT 1`);
-    return String(r.rows[0]?.slug ?? "yunqi-hotel");
-  } finally { await pool.end(); }
-}
-
 async function loginAs(memberNo: string): Promise<string> {
-  const workspaceSlug = await resolveWorkspaceSlug();
+  const workspaceSlug = fixture.workspaceSlug;
   const r = await trpc("auth.loginAs", { input: { workspaceSlug, memberNo }, method: "mutation" });
   expect(r.error).toBeNull();
   return (r.data as { token: string }).token;
@@ -113,7 +80,7 @@ async function bindMember(cUserId: string, memberId: string): Promise<void> {
 }
 
 async function signCToken(over: Record<string, unknown>, secret = DEV_C_SECRET, exp = "1h"): Promise<string> {
-  return new SignJWT({ workspaceId: "ws-yunqi", cUserId: "cu-x", channel: "h5", scope: "c-user", ...over })
+  return new SignJWT({ workspaceId: fixture.workspaceId, cUserId: "cu-x", channel: "h5", scope: "c-user", ...over })
     .setProtectedHeader({ alg: "HS256" }).setIssuedAt().setIssuer("workloom-c").setExpirationTime(exp)
     .sign(new TextEncoder().encode(secret));
 }
@@ -121,9 +88,10 @@ async function signCToken(over: Record<string, unknown>, secret = DEV_C_SECRET, 
 /* ---------------- 服务拉起/回收 ---------------- */
 
 beforeAll(async () => {
+  await createServiceFixture(fixture);
   server = spawn(process.execPath, ["node_modules/tsx/dist/cli.mjs", "--env-file=.env", "apps/server/src/index.ts"], {
     cwd: ROOT,
-    env: { ...process.env, SERVER_PORT: String(PORT), SERVICE_C_DEMO_AUTH: "true" },
+    env: { ...process.env, SERVER_PORT: String(PORT), SERVICE_C_DEMO_AUTH: "true", SERVICE_C_WORKSPACE_ID: fixture.workspaceId, SERVICE_C_JWT_SECRET: DEV_C_SECRET },
     stdio: "ignore",
     detached: true, // 独立进程组：afterAll 按组杀（tsx 会再派生 node 子进程）
   });
@@ -143,20 +111,22 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
-    // 清理本套件写入的知识库文档（防评测/演示环境污染——基线文档保留）
+  // This suite owns one disposable workspace. Do not delete other runs' documents.
+  try {
+    if (db) {
+      await db.query(`DELETE FROM kb_chunks WHERE workspace_id=$1 AND document_id IN (SELECT id FROM kb_documents WHERE workspace_id=$1 AND title LIKE $2)`, [fixture.workspaceId, `${RUN}-%`]);
+      await db.query(`DELETE FROM kb_documents WHERE workspace_id=$1 AND title LIKE $2`, [fixture.workspaceId, `${RUN}-%`]);
+    }
+  } finally {
     try {
-      const pg = (await import("pg")).default;
-      const pool = new pg.Pool({ connectionString: DB_URL });
-      // 仅清理本套件 upsert 产生的测试文档（标题带 RUN 前缀 e2e- 开头）；种子基线与预置库（FAQ/送物/报修）一律保留
-      await pool.query(`DELETE FROM kb_chunks WHERE document_id IN (SELECT id FROM kb_documents WHERE title LIKE 'e2e-%')`);
-      await pool.query(`DELETE FROM kb_documents WHERE title LIKE 'e2e-%'`);
-      await pool.end();
-    } catch { /* 清理失败不阻断 */ }
-
-  if (server?.pid) {
-    try { process.kill(-server.pid, "SIGKILL"); } catch { server.kill("SIGKILL"); }
+      if (server?.pid) {
+        try { process.kill(-server.pid, "SIGKILL"); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+      }
+    } finally {
+      await db?.end();
+    }
   }
-  await db?.end().catch(() => undefined);
 });
 
 /* ================= E. 渠道与安全 ================= */
@@ -371,117 +341,114 @@ describe("E 安全 · 越权与输入约束", () => {
 
 /* ================= D. 业务查询 ================= */
 
-describe("D 业务查询 · 绑定引导与卡片契约", () => {
-  it("未绑定查订单：/orders 空集 + bindRequired + 引导文案", async () => {
+describe("D 业务查询 · Tiger 无业务适配器的诚实边界", () => {
+  async function unsupported(path: string, token: string, ip: string) {
+    const response = await cReq(path, {}, token, ip);
+    expect(response.status).toBe(503);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.code).toBe("BUSINESS_ADAPTER_UNAVAILABLE");
+    expect(typeof body.error).toBe("string");
+    expect(typeof body.requestId).toBe("string");
+    return body;
+  }
+
+  it("未绑定查订单：明确未装配，不返回虚构订单或绑定引导", async () => {
     const { token } = await cSession(`${RUN}-d1`, "h5", "203.0.113.51");
-    const j = (await (await cReq("/orders", {}, token, "203.0.113.51")).json()) as Record<string, unknown>;
-    expect(j).toMatchObject({ bindRequired: true, demo: true });
-    expect(j.orders).toEqual([]);
-    expect(String(j.hint)).toContain("绑定会员");
+    const body = await unsupported("/orders", token, "203.0.113.51");
+    expect(body).not.toHaveProperty("orders");
+    expect(body).not.toHaveProperty("bindRequired");
   });
 
-  it("未绑定查会员：/member level=游客 + bindRequired", async () => {
+  it("未绑定查会员：明确未装配，不伪造游客积分", async () => {
     const { token } = await cSession(`${RUN}-d2`, "h5", "203.0.113.52");
-    const j = (await (await cReq("/member", {}, token, "203.0.113.52")).json()) as Record<string, unknown>;
-    expect(j).toMatchObject({ level: "游客", points: 0, bindRequired: true });
-    expect(j.benefits).toEqual([]);
+    const body = await unsupported("/member", token, "203.0.113.52");
+    expect(body).not.toHaveProperty("level");
+    expect(body).not.toHaveProperty("points");
   });
 
-  it("绑定会员后 /orders 返回本人订单（字段契约齐全）", async () => {
-    const s = await cSession(`${RUN}-d3`, "h5", "203.0.113.53");
-    await bindMember(s.user.id, "M-1001");
-    const j = (await (await cReq("/orders", {}, s.token, "203.0.113.53")).json()) as { orders: Array<Record<string, unknown>>; demo: boolean; bindRequired?: boolean };
-    expect(j.bindRequired).toBeUndefined();
-    expect(j.orders.length).toBeGreaterThan(0);
-    const o = j.orders[0]!;
-    for (const k of ["id", "title", "status", "checkIn", "roomType", "amount"]) expect(o, k).toHaveProperty(k);
+  it("遗留 member_id 不能启用未声明的订单适配器", async () => {
+    const session = await cSession(`${RUN}-d3`, "h5", "203.0.113.53");
+    await bindMember(session.user.id, "M-1001");
+    const body = await unsupported("/orders", session.token, "203.0.113.53");
+    expect(body).not.toHaveProperty("orders");
   });
 
-  it("订单金额分→元换算（117600 分 → 1176 元）", async () => {
-    const s = await cSession(`${RUN}-d4`, "h5", "203.0.113.54");
-    await bindMember(s.user.id, "M-1001");
-    const j = (await (await cReq("/orders", {}, s.token, "203.0.113.54")).json()) as { orders: Array<{ id: string; amount: number }> };
-    const target = j.orders.find((o) => o.id === "O-20260820-001")!;
-    expect(target.amount).toBe(1176);
+  it("订单错误响应不泄漏旧酒店金额或订单号", async () => {
+    const session = await cSession(`${RUN}-d4`, "h5", "203.0.113.54");
+    await bindMember(session.user.id, "M-1001");
+    const body = await unsupported("/orders", session.token, "203.0.113.54");
+    expect(JSON.stringify(body)).not.toMatch(/117600|1176|O-20260820-001|豪华大床房/);
   });
 
-  it("绑定会员后 /member 返回等级/积分/权益（demo 标注）", async () => {
-    const s = await cSession(`${RUN}-d5`, "h5", "203.0.113.55");
-    await bindMember(s.user.id, "M-1001");
-    const j = (await (await cReq("/member", {}, s.token, "203.0.113.55")).json()) as Record<string, unknown>;
-    expect(j).toMatchObject({ level: "金卡", points: 2680, demo: true });
-    expect((j.benefits as unknown[]).length).toBeGreaterThan(0);
+  it("遗留 member_id 不能启用会员权益或积分", async () => {
+    const session = await cSession(`${RUN}-d5`, "h5", "203.0.113.55");
+    await bindMember(session.user.id, "M-1001");
+    const body = await unsupported("/member", session.token, "203.0.113.55");
+    expect(JSON.stringify(body)).not.toMatch(/金卡|2680/);
   });
 
-  it("会员隔离：M-1002 只见本人订单", async () => {
-    const s = await cSession(`${RUN}-d6`, "h5", "203.0.113.56");
-    await bindMember(s.user.id, "M-1002");
-    const j = (await (await cReq("/orders", {}, s.token, "203.0.113.56")).json()) as { orders: Array<{ id: string }> };
-    expect(j.orders.length).toBeGreaterThan(0);
-    expect(j.orders.every((o) => o.id === "O-20260822-003")).toBe(true);
+  it("不同业务主体都不得回退到演示订单", async () => {
+    for (const [memberId, suffix] of [["M-1001", "a"], ["M-1002", "b"]] as const) {
+      const session = await cSession(`${RUN}-d6-${suffix}`, "h5", "203.0.113.56");
+      await bindMember(session.user.id, memberId);
+      expect(await unsupported("/orders", session.token, "203.0.113.56")).not.toHaveProperty("orders");
+    }
   });
 
-  it("chat 查订单（已绑定）→ biz_query + order 卡片", async () => {
-    const s = await cSession(`${RUN}-d7`, "h5", "203.0.113.57");
-    await bindMember(s.user.id, "M-1001");
-    const r = await chat(s.token, "帮我查一下我的订单", {}, "203.0.113.57");
-    expect(r.intent).toBe("biz_query");
-    const cards = r.cards as Array<{ kind: string; data: Record<string, unknown> }>;
-    expect(cards.length).toBeGreaterThan(0);
-    expect(cards[0]!.kind).toBe("order");
-    expect(cards[0]!.data).toHaveProperty("checkIn");
+  it("已绑定用户询问订单，无适配器时不生成订单卡片", async () => {
+    const session = await cSession(`${RUN}-d7`, "h5", "203.0.113.57");
+    await bindMember(session.user.id, "M-1001");
+    const response = await chat(session.token, "帮我查一下我的订单", {}, "203.0.113.57");
+    expect(response.intent).toBe("kb_qa");
+    expect(response.cards).toEqual([]);
+    expect(String(response.answer)).toContain("无法准确回答");
   });
 
-  it("chat 查会员（已绑定）→ member 卡片（level/points/benefits）", async () => {
-    const s = await cSession(`${RUN}-d8`, "h5", "203.0.113.58");
-    await bindMember(s.user.id, "M-1001");
-    const r = await chat(s.token, "我的会员积分还有多少", {}, "203.0.113.58");
-    const cards = r.cards as Array<{ kind: string; data: Record<string, unknown> }>;
-    expect(cards[0]!).toMatchObject({ kind: "member" });
-    expect(cards[0]!.data).toMatchObject({ level: "金卡", points: 2680 });
-    expect(Array.isArray(cards[0]!.data.benefits)).toBe(true);
+  it("已绑定用户询问会员，无适配器时不生成权益卡片", async () => {
+    const session = await cSession(`${RUN}-d8`, "h5", "203.0.113.58");
+    await bindMember(session.user.id, "M-1001");
+    const response = await chat(session.token, "我的会员积分还有多少", {}, "203.0.113.58");
+    expect(response.intent).toBe("kb_qa");
+    expect(response.cards).toEqual([]);
+    expect(JSON.stringify(response)).not.toMatch(/金卡|2680/);
   });
 
-  it("chat 查房价 → catalog 卡片（items 含 sku/name/priceYuan）", async () => {
+  it("房价词不能隐式启用酒店目录", async () => {
     const { token } = await cSession(`${RUN}-d9`, "h5", "203.0.113.59");
-    const r = await chat(token, "豪华大床房多少钱一晚", {}, "203.0.113.59");
-    const cards = r.cards as Array<{ kind: string; data: { items: Array<Record<string, unknown>> } }>;
-    expect(cards[0]!.kind).toBe("catalog");
-    expect(cards[0]!.data.items.length).toBeGreaterThan(0);
-    expect(cards[0]!.data.items[0]).toHaveProperty("sku");
-    expect(cards[0]!.data.items[0]).toHaveProperty("priceYuan");
+    const response = await chat(token, "豪华大床房多少钱一晚", {}, "203.0.113.59");
+    expect(response.intent).toBe("kb_qa");
+    expect(response.cards).toEqual([]);
+    expect(String(response.answer)).toContain("无法准确回答");
   });
 
-  it("chat 未绑定查订单 → 答案替换为绑定引导且不出卡", async () => {
+  it("未绑定询问订单不提示当前产品不存在的会员绑定流程", async () => {
     const { token } = await cSession(`${RUN}-d10`, "h5", "203.0.113.60");
-    const r = await chat(token, "我的订单呢", {}, "203.0.113.60");
-    expect(r.intent).toBe("biz_query");
-    expect(String(r.answer)).toContain("绑定会员");
-    expect(r.cards).toEqual([]);
+    const response = await chat(token, "我的订单呢", {}, "203.0.113.60");
+    expect(response.intent).toBe("kb_qa");
+    expect(response.cards).toEqual([]);
+    expect(String(response.answer)).not.toContain("绑定会员");
   });
 
-  it("chat 查账单（已绑定）→ query_order 订单卡片", async () => {
-    const s = await cSession(`${RUN}-d11`, "h5", "203.0.113.64");
-    await bindMember(s.user.id, "M-1001");
-    const r = await chat(s.token, "我的账单和房费", {}, "203.0.113.64");
-    expect(r.intent).toBe("biz_query");
-    expect((r.cards as Array<{ kind: string }>)[0]!.kind).toBe("order");
+  it("账单与房费词无行业适配器时不读取旧酒店业务表", async () => {
+    const session = await cSession(`${RUN}-d11`, "h5", "203.0.113.64");
+    await bindMember(session.user.id, "M-1001");
+    const response = await chat(session.token, "我的账单和房费", {}, "203.0.113.64");
+    expect(response.intent).toBe("kb_qa");
+    expect(response.cards).toEqual([]);
   });
 
-  it("chat 问工单进度 → query_ticket 应答", async () => {
+  it("通用工单进度查询保持可用", async () => {
     const { token } = await cSession(`${RUN}-d12`, "h5", "203.0.113.65");
-    const r = await chat(token, "我的工单进度怎么样了", {}, "203.0.113.65");
-    expect(r.intent).toBe("biz_query");
-    expect(String(r.answer)).toContain("工单进度");
+    const response = await chat(token, "我的工单进度怎么样了", {}, "203.0.113.65");
+    expect(response.intent).toBe("biz_query");
+    expect(String(response.answer)).toContain("工单进度");
   });
 
-  it("/orders 与 /member 均带 demo 标注", async () => {
-    const s = await cSession(`${RUN}-d13`, "h5", "203.0.113.66");
-    await bindMember(s.user.id, "M-1001");
-    const o = (await (await cReq("/orders", {}, s.token, "203.0.113.66")).json()) as { demo: boolean };
-    const m = (await (await cReq("/member", {}, s.token, "203.0.113.66")).json()) as { demo: boolean };
-    expect(o.demo).toBe(true);
-    expect(m.demo).toBe(true);
+  it("未装配错误不伪装成 demo 成功响应", async () => {
+    const { token } = await cSession(`${RUN}-d13`, "h5", "203.0.113.66");
+    for (const path of ["/orders", "/member"]) {
+      expect(await unsupported(path, token, "203.0.113.66")).not.toHaveProperty("demo");
+    }
   });
 
   it("/tickets 列表仅本人单（工单查询隔离）", async () => {
@@ -524,22 +491,23 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
     expect(String(r.answer)).toContain("MRS");
   });
 
-  it("F3 查订单未绑定 → 绑定引导", async () => {
+  it("F3 无业务适配器的订单询问诚实拒答", async () => {
     const r = await chat(token, "查一下我的订单", { conversationId: convId }, ip);
-    expect(String(r.answer)).toContain("绑定会员");
+    expect(String(r.answer)).toContain("无法准确回答");
     expect(r.cards).toEqual([]);
   });
 
-  it("F4 对话中建单「帮我开通研报速递订阅」→ ticketDraft delivery（未确认不建单）", async () => {
-    const r = await chat(token, "帮我开通研报速递订阅", { conversationId: convId }, ip);
+  it("F4 明确人工协助 → 通用工单草稿（未确认不建单）", async () => {
+    const r = await chat(token, "请处理研报速递订阅申请", { conversationId: convId }, ip);
     expect(r.intent).toBe("service_request");
-    expect(r.ticketDraft).toMatchObject({ kind: "delivery" });
+    expect(r.ticketDraft).toMatchObject({ kind: "other" });
     expect(r.ticket).toBeNull();
   });
 
   it("F5 confirmTicket:true → 建单 assigned + 复盘组 + statusText 已受理", async () => {
-    const r = await chat(token, "帮我开通研报速递订阅", {
+    const r = await chat(token, "请处理研报速递订阅申请", {
       conversationId: convId, confirmTicket: true, idempotencyKey: `${RUN}-f5`,
+      ticketDraft: { kind: "delivery", title: "测试研报速递", payload: { request: "explicit-delivery" } },
     }, ip);
     const t = r.ticket as { id: string; status: string; dept: string; statusText: string };
     ticketId = t.id;
@@ -552,8 +520,9 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
   });
 
   it("F7 同幂等键重放 → deduped:true 同单号", async () => {
-    const r = await chat(token, "帮我开通研报速递订阅", {
+    const r = await chat(token, "请处理研报速递订阅申请", {
       conversationId: convId, confirmTicket: true, idempotencyKey: `${RUN}-f5`,
+      ticketDraft: { kind: "delivery", title: "测试研报速递", payload: { request: "explicit-delivery" } },
     }, ip);
     expect(r.deduped).toBe(true);
     expect((r.ticket as { id: string }).id).toBe(ticketId);
@@ -573,11 +542,11 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
   });
 
   it("F10 B 端办结（complete → done + 结果回填）", async () => {
-    const r = await trpc("service.tickets.complete", { input: { ticketId, result: "两瓶矿泉水已送至房间" }, token: bToken, method: "mutation" });
+    const r = await trpc("service.tickets.complete", { input: { ticketId, result: "研报速递已开通" }, token: bToken, method: "mutation" });
     expect(r.error).toBeNull();
     const t = (r.data as { ticket: { status: string; result: { text: string } } }).ticket;
     expect(t.status).toBe("done");
-    expect(t.result.text).toContain("矿泉水");
+    expect(t.result.text).toContain("研报速递");
   });
 
   it("F11 完成通知：通知箱含 ticket.completed", async () => {
@@ -619,10 +588,10 @@ describe("F C 端旅程 · 首问到五星评价全链路", () => {
 describe("F C 端旅程 · 场景分支", () => {
   it("投诉一句话直达 → intent complaint + complaint 草稿（confirm 后值班负责人）", async () => {
     const { token } = await cSession(`${RUN}-fc`, "h5", "203.0.113.111");
-    const r = await chat(token, "我要投诉，隔壁房间半夜太吵了", {}, "203.0.113.111");
+    const r = await chat(token, "我要投诉，报告多次延迟送达", {}, "203.0.113.111");
     expect(r.intent).toBe("complaint");
     expect(r.ticketDraft).toMatchObject({ kind: "complaint" });
-    const ok = await chat(token, "我要投诉，隔壁房间半夜太吵了", { confirmTicket: true, idempotencyKey: `${RUN}-fc-1` }, "203.0.113.111");
+    const ok = await chat(token, "我要投诉，报告多次延迟送达", { confirmTicket: true, idempotencyKey: `${RUN}-fc-1` }, "203.0.113.111");
     expect((ok.ticket as { dept: string; kind: string })).toMatchObject({ kind: "complaint", dept: "值班负责人" });
   });
 
@@ -636,12 +605,12 @@ describe("F C 端旅程 · 场景分支", () => {
     expect((ok.ticket as { kind: string; dept: string })).toMatchObject({ kind: "other", dept: "合规组" });
   });
 
-  it("申报一句话「行情数据中断」→ service_request repair 草稿，confirm 后数据质量组", async () => {
+  it("人工协助通用草稿，显式确认 repair 类型后分派数据质量组", async () => {
     const { token } = await cSession(`${RUN}-fr`, "h5", "203.0.113.113");
-    const r = await chat(token, "行情数据推送中断，帮我申报一下", {}, "203.0.113.113");
+    const r = await chat(token, "行情数据推送中断，请处理", {}, "203.0.113.113");
     expect(r.intent).toBe("service_request");
-    expect(r.ticketDraft).toMatchObject({ kind: "repair" });
-    const ok = await chat(token, "行情数据推送中断，帮我申报一下", { confirmTicket: true, idempotencyKey: `${RUN}-fr-1` }, "203.0.113.113");
+    expect(r.ticketDraft).toMatchObject({ kind: "other" });
+    const ok = await chat(token, "行情数据推送中断，请处理", { confirmTicket: true, ticketDraft: { kind: "repair", title: "测试数据故障", payload: {} }, idempotencyKey: `${RUN}-fr-1` }, "203.0.113.113");
     expect((ok.ticket as { dept: string })).toMatchObject({ dept: "数据质量组" });
   });
 
@@ -656,16 +625,9 @@ describe("F C 端旅程 · 场景分支", () => {
     expect(list.tickets).toHaveLength(0);
   });
 
-  // ⚠️ 疑似真实 bug（不改源码，标注 test.fails 上报）：
-  // 客户端显式回传的上轮草稿 body.ticketDraft 被本轮消息新生成的低置信拒答草稿
-  // （r.ticketDraft，kind=other）遮蔽——gateway.ts 取 `r.ticketDraft ?? body.ticketDraft`，
-  // 「好的确认提交」默认走 kb_qa 低置信拒答也会产草稿，导致确认建单建成 other 而非 delivery。
-  // 合理预期：显式 body.ticketDraft 应优先。
   it("confirmTicket 带 body.ticketDraft 兜底（上轮草稿本轮确认，显式草稿优先）【bug 已修复】", async () => {
     const { token } = await cSession(`${RUN}-fb`, "h5", "203.0.113.115");
-    const first = await chat(token, "帮我订购一份个股深度报告", {}, "203.0.113.115");
-    const draft = first.ticketDraft as { kind: string; title: string; payload: Record<string, unknown> };
-    expect(draft).toBeDefined();
+    const draft = { kind: "delivery", title: "测试研报速递", payload: { source: "explicit-client-draft" } };
     const second = await chat(token, "好的确认提交", {
       confirmTicket: true, ticketDraft: draft, idempotencyKey: `${RUN}-fb-1`,
     }, "203.0.113.115");
@@ -685,27 +647,23 @@ describe("F C 端旅程 · 场景分支", () => {
     expect(r.latencyMs as number).toBeGreaterThanOrEqual(0);
   });
 
-  // ⚠️ 疑似真实 bug（不改源码，标注 test.fails 上报）：
-  // 切块正文写作「Wi-Fi」（连字符），查询「wifi 密码」切词得 token "wifi"，
-  // 不是 "wi-fi" 的子串 → 召回/打分双 miss，top1≈0.21 < 0.5 落入诚实拒答。
-  // 连字符未归一导致高频 WiFi 问句无法命中 Wi-Fi 知识（检索召回缺陷）。
-  it("开仓纪律问句命中种子 KB（MRS 硬逻辑）", async () => {
+  it("开仓纪律问句命中显式测试 KB（MRS 硬逻辑）", async () => {
     const { token } = await cSession(`${RUN}-fw`, "h5", "203.0.113.118");
     const r = await chat(token, "开仓的硬逻辑是什么", {}, "203.0.113.118");
     expect((r.citations as unknown[]).length).toBeGreaterThan(0);
-    expect(String(r.answer)).toMatch(/房间号的后四位|房间号后四位/); // FAQ 预置库与基线文档措辞兼容
+    expect(String(r.answer)).toContain("MRS");
   });
 
   it("连字符原样问句「Wi-Fi 密码」可命中（对照组）", async () => {
     const { token } = await cSession(`${RUN}-fw2`, "h5", "203.0.113.120");
     const r = await chat(token, "Wi-Fi 密码是多少", {}, "203.0.113.120");
     expect((r.citations as unknown[]).length).toBeGreaterThan(0);
-    expect(String(r.answer)).toMatch(/房间号的后四位|房间号后四位/); // FAQ 预置库与基线文档措辞兼容
+    expect(String(r.answer)).toContain("管理员单独提供");
   });
 
   it("未 confirmTicket 时 ticket 为 null（草稿不落库）", async () => {
     const { token } = await cSession(`${RUN}-fn`, "h5", "203.0.113.119");
-    const r = await chat(token, "帮我打扫一下房间", {}, "203.0.113.119");
+    const r = await chat(token, "请处理我的服务申请", {}, "203.0.113.119");
     expect(r.ticket).toBeNull();
     const list = (await (await cReq("/tickets", {}, token, "203.0.113.119")).json()) as { tickets: unknown[] };
     expect(list.tickets).toHaveLength(0);
@@ -716,11 +674,11 @@ describe("F C 端旅程 · 场景分支", () => {
 
 describe("G B 端 · 登录与守卫", () => {
   it("loginAs 返回 token + identity（owner / plan pro）", async () => {
-    const r = await trpc("auth.loginAs", { input: { workspaceSlug: "yunqi-hotel", memberNo: "MEM-001" }, method: "mutation" });
+    const r = await trpc("auth.loginAs", { input: { workspaceSlug: fixture.workspaceSlug, memberNo: "MEM-001" }, method: "mutation" });
     expect(r.error).toBeNull();
     const d = r.data as { token: string; identity: Record<string, unknown> };
     expect(typeof d.token).toBe("string");
-    expect(d.identity).toMatchObject({ memberNo: "MEM-001", role: "owner", workspaceId: "ws-yunqi" });
+    expect(d.identity).toMatchObject({ memberNo: "MEM-001", role: "owner", workspaceId: fixture.workspaceId });
   });
 
   it("loginAs 不存在工作区 → NOT_FOUND", async () => {
@@ -730,7 +688,7 @@ describe("G B 端 · 登录与守卫", () => {
   });
 
   it("loginAs 不存在成员 → NOT_FOUND", async () => {
-    const r = await trpc("auth.loginAs", { input: { workspaceSlug: "yunqi-hotel", memberNo: "MEM-999" }, method: "mutation" });
+    const r = await trpc("auth.loginAs", { input: { workspaceSlug: fixture.workspaceSlug, memberNo: "MEM-999" }, method: "mutation" });
     expect(r.error!.data?.code).toBe("NOT_FOUND");
   });
 
@@ -753,10 +711,10 @@ describe("G B 端 · KB 管理", () => {
   let colId = "";
   let docId = "";
 
-  it("kb.listCollections 含种子「住客服务知识库」", async () => {
+  it("kb.listCollections 含本轮显式知识夹具", async () => {
     const r = await trpc("service.kb.listCollections", { token: bToken });
     const cols = (r.data as { collections: Array<{ id: string; name: string }> }).collections;
-    expect(cols.some((c) => c.name === "住客服务知识库")).toBe(true);
+    expect(cols.some((c) => c.name === fixture.collectionName)).toBe(true);
   });
 
   it("kb.createCollection 创建后列表可见", async () => {
@@ -828,12 +786,12 @@ describe("G B 端 · KB 管理", () => {
 
   it("approveDocument 联动审批台（五元事件 + approvals 行落库，event_id 关联）", async () => {
     const ev = await db.query<{ event_id: string }>(
-      `SELECT event_id FROM biz_events WHERE payload->'decision'->>'action'='kb.publish' ORDER BY seq DESC LIMIT 1`,
+      `SELECT event_id FROM biz_events WHERE workspace_id=$1 AND payload->'decision'->>'action'='kb.publish' ORDER BY seq DESC LIMIT 1`, [fixture.workspaceId],
     );
     expect(ev.rows.length).toBeGreaterThan(0);
     const ap = await db.query<{ approval_id: string; event_id: string; status: string }>(
-      `SELECT approval_id, event_id, status FROM approvals WHERE event_id=$1 AND channel='inapp'`,
-      [ev.rows[0]!.event_id],
+      `SELECT approval_id, event_id, status FROM approvals WHERE workspace_id=$1 AND event_id=$2 AND channel='inapp'`,
+      [fixture.workspaceId, ev.rows[0]!.event_id],
     );
     expect(ap.rows.length).toBeGreaterThan(0);
     expect(ap.rows[0]!.event_id).toBe(ev.rows[0]!.event_id);
@@ -883,12 +841,12 @@ describe("G B 端 · 工单消费", () => {
     // 直插一张 created 单（C 端链路建单即 assigned，created 态由 DB fixture 构造）
     createdId = `tck-${RUN}-created`;
     await db.query(
-      `INSERT INTO c_tickets (id, workspace_id, kind, title, payload, status) VALUES ($1,'ws-yunqi','other',$2,'{}','created')`,
-      [createdId, `${RUN}-待分派单`],
+      `INSERT INTO c_tickets (id, workspace_id, kind, title, payload, status) VALUES ($1,$2,'other',$3,'{}','created')`,
+      [createdId, fixture.workspaceId, `${RUN}-待分派单`],
     );
-    const r = await trpc("service.tickets.assign", { input: { ticketId: createdId, dept: "礼宾部", assignee: "MEM-002" }, token: bToken, method: "mutation" });
+    const r = await trpc("service.tickets.assign", { input: { ticketId: createdId, dept: "测试受理组", assignee: "MEM-002" }, token: bToken, method: "mutation" });
     expect(r.error).toBeNull();
-    expect((r.data as { ticket: Record<string, unknown> }).ticket).toMatchObject({ dept: "礼宾部", assignee: "MEM-002", status: "assigned" });
+    expect((r.data as { ticket: Record<string, unknown> }).ticket).toMatchObject({ dept: "测试受理组", assignee: "MEM-002", status: "assigned" });
   });
 
   it("tickets.assign 对 assigned 单重复分派 → 409 语义错误", async () => {
@@ -966,8 +924,10 @@ describe("G B 端 · stats.overview 指标", () => {
     const q = await db.query<{ grounded: string; answered: string }>(
       `SELECT count(*) FILTER (WHERE role='assistant' AND jsonb_array_length(citations) > 0)::text AS grounded,
               count(*) FILTER (WHERE role='assistant')::text AS answered
-       FROM c_messages WHERE workspace_id='ws-yunqi' AND created_at >= date_trunc('day', now())`,
+       FROM c_messages WHERE workspace_id=$1 AND created_at >= date_trunc('day', now())`,
+      [fixture.workspaceId],
     );
+    expect(Number(q.rows[0]!.answered)).toBeGreaterThan(0);
     const expectRate = Number((Number(q.rows[0]!.grounded) / Number(q.rows[0]!.answered)).toFixed(3));
     expect(d.groundedRate).toBe(expectRate);
   });

@@ -15,6 +15,35 @@ jobs:
     timeout-minutes: 55
     env:
       WORKLOOM_DIR: governance
+      NODE_ENV: test
+      LLM_PROVIDER: mock
+      TOOL_UNVERIFIED_RATE: "0"
+      DATABASE_URL: postgres://postgres:mock@127.0.0.1:55432/workloom_tiger_ci
+      DATABASE_APP_URL: postgres://workloom_app:mockapp@127.0.0.1:55432/workloom_tiger_ci
+      DATABASE_GATEWAY_URL: postgres://workloom_gateway:mockgw@127.0.0.1:55432/workloom_tiger_ci
+      APP_DB_PASSWORD: mockapp
+      GATEWAY_DB_PASSWORD: mockgw
+      JWT_SECRET: ci-only-jwt-signing-key-not-for-deployment
+      PII_KEY: ci-only-pii-key-not-for-deployment
+      RUN_FENCE_PROPOSAL_PG_TESTS: "1"
+      RUN_CONTRACT_DRIFT_PG_TESTS: "1"
+      RUN_FRONTEND_CONTRACT_PG_TESTS: "1"
+      RUN_DEVTOOLS_PERMISSION_PG_TESTS: "1"
+    services:
+      postgres:
+        # Official pgvector image: PostgreSQL 17 with the required vector extension.
+        image: pgvector/pgvector:0.8.7-pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: mock
+          POSTGRES_DB: workloom_tiger_ci
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d workloom_tiger_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -27,6 +56,13 @@ jobs:
           python-version: "3.12"
       - run: corepack enable && corepack prepare pnpm@10.14.0 --activate
       - run: pnpm -C "$WORKLOOM_DIR" install --frozen-lockfile
+      - name: 初始化隔离 PostgreSQL 与交易装配
+        run: |
+          set -euo pipefail
+          # Package entry points expect an env file; values remain in the job environment.
+          touch "$WORKLOOM_DIR/.env"
+          pnpm -C "$WORKLOOM_DIR" db:migrate
+          pnpm -C "$WORKLOOM_DIR" db:seed:trading
       - name: 禁止 UI 分叉并校验三端版本
         run: node "$WORKLOOM_DIR/scripts/verify-ui-consumer.mjs" --repo "$WORKLOOM_DIR" --require-governance-state
       - name: 校验三端应用壳指纹与行业扩展边界
@@ -40,6 +76,11 @@ jobs:
           set -euo pipefail
           node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs
           pnpm -C "$WORKLOOM_DIR" test
+          RUN_DB_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test fence-engine/fence-engine.test.ts
+          # The sequence assertions share one database and must run serially.
+          RUN_RUNTIME_SCHEMA_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/runtime" test src/runtime-schema.pg.test.ts
+          RUN_RUNTIME_SCHEMA_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/apps/server" test src/trpc/thread-number.pg.test.ts
+          pnpm -C "$WORKLOOM_DIR" suite
           if [ -f requirements.txt ] && [ -d tests ] && find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
             python -m pip install --disable-pip-version-check -r requirements.txt
             python -m pytest -q
@@ -47,9 +88,9 @@ jobs:
       - name: 三端逐一类型检查与生产构建
         run: |
           set -euo pipefail
+          pnpm -C "$WORKLOOM_DIR" typecheck
           for CLIENT in web webb webc; do
             test -f "$WORKLOOM_DIR/apps/$CLIENT/package.json"
-            pnpm -C "$WORKLOOM_DIR/apps/$CLIENT" typecheck
             pnpm -C "$WORKLOOM_DIR/apps/$CLIENT" build
           done
       - name: 安装 Chromium
