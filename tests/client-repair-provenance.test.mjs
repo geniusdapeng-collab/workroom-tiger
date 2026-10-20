@@ -16,6 +16,8 @@ const regression = "apps/web/src/components/star-ring/StarRing.contract.test.tsx
 const onboarding = "apps/web/src/pages/onboarding/Onboarding.tsx";
 const banner = "apps/web/src/components/SimBanner.tsx";
 const modeRegression = "apps/web/src/pages/onboarding/Onboarding.mode.test.tsx";
+const ball = "apps/web/src/components/loomball/LoomBall.tsx";
+const ballRegression = "apps/web/src/components/loomball/LoomBall.accessibility.test.tsx";
 const manifestFile = ".workloom-client-repairs.json";
 const write = (root, path, content) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); };
 
@@ -23,7 +25,7 @@ function fixture(t, repaired = true) {
   const root = mkdtempSync(join(tmpdir(), "tiger-client-repairs-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const g = join(root, "governance");
-  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner];
+  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball];
   for (const path of entries) write(g, path, `original:${path}\n`);
   write(g, ".workloom-ui.json", JSON.stringify({ version: "0.1.17" }));
   const state = {
@@ -42,7 +44,7 @@ function fixture(t, repaired = true) {
     repairs: [], testAdditions: [],
   };
   if (repaired) {
-    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"]]) {
+    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"], [ball, "MC-032"]]) {
       write(g, path, `reviewed repair:${path}\n`);
       manifest.repairs.push({ path, card, upstreamSha256: state.managedFiles[path].sha256, repairedSha256: digest(readFileSync(join(g, path))), sourceCommit: "a".repeat(40), reason: "Reviewed contract repair with focused behavioral regression coverage." });
     }
@@ -50,6 +52,8 @@ function fixture(t, repaired = true) {
     manifest.testAdditions.push({ path: regression, card: "MC-012", sha256: digest(readFileSync(join(g, regression))) });
     write(g, modeRegression, "test('mode declaration and formal qualification', () => {});\n");
     manifest.testAdditions.push({ path: modeRegression, card: "MC-027", sha256: digest(readFileSync(join(g, modeRegression))) });
+    write(g, ballRegression, "test('decorative animation stays outside sequential keyboard focus', () => {});\n");
+    manifest.testAdditions.push({ path: ballRegression, card: "MC-032", sha256: digest(readFileSync(join(g, ballRegression))) });
     write(g, manifestFile, JSON.stringify(manifest));
   }
   return { root, g, manifest, state, save: () => write(g, manifestFile, JSON.stringify(manifest)) };
@@ -180,3 +184,24 @@ test("MC027 regression cannot authorize an unrelated new client source", (t) => 
   write(f.g, "apps/web/src/pages/onboarding/unreviewed.ts", "export const invented = 'simulated';\n");
   assert.ok(verifyTigerClientRepairs(f.root).some((e) => e.includes("unreviewed.ts")));
 });
+for (const kind of ["changed-source", "missing-source-registration", "wrong-source-card", "missing-test-registration", "changed-test", "wrong-test-card", "executable-test", "symlink-test"]) {
+  test(`MC032 decorative focus repair ${kind} fails closed`, (t) => {
+    const f = fixture(t);
+    const repair = f.manifest.repairs.find((entry) => entry.path === ball);
+    const regression = f.manifest.testAdditions.find((entry) => entry.path === ballRegression);
+    if (kind === "changed-source") write(f.g, ball, "unreviewed focus behavior\n");
+    if (kind === "missing-source-registration") f.manifest.repairs = f.manifest.repairs.filter((entry) => entry.path !== ball);
+    if (kind === "wrong-source-card") repair.card = "MC-012";
+    if (kind === "missing-test-registration") f.manifest.testAdditions = f.manifest.testAdditions.filter((entry) => entry.path !== ballRegression);
+    if (kind === "changed-test") write(f.g, ballRegression, "unreviewed accessibility assertions\n");
+    if (kind === "wrong-test-card") regression.card = "MC-012";
+    if (kind === "executable-test") chmodSync(join(f.g, ballRegression), 0o755);
+    if (kind === "symlink-test") {
+      copyFileSync(join(f.g, ballRegression), join(f.root, "outside-ball.test.tsx"));
+      rmSync(join(f.g, ballRegression));
+      symlinkSync(join(f.root, "outside-ball.test.tsx"), join(f.g, ballRegression));
+    }
+    f.save();
+    assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+  });
+}

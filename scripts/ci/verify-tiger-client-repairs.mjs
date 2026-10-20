@@ -16,6 +16,7 @@ const REPAIR_PATHS = new Map([
   ["apps/web/consumer-e2e/clients.playwright.ts", "MC-015"],
   ["apps/web/src/pages/onboarding/Onboarding.tsx", "MC-027"],
   ["apps/web/src/components/SimBanner.tsx", "MC-027"],
+  ["apps/web/src/components/loomball/LoomBall.tsx", "MC-032"],
 ]);
 const TEST_PATHS = new Map([
   ["apps/web/src/components/star-ring/StarRing.contract.test.tsx", {
@@ -23,6 +24,9 @@ const TEST_PATHS = new Map([
   }],
   ["apps/web/src/pages/onboarding/Onboarding.mode.test.tsx", {
     card: "MC-027", repairs: ["apps/web/src/pages/onboarding/Onboarding.tsx", "apps/web/src/components/SimBanner.tsx"],
+  }],
+  ["apps/web/src/components/loomball/LoomBall.accessibility.test.tsx", {
+    card: "MC-032", repairs: ["apps/web/src/components/loomball/LoomBall.tsx"],
   }],
 ]);
 const SHA256 = /^[a-f0-9]{64}$/;

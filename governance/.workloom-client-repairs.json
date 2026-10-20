@@ -53,6 +53,14 @@
       "repairedSha256": "69a2378681ed5be11b10b2c5b572d53722328dbe8bebabaeb2868f7c787039f3",
       "sourceCommit": "f51f2dd907a0ea2a73a1dc018ab9cda6d30c6b30",
       "reason": "Report archive declaration, default tool requirements and formal eligibility independently; do not relabel missing or invalid data modes as simulated execution."
+    },
+    {
+      "path": "apps/web/src/components/loomball/LoomBall.tsx",
+      "card": "MC-032",
+      "upstreamSha256": "9e561d754b0fced2caddd7a612ea23b55159755da6414e95d84a99caaf8c907a",
+      "repairedSha256": "4a5f7d9a630136cb170170dcdbc32e471d77824952dab70b70466ee73939a576",
+      "sourceCommit": "3ff33c56b07c1ff6321e463b7ba5423373c7d151",
+      "reason": "Keep the aria-hidden decorative roster animation outside sequential keyboard focus while retaining pointer activation, live animation and reduced-motion behavior."
     }
   ],
   "testAdditions": [
@@ -65,6 +73,11 @@
       "path": "apps/web/src/pages/onboarding/Onboarding.mode.test.tsx",
       "card": "MC-027",
       "sha256": "5e75ae201ad3cd4283f856d9991c6f47d9d9489b638076b59b5cfc9b6b515b6a"
+    },
+    {
+      "path": "apps/web/src/components/loomball/LoomBall.accessibility.test.tsx",
+      "card": "MC-032",
+      "sha256": "4f3eefb9d9efe45313d039e4cb446fcb67df4eeb99dc56be3d4466409f03d287"
     }
   ]
 }
