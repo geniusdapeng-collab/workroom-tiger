@@ -88,7 +88,7 @@ jobs:
       - name: 执行仓库已有测试
         run: |
           set -euo pipefail
-          node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs tests/client-repair-provenance.test.mjs
+          node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs tests/client-repair-provenance.test.mjs tests/acceptance-route-contract.test.mjs
           pnpm -C "$WORKLOOM_DIR" exec vitest run scripts/release-gate.test.ts
           pnpm -C "$WORKLOOM_DIR" test
           RUN_DB_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test fence-engine/fence-engine.test.ts
@@ -132,9 +132,11 @@ jobs:
           MC034_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC034
           MC035_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC035
           MC037_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC037
+          MC038_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC038
+          MC039_EVIDENCE_DIR: ${{ github.workspace }}/governance/acceptance-browser-evidence/MC039
         run: |
           cd "$WORKLOOM_DIR"
-          node --test --test-concurrency=1 scripts/acceptance/lib/level-badge-layout.test.mjs scripts/acceptance/lib/loommate-unread-contrast.test.mjs scripts/acceptance/lib/loommate-viewport.test.mjs scripts/acceptance/lib/loommate-stacking.test.mjs
+          node --test --test-concurrency=1 scripts/acceptance/lib/level-badge-layout.test.mjs scripts/acceptance/lib/loommate-unread-contrast.test.mjs scripts/acceptance/lib/loommate-viewport.test.mjs scripts/acceptance/lib/loommate-stacking.test.mjs scripts/acceptance/lib/skill-suggestion-layout.test.mjs scripts/acceptance/lib/task-notification-interception.test.mjs
       - name: 三端生产预览主入口与首帧横向溢出冒烟
         run: CI=true pnpm -C "$WORKLOOM_DIR/apps/web" test:consumer
       - name: 留存三端浏览器冒烟证据

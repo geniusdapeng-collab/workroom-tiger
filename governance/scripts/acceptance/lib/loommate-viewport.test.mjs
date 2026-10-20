@@ -305,6 +305,9 @@ async function panelPaths(page, state, observation) {
   await expect(panel(page)).toHaveCount(0);
 }
 async function notificationPaths(page, state, observation) {
+  if (observation.mode === "mini") {
+    await pointer(page, page.getByRole("button", { name: /^查看未读提醒/ }), observation, "open-notifications");
+  }
   const [first, next] = state.items;
   const card = (item) => page.locator("div:has(> .wl-action-row)")
     .filter({ has: page.getByText(item.title, { exact: true }) });

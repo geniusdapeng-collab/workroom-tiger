@@ -352,6 +352,7 @@ async function interact(page, state, mode, observation) {
   await expect(unreadBadge(page, 13)).toHaveCount(1);
   assert.ok(state.calls.filter((call) => call.name === "service.secretary.scan").length > scans,
     "Count increase must use the real component heartbeat, not a remount or DOM mutation");
+  if (mode === "mini") await page.getByRole("button", { name: /^查看未读提醒/ }).click();
   const later = page.getByRole("button", { name: "稍后", exact: true }).first();
   // At 390px the original fullscreen live strip can cover this button. Observe
   // that geometry explicitly without conflating it with badge contrast coverage.
@@ -377,6 +378,7 @@ async function interact(page, state, mode, observation) {
   state.items = itemsFor(1);
   await page.clock.fastForward(20_000);
   await expect(unreadBadge(page, 1)).toHaveCount(1);
+  if (mode === "mini") await page.getByRole("button", { name: /^查看未读提醒/ }).click();
   await tabTo(page, page.getByRole("button", { name: "稍后", exact: true }).first());
   await page.keyboard.press("Enter");
   await expect(page.locator(NUMBER_SPANS).filter({ hasText: /^\d+$/ })).toHaveCount(0);

@@ -1,0 +1,325 @@
+{
+  "schema": "workloom.mine-clear/ledger@1",
+  "task_id": "T-2026-1020-0901",
+  "repo": "workroom-tiger",
+  "repo_path": ".",
+  "title": "独立界面验收新增 MC038–MC040：建议可读性、任务通知命中与夜班路由契约",
+  "created_at": "2026-10-20T17:03:58.104Z",
+  "updated_at": "2026-10-20T17:38:28.570587+00:00",
+  "baseline": {
+    "audit": {
+      "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+      "branch": "task/T-2026-1020-0901",
+      "remote": "origin",
+      "fetched_at": "2026-10-20T17:03:58.067Z",
+      "fetch_status": "success",
+      "notes": "本地 HEAD 不是 origin/main 最新（云端 5fc58513 / 本地 e7506055）——按 §1.2 先对齐基线"
+    },
+    "repair": {
+      "commit": null,
+      "reverified_problem_ids": []
+    },
+    "acceptance": {
+      "commit": null,
+      "is_descendant_of_repair": null
+    }
+  },
+  "environment": {
+    "kind": "local-preview",
+    "notes": "Portable audit-only specification; open/not-run is intentional. Actual repair and independent acceptance receipts are separate delivery artifacts."
+  },
+  "invariants": [
+    {
+      "id": "INV-1",
+      "text": "租户边界覆盖数据库 RLS、运行时上下文、事件、缓存和外部连接器。",
+      "source": "AGENTS.md#4.1"
+    },
+    {
+      "id": "INV-2",
+      "text": "经营事件、审批和关键回执只增不改；纠正通过新事件表达，不静默覆盖证据。",
+      "source": "AGENTS.md#4.2"
+    },
+    {
+      "id": "INV-3",
+      "text": "所有外部或变更性动作及其子调用，统一经过权限、PII、围栏和审批链路。",
+      "source": "AGENTS.md#4.3"
+    },
+    {
+      "id": "INV-4",
+      "text": "涉钱、敏感数据、群发、公开发布、交易和破坏性变更必须按高风险处理并由人审批。",
+      "source": "AGENTS.md#4.4"
+    },
+    {
+      "id": "INV-5",
+      "text": "没有真实回执就不能标记完成；mock、模拟和体验模式在数据结构与界面上都要明确区分。",
+      "source": "AGENTS.md#4.5"
+    },
+    {
+      "id": "INV-6",
+      "text": "客户原始经营数据不得上行；蜂群只接受白名单化、最小化、匿名化且可审计的元数据或派生经验。",
+      "source": "AGENTS.md#4.6"
+    },
+    {
+      "id": "INV-7",
+      "text": "租户覆盖层只能收紧围栏，不能放宽平台不可变红线。",
+      "source": "AGENTS.md#4.7"
+    },
+    {
+      "id": "INV-8",
+      "text": "模型、提示词、技能、bundle、策略和热更新必须先评测再灰度，且始终可回滚。",
+      "source": "AGENTS.md#4.8"
+    },
+    {
+      "id": "INV-9",
+      "text": "platform-ops、平台账户运营和平台秘密只属于 Andromeda。",
+      "source": "AGENTS.md#4.9"
+    },
+    {
+      "id": "INV-10",
+      "text": "Tiger 在获得单独的合规审查和用户明确授权前，只能模拟或纸面交易。",
+      "source": "AGENTS.md#4.10"
+    },
+    {
+      "id": "INV-11",
+      "text": "令牌、密码、API key、私钥、客户凭证和私密客户数据不得进入源码、文档、上下文、提示词、日志或提交。",
+      "source": "AGENTS.md#4.11"
+    },
+    {
+      "id": "INV-12",
+      "text": "个性化与行业扩展不得形成公共机制的第二事实源。",
+      "source": "AGENTS.md#4.12"
+    }
+  ],
+  "cards": [
+    {
+      "id": "MC-038",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P2",
+      "batch": 3,
+      "state": "open",
+      "title": "技能建议文案与动作争抢横向空间，真实窄壳中被挤成逐字竖列",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/pages/p6/P6.tsx:363@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "e13d40b9b0d6c08d8461d3965d7d81daa66bf6491c199fcd6b8e6a3fee9e8b08",
+          "note": "A: 原始P6完整精读；主建议将flex-1文案与宽动作组放在同一flex-wrap行内，正文在真实导航和AI助手占位后可被挤至约单字宽。候选改为图标/正文两列grid，动作独占下一行。"
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/pages/p6/P6.tsx:404@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "e13d40b9b0d6c08d8461d3965d7d81daa66bf6491c199fcd6b8e6a3fee9e8b08",
+          "note": "A: 原始其余建议使用单行flex，flex-1文案与三个按钮竞争宽度；候选将正文和可换行动作组放到分离的grid行，文案、权限条件、禁用谓词、回调与业务payload保持。"
+        },
+        {
+          "type": "ui",
+          "ref": "audit-evidence/mc038-red-receipt.json",
+          "sha256": "934bb383b887033c4d5c73e42a3f7106dd7621a5973ef89acc929fca8a094146",
+          "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+          "note": "B: 原始P6字节的同一runner浏览器红测，25项中14失败11通过；明确为真实前端壳加本地合成HTTP。该commit绑定被测P6来源，工作区其他不相关修复不代表此回执来自整体clean提交；sourceBefore/sourceAfter逐项记录被测源。"
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/pages/p6/P6.tsx",
+        "line": 363,
+        "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+        "symbol": "P6 AwarenessBanner primary flex-1 copy/action row and suggestions.slice(1) nonwrapping rows"
+      },
+      "trigger_path": "进入/skills，真实SideNav、StarRing及Bridge按容器预留导航/助手/面板宽度；存在一条或多条待确认建议时，主建议宽动作组与flex-1正文竞争横向空间，追加建议的三个按钮与正文同处不换行flex行；390移动壳与1440默认桌面壳可出现约单字宽正文和逐字竖排，长文案进一步加剧。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实P6/Bridge/SideNav/StarRing、权限provider及tRPC客户端和生产CSS；明示模拟HTTP数据/回执；1440x900与390x844，0/1/7条及长文案、只读、拒绝、加载、确认RPC失败重试；真实助手折叠及左右面板显隐；普通指针和连续Tab+Enter/Space。",
+          "expect": "23场景满足实际字体Range和几何断言：建议标题/数量完整，正文有可读行宽，文案及动作无裁切、重叠和横向溢出；权限/加载态保持，拒绝路由无技能查询；一项激活仅产生一条精确模拟mutation或真实草稿路由与准确预填；确认忙态、RPC失败提示及显式重试保持；真实布局切换等待左右面板hidden状态稳定且不触发业务mutation；未预期网络、pageerror、console.error、资源清理错误为零，所列25份运行源文件前后不变。",
+          "command": "node --test governance/scripts/acceptance/lib/skill-suggestion-layout.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/skill-suggestion-layout.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "已实施本地最小布局修复：主建议图标/正文使用auto与minmax(0,1fr)两列grid，标题和待确认数量作为整块标签换行，主动作跨两列另起一行；其余建议将正文与可换行动作组分行。保留所有文案、渲染条件、权限/禁用逻辑、业务回调及payload，不新增依赖或全局CSS。新增真实壳布局/交互回归；root后续登记CI及来源清单、绑定正式候选提交，再由独立角色执行断言与实际验收。",
+      "rollback": "普通revert本卡P6布局改动、新增回归runner及root后续对应CI/来源登记；保留其他卡修复。不涉及数据库迁移、真实模型调用或外部业务状态。",
+      "conflict_paths": [
+        "governance/apps/web/src/pages/p6/P6.tsx",
+        "governance/scripts/acceptance/lib/skill-suggestion-layout.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs"
+      ],
+      "blast_radius": "仅P6建议区布局与本仓回归证据；真实产品运行源码只改P6。共享UI、其他页面、建议计算、任务固化/驳回业务、权限、模型与数据源语义保持。CI/provenance/正式提交由root负责，本卡草稿不表示这些登记已完成。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/skill-suggestion-layout.test.mjs"
+      },
+      "notes": "发现基线为e750605583a4b41bce459ec97215c8cfdddfec91；fixed_by为/root/fix_skill_suggestion_layout。独立acceptance状态：pending；此raw card仍open，正式assertion last_result=not-run表示尚未由root在绑定候选上登记正式独立断言，不抹去修复者本地自测成功。修复者同字节runner SHA256=08d38c67c328b708b0a45e26c2c3c72d49a41ae7d6748c065e9b77ac2cbc4df4；候选P6 SHA256=4e353e5281401a2c30f4aa9e2f70f23d671f6b8b073973bb4c9f06a0b015e392。修复回执：outputs/tiger-audit/MC038/red-v5/receipt.json与green-v5/receipt.json；候选25/25，web typecheck exit0，四文件受影响Vitest 25/25。证据边界：实际前端壳/客户端配合明示模拟HTTP，未运行BackendGate/LoomMate/真实后端/数据库/模型；错误场景是HTTP200中的FORBIDDEN RPC envelope，不是HTTP403或断网测试；只读/拒绝场景证明客户端行为而非服务端授权。源冻结只覆盖列出的25份运行文件，不等于整个工作区干净。既有SimBanner窄文案列及load/reject失败路径未纳入本卡修复，不声称整个移动产品已完整验收。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    },
+    {
+      "id": "MC-039",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 3,
+      "state": "open",
+      "title": "默认迷你助手仍展开未读卡片，拦截任务中心启航按钮导致无法发起任务",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/loommate/LoomMate.tsx:492@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
+          "note": "A: 完整精读原始LoomMate；open=none时无条件渲染最多三条卡片，没有以mini聚合状态约束，默认迷你球仍显示大面积提醒。原始完整Git blob=4f92f8857eddc94569c7d9bc60e78101e9519f66。"
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/components/loommate/LoomMate.tsx:488@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
+          "note": "A: 浮层p-2透明留白及卡片均参与指针命中。任务中心真实App/Bridge布局内，普通启航点击被根容器、wl-action-row或提醒按钮拦截；仅修改默认提醒聚合仍应一并消除透明留白的点击拦截。"
+        },
+        {
+          "type": "receipt",
+          "ref": "audit-evidence/mc039-red-receipt.json",
+          "sha256": "04c327a4a02d9a1a0e91e4db5d8d027325e90b1ae229533720923991091853dc",
+          "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+          "note": "B: 修复前同字节新runner的真实main/App /tasks及生产CSS、明示本地HTTP红测原始回执，19场景4过15失败；12个任务发起相关场景普通指针trial被助手拦截且threads.dispatch请求数为0，另外3个新入口流程因尚无toggle失败。source/runner前后hash稳定，cleanup[]。 此commit绑定被测LoomMate原字节；其余卡工作区并行准备不代表整个测试来自clean提交，所有被测运行源由回执前后hash明示。"
+        },
+        {
+          "type": "receipt",
+          "ref": "audit-evidence/mc039-red-process.json",
+          "sha256": "7408129c8ffb840e4d567b52e533b3c4582bef6662173e25e9d2bd72d99d9fb1",
+          "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+          "note": "B: 原始红测进程记录完整argv、时间、exit1、runner散列与raw日志散列；不是截图推断。 此commit绑定被测LoomMate原字节；其余卡工作区并行准备不代表整个测试来自clean提交，所有被测运行源由回执前后hash明示。"
+        }
+      ],
+      "root_cause": {
+        "file": "governance/apps/web/src/components/loommate/LoomMate.tsx",
+        "line": 492,
+        "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+        "symbol": "LoomMate default mini renders unconditional items.slice(0,3) cards and pointer-active padded root"
+      },
+      "trigger_path": "真实/tasks使用默认迷你助手，存在1或10条未读提醒；桌面1440×900/1440×360和移动390×844/390×360输入一句话目标后启航按钮已enabled，但普通指针被助手提醒卡片/动作区/透明根容器拦截，无法产生threads.dispatch。用户主动展开助手后再收起为小球也会复现。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "真实main/App /tasks、P1/DispatchBar/LoomMate及生产CSS；明示本地HTTP身份、权限、任务列表和秘书收件箱夹具；四视口×未读0/1/10，发起失败显式重试2场、readonly2场、展开后收起2场、清空后心跳新增1场；普通指针和连续Tab+Enter。",
+          "expect": "19场景通过：默认迷你仅聚合数量，启航通过普通指针、实际命中检查和精确一次模拟threads.dispatch产生任务，并经真实threads.list查询回读；显式通知入口的展开/稍后/read/查看事项/acted/导航后收起/Escape/清空/新轮询保持可用；发起失败保留输入和无新任务，显式重试成功；readonly不呈现发起控件且0dispatch。页面无横向溢出、未登记网络调用或pageerror。既有共享UI rocket路径错误仅按完整精确字符串单列，raw consoleErrors完整保留；其他console错误严格失败（发起失败场景仅允许其预期错误）。所列运行源码与runner前后稳定，资源清理无错误。",
+          "command": "node --test governance/scripts/acceptance/lib/task-notification-interception.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "governance/scripts/acceptance/lib/task-notification-interception.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "本地已实施默认mini聚合数量与显式通知toggle；主动查看后最多展示三条卡片，Escape/操作导航/清空/隐藏或切换形态关闭提醒。透明外层pointer-events:none，实际卡片/面板/头像/toggle/控制条pointer-events:auto；用户主动展开的大/小形态及屏保保留原提醒行为。新增19场真实任务路由回归；旧MC034/035/037仅增加必要普通展开步骤，所有原断言/场景/对比度阈值保留。root后续登记来源/CI并绑定干净候选提交，repair与独立acceptance分别实际运行。",
+      "rollback": "普通revert本卡LoomMate产品改动、新19场回归及关联旧测试展开步骤/对应来源与CI登记；保留其他卡修复。不涉及数据库、真实任务、模型或外部业务状态。",
+      "conflict_paths": [
+        "governance/apps/web/src/components/loommate/LoomMate.tsx",
+        "governance/scripts/acceptance/lib/task-notification-interception.test.mjs",
+        "governance/scripts/acceptance/lib/loommate-unread-contrast.test.mjs",
+        "governance/scripts/acceptance/lib/loommate-viewport.test.mjs",
+        "governance/scripts/acceptance/lib/loommate-stacking.test.mjs",
+        "governance/.workloom-client-repairs.json",
+        "scripts/ci/verify-tiger-client-repairs.mjs",
+        "tests/client-repair-provenance.test.mjs",
+        ".github/workflows/workloom-ui-contract.yml"
+      ],
+      "blast_radius": "产品源码只变LoomMate的提醒呈现、开关状态和指针命中。任务输入/派遣协议/权限与数据源/服务端接口保持；提醒读/已处理请求保持。关联034/035/037增加用户显式展开入口以适配新交互，不减弱原assertion。",
+      "regression": {
+        "command": "node --test governance/scripts/acceptance/lib/task-notification-interception.test.mjs"
+      },
+      "notes": "发现基线完整commit=e750605583a4b41bce459ec97215c8cfdddfec91；原LoomMate SHA256=95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5、Git blob=4f92f8857eddc94569c7d9bc60e78101e9519f66。fixed_by=/root/fix_task_notification_interception。本raw card保持open且正式assertion=not-run，表示尚未在干净候选提交上登记正式修复运行/独立验收，不抹去已完成本地红绿自测。新runner SHA256=3c796d9f309b9d61b933196513fc2cb9c68a5e303ff9cd8145e332a2f0878ae2；候选LoomMate SHA256=e58d7d0e24ae456258be028cf1e63c3066e1185859a97ce44ed0482838303cf5。红测red-v2、绿测green-v1；旧034原样失败regression-mc034-v1完整保留，仅两条mini普通展开后regression-mc034-v2全过。既有rocket SVG parse错误发现未修，17条/次在raw与knownConsoleErrors保留，不称console clean。local-preview仅本机真实前端配明示模拟HTTP；没有真实后端/模型/数据库/生产验收，没有声称全工作区干净。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    },
+    {
+      "id": "MC-040",
+      "kind": "problem",
+      "level": "L4",
+      "severity": "P1",
+      "batch": 3,
+      "state": "open",
+      "title": "验收profile使用不存在的夜班地址，非空NotFound页面造成假阳性",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "acceptance/profile.json:35@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "acf2f4d84cea376113a197ea6b81368a15e588100f288f008bfa9fd3b17d1ff5",
+          "note": "A: 完整读取profile和App；profile声明/nights，实际注册/night，未知地址进入NotFound。"
+        },
+        {
+          "type": "code",
+          "ref": "governance/acceptance/profile.json:35@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "acf2f4d84cea376113a197ea6b81368a15e588100f288f008bfa9fd3b17d1ff5",
+          "note": "A: 完整读取profile和App；profile声明/nights，实际注册/night，未知地址进入NotFound。"
+        },
+        {
+          "type": "code",
+          "ref": "governance/apps/web/src/App.tsx:146@e750605583a4b41bce459ec97215c8cfdddfec91",
+          "sha256": "7f691c714d911671e796abc6d490196704e2f40e25b90122cc80fbbb4b98082a",
+          "note": "A: 完整读取profile和App；profile声明/nights，实际注册/night，未知地址进入NotFound。"
+        },
+        {
+          "type": "ui",
+          "ref": "audit-evidence/mc040-routes.json",
+          "sha256": "89a95c7ab54731b97456a3569349dd5f745af1e361e577b915d5514330281a03",
+          "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+          "note": "B+C: 独立20路由实际访问及逐图检查，/nights显示页面不存在；原UI报告机械ok不证明路由有效。"
+        }
+      ],
+      "root_cause": {
+        "file": "acceptance/profile.json",
+        "line": 35,
+        "commit": "e750605583a4b41bce459ec97215c8cfdddfec91",
+        "symbol": "surfaces.pcRoutes"
+      },
+      "trigger_path": "根目录或governance验收profile访问/nights，实际App只有/night而落入NotFound；旧非空页面谓词将此误计为ok。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "实际App JSX路由声明和根/governance两份profile；通配路由、动态表达式、注释、缺失和重复配置负例。",
+          "expect": "每个PC验收路径对应真实注册的具体路由；两份profile一致；旧/nights、通配兜底、注释字符串或坏JSX不能提供有效目标。",
+          "command": "node --test tests/acceptance-route-contract.test.mjs",
+          "exec": {
+            "file": "node",
+            "args": [
+              "--test",
+              "tests/acceptance-route-contract.test.mjs"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "fix_plan": "两份profile的/nights修正/night；CI通过TypeScript AST核对实际路由；独立新候选再实际访问/night并核对非NotFound。",
+      "rollback": "普通revert两份profile、新路由契约测试及CI测试注册；不涉及数据库或业务写入。",
+      "conflict_paths": [
+        "acceptance/profile.json",
+        "governance/acceptance/profile.json",
+        "tests/acceptance-route-contract.test.mjs",
+        ".github/workflows/workloom-ui-contract.yml"
+      ],
+      "blast_radius": "只修复本仓验收目标和CI回归，不修改产品路由或共享UI探针；通用UI探针未识别NotFound的局限继续明确披露。",
+      "regression": {
+        "command": "node --test tests/acceptance-route-contract.test.mjs"
+      },
+      "notes": "同字节测试旧源7项中2失败5通过，修正后7/7通过；日志和过程回执在MC040目录。尚待干净候选正式修复/独立验收。",
+      "fixed_by": null,
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null
+    }
+  ],
+  "gates": []
+}

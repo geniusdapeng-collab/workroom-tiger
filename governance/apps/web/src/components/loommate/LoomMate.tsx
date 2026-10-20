@@ -4,7 +4,7 @@
  *      大/小两种尺寸手动切换（默认大尺寸）· 气泡提醒 · 对话面板 · 记忆透明面板
  * 铁律：不替人决策 / 不打扰（勿扰+聚合）/ 不装在线
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ensureDemoLogin, trpc } from "../../lib/trpc";
 import { VoiceEngine } from "../../voice/VoiceEngine";
@@ -113,6 +113,9 @@ export function LoomMate() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [open, setOpen] = useState<"none" | "chat" | "settings" | "memory">("none");
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationsId = useId();
+  const notificationsToggleRef = useRef<HTMLButtonElement | null>(null);
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -239,6 +242,10 @@ export function LoomMate() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    if (hidden || !mini || open !== "none" || items.length === 0) setNotificationsOpen(false);
+  }, [hidden, mini, open, items.length]);
+
+  useEffect(() => {
     const keepVisible = () => {
       setViewport({ width: window.innerWidth, height: window.innerHeight });
       setPos((current) => current ? clampPos(current.x, current.y) : current);
@@ -253,6 +260,7 @@ export function LoomMate() {
       setHidden(false);
       setMini(true); // 恢复默认 = 首访默认的小球态
       setOpen("none");
+      setNotificationsOpen(false);
     };
     const setVisibility = (event: Event) => {
       const action = (event as CustomEvent<"show" | "hide" | "toggle">).detail;
@@ -297,6 +305,7 @@ export function LoomMate() {
   const act = async (it: InboxItem) => {
     await svc().secretary.markInbox.mutate({ ids: [it.id], status: "acted" }).catch(() => undefined);
     setItems((prev) => prev.filter((x) => x.id !== it.id));
+    setNotificationsOpen(false);
     if (it.link) navigate(canonicalNavigationPath(it.link));
   };
   const later = async (it: InboxItem) => {
@@ -312,16 +321,19 @@ export function LoomMate() {
     await svc().secretary.saveSettings.mutate({ widget_size: next }).catch(() => undefined);
   };
   const mateSurface = useManagedSurface<HTMLDivElement>({
-    open: size === "fullscreen" || (!hidden && open !== "none"),
+    open: size === "fullscreen" || (!hidden && (open !== "none" || notificationsOpen)),
     kind: "assistant-companion",
     onDismiss: () => {
       if (size === "fullscreen") void toggleSize();
-      else setOpen("none");
+      else {
+        setOpen("none");
+        setNotificationsOpen(false);
+      }
     },
     modal: size === "fullscreen",
     focusOnOpen: size === "fullscreen",
-    restoreFocusOnClose: size === "fullscreen",
-    returnFocusRef: sizeToggleRef,
+    restoreFocusOnClose: size === "fullscreen" || notificationsOpen,
+    returnFocusRef: size === "fullscreen" ? sizeToggleRef : notificationsToggleRef,
   });
   useEffect(() => {
     if (size === "fullscreen" || hidden) return;
@@ -486,11 +498,13 @@ export function LoomMate() {
   return (
     <div {...mateSurface}
       className={`flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 ${docked === "left" ? "items-start" : "items-end"}`}
-      style={{ fontFamily: "inherit", maxHeight: Math.max(0, viewport.height - (pos?.y ?? 8) - 8),
+      style={{ fontFamily: "inherit", pointerEvents: "none", maxHeight: Math.max(0, viewport.height - (pos?.y ?? 8) - 8),
         maxWidth: Math.max(96, viewport.width - railW - navW - 16), ...rootStyle }}>
-      {/* 气泡提醒（最多叠 3 条） */}
-      {open === "none" && items.slice(0, 3).map((it) => (
-        <div key={it.id} className={`w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur ${LEVEL_STYLE[it.level]}`}>
+      {/* 小球默认聚合提醒；用户主动查看后才展开卡片，避免遮住业务操作。 */}
+      {open === "none" && unread > 0 && (!mini || notificationsOpen) && (
+      <div id={notificationsId} role="region" aria-label="小织未读提醒" className="flex max-w-full flex-col gap-2">
+      {items.slice(0, 3).map((it) => (
+        <div key={it.id} style={{ pointerEvents: "auto" }} className={`w-[min(19rem,calc(100vw-2rem))] max-w-full rounded-2xl border p-3 shadow-xl backdrop-blur ${LEVEL_STYLE[it.level]}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-1.5 text-body font-semibold text-ink">{it.level === "red" && <Icon name="warning" size={14} />}{clientValueText(it.title)}</div>
             <button onClick={() => void later(it)} className="shrink-0 text-body text-ink3 hover:text-ink">稍后</button>
@@ -504,6 +518,8 @@ export function LoomMate() {
           </div>
         </div>
       ))}
+      </div>
+      )}
 
       {open !== "none" && (
         <MatePanel
@@ -512,6 +528,17 @@ export function LoomMate() {
           personaName={personaName} settings={settings} setSettings={setSettings}
           memory={memory} setMemory={setMemory}
         />
+      )}
+
+      {mini && open === "none" && unread > 0 && (
+        <button ref={notificationsToggleRef}
+          onClick={() => setNotificationsOpen((value) => !value)}
+          aria-label={`${notificationsOpen ? "收起" : "查看"}未读提醒（${unread}）`}
+          aria-expanded={notificationsOpen} aria-controls={notificationsId}
+          style={{ pointerEvents: "auto" }}
+          className="rounded-full border border-line bg-bg900/95 px-2.5 py-1 text-body text-ink shadow hover:bg-bg850">
+          {notificationsOpen ? "收起通知" : "通知"}
+        </button>
       )}
 
       {/* 本体：形象（可拖拽·松手边缘吸附）+ 名字 + 控制条 */}
@@ -533,6 +560,7 @@ export function LoomMate() {
             }
           }}
           className="relative block h-16 w-16 rounded-full border-2 border-gold/60 bg-bg900 shadow-xl transition-transform hover:scale-110"
+          style={{ pointerEvents: "auto" }}
         >
           {loomBallEnabled ? (
             /* 小角落态：静态小头像 → 织球（班组此刻在干什么，一眼看得见；
@@ -582,7 +610,7 @@ export function LoomMate() {
           title={`${personaName}（拖拽挪位置 · 点击聊聊）`}
           />
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
+        <div className="mt-0.5 flex items-center gap-1.5" style={{ pointerEvents: "auto" }}>
             <span className="rounded-full bg-bg900/90 px-2.5 py-0.5 text-body text-ink shadow">
             {personaName}
           </span>
@@ -618,7 +646,7 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
   setMemory: React.Dispatch<React.SetStateAction<Record<string, MemRow[]> | null>>;
 }) {
   return (
-<div className="flex h-[min(26rem,calc(100vh-2rem))] min-h-0 max-h-full w-[var(--wl-assistant-expanded)] max-w-full flex-col rounded-2xl border border-gline bg-bg900/95 shadow-2xl backdrop-blur" role="region" aria-label="小织助手面板">
+<div style={{ pointerEvents: "auto" }} className="flex h-[min(26rem,calc(100vh-2rem))] min-h-0 max-h-full w-[var(--wl-assistant-expanded)] max-w-full flex-col rounded-2xl border border-gline bg-bg900/95 shadow-2xl backdrop-blur" role="region" aria-label="小织助手面板">
           <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-2">
             <div className="flex gap-1">
               {([["chat", "聊聊"], ["settings", "设置"], ["memory", "记忆"]] as const).map(([k, label]) => (

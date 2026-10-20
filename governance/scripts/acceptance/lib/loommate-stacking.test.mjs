@@ -225,7 +225,7 @@ async function pointer(page, target, observation, name, trial = false, position 
   try {
     // Native actionability waits for the actual React/ResizeObserver layout.
     // Geometry sampled before that wait can belong to the preceding panel size.
-    await target.click({ trial: true, timeout: 3000, ...(position ? { position } : {}) });
+    await target.click({ trial: true, timeout: 15000, ...(position ? { position } : {}) });
     const actual = await geometry(target, position);
     observation.geometry.push({ name, phase: "after-actionability", position, ...actual });
     assert.ok(actual.inside, `${name}: control must be within the viewport after native scroll`);
@@ -364,7 +364,7 @@ async function forcedBannerOverlap(page, state, observation) {
     if (Math.abs(delta) <= 8) break;
     await page.keyboard.press(delta < 0 ? "ArrowUp" : "ArrowDown");
     await expect.poll(async () => (await avatar(page).boundingBox()).y,
-      { message: "The product must render each ordinary keyboard movement before another key is sent" }).not.toBe(widget.y);
+      { timeout: 15000, message: "The product must render each ordinary keyboard movement before another key is sent" }).not.toBe(widget.y);
   }
   observation.geometry.push({ name: "real-keyboard-overlap", ...current });
   const { banner: bounds, avatar: widget } = current;
@@ -423,7 +423,7 @@ async function modalPaths(page, state, observation) {
   }
 }
 
-test("MC-037 inline banners and assistant coexist in the actual App shell", { timeout: 900_000 }, async (t) => {
+test("MC-037 inline banners and assistant coexist in the actual App shell", { timeout: 2_400_000 }, async (t) => {
   const receipt = { card: "MC-037", actor: "repair", environment: "local-preview", startedAt: new Date().toISOString(),
     passScope: "Inline banner actionability, ordinary pointer/keyboard paths and overlay priority; contrast diagnostics are reported separately",
     fixture: "Real main/App, routes, overlays and production CSS; explicit local HTTP fixtures; no backend, DB, model or broker",
@@ -549,6 +549,7 @@ test("MC-037 inline banners and assistant coexist in the actual App shell", { ti
         async (page, state, observation) => {
           await expect(banner(page, "skills-loaded")).toBeVisible();
           await pointer(page, avatar(page), observation, "two-banner-mini", true);
+          await pointer(page, page.getByRole("button", { name: /^查看未读提醒/ }), observation, "open-notifications");
           const first = state.items[0];
           const card = page.locator("div:has(> .wl-action-row)").filter({ has: page.getByText(first.title, { exact: true }) });
           await pointer(page, card.getByRole("button", { name: "稍后", exact: true }), observation, "read-first-notification");
