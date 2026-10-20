@@ -201,16 +201,28 @@ def _single_with_fallback(provider, method: str, *args, **kwargs):
 
 
 def _quote_stale(q: dict, max_lag_days: int = 3) -> bool:
-    """eod_close 类报价的陈旧判定：报价日期落后最近交易日 >max_lag_days 视为陈旧
-    （停牌/源不完整的票，上周的收盘价绝不是"当前价格"）。"""
-    if q.get("kind") == "realtime":
-        return False
+    """所有报价统一校验时间，realtime 标签不能证明数据新鲜。
+
+    保留距最近交易日 >max_lag_days 个自然日的容忍口径；源已标记陈旧、
+    时间缺失/无效或晚于当前时刻时同样弃用，不能把未知时间当作当前价。
+    """
+    from datetime import date
+
     try:
         from .calendar import prev_trading_day
-        qdate = datetime.strptime(str(q.get("ts", ""))[:10], "%Y-%m-%d").date()
-        return (prev_trading_day(datetime.now().date()) - qdate).days > max_lag_days
-    except Exception:
-        return False
+        if q.get("stale"):
+            return True
+        ts = q.get("ts")
+        if not isinstance(ts, (str, date)):
+            return True
+        # 校验完整时间，不能截掉无效后缀；支持源端日期、空格/ISO 时间与时区。
+        quoted_at = datetime.fromisoformat(str(ts).strip().replace("Z", "+00:00"))
+        now = datetime.now(quoted_at.tzinfo)
+        return (quoted_at > now
+                or (prev_trading_day(datetime.now().date())
+                    - quoted_at.date()).days > max_lag_days)
+    except (TypeError, ValueError, OverflowError):
+        return True
 
 
 def quote_with_fallback(provider, ticker: str) -> dict | None:
@@ -220,39 +232,65 @@ def quote_with_fallback(provider, ticker: str) -> dict | None:
     抛异常，旧链路会把 None 当成功、静默拿不到价（盘中触发器因此零警报）。
     本函数把 None 视为失败继续降级，并把报价来源与时效（kind:
     realtime / realtime_delayed / eod_close）记入来源血缘如实披露。
-    v6.1：eod_close 报价日期落后最近交易日 >3 天判定【陈旧】——继续降级找
-    新鲜报价；全链皆陈旧时返回最后一个并标注 stale=True（触发器将弃用，
+    报价必须是有限正数且时间可验证；任意 kind 落后最近交易日 >3 天、
+    源标记陈旧、时间未知/无效/未来时继续降级。全链无有效报价时保留首个
+    价格有效但时间不可用的报价并标注 stale=True（触发器将弃用，
     用上周的价格触发止损/入场比不报警更危险）。
     """
-    chain: list = [provider]
-    if provider.name != "stooq":
-        try:
-            from .providers.stooq import StooqProvider
-            chain.append(StooqProvider())
-        except Exception:
-            pass
-    chain.extend(p for p in _channel_chain() if p.name != provider.name)
+    import math
+    from numbers import Real
+
+    def sources():
+        # 正常主源成功后不探测无关通道；实际回退顺序保持不变。
+        yield provider
+        if provider.name != "stooq":
+            try:
+                from .providers.stooq import StooqProvider
+                yield StooqProvider()
+            except Exception as exc:
+                logger.warning("stooq 报价源初始化失败（%s），尝试下一环",
+                               type(exc).__name__)
+        yield from (p for p in _channel_chain() if p.name != provider.name)
+
     stale_q: dict | None = None
-    for src in chain:
+    for src in sources():
+        if src is not provider and not is_synthetic(provider) and is_synthetic(src):
+            _data_issue(src, "quote", [ticker], "synthetic_fallback_rejected")
+            logger.warning("%s.quote 是合成源，真实报价回退链跳过该源", src.name)
+            continue
         try:
             q = src.quote(ticker)
         except Exception as e:
-            logger.warning("%s.quote(%s) 异常（%s），降级下一环", src.name, ticker, e)
+            _data_issue(src, "quote", [ticker], "provider_error", error=e)
+            logger.warning("%s.quote(%s) 异常（%s），降级下一环",
+                           src.name, ticker, type(e).__name__)
             continue
-        if not q or not q.get("price"):
+        if not isinstance(q, dict) or not q:
+            _data_issue(src, "quote", [ticker], "no_data" if q is None else "invalid_data")
             logger.warning("%s.quote(%s) 无数据，降级下一环", src.name, ticker)
             continue
-        if _quote_stale(q):
-            logger.warning("%s.quote(%s) 报价陈旧（%s），尝试下一环",
-                           src.name, ticker, q.get("ts"))
-            q["stale"] = True
-            stale_q = stale_q or q
+        price = q.get("price")
+        try:
+            valid_price = (not isinstance(price, bool) and isinstance(price, Real)
+                           and math.isfinite(price) and price > 0)
+        except (TypeError, ValueError, OverflowError):
+            valid_price = False
+        if not valid_price:
+            _data_issue(src, "quote", [ticker], "invalid_price")
+            logger.warning("%s.quote(%s) 价格无效，降级下一环", src.name, ticker)
             continue
-        _LINEAGE.append((f"quote({ticker})[{q.get('kind', '?')}]", src.name))
+        if _quote_stale(q):
+            _data_issue(src, "quote", [ticker], "stale_or_unverifiable_quote")
+            logger.warning("%s.quote(%s) 报价陈旧或时间不可验证，尝试下一环",
+                           src.name, ticker)
+            stale_q = stale_q or {**q, "stale": True}
+            continue
+        _LINEAGE.append((f"quote({ticker})[{q.get('kind', '?')}]", _provider_source(src)))
         return q
     if stale_q is not None:
         _LINEAGE.append((f"quote({ticker})[stale]", "STALE"))
         return stale_q
+    _data_issue(provider, "quote", [ticker], "quote_unavailable")
     return None
 
 
