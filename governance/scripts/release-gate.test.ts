@@ -11,11 +11,13 @@ type Payload = {
   receipt?: Record<string, unknown>;
 };
 type StoredEvent = { tenant_id: string; workspace_id: string; session_id: string; payload: Payload };
+type InstalledAgent = { workspace_id: string; preset_key: string; status: string; readonly: boolean };
 type Scenario = {
   dispatch: Record<string, unknown> | null;
   thread: Record<string, unknown> | null;
   apiEvents: unknown;
   ledger: StoredEvent[];
+  agents: InstalledAgent[];
   queries: Array<{ sql: string; params: unknown[]; tenant?: unknown; workspace?: unknown }>;
   requests: Array<{ path: string; input: Record<string, unknown> }>;
   failAt?: "threads.dispatch" | "threads.get" | "threads.events" | "ledger";
@@ -41,11 +43,27 @@ vi.mock("pg", () => ({ default: { Client: class {
     if (sql.includes("set_config('app.tenant_id'")) { this.tenant = params[0]; return { rows: [] }; }
     if (sql.includes("set_config('app.workspace_id'")) { this.workspace = params[0]; return { rows: [] }; }
     if (sql.includes("FROM profiles")) return { rows: [{ workspace_id: "ws-a", charter: {} }], rowCount: 1 };
-    if (sql.includes("FROM workspaces w")) return { rows: [{
-      tenant_id: "tenant-a", id: "ws-a", slug: "sample", name: "验收工作区",
-      member_id: "member-a", member_no: "MEM-A", member_name: "验收成员", member_role: "owner",
-      plan: "pro", preset_key: "operator",
-    }] };
+    if (sql.includes("FROM workspaces w")) {
+      if (params[0] != null && params[0] !== "ws-a") return { rows: [] };
+      // Model the emitted selector predicates. Without the new bound preset filter,
+      // the previous gate selects the unrelated default operator and reproduces fallback.
+      const bindsPreset = /\bpreset_key\s*=\s*\$2\b/.test(sql);
+      const explicitPreset = bindsPreset ? params[1] : null;
+      const readonlyOverride = /\$2::text\s+IS NOT NULL\s+OR\s+readonly\s*=\s*false/i.test(sql);
+      const candidates = state.agents.filter((agent) => {
+        if (/\bworkspace_id\s*=\s*w\.id\b/.test(sql) && agent.workspace_id !== "ws-a") return false;
+        if (/status\s+IN\s*\('ready','active'\)/.test(sql) && !["ready", "active"].includes(agent.status)) return false;
+        if (explicitPreset != null && agent.preset_key !== explicitPreset) return false;
+        if (/readonly\s*=\s*false/.test(sql) && !(readonlyOverride && explicitPreset != null) && agent.readonly) return false;
+        return true;
+      }).sort((a, b) => a.preset_key.localeCompare(b.preset_key));
+      const agent = candidates[0];
+      return { rows: agent ? [{
+        tenant_id: "tenant-a", id: "ws-a", slug: "sample", name: "验收工作区",
+        member_id: "member-a", member_no: "MEM-A", member_name: "验收成员", member_role: "owner",
+        plan: "pro", preset_key: agent.preset_key, preset_readonly: agent.readonly,
+      }] : [] };
+    }
     if (sql.includes("FROM triggers")) return { rows: [{ n: "1" }] };
     if (sql.includes("ceo.briefing")) return { rows: [{ n: String(state.briefings) }] };
     if (sql.includes("FROM biz_events")) {
@@ -91,6 +109,7 @@ function successfulScenario(steps = 2, mode: "simulated" | "real" = "simulated")
     thread: { id: "T-100", mode: "quest", status: "completed", progress_done: steps, progress_total: steps },
     apiEvents: events,
     ledger: events.map((payload) => ({ ...scope, session_id: "T-100", payload: structuredClone(payload) })),
+    agents: [{ workspace_id: "ws-a", preset_key: "operator", status: "ready", readonly: false }],
     requests: [], queries: [], briefings: 0,
   };
 }
@@ -100,6 +119,8 @@ beforeEach(() => {
   doubles.current = successfulScenario();
   vi.stubEnv("SERVER_BASE", "http://release-gate.test");
   vi.stubEnv("RELEASE_GATE_TOKEN", "test-only-token");
+  vi.stubEnv("RELEASE_WORKSPACE_ID", "");
+  vi.stubEnv("RELEASE_PRESET_KEY", "");
   vi.stubEnv("GATE_QUEST_TIMEOUT_MS", "100");
   vi.stubEnv("LLM_PROVIDER", "mock");
   vi.stubGlobal("fetch", vi.fn(async (raw: string | URL, options?: RequestInit) => {
@@ -339,5 +360,136 @@ describe("release gate: unavailable evidence is a failure", () => {
     const result = await expectBlocked("Q-01");
     expect(result.log).toContain("GATE_QUEST_TIMEOUT_MS");
     expect(doubles.current.requests.some(({ input }) => input.runImmediately === true)).toBe(false);
+  });
+});
+
+describe("release gate: explicit installed preset selection", () => {
+  const analyst: InstalledAgent = { workspace_id: "ws-a", preset_key: "attribution-analyst", status: "ready", readonly: true };
+  function installAnalyst(change: Partial<InstalledAgent> = {}) {
+    doubles.current.agents.push({ ...analyst, ...change });
+  }
+  function useAnalystEvidence() {
+    for (const event of apiEvents()) if (event.who.type === "agent") event.who.id = analyst.preset_key;
+    doubles.current.ledger = apiEvents().map((payload) => ({ ...scope, session_id: "T-100", payload: structuredClone(payload) }));
+  }
+  async function expectUnavailable() {
+    const result = await runGate();
+    expect(result.code, result.log).toBe(1);
+    expect(result.log).toContain("✗ G-01");
+    expect(result.log).not.toContain("准许发布");
+    expect(doubles.current.requests.filter(({ path }) => path === "threads.dispatch")).toEqual([]);
+    expect(doubles.current.queries.filter(({ sql }) => sql.includes("FROM workspaces w"))).toHaveLength(1);
+    return result;
+  }
+
+  it.each(["", " \t "])("empty preset option %j keeps the default writable-only selection", async (value) => {
+    installAnalyst();
+    vi.stubEnv("RELEASE_PRESET_KEY", value);
+    const result = await runGate();
+    expect(result.code, result.log).toBe(0);
+    expect(doubles.current.requests.filter(({ path }) => path === "threads.dispatch").every(({ input }) => input.presetKey === "operator")).toBe(true);
+    expect(result.log).toContain("readonly=false");
+    expect(result.log).toContain("默认非只读岗位");
+  });
+
+  it("default discovery cannot silently use a readonly-only workspace", async () => {
+    doubles.current.agents = [{ ...analyst }];
+    await expectUnavailable();
+  });
+
+  it.each(["ready", "active"])("explicit installed readonly preset in state %s is selected exactly", async (status) => {
+    installAnalyst({ status });
+    useAnalystEvidence();
+    vi.stubEnv("RELEASE_WORKSPACE_ID", "ws-a");
+    vi.stubEnv("RELEASE_PRESET_KEY", analyst.preset_key);
+    const result = await runGate();
+    expect(result.code, result.log).toBe(0);
+    expect(result.log).toContain("11/11 通过");
+    expect(doubles.current.requests.filter(({ path }) => path === "threads.dispatch").every(({ input }) => input.presetKey === analyst.preset_key)).toBe(true);
+    expect(result.log).toContain("RELEASE_PRESET_KEY");
+    expect(result.log).toContain(analyst.preset_key);
+    expect(result.log).toContain("readonly=true");
+    expect(result.log).toContain("只读核心结构正例，不证明写任务或生产能力");
+    const query = doubles.current.queries.find(({ sql }) => sql.includes("FROM workspaces w"))!;
+    expect(query.params).toEqual(["ws-a", analyst.preset_key]);
+    expect(query.sql).toMatch(/workspace_id\s*=\s*w\.id/);
+    expect(query.sql).toMatch(/preset_key\s*=\s*\$2/);
+    expect(query.sql).toMatch(/status\s+IN\s*\('ready','active'\)/);
+  });
+
+  it("an explicit readonly preset does not require a separate writable preset", async () => {
+    doubles.current.agents = [{ ...analyst }];
+    useAnalystEvidence();
+    vi.stubEnv("RELEASE_PRESET_KEY", analyst.preset_key);
+    const result = await runGate();
+    expect(result.code, result.log).toBe(0);
+    expect(doubles.current.requests.some(({ input }) => input.runImmediately && input.presetKey === analyst.preset_key)).toBe(true);
+  });
+
+  it("an explicit writable preset remains available with truthful scope", async () => {
+    vi.stubEnv("RELEASE_PRESET_KEY", "operator");
+    const result = await runGate();
+    expect(result.code, result.log).toBe(0);
+    expect(result.log).toContain("RELEASE_PRESET_KEY");
+    expect(result.log).toContain("readonly=false");
+    expect(result.log).not.toContain("只读核心结构正例");
+  });
+
+  it("explicit preset and workspace options are trimmed before exact parameter binding", async () => {
+    installAnalyst();
+    useAnalystEvidence();
+    vi.stubEnv("RELEASE_WORKSPACE_ID", " ws-a ");
+    vi.stubEnv("RELEASE_PRESET_KEY", " attribution-analyst ");
+    const result = await runGate();
+    expect(result.code, result.log).toBe(0);
+    const query = doubles.current.queries.find(({ sql }) => sql.includes("FROM workspaces w"))!;
+    expect(query.params).toEqual(["ws-a", "attribution-analyst"]);
+  });
+
+  it.each(["missing-preset", "Attribution-Analyst"])("unavailable explicit preset %s does not fall back to the default operator", async (key) => {
+    installAnalyst();
+    vi.stubEnv("RELEASE_PRESET_KEY", key);
+    const result = await expectUnavailable();
+    expect(result.log).toContain("RELEASE_PRESET_KEY");
+    expect(result.log).toContain(key);
+    expect(result.log).toContain("拒绝回退");
+  });
+
+  it.each(["disabled", "invalid", "queued"])("explicit installed preset in state %s cannot fall back to an enabled one", async (status) => {
+    installAnalyst({ status });
+    vi.stubEnv("RELEASE_PRESET_KEY", analyst.preset_key);
+    await expectUnavailable();
+  });
+
+  it("an identically named preset in another workspace cannot satisfy the explicit target", async () => {
+    installAnalyst({ workspace_id: "ws-b" });
+    vi.stubEnv("RELEASE_WORKSPACE_ID", "ws-a");
+    vi.stubEnv("RELEASE_PRESET_KEY", analyst.preset_key);
+    await expectUnavailable();
+  });
+
+  it("an unavailable requested workspace cannot fall back to the detected workspace", async () => {
+    installAnalyst();
+    vi.stubEnv("RELEASE_WORKSPACE_ID", "ws-b");
+    vi.stubEnv("RELEASE_PRESET_KEY", analyst.preset_key);
+    await expectUnavailable();
+  });
+
+  it("special characters in an unavailable preset remain a bound value, not SQL", async () => {
+    const key = "analyst' OR true --";
+    vi.stubEnv("RELEASE_PRESET_KEY", key);
+    await expectUnavailable();
+    const query = doubles.current.queries.find(({ sql }) => sql.includes("FROM workspaces w"))!;
+    expect(query.params).toEqual([null, key]);
+    expect(query.sql).not.toContain(key);
+  });
+
+  it.each(["failed", "pending_review"])("selecting readonly does not waive the completed requirement for %s", async (status) => {
+    installAnalyst();
+    useAnalystEvidence();
+    vi.stubEnv("RELEASE_PRESET_KEY", analyst.preset_key);
+    doubles.current.dispatch!.status = status;
+    await expectBlocked("Q-01");
+    expect(doubles.current.requests.some(({ input }) => input.runImmediately && input.presetKey === analyst.preset_key)).toBe(true);
   });
 });

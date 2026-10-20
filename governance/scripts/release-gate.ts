@@ -9,6 +9,8 @@
  * 红线：三条主链路未全部通过 → 禁止发布（本脚本 exit 1）
  *
  * 用法：pnpm release:gate（需要 server 运行于 SERVER_BASE，默认 http://localhost:8787）
+ * RELEASE_PRESET_KEY 可精确指定目标工作区已安装且启用的岗位；未指定时仍只选非只读岗位。
+ * 显式只读岗位仅提供只读核心结构正例，不证明写任务或生产能力。
  */
 import pg from "pg";
 import { existsSync, readFileSync } from "node:fs";
@@ -35,6 +37,7 @@ const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const APP_URL = process.env.DATABASE_APP_URL ?? "postgres://workloom_app:workloom_dev_app@localhost:5432/workloom";
 const OWNER_URL = process.env.DATABASE_URL ?? "postgres://postgres:workloom@localhost:5432/workloom";
 const REQUESTED_WORKSPACE_ID = process.env.RELEASE_WORKSPACE_ID?.trim() || null;
+const REQUESTED_PRESET_KEY = process.env.RELEASE_PRESET_KEY?.trim() || null;
 
 /* ================= 判定框架 ================= */
 interface CheckResult { id: string; name: string; ok: boolean; detail: string; ms: number }
@@ -235,6 +238,7 @@ interface ReleaseTarget {
   memberRole: Identity["role"];
   plan: Identity["plan"];
   presetKey: string;
+  presetReadonly: boolean;
 }
 
 let TARGET: ReleaseTarget | null = null;
@@ -246,10 +250,10 @@ let TARGET: ReleaseTarget | null = null;
     const result = await owner.query<{
       tenant_id: string; id: string; slug: string; name: string;
       member_id: string; member_no: string; member_name: string; member_role: Identity["role"]; plan: Identity["plan"];
-      preset_key: string;
+      preset_key: string; preset_readonly: boolean;
     }>(
       `SELECT w.tenant_id, w.id, w.slug, w.name, m.id AS member_id, m.member_no, m.name AS member_name, m.role AS member_role,
-              COALESCE(t.plan, 'community') AS plan, a.preset_key
+              COALESCE(t.plan, 'community') AS plan, a.preset_key, a.readonly AS preset_readonly
        FROM workspaces w
        LEFT JOIN tenants t ON t.id = w.tenant_id
        JOIN LATERAL (
@@ -258,14 +262,16 @@ let TARGET: ReleaseTarget | null = null;
          ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, member_no LIMIT 1
        ) m ON true
        JOIN LATERAL (
-         SELECT preset_key FROM agents
-         WHERE workspace_id=w.id AND status IN ('ready','active') AND readonly=false
+         SELECT preset_key, readonly FROM agents
+         WHERE workspace_id=w.id AND status IN ('ready','active')
+           AND ($2::text IS NULL OR preset_key=$2)
+           AND ($2::text IS NOT NULL OR readonly=false)
          ORDER BY preset_key LIMIT 1
        ) a ON true
        WHERE w.is_example=true AND ($1::text IS NULL OR w.id=$1)
        ORDER BY w.created_at DESC NULLS LAST, w.id
        LIMIT 1`,
-      [REQUESTED_WORKSPACE_ID],
+      [REQUESTED_WORKSPACE_ID, REQUESTED_PRESET_KEY],
     );
     const row = result.rows[0];
     if (row) TARGET = {
@@ -279,15 +285,23 @@ let TARGET: ReleaseTarget | null = null;
       memberRole: row.member_role,
       plan: row.plan,
       presetKey: row.preset_key,
+      presetReadonly: row.preset_readonly,
     };
   } finally {
     await owner.end();
   }
   console.log(`工作区探测：${TARGET ? `${TARGET.name}（${TARGET.workspaceId}）` : "（无可验收示例工作区）"}\n`);
+  if (TARGET) {
+    console.log(`验收岗位：${JSON.stringify(TARGET.presetKey)} · readonly=${TARGET.presetReadonly} · ${REQUESTED_PRESET_KEY ? "显式 RELEASE_PRESET_KEY" : "默认非只读岗位"}`);
+    if (TARGET.presetReadonly) console.log("验收范围：只读核心结构正例，不证明写任务或生产能力；完成状态与逐步回执要求不变。");
+  }
 }
 if (!TARGET) {
-  results.push({ id: "G-01", name: "工作区探测", ok: false, detail: "无可验收的示例工作区（请先播种当前 Bundle）", ms: 0 });
-  console.log("✗ G-01 工作区探测 —— 无可验收的示例工作区（请先播种当前 Bundle）");
+  const detail = REQUESTED_PRESET_KEY
+    ? `指定验收岗位不可用（RELEASE_PRESET_KEY=${JSON.stringify(REQUESTED_PRESET_KEY)}，RELEASE_WORKSPACE_ID=${JSON.stringify(REQUESTED_WORKSPACE_ID)}）；须为目标示例工作区已安装的 ready/active 岗位，拒绝回退到其他岗位`
+    : "无可验收的示例工作区（请先播种当前 Bundle）";
+  results.push({ id: "G-01", name: "工作区探测", ok: false, detail, ms: 0 });
+  console.log(`✗ G-01 工作区探测 —— ${detail}`);
 }
 const gateIdentity = TARGET ? await resolveGateToken(TARGET).catch((err: unknown) => {
   console.log(`✗ 身份通道不可用 —— ${err instanceof Error ? err.message : String(err)}`);
@@ -460,3 +474,4 @@ if (failed.length > 0) {
   process.exit(1);
 }
 console.log(`\n✅ 三条主链路全部通过（ASK ×${ASK_SCENARIOS.length} / QUEST ×2 / 编排 ×3），准许发布。环境：${envLabel}`);
+if (TARGET?.presetReadonly) console.log("范围限定：本次为只读核心结构正例，不证明写任务或生产能力。");
