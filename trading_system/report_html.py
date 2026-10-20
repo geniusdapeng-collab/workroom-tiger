@@ -20,6 +20,7 @@ import re as _re
 from . import config
 from .data_models import PipelineResult
 from .redline import STEP_REGISTRY
+from .report import _freshness_note, _market_currency, _market_name, _universe_note
 
 try:  # AI 生成美术资源（老虎全球资产管理头图 / 产业链主题产品图，内嵌 base64，零外链）
     from .hero_art import HERO_ART_B64, THEME_ART_B64
@@ -62,10 +63,17 @@ def _get(v, key, default=None):
     return getattr(v, key, default)
 
 
+def _number(value) -> float | None:
+    """缺失或无效读数不能在显示层变成有效评分/资金。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
 def _radar_svg(dims: dict, size: int = 300) -> str:
     """市场环境五维雷达图。dims: {key: DimensionScore/dict}，取 score 0-10。"""
-    items = [(_DIM_ZH.get(k, k), _get(v, "score")) for k, v in dims.items()]
-    items = [(k, s if isinstance(s, (int, float)) else 5.0) for k, s in items][:6]
+    items = [(_DIM_ZH.get(k, k), _number(_get(v, "score")))
+             for k, v in dims.items()][:6]
     if not items:
         return ""
     n = len(items)
@@ -83,18 +91,21 @@ def _radar_svg(dims: dict, size: int = 300) -> str:
     for i in range(n):
         x, y = pt(i, 1.0)
         parts.append(f'<line x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}" stroke="{BORDER}"/>')
-    data_pts = " ".join(f"{pt(i, s / 10.0)[0]:.1f},{pt(i, s / 10.0)[1]:.1f}"
-                        for i, (_, s) in enumerate(items))
-    parts.append(f'<polygon points="{data_pts}" fill="{GOLD}33" stroke="{GOLD}" stroke-width="2"/>')
+    # 缺失轴只保留轴与文字，既不补分，也不连接成完整面积。
+    if all(s is not None for _, s in items):
+        data_pts = " ".join(f"{pt(i, s / 10.0)[0]:.1f},{pt(i, s / 10.0)[1]:.1f}"
+                            for i, (_, s) in enumerate(items))
+        parts.append(f'<polygon points="{data_pts}" fill="{GOLD}33" stroke="{GOLD}" stroke-width="2"/>')
     for i, (k, s) in enumerate(items):
-        x, y = pt(i, s / 10.0)
-        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.2" fill="{GOLD}"/>')
+        if s is not None:
+            x, y = pt(i, s / 10.0)
+            parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.2" fill="{GOLD}"/>')
         lx, ly = pt(i, 1.22)
         anchor = "middle" if abs(lx - cx) < 12 else ("start" if lx > cx else "end")
         parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" fill="{FG}" font-size="12" '
                      f'text-anchor="{anchor}">{_esc(k)}</text>')
         parts.append(f'<text x="{lx:.1f}" y="{ly + 14:.1f}" fill="{MUTED}" font-size="11" '
-                     f'text-anchor="{anchor}">{s}</text>')
+                     f'text-anchor="{anchor}">{s if s is not None else "缺失"}</text>')
     parts.append("</svg>")
     return "".join(parts)
 
@@ -196,15 +207,15 @@ _STEP_ZH = {"search.collect": "情报采集", "clean.rule_base": "规则清洗",
             "tech.sentiment": "舆情分析", "tech.risk": "风险扫描",
             "tech.fusion": "多源融合", "sector.narrative": "板块叙事",
             "layer1.mrs": "市场环境评估", "layer2.sector": "板块评估",
-            "layer2b.chain": "产业链评估", "layer0.scan": "全市场扫描",
+            "layer2b.chain": "产业链评估", "layer0.scan": "股票池扫描",
             "layer3.tss": "个股质量评估", "layer4.risk": "风控闸门",
             "report.emit": "报告生成"}
 _REJ_ZH = {"price": "股价过低、风险偏高", "adv": "日均成交额不足、流动性差",
            "history": "上市时间太短、数据不足", "atr": "波动过大、风险不可控",
            "nodata": "无有效行情数据"}
-_PROVIDER_ZH = {"demo": "离线合成演示数据", "yahoo": "Yahoo 实时行情",
-                "stooq": "Stooq 实时行情", "agentgw": "服务端行情通道",
-                "ifind_gw": "同花顺 iFinD 行情", "tiingo": "Tiingo 实时行情"}
+_PROVIDER_ZH = {"demo": "离线合成演示数据", "yahoo": "Yahoo 日线行情",
+                "stooq": "Stooq 日线行情", "agentgw": "服务端行情通道",
+                "ifind_gw": "同花顺 iFinD 行情", "tiingo": "Tiingo 日线行情"}
 _SRC_SHORT = {"demo": "离线合成", "yahoo": "Yahoo 财经", "stooq": "Stooq",
               "agentgw": "服务端通道", "ifind_gw": "同花顺 iFinD",
               "tiingo": "Tiingo"}
@@ -365,6 +376,7 @@ def _evidence_zh(text: str) -> str:
 
 def _health(score, missing: bool = False) -> str:
     """分数 → 业务状态词（不暴露内部阈值与权重）。"""
+    score = _number(score)
     if missing or score is None:
         return "数据缺失"
     if score >= 7.5:
@@ -387,8 +399,19 @@ def _dim_reading(name: str, score) -> str:
         "micro": "波动率与微观交易结构",
     }.get(name, name)
     tail = {"强": "构成明确支撑", "偏强": "总体有利", "中性": "影响中性",
-            "偏弱": "构成一定压力", "数据缺失": "本轮不可用，按中性处理"}[h]
+            "偏弱": "构成一定压力", "数据缺失": "本轮不可用，已剔除并再归一化"}[h]
     return f"{base}{tail}"
+
+
+def _harmony(mrs) -> str:
+    available = sum(_number(_get(d, "score")) is not None
+                    for d in mrs.dimensions.values())
+    missing = len(mrs.dimensions) - available
+    level = ("高（可用评分接近）" if mrs.delta < 4 else
+             "中（可用评分存在分化）" if mrs.delta <= 6 else
+             "低（可用评分分化较大，评级取保守档）")
+    return (f"可用维度协调度：{level}；可用 {available} 个，缺失维度 {missing} 个"
+            "（缺失维度已剔除并再归一化）")
 
 
 def _scrub(text: str) -> str:
@@ -415,15 +438,14 @@ def _rationale_detail(r: "PipelineResult", pick, cand, sec, chain, tech_hit) -> 
     """
     ra = (r.raw or {}).get("pick_rationale", {}).get(pick.ticker, {})
     mrs = r.mrs
+    currency = _esc(_market_currency(r.raw))
     P: list[str] = []
 
     # ① 市场环境体检
     if mrs:
         b: list[str] = []
         cap = mrs.position_cap if isinstance(mrs.position_cap, (tuple, list)) else (0.0, 0.0)
-        harmony = ("五个维度得分接近、无明显短板，协同性良好" if mrs.delta < 4 else
-                   "各维度存在一定分化，综合评级已相应保守" if mrs.delta <= 6 else
-                   "各维度分化较大，综合评级采取保守档")
+        harmony = _harmony(mrs)
         b.append(_kv("总体结论", f"综合 <b>{mrs.mrs_star}/10</b> —— "
                                 f"{'允许开新仓' if mrs.allow_new_positions else '暂不允许开新仓'}"
                                 f"，建议总仓位 {cap[0]:.0%}–{cap[1]:.0%}；{harmony}"))
@@ -485,13 +507,13 @@ def _rationale_detail(r: "PipelineResult", pick, cand, sec, chain, tech_hit) -> 
     # ④ 个股质地
     if cand:
         b = []
-        opt_note = ("衍生品数据本轮不可用，按中性处理" if cand.s_options is None
+        opt_note = ("衍生品数据本轮不可用，已剔除并再归一化" if cand.s_options is None
                     else f"衍生品维度 {cand.s_options}/10")
         b.append(_kv("综合质量", f"<b>{cand.tss_final}/10</b> —— 价格结构 "
                                 f"{cand.s_structure}/10、动能 {cand.s_momentum}/10；{opt_note}"))
-        b.append(_kv("流动性与波动", f"现价 ${cand.price:.2f}，日均成交额约 "
-                                    f"${cand.adv_usd / 1e6:.0f}M（流动性充裕，远超 $20M 门槛），"
-                                    f"日均波动 {cand.atr_pct:.1f}%"))
+        b.append(_kv("流动性与波动", f"日K收盘价 {currency} {cand.price:.2f}，日均成交额约 "
+                                    f"{currency} {cand.adv_usd / 1e6:.0f}M，"
+                                    f"日均波动 {cand.atr_pct:.1%}"))
         tpl = _TEMPLATE_ZH.get(cand.entry_template, cand.entry_template or "待定")
         b.append(_kv("入场形态", f"{tpl} ｜ 关键位 {cand.key_level:.2f}"))
         if cand.stop_plan:
@@ -508,9 +530,10 @@ def _rationale_detail(r: "PipelineResult", pick, cand, sec, chain, tech_hit) -> 
         b.append(_kv("投入与仓位", f"计划 {ra.get('shares')} 股（约 ${pos_usd:,.0f}，"
                                   f"占账户 {ra.get('position_pct', 0):.1%}"
                                   f"{'；已触及单票仓位上限并自动压降' if ra.get('position_capped') else ''}）"))
-        b.append(_kv("亏损锁定", f"入场参考 {ra.get('entry')}，止损 {ra.get('stop')} —— "
-                                f"若跌破止损，单笔最大亏损锁定在 "
-                                f"<b>${ra.get('r_usd', 0):,.0f}</b> 以内"))
+        b.append(_kv("计划风险", f"入场参考 {ra.get('entry')}，止损 {ra.get('stop')} —— "
+                                f"按计划价差计算的风险预算 "
+                                f"<b>${ra.get('r_usd', 0):,.0f}</b>；"
+                                "跳空、滑点与佣金可能使实际亏损超过计划风险"))
         rank = next((i + 1 for i, p in enumerate(r.picks) if p.ticker == pick.ticker), None)
         if rank:
             b.append(_kv("今日优先级", f"第 {rank} 位（共 {len(r.picks)} 只放行，"
@@ -566,6 +589,7 @@ def _decision_card(r: "PipelineResult", pick) -> str:
     """基金经理视角决策卡：放行的是谁、为什么、怎么判出来的、怎么进怎么出。"""
     cand, sec, chain, tech_hit = _pick_context(r, pick)
     mrs = r.mrs
+    currency = _esc(_market_currency(r.raw))
 
     P: list[str] = []
     # —— 标题与一句话结论（业务语言）——
@@ -587,19 +611,19 @@ def _decision_card(r: "PipelineResult", pick) -> str:
              + (f"（{nm_tk}）" if nm_tk else "")
              + f"</b>，认错线 <b style='color:{RED}'>{pick.stop_price:.2f}</b>"
              f"——跌破就走，不商量；赚够两倍风险，认错线自动抬到成本价，"
-             f"这笔买卖从此不亏钱。</div>")
+             f"这用于降低回撤，不保证保本。</div>")
     bio = _TICKER_BIO.get(pick.ticker.upper(), "")
     if bio:
         P.append(f"<div class='sub' style='margin-top:4px'>它是谁：{_esc(bio)}</div>")
     cur = cand.price if (cand and cand.price) else None
     if cur:
         prem = (cur / pick.entry_price - 1.0) if pick.entry_price else 0.0
-        price_html = (f"<div style='text-align:right;flex:none'><div class='sub'>现价</div>"
+        price_html = (f"<div style='text-align:right;flex:none'><div class='sub'>日K收盘价</div>"
                       f"<div style='font-size:23px;font-weight:800;color:{GOLD}'>"
-                      f"${cur:.2f}</div>"
+                       f"{currency} {cur:.2f}</div>"
                       f"<div class='sub'>较入场参考 {prem:+.1%}</div></div>")
     else:
-        price_html = ("<div style='text-align:right;flex:none'><div class='sub'>现价</div>"
+        price_html = ("<div style='text-align:right;flex:none'><div class='sub'>日K收盘价</div>"
                       "<div style='font-size:23px;font-weight:800'>—</div>"
                       "<div class='sub'>本轮未取到</div></div>")
     name_zh = _name_zh(pick.ticker)
@@ -626,9 +650,10 @@ def _decision_card(r: "PipelineResult", pick) -> str:
              f"{pick.stop_price:.2f}</div><div class='sub'>{stop_pct:+.1f}%</div></div>"
              f"<div><div class='sub'>计划股数</div><div class='kpi'>{pick.shares}</div>"
              f"<div class='sub'>仓位 {pick.position_pct:.1%}</div></div>"
-             f"<div><div class='sub'>单笔最大亏损</div><div class='kpi'>${pick.risk_usd:,.0f}</div>"
+             f"<div><div class='sub'>计划风险</div><div class='kpi'>${pick.risk_usd:,.0f}</div>"
              + (f"<div class='sub'>今日优先级 #{rank}</div>" if rank else "") +
-             "</div></div>")
+             "</div></div>"
+             "<div class='sub'>跳空、滑点与佣金可能使实际亏损超过计划风险。</div>")
 
     # —— 价格阶梯图：止损 → 入场 → 2R 盈利保护，风险收益一图看清 ——
     ladder = _price_ladder_svg(pick)
@@ -674,22 +699,30 @@ _GITHUB_URL = "https://cnb.cool/workloom-ai/workroom-tiger"
 _DSR_CHECKPOINT = "2026-10-30"
 
 
-def _equity_svg(curve: list[dict], initial: float, width: int = 720,
+def _equity_svg(curve: list[dict], initial: float | None, width: int = 720,
                 height: int = 180) -> str:
-    """净值曲线（内嵌 SVG，基准线=初始资金）。"""
-    pts_v = [initial] + [float(e["equity"]) for e in curve]
+    """净值曲线；只有已记录的初始资金才能作为资金基线。"""
+    initial = _number(initial)
+    values = [_number(e.get("equity")) for e in curve]
+    pts_v = ([initial] if initial is not None else []) + [v for v in values if v is not None]
     if len(pts_v) < 2:
         return ""
     lo, hi = min(pts_v), max(pts_v)
-    pad = (hi - lo) * 0.08 or initial * 0.01
+    pad = (hi - lo) * 0.08 or abs(pts_v[-1]) * 0.01 or 1.0
     lo, hi = lo - pad, hi + pad
     span = (hi - lo) or 1.0
     step = width / max(1, len(pts_v) - 1)
     pts = " ".join(f"{i * step:.1f},{height - 16 - (v - lo) / span * (height - 34):.1f}"
                    for i, v in enumerate(pts_v))
-    base_y = height - 16 - (initial - lo) / span * (height - 34)
     last = pts_v[-1]
-    color = "#ffd700" if last >= initial else "#ff6b6b"
+    color = "#ffd700" if last >= pts_v[0] else "#ff6b6b"
+    baseline = ""
+    if initial is not None:
+        base_y = height - 16 - (initial - lo) / span * (height - 34)
+        baseline = (f'<line x1="10" y1="{base_y:.1f}" x2="{width - 10}" y2="{base_y:.1f}" '
+                    f'stroke="#cbb26a" stroke-opacity="0.7" stroke-dasharray="5 4"/>'
+                    f'<text x="{width - 14}" y="{base_y - 5:.1f}" fill="#cbb26a" font-size="10" '
+                    f'text-anchor="end">初始 ${initial:,.0f}</text>')
     lx, ly = (len(pts_v) - 1) * step, height - 16 - (last - lo) / span * (height - 34)
     area = f"0,{height - 14} {pts} {lx:.1f},{height - 14}"
     return (f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}">'
@@ -699,10 +732,7 @@ def _equity_svg(curve: list[dict], initial: float, width: int = 720,
             f'</linearGradient></defs>'
             f'<rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="12" '
             f'fill="#0e0e11" stroke="#d4af37" stroke-opacity="0.5"/>'
-            f'<line x1="10" y1="{base_y:.1f}" x2="{width - 10}" y2="{base_y:.1f}" '
-            f'stroke="#cbb26a" stroke-opacity="0.7" stroke-dasharray="5 4"/>'
-            f'<text x="{width - 14}" y="{base_y - 5:.1f}" fill="#cbb26a" font-size="10" '
-            f'text-anchor="end">初始 ${initial:,.0f}</text>'
+            f'{baseline}'
             f'<polygon points="{area}" fill="url(#eg)"/>'
             f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2.6" '
             f'stroke-dasharray="2600" stroke-dashoffset="2600">'
@@ -875,7 +905,7 @@ def _resonance_svg() -> str:
 
 def _pipeline_svg() -> str:
     """理念页·六层决策流水线（黑金面板：金色节点 + 虚线金链）。"""
-    steps = [("全市场海选", "6000+ → Top30"), ("市场许可", "仓位上限"),
+    steps = [("股票池扫描", "本轮池 → 候选"), ("市场许可", "仓位上限"),
              ("主线识别", "1–2 条主线"), ("产业链", "热区/衰退"),
              ("建仓质量", "模板+锚点"), ("风控闸门", "五态行动")]
     parts = []
@@ -902,8 +932,8 @@ def _pipeline_svg() -> str:
             + "".join(parts) + "</svg>")
 
 
-def _ticker_badge_svg(ticker: str, size: int = 76) -> str:
-    """个股·黑金徽章（公司 logo 位：外金环 + 电路刻度 + 代码金字 + 美股全市场标）。"""
+def _ticker_badge_svg(ticker: str, size: int = 76, market: str = "STOCK") -> str:
+    """个股·黑金徽章（公司 logo 位：外金环 + 电路刻度 + 代码金字）。"""
     t = html.escape(ticker)
     ticks = "".join(
         f"<line x1='60' y1='4' x2='60' y2='12' stroke='#d4af37' stroke-width='2' "
@@ -921,7 +951,7 @@ def _ticker_badge_svg(ticker: str, size: int = 76) -> str:
             f"<text x='60' y='{64 + fs * 0.12:.0f}' text-anchor='middle' font-size='{fs}' "
             f"font-weight='800' fill='#ffd700' letter-spacing='1'>{t}</text>"
             f"<text x='60' y='88' text-anchor='middle' font-size='9' fill='#cbb26a' "
-            f"letter-spacing='2.5'>US STOCK</text></svg>")
+            f"letter-spacing='2.5'>{_esc(market)}</text></svg>")
 
 
 _CHAIN_THEME = {"memory": "memory", "logic": "logic", "foundry": "foundry",
@@ -984,7 +1014,7 @@ def _topology_svg() -> str:
     W, H = 1200, 620
     P: list[str] = []
     # —— 左侧：六源情报节点 ——
-    sources = ["新闻情报", "券商研报", "社交舆情", "实时行情", "宏观利率", "公司公告"]
+    sources = ["新闻情报", "券商研报", "社交舆情", "行情数据", "宏观利率", "公司公告"]
     for i, name in enumerate(sources):
         y = 66 + i * 84
         P.append(f"<rect x='52' y='{y}' width='176' height='50' rx='10' fill='#15151a' "
@@ -1161,7 +1191,7 @@ def _gauges_row_svg(dims: dict, width: int = 1080) -> str:
     P = []
     for i, k in enumerate(keys):
         d = dims.get(k)
-        sc = _get(d, "score") if d else None
+        sc = _number(_get(d, "score")) if d else None
         cx = cell * i + cell / 2
         cy = 78
         if sc is None:
@@ -1194,8 +1224,8 @@ def _gauges_row_svg(dims: dict, width: int = 1080) -> str:
 
 def _funnel_svg(total: int, passed: int, selected: int, n_pick: int,
                 width: int = 1080) -> str:
-    """今日选股漏斗图：全市场 → 门槛 → 精评 → 放行，四层金色漏斗。"""
-    layers = [("全市场股票池", total, "#ffe27a", 60, 1020),
+    """今日选股漏斗图：本轮扫描池 → 门槛 → 精评 → 放行。"""
+    layers = [("本轮扫描池", total, "#ffe27a", 60, 1020),
               ("通过基础门槛", passed, "#ffd700", 190, 890),
               ("进入深度精评", selected, "#e6b400", 320, 760),
               ("今日最终放行", n_pick, "#c28e00", 450, 630)]
@@ -1220,13 +1250,15 @@ def _funnel_svg(total: int, passed: int, selected: int, n_pick: int,
 
 def _sim_tab(sim: dict) -> str:
     st, stats = sim["state"], sim["stats"]
+    initial = _number(st.get("initial_cash"))
+    initial_note = f"初始资金 ${initial:,.0f}" if initial is not None else "初始资金未知"
     P: list[str] = []
     # —— 醒目免责声明（公开传播纪律）——
     P.append(f"<div style='background:#fdeaea;border:2px solid {RED};border-radius:12px;"
              f"padding:14px 18px;margin-bottom:14px'>"
              f"<b style='color:{RED}'>⚠️ 全 AI 掌控的模拟盘（Paper Trading）</b>"
              f"<div style='margin-top:4px'>本页所有交易均由<b>老虎全球资产管理（Tiger Global Asset Management）</b>"
-             f"自动决策与记账，初始资金 $100,000 为虚拟资金，目的是验证 AI 的投资能力。"
+             f"自动决策与记账，{initial_note}；本页资金均为虚拟资金，目的是验证 AI 的投资能力。"
              f"<b>不构成任何投资建议或决策参考</b>，据此操作风险自负。"
              f"<div style='margin-top:4px'><b>口径披露：含保守摩擦成本口径"
              f"（滑点按ADV分档+单边10bp）</b>——成交额越小的标的滑点越大，"
@@ -1238,20 +1270,22 @@ def _sim_tab(sim: dict) -> str:
     # —— 美金金币雨横幅（虚拟资金属性一眼即知）——
     P.append(f"<div style='margin-bottom:14px'>{_coin_rain_svg()}</div>")
     # —— 小虎 人设卡 + 资金看板 ——
-    ret = stats["cum_return"]
-    ret_color = GREEN if ret >= 0 else RED
+    ret = _number(stats.get("cum_return")) if initial is not None else None
+    ret_color = MUTED if ret is None else GREEN if ret >= 0 else RED
+    ret_text = f"{ret:+.1%}" if ret is not None else "—"
+    ret_note = "累计收益" if ret is not None else "累计收益未知（缺少初始资金记录）"
     P.append(f"<div class='card' style='border-color:{GOLD}66'><div style='display:flex;"
              f"gap:16px;align-items:center;flex-wrap:wrap'>"
              f"<div>{_avatar_svg()}</div>"
-             f"<div style='flex:1;min-width:220px'>"
+             f"<div style='flex:1;min-width:min(220px,100%)'>"
              f"<div style='font-size:18px'><b>小虎</b> <span class='sub'>老虎全球资产管理 AI 的人间化身"
              f"（全 AI 决策，零人工干预）</span>"
              f"<span class='tag' style='border-color:{GOLD};color:{GOLD}'>公开验证期</span></div>"
-             f"<div class='sub'>初始资金 $100,000 ｜ 已运行 {stats['days']} 个交易日 ｜ "
+             f"<div class='sub'>{initial_note} ｜ 已记录 {stats['days']} 个净值日期 ｜ "
              f"成交规则：信号次日开盘价（无未来函数）</div></div>"
              f"<div style='text-align:right'>"
-             f"<div class='kpi' style='color:{ret_color}'>{ret:+.1%}</div>"
-             f"<div class='sub'>累计收益</div></div></div>")
+             f"<div class='kpi' style='color:{ret_color}'>{ret_text}</div>"
+             f"<div class='sub'>{ret_note}</div></div></div>")
     P.append(f"<div class='grid g4' style='margin-top:12px'>"
              f"<div><div class='sub'>总净值</div><div class='kpi' id='simEquityKpi' "
              f"data-v='{stats['equity']:.0f}'>${stats['equity']:,.0f}</div></div>"
@@ -1271,10 +1305,10 @@ def _sim_tab(sim: dict) -> str:
              f"<div><div class='sub'>现金</div><div class='kpi' style='font-size:20px'>"
              f"${stats['cash']:,.0f}</div></div>"
              f"<div><div class='sub'>已结算交易</div><div class='kpi'>0</div>"
-             f"<div class='sub'>账本从今天开始积累</div></div>"
+             f"<div class='sub'>尚无已结算交易</div></div>"
              f"<div><div class='sub'>最大回撤</div><div class='kpi'>{stats['max_drawdown']:.1%}</div>"
              f"<div class='sub'>逐日更新</div></div></div>")
-    svg = _equity_svg(st["equity_curve"], 100_000.0)
+    svg = _equity_svg(st["equity_curve"], initial)
     if svg:
         P.append(f"<div style='margin-top:10px'>{svg}</div>")
     P.append("</div>")
@@ -1288,28 +1322,29 @@ def _sim_tab(sim: dict) -> str:
                  f"<div class='kpi' style='font-size:20px'>${stats.get('pnl_gross', 0):+,.0f}</div></div>"
                  f"<div><div class='sub'>摩擦成本（滑点+佣金）</div>"
                  f"<div class='kpi' style='font-size:20px;color:{YELLOW}'>−${stats.get('friction_total', 0):,.0f}</div></div>"
-                 f"<div><div class='sub'>净收益（真实到手）</div>"
+                 f"<div><div class='sub'>净收益（模拟盘记账）</div>"
                  f"<div class='kpi' style='font-size:20px;color:{GREEN if stats.get('pnl_net', 0) >= 0 else RED}'>"
                  f"${stats.get('pnl_net', 0):+,.0f}</div></div>"
                  f"</div></div>")
-    # —— 风控边界（公开卖点：最坏情况亏多少，是设计出来的）——
+    # —— 计划风险边界（跳空与摩擦并不受计划止损价保证）——
     P.append(
         f"<div class='card' style='margin-top:12px'>"
-        f"<b>🛡️ 风控边界</b> <span class='sub'>——这套系统最坏情况亏多少，是算得出来的</span>"
+        f"<b>🛡️ 风控边界</b> <span class='sub'>——按计划止损距离分配风险预算</span>"
         f"<div class='grid g3' style='margin-top:10px'>"
-        f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>0.8%</div>"
-        f"<div class='sub'>单笔最大风险：股数由止损距离反推，任何一笔交易打止损最多失血净值 0.8%</div></div>"
-        f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>20%</div>"
-        f"<div class='sub'>单票仓位上限：再看好也不超过净值两成，杜绝一把梭</div></div>"
+        f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>{config.RISK_R_PCT:.1%}</div>"
+        f"<div class='sub'>单笔计划风险预算：股数由止损距离反推，实际预算还受当轮仓位与事件折扣约束</div></div>"
+        f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>{config.MAX_SINGLE_POSITION_PCT:.0%}</div>"
+        f"<div class='sub'>单票仓位上限：再看好也不超过净值 {config.MAX_SINGLE_POSITION_PCT:.0%}，杜绝一把梭</div></div>"
         f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>环境闸门</div>"
         f"<div class='sub'>市场环境评分跌破警戒线即禁止开新仓——空仓也是一种仓位</div></div>"
         f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>T+1</div>"
         f"<div class='sub'>信号次日开盘价成交，无未来函数；同日重跑不重复成交</div></div>"
-        f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>7 日</div>"
-        f"<div class='sub'>时间止损：入场 7 个交易日未推进即离场，资金不为横盘站岗</div></div>"
+        f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>5–7 日</div>"
+        f"<div class='sub'>时间止损按信号设定的交易日数执行；旧记录缺少设置时使用默认 7 日</div></div>"
         f"<div><div class='kpi' style='font-size:20px;color:{GOLD}'>2R</div>"
-        f"<div class='sub'>盈利保护：浮盈达两倍风险后止损上移至成本线，亏钱的交易不回头</div></div>"
-        f"</div></div>")
+        f"<div class='sub'>盈利保护：浮盈达两倍风险后止损上移至成本线，不保证保本</div></div>"
+        f"</div><div class='sub' style='margin-top:8px'>"
+        f"跳空、滑点与佣金可能使实际亏损超过计划风险。</div></div>")
     # —— 公开验证章程（定位与宣传纪律，详见 docs/PUBLIC_VERIFICATION.md）——
     P.append(
         f"<div class='card' style='margin-top:12px;border-color:{GOLD}55'>"
@@ -1337,7 +1372,7 @@ def _sim_tab(sim: dict) -> str:
     P.append("<div class='card' style='margin-top:12px'><b>当前持仓</b>")
     if st["positions"]:
         P.append("<table style='margin-top:6px'><tr><th>标的</th><th>股数</th><th>成本</th>"
-                 "<th>止损</th><th>浮盈风险</th><th>入场日</th><th>产业链</th></tr>")
+                 "<th>止损</th><th>初始计划风险</th><th>入场日</th><th>产业链</th></tr>")
         for p in st["positions"]:
             P.append(f"<tr><td><b>{p['ticker']}</b></td><td>{p['shares']}</td>"
                      f"<td>{p['entry_price']:.2f}</td><td style='color:{RED}'>{p['stop']:.2f}</td>"
@@ -1345,10 +1380,11 @@ def _sim_tab(sim: dict) -> str:
                      f"<td>{p.get('chain') or '-'}</td></tr>")
         P.append("</table>")
     else:
-        P.append("<div class='sub' style='margin-top:4px'>空仓中——现金即立场。</div>")
+        P.append("<div class='sub' style='margin-top:4px'>当前无持仓"
+                 + ("，有待成交信号。" if st["pending"] else "，也无待成交信号。") + "</div>")
     if st["pending"]:
         P.append(f"<div class='sub' style='margin-top:8px'>📋 待成交信号 "
-                 f"{len(st['pending'])} 只（明日开盘价成交）："
+                 f"{len(st['pending'])} 只（等待下一交易日有效开盘行情，满足成交条件后记账）："
                  f"{_esc('、'.join(p['ticker'] for p in st['pending']))}</div>")
     P.append("</div>")
     # —— 历史交易 ——
@@ -1382,8 +1418,10 @@ def _sim_tab(sim: dict) -> str:
                      f"<td class='sub'>{_esc(c['reason'])}</td></tr>")
         P.append("</table>")
     else:
-        P.append("<div class='sub' style='margin-top:4px'>尚无已结算交易——"
-                 "第一笔信号正在等待次日开盘价成交。</div>")
+        note = ("已有持仓，尚无已结算交易。" if st["positions"] else
+                "尚无已结算交易；待成交信号仍在等待有效行情与成交条件。" if st["pending"] else
+                "尚无已结算交易；当前无持仓，也无待成交信号。")
+        P.append(f"<div class='sub' style='margin-top:4px'>{note}</div>")
     P.append("</div>")
     # —— 开源预告 ——
     P.append(f"<div class='card' style='margin-top:12px;text-align:center'>"
@@ -1398,6 +1436,7 @@ def _sim_tab(sim: dict) -> str:
 def _stock_deep_annex(r: "PipelineResult", pick) -> str:
     """深度附录：管道已有数据的二次展示（技术档案/板块内部/赛道联动）。"""
     cand, sec, chain, tech_hit = _pick_context(r, pick)
+    currency = _esc(_market_currency(r.raw))
     P: list[str] = []
     P.append("<div class='card' style='margin-top:12px'><b>📊 深度数据档案</b>"
              "<div class='sub' style='margin:2px 0 10px'>以下读数全部来自本轮全链路分析的中间产出，"
@@ -1406,16 +1445,16 @@ def _stock_deep_annex(r: "PipelineResult", pick) -> str:
     # —— 个股技术档案 ——
     if cand:
         P.append("<h4 style='margin:6px 0;color:#5b8c00;font-size:13px'>个股技术档案</h4>")
-        adv = f"${cand.adv_usd / 1e6:,.0f}M" if cand.adv_usd else "—"
+        adv = f"{currency} {cand.adv_usd / 1e6:,.0f}M" if cand.adv_usd else "—"
         P.append("<div class='grid g4'>"
-                 f"<div><div class='sub'>现价</div><div class='kpi' style='font-size:20px'>"
-                 f"{cand.price:.2f}</div></div>"
+                 f"<div><div class='sub'>日K收盘价</div><div class='kpi' style='font-size:20px'>"
+                 f"{currency} {cand.price:.2f}</div></div>"
                  f"<div><div class='sub'>日均成交额</div><div class='kpi' style='font-size:20px'>"
                  f"{adv}</div><div class='sub'>流动性评分 {cand.c_liq}/10</div></div>"
                  f"<div><div class='sub'>日均波动幅度</div><div class='kpi' style='font-size:20px'>"
                  f"{cand.atr_pct:.1%}</div><div class='sub'>止损距离的参考尺</div></div>"
                  f"<div><div class='sub'>综合质量</div><div class='kpi' style='font-size:20px'>"
-                 f"{cand.tss_final}/10</div><div class='sub'>全市场精评排序 {cand.rank_score:.1f}</div></div>"
+                 f"{cand.tss_final}/10</div><div class='sub'>扫描初排分 {cand.rank_score:.1f}</div></div>"
                  "</div>")
         P.append("<div style='margin-top:8px'>")
         P.append(_bar_row("价格结构", cand.s_structure, 10.0, GOLD,
@@ -1426,7 +1465,7 @@ def _stock_deep_annex(r: "PipelineResult", pick) -> str:
             P.append(_bar_row("衍生品", cand.s_options, 10.0, "#84cc1688",
                               extra="/10｜期权市场隐含预期"))
         else:
-            P.append("<div class='sub'>· 衍生品：本轮数据不可用，按中性处理</div>")
+            P.append("<div class='sub'>· 衍生品：本轮数据不可用，已剔除并再归一化</div>")
         P.append("</div>")
         P.append(f"<div class='sub' style='margin-top:6px'>· 关键位（计划入场参考）："
                  f"<b style='color:{FG}'>{cand.key_level:.2f}</b> ｜ 入场形态："
@@ -1450,7 +1489,7 @@ def _stock_deep_annex(r: "PipelineResult", pick) -> str:
                  f"<tr><td>板块热度</td><td><b>{sec.shs}/10</b></td>"
                  f"<td class='sub'>{'当前最强主线之一' if sec.in_main_pool else ('次主线（热区链支撑）' if sec.in_sub_pool else '普通板块')}</td></tr>"
                  f"<tr><td>近 20 日相对大盘</td><td><b>{sec.r20:+.1f}%</b></td>"
-                 f"<td class='sub'>正数为跑赢标普 500</td></tr>"
+                 f"<td class='sub'>正数为跑赢本市场基准</td></tr>"
                  f"<tr><td>成分股趋势健康度</td><td><b>{sec.breadth:.0f}%</b></td>"
                  f"<td class='sub'>板块内处于中期上升趋势的个股占比（健康线 60%）</td></tr>"
                  + (f"<tr><td>主要驱动</td><td><b>{_FACTOR_ZH.get(driver[0], driver[0])}</b></td>"
@@ -1475,15 +1514,16 @@ def _stock_deep_annex(r: "PipelineResult", pick) -> str:
 def _stock_tab(r: "PipelineResult") -> str:
     """页签·个股深度报告：今日放行标的的完整档案（多标的二级切换）。"""
     P: list[str] = []
+    currency = _esc(_market_currency(r.raw))
     P.append(f"<div class='card' style='border-color:{BLUE}66;margin-bottom:12px'>"
              "<div class='eyebrow-l'>THE STORY BEHIND EACH TRADE · 每笔买卖的来龙去脉</div>"
-             "<b>美股个股深度报告</b><div class='sub' style='margin-top:4px'>"
+             f"<b>{_esc(_market_name(r.raw))}个股深度报告</b><div class='sub' style='margin-top:4px'>"
              "今日放行标的的完整分析档案：四层共振结论、五段业务依据、技术档案、"
              "板块内部结构与赛道联动——全部数据与决策同源，逐项可回溯。</div></div>")
     if not r.picks:
         P.append("<div class='card'><b>今日无放行标的</b><div class='sub' style='margin-top:6px'>"
-                 "市场环境门未开，按纪律不开新仓。以下为预备观察名单前列标的的质量档案，"
-                 "环境开门后将按此优先级复核入场。</div></div>")
+                 "本轮未产生新的放行信号；既有持仓继续按出场规则管理。"
+                 "以下为本轮观察名单前列标的的质量档案，后续仍须重新通过各项闸门。</div></div>")
         for c in r.watchlist[:3]:
             nm = _name_zh(c.ticker)
             nm_html = (f"<span style='font-size:14px;color:{GOLD};margin-left:4px'>"
@@ -1494,7 +1534,7 @@ def _stock_tab(r: "PipelineResult") -> str:
                      f"<span class='tag'>综合质量 {c.tss_final}/10</span></div>"
                      f"<div class='sub' style='margin-top:4px'>所属板块 {_etf_zh(c.sector_etf)}"
                      f" ｜ 所属赛道 {_chain_zh(c.chain_id)}"
-                     f" ｜ 现价 <b style='color:{GOLD}'>{c.price:.2f}</b>"
+                     f" ｜ 日K收盘价 <b style='color:{GOLD}'>{currency} {c.price:.2f}</b>"
                      f" ｜ 入场形态 {_TEMPLATE_ZH.get(c.entry_template, c.entry_template or '待定')}"
                      f" ｜ 关键位 {c.key_level:.2f}</div>")
             P.append(_bar_row("价格结构", c.s_structure, 10.0, GOLD, extra="/10"))
@@ -1504,7 +1544,7 @@ def _stock_tab(r: "PipelineResult") -> str:
             P.append("</div>")
         if not r.watchlist:
             P.append("<div class='card sub' style='margin-top:10px'>预备观察名单为空——"
-                     "全市场扫描未筛出达标标的，空仓等待。</div>")
+                     "本轮扫描池未筛出达标候选，等待新信号。</div>")
         return "".join(P)
 
     # —— 多标的二级切换 ——
@@ -1516,18 +1556,18 @@ def _stock_tab(r: "PipelineResult") -> str:
         P.append("</div>")
     for i, pick in enumerate(r.picks):
         P.append(f"<div id='stock-pane-{i}' style='display:{'' if i == 0 else 'none'}'>")
-        # —— 公司横幅：黑金徽章（logo 位）+ 所属板块/赛道 + 大号现价 + 产业链主题产品图 ——
+        # —— 公司横幅：黑金徽章（logo 位）+ 所属板块/赛道 + 大号日K收盘价 + 产业链主题产品图 ——
         cand_b, _, _, _ = _pick_context(r, pick)
         cur_b = cand_b.price if (cand_b and cand_b.price) else None
         price_block = (f"<div style='text-align:center;padding:0 10px;flex:none'>"
-                       f"<div class='sub'>现价</div>"
+                       f"<div class='sub'>日K收盘价</div>"
                        f"<div style='font-size:32px;font-weight:900;color:{GOLD};"
-                       f"line-height:1.1'>{f'${cur_b:.2f}' if cur_b else '—'}</div>"
+                       f"line-height:1.1'>{f'{currency} {cur_b:.2f}' if cur_b else '—'}</div>"
                        f"<div class='sub'>本轮最新读数</div></div>")
         P.append(f"<div class='card' style='margin-bottom:12px;display:flex;gap:18px;"
                  f"align-items:center;flex-wrap:wrap;border-color:#d4af3788'>"
-                 f"{_ticker_badge_svg(pick.ticker)}"
-                 f"<div style='flex:1;min-width:220px'>"
+                 f"{_ticker_badge_svg(pick.ticker, market=_market_name(r.raw))}"
+                 f"<div style='flex:1;min-width:min(220px,100%)'>"
                  f"<div style='font-size:22px;font-weight:800'>{_esc(pick.ticker)}"
                  + (f"<span style='font-size:17px;color:{GOLD};margin-left:6px'>"
                     f"{_esc(_name_zh(pick.ticker))}</span>" if _name_zh(pick.ticker) else "")
@@ -1590,46 +1630,51 @@ def _empty_panel_svg(text: str, sub: str = "", width: int = 1080,
 
 def _verify_curve_svg(sim: dict | None, bench: dict | None,
                       width: int = 1080, height: int = 260) -> str:
-    """策略净值 vs QQQ/SPY 同期表现（三线同图，统一自起点归一）。"""
+    """在各序列都已开始的共同窗口比较；只前向延续真实观测。"""
     state = (sim or {}).get("state") or {}
     curve = state.get("equity_curve") or []
-    initial = float(state.get("initial_cash") or 100000.0)
     series: dict[str, dict[str, float]] = {}
-    if curve:
-        base = float(curve[0].get("equity") or initial)
-        series["小虎模拟盘"] = {p["date"]: float(p["equity"]) / base - 1.0
-                              for p in curve if p.get("date")}
+    # 初始资金字段并不是带日期的净值记录，不拿它补曲线上的空值。
+    strategy = {p["date"]: _number(p.get("equity")) for p in curve if p.get("date")}
+    if any(v is None for v in strategy.values()):
+        return _empty_panel_svg("净值 vs 基准对比曲线", "净值记录存在缺失或无效读数，无法绘制")
+    if len(strategy) < 2:
+        return _empty_panel_svg(
+            "净值 vs 基准对比曲线", "至少两个不同日期的净值记录后绘制，无需等待交易结算")
+    series["小虎模拟盘"] = strategy
     for name in ("QQQ", "SPY"):
         pts = (bench or {}).get(name) or []
         if pts:
-            base = float(pts[0][1])
-            series[name] = {d: float(c) / base - 1.0 for d, c in pts}
-    strat = series.get("小虎模拟盘") or {}
-    if len(strat) < 2:
-        return _empty_panel_svg(
-            "净值 vs 基准对比曲线", "首个信号成交结算后自动绘制（小虎 vs QQQ vs SPY）")
-    start = min(strat)
-    # 统一窗口（自小虎起步日起）+ 前向填充 + 起点归一
-    all_dates = sorted({d for s in series.values() for d in s if d >= start})
+            values = {d: _number(c) for d, c in pts if d}
+            if any(v is None for v in values.values()):
+                return _empty_panel_svg("净值 vs 基准对比曲线", f"{name} 存在缺失或无效读数，无法比较")
+            if values:
+                series[name] = values
+    start = max(min(s) for s in series.values())
+    end = min(max(s) for s in series.values())
+    if start > end:
+        return _empty_panel_svg("净值 vs 基准对比曲线", "无共同日期窗口，暂不比较")
+    all_dates = sorted({d for s in series.values() for d in s if start <= d <= end})
+    if len(all_dates) < 2:
+        return _empty_panel_svg("净值 vs 基准对比曲线", "共同窗口不足两个日期，暂不比较")
     filled: dict[str, dict[str, float]] = {}
+    last_observed: dict[str, str] = {}
     for name, s in series.items():
-        out: dict[str, float] = {}
-        last: float | None = None
-        for d in sorted(s):
-            if d < start:
-                continue
-            last = s[d]
-            out[d] = last
-        # 前向填充到窗口内所有日期
-        ff, last = {}, None
+        dated = sorted((d, v) for d, v in s.items() if d <= end)
+        cursor = 0
+        last = None
+        ff = {}
         for d in all_dates:
-            if d in out:
-                last = out[d]
+            while cursor < len(dated) and dated[cursor][0] <= d:
+                last_observed[name], last = dated[cursor]
+                cursor += 1
             if last is not None:
                 ff[d] = last
         if ff:
             b0 = ff[all_dates[0]]
-            filled[name] = {d: (1.0 + v) / (1.0 + b0) - 1.0 for d, v in ff.items()}
+            if b0 <= 0:
+                return _empty_panel_svg("净值 vs 基准对比曲线", f"{name} 窗口起点读数非正，无法归一化")
+            filled[name] = {d: v / b0 - 1.0 for d, v in ff.items()}
     vals = [v for s in filled.values() for v in s.values()]
     if not vals or len(all_dates) < 2:
         return _empty_panel_svg("净值 vs 基准对比曲线", "数据积累中")
@@ -1686,8 +1731,11 @@ def _verify_curve_svg(sim: dict | None, bench: dict | None,
             parts.append(f"<text x='{ex + 8:.0f}' y='{ly:.1f}' "
                          f"font-size='12' fill='{col}' font-weight='700'>{txt}</text>")
     parts.append(f"<text x='{width - 16}' y='{height - 12}' text-anchor='end' "
-                 f"font-size='11' fill='#8a8a7a'>自 {start} 起归一 ｜ 同期对比</text>")
+                 f"font-size='11' fill='#8a8a7a'>共同窗口 {start} 至 {end} ｜ 起点归一</text>")
     parts.append("</svg>")
+    dates_note = "；".join(f"{name} 最后真实记录 {day}" for name, day in last_observed.items())
+    parts.append(f"<div class='sub'>{_esc(dates_note)}。窗口内缺少当日记录时只延续此前观测，"
+                 "不补出更早的价格，也不把延续值作为新行情。</div>")
     return "".join(parts)
 
 
@@ -1794,7 +1842,7 @@ def _failure_modes_html(closed: list[dict]) -> str:
     cards = []
     for (chain, tmpl), a in bad[:3]:
         cards.append(
-            f"<div class='card' style='flex:1;min-width:220px;border-color:{RED}55'>"
+            f"<div class='card' style='flex:1;min-width:min(220px,100%);border-color:{RED}55'>"
             f"<b style='color:{RED}'>✕ {chain} × {tmpl}</b>"
             f"<div class='sub' style='margin-top:4px'>{a['n']} 笔 ｜ 胜率 "
             f"{a['win_rate']:.0%} ｜ 期望 <b style='color:{RED}'>{a['avg']:+.2f}R</b>"
@@ -1810,6 +1858,7 @@ def _lifecycle_card(e: dict) -> str:
     ticker = e.get("ticker", "")
     nm = _name_zh(ticker)
     closed = e.get("status") == "closed" and e.get("r") is not None
+    void = e.get("status") == "void"
     has_entry = e.get("entry") is not None
     # —— 状态机四节点 ——
     steps = [("已放行", e.get("date", "")),
@@ -1826,19 +1875,25 @@ def _lifecycle_card(e: dict) -> str:
         line = (f"<span style='display:inline-block;flex:1;height:2px;min-width:12px;"
                 f"background:{'#d4af37' if i < done_upto else '#d9d9c8'};margin:0 4px'></span>"
                 if i < 3 else "")
-        sub_txt = sub if sub else ("待成交" if i == 1 else ("持仓中" if i == 2 and has_entry else "—"))
+        sub_txt = sub if sub else (
+            "已作废" if void and i == 1 else "—" if void else
+            "待成交" if i == 1 else "持仓中" if i == 2 and has_entry else "—")
         nodes.append(f"<div style='display:flex;align-items:center'>"
                      f"<div style='text-align:center;min-width:52px'>{dot}"
                      f"<div style='font-size:12px;font-weight:700;margin-top:2px'>{label}</div>"
                      f"<div class='sub' style='font-size:11px'>{sub_txt}</div></div>{line}</div>")
     # —— 结果与依据 ——
-    if closed:
+    if void:
+        r_html = "<div class='sub' style='font-size:15px'>已作废</div>"
+    elif closed:
         col = GREEN if e.get("win") else RED
         r_html = f"<div style='font-size:26px;font-weight:900;color:{col}'>{e['r']:+.2f}R</div>"
     elif has_entry and e.get("r_live") is not None:
         col = GREEN if e["r_live"] > 0 else RED
         r_html = (f"<div style='font-size:26px;font-weight:900;color:{col}'>"
                   f"{e['r_live']:+.2f}R</div><div class='sub'>浮动（未结算，不计入胜率）</div>")
+    elif has_entry:
+        r_html = "<div class='sub' style='font-size:15px'>持仓中（浮动结果未提供）</div>"
     else:
         r_html = "<div class='sub' style='font-size:15px'>待成交</div>"
     meta = [f"模式 {e.get('mode', '-')}",
@@ -1861,7 +1916,7 @@ def _lifecycle_card(e: dict) -> str:
             f"<div><b style='font-size:17px'>{ticker}</b>"
             + (f" <span style='color:{GOLD};font-weight:600'>{_esc(nm)}</span>" if nm else "")
             + f"</div>{r_html}</div>"
-            f"<div style='display:flex;align-items:center;margin:10px 0 6px'>"
+            f"<div class='lifecycle-steps'>"
             f"{''.join(nodes)}</div>"
             f"<div class='sub'>{' ｜ '.join(meta)}</div>"
             + (f"<div class='sub' style='margin-top:2px'>{' ｜ '.join(tail)}</div>"
@@ -1880,11 +1935,15 @@ def _ledger_table(entries: list[dict]) -> str:
             if r_mult is not None:
                 col = GREEN if e.get("win") else RED
                 result = f"<b style='color:{col}'>{r_mult:+.2f}R</b>"
-        elif e.get("status") == "open" and e.get("entry"):
+        elif e.get("status") == "void":
+            status = "<span class='sub'>已作废</span>"
+        elif e.get("status") == "open" and e.get("entry") is not None:
             status = (f"持仓中<br><span class='sub'>{e.get('entry_date', '')} "
                       f"@{e.get('entry')}</span>")
+        elif e.get("status") == "open":
+            status = "<span class='sub'>待成交</span>"
         else:
-            status = "<span class='sub'>待成交/结算中</span>"
+            status = f"<span class='sub'>状态未知（{_esc(e.get('status') or '未提供')}）</span>"
         rows.append(f"<tr><td>{e.get('date', '')}</td><td><b>{e.get('ticker', '')}</b></td>"
                     f"<td>{e.get('mode', '')}</td><td>{e.get('entry_ref')}</td>"
                     f"<td style='color:{RED}'>{e.get('stop')}</td>"
@@ -1904,6 +1963,9 @@ def _verify_tab(entries: list[dict] | None, stats: dict | None,
     closed = [e for e in entries if e.get("status") == "closed" and e.get("r") is not None]
     rs = [e["r"] for e in closed]
     n_closed = len(closed)
+    open_entries = [e for e in entries if e.get("status") == "open"]
+    held_n = sum(e.get("entry") is not None for e in open_entries)
+    pending_n = len(open_entries) - held_n
 
     # —— 门头：三章承诺（数据诚实公开亮牌）——
     P.append(f"<div class='card' style='border-color:{BLUE}66;margin-bottom:12px'>"
@@ -1946,7 +2008,7 @@ def _verify_tab(entries: list[dict] | None, stats: dict | None,
     P.append(f"<div class='grid g3' style='margin-bottom:4px'>"
              f"<div class='card'><div class='sub'>已结算信号</div>"
              f"<div class='kpi'>{n_closed}</div>"
-             f"<div class='sub'>持仓/待成交 {stats.get('open', 0)} 笔</div></div>"
+             f"<div class='sub'>持仓中 {held_n} 笔，待成交 {pending_n} 笔</div></div>"
              f"<div class='card'><div class='sub'>总胜率</div>"
              f"<div class='kpi'>{stats.get('win_rate', 0):.1%}</div>"
              f"<div class='sub'>近20笔 {stats.get('last20', {}).get('win_rate', 0):.0%}</div></div>"
@@ -1963,9 +2025,9 @@ def _verify_tab(entries: list[dict] | None, stats: dict | None,
     P.append(f"<div class='card' style='padding:14px 10px 6px'>"
              f"{_verify_curve_svg(sim, bench)}</div>")
     P.append("<div style='display:flex;gap:14px;flex-wrap:wrap'>"
-             f"<div class='card' style='flex:2;min-width:340px;padding:14px 10px 6px'>"
+             f"<div class='card' style='flex:2;min-width:min(340px,100%);padding:14px 10px 6px'>"
              f"{_r_hist_svg(rs)}</div>"
-             f"<div class='card' style='flex:1;min-width:300px'><b>月度盈亏热力</b>"
+             f"<div class='card' style='flex:1;min-width:min(300px,100%)'><b>月度盈亏热力</b>"
              f"<div style='margin-top:8px'>{_month_heat_html(closed)}</div></div></div>")
 
     # ==================== B. 信号全生命周期（追溯层）====================
@@ -2027,14 +2089,16 @@ def _verify_tab(entries: list[dict] | None, stats: dict | None,
 
 
 # ---------------------------------------------------------------- 交易理念
-def _philosophy_tab() -> str:
+def _philosophy_tab(raw: dict | None = None) -> str:
     """页签·核心交易理念：按《AI短线美股交易（1-15天波段版）白皮书》整理。"""
+    raw = raw or {}
+    market = _esc(_market_name(raw))
     P: list[str] = []
     P.append(f"<div class='card' style='border-color:{GOLD}66;margin-bottom:12px;text-align:center'>"
              "<div class='eyebrow-l'>DISCIPLINE IS THE EDGE. · 纪律就是优势</div>"
-             f"<div style='font-size:17px'><b>汇聚顶级基金经理思想 × AI 能力的美股交易系统</b></div>"
-             f"<div class='sub' style='margin-top:6px'>投资标的：<b style='color:{FG}'>美股</b>"
-             "（纽交所 + 纳斯达克全市场官方清单，经流动性筛选后纳入分析池）<br>"
+             f"<div style='font-size:17px'><b>汇聚顶级基金经理思想 × AI 能力的{market}交易系统</b></div>"
+             f"<div class='sub' style='margin-top:6px'>投资标的：<b style='color:{FG}'>{market}</b>"
+             f"（{_esc(_universe_note(raw))}）<br>"
              "四层共振 × 数据工程 × 自我迭代的全链路交易系统 ｜ 波段周期 1–15 天<br>"
              f"<b style='color:{GOLD}'>No prediction. Process, discipline, audit.</b>"
              "——Edge 不是预测，是流程。</div></div>")
@@ -2083,8 +2147,8 @@ def _philosophy_tab() -> str:
     P.append(f"<div class='card' style='padding:16px 8px 6px'>{_pipeline_svg()}</div>")
     P.append("<div class='card'><table>"
              "<tr><th>层</th><th>回答的问题</th><th>输出</th></tr>"
-             "<tr><td>全市场海选</td><td>全市场 6000+ 只，今天谁值得精评？</td>"
-             "<td>候选池（Top 30 + 主线定向补扫 ≤5）——候选每轮由数据产生，不由记忆产生</td></tr>"
+             "<tr><td>股票池扫描</td><td>本轮扫描池中，谁值得精评？</td>"
+             "<td>候选数量按本轮配置与数据可用性确定，另含主线定向补扫</td></tr>"
              "<tr><td>市场许可</td><td>今天最多能押多少？</td>"
              "<td>总仓位上限 + 新开仓许可（五维投票，意见打架自动打折）</td></tr>"
              "<tr><td>主线识别</td><td>钱在哪 1–2 条主线？</td>"
@@ -2096,7 +2160,7 @@ def _philosophy_tab() -> str:
              "<tr><td>风控闸门</td><td>放行谁、放多少？</td>"
              "<td>五态行动（BUY/LIGHT/HOLD/WAIT/AVOID）+ 股数 + 交易卡片</td></tr></table>"
              "<div class='sub' style='margin-top:8px'>同构于机构三段式流程：放风控额度 → 定主线配置 "
-             "→ 做交易执行；前后各补一段散户缺失的环节——前面的全市场海选与情报处理"
+             "→ 做交易执行；前后各补一段散户缺失的环节——前面的股票池扫描与情报处理"
              "（解决「看都没看到」），后面的落账结算与统计迭代（解决「做完就忘」）。</div></div>")
 
     # —— 刻意不赚的钱 ——
@@ -2110,22 +2174,21 @@ def _philosophy_tab() -> str:
              "<div class='sub' style='margin-top:6px'>负向共振时个股再强也可能被系统性抛售砸穿。"
              "系统宁可空仓，也不在这种日子里证明自己——波段最大的亏损来自「市场不允许时还硬做」。"
              "</div></div>"
-             f"<div class='card'><b style='color:{RED}'>✕ 不在数据地基不实时假装交易</b>"
-             "<div class='sub' style='margin-top:6px'>行情硬依赖（大盘指数/美债利率/恐慌指数）"
-             "全部数据源失败时，系统立即中止并说明原因——诚实失败，绝不产出带污点的报告。"
+             f"<div class='card'><b style='color:{RED}'>✕ 不用缺失或陈旧数据假装完整分析</b>"
+             "<div class='sub' style='margin-top:6px'>本市场硬依赖行情不满足可用性或时效要求时，"
+             "系统中止并说明原因；允许缺失的维度按其契约处理，并在报告中披露。"
              "</div></div></div>")
 
     # —— 风控 ——
-    P.append("<h2>风控：用 R 把亏损关进笼子</h2>")
+    P.append("<h2>风控：用 R 记录计划风险</h2>")
     P.append(_idea("①", "仓位由止损距离反推，不是凭感觉",
-                   "顺序与直觉相反：<b>先定「错了在哪里走」，再定「最多亏多少」，最后才算「买多少股」</b>。"
+                   "顺序与直觉相反：<b>先定「错了在哪里走」，再定「计划风险预算」，最后才算「买多少股」</b>。"
                    "止损越远就必须买得越少；想买得多，就必须找到更清晰、更近的结构位。"
-                   "单票市值永远不超过账户两成——单票永远不至于毁灭账户。"))
+                   "建仓时受单票仓位上限约束；跳空、滑点与佣金可能使实际亏损超过计划风险。"))
     P.append(_idea("②", "三类制度化离场，没有情绪余地",
                    "<b>结构止损</b>：跌破事先定义的结构位即走——亏 3% 不等于错，破关键位才等于错；"
                    "<b>时间止损</b>：入场 5–7 个交易日不推进或跑输主线，减仓或换股——资金效率是硬指标；"
-                   "<b>盈利保护</b>：浮盈达两倍风险必须锁利（止损上移至成本线上方）——"
-                   "曲线好看的人，不是赚得更多，而是吐回去更少。"))
+                   "<b>盈利保护</b>：浮盈达两倍风险后上移止损，目标是减少利润回吐，不保证保本。"))
     P.append(_idea("③", "分批建仓与加仓铁律",
                    "首仓 40% / 二仓 40% / 三仓 20%（仅在环境与主线不降级时）。"
                    "<b>加仓的唯一合法理由是你变得更对</b>——趋势确认、结构推进；"
@@ -2149,9 +2212,9 @@ def _philosophy_tab() -> str:
 
     # —— 工程与诚实底座 ——
     P.append("<h2>工程与诚实底座（为什么敢公开直播）</h2>")
-    P.append(_idea("①", "数据四环保障 + 零基线纪律",
-                   "行情沿 Yahoo → Stooq → 服务端通道 → 同花顺 iFinD 四环降级，单源故障不中断，"
-                   "覆盖率与来源血缘每轮披露；每轮运行从零开始，绝不消费历史残留——"
+    P.append(_idea("①", "数据来源留痕 + 零基线纪律",
+                   "行情按本轮配置与来源可用性选择通道，具体使用来源与覆盖情况逐轮披露；"
+                   "允许降级不代表数据必然完整，每轮重新获取决策输入——"
                    "决策只能由「本轮真实数据 + 固定规则」产生，任何上轮残留进入决策都是污染。"))
     P.append(_idea("②", "工程红线：流程的机器级保险",
                    f"{len(STEP_REGISTRY)} 个注册环节每次运行逐一点名，缺一个即判系统性事故；"
@@ -2165,7 +2228,7 @@ def _philosophy_tab() -> str:
                    "系统正确地拒绝了它——这是量化系统最稀缺的美德。"))
     P.append(_idea("④", "双账公开验证：信号日记 + 小虎纯AI模拟盘",
                    "「策略验证中心」记录每一天的推荐信号及其结算结果（信号口径胜率）；"
-                   "「小虎纯AI模拟盘」以 10 万美元虚拟资金按 T+1 开盘价规则完整模拟交易"
+                   "「小虎纯AI模拟盘」以台账记录的初始虚拟资金按 T+1 开盘价规则模拟交易"
                    "（账户口径净值），两者互为镜像、交叉验证。亏损交易日同样公示——"
                    "公开、可回溯，是我们对自身方法论的信心。"))
 
@@ -2191,11 +2254,21 @@ def _philosophy_tab() -> str:
 
 
 # ---------------------------------------------------------------- 页面
+def _scrollable_tables(markup: str) -> str:
+    """Give generated tables a keyboard-accessible local viewport, preserving their cells."""
+    return _re.sub(
+        r"(<table\b.*?</table>)",
+        r'<div class="table-scroll" role="region" aria-label="数据表格，可左右滚动查看完整内容" tabindex="0">\1</div>',
+        markup, flags=_re.S,
+    )
+
+
 _CSS = f"""
 * {{ box-sizing: border-box; }}
 body {{ margin:0; background:{BG}; color:{FG};
   font:14px/1.65 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }}
-.wrap {{ max-width:1080px; margin:0 auto; padding:28px 22px 60px; }}
+.wrap {{ max-width:1080px; margin:0 auto; padding:28px 22px 60px; overflow-wrap:anywhere; }}
+svg {{ max-width:100%; }}
 h1 {{ font-size:24px; margin:0 0 4px; }}
 h2 {{ font-size:18px; margin:36px 0 14px; padding:0 0 8px 20px; position:relative;
   letter-spacing:0.5px;
@@ -2205,19 +2278,23 @@ h2::before {{ content:''; position:absolute; left:2px; top:7px; width:9px; heigh
   background:linear-gradient(135deg,#ffe27a,#d4af37); transform:rotate(45deg);
   box-shadow:0 0 8px #d4af3780; }}
 .sub {{ color:{MUTED}; font-size:13px; }}
-.grid {{ display:grid; gap:14px; }}
-.g4 {{ grid-template-columns:repeat(4,1fr); }}
-.g3 {{ grid-template-columns:repeat(3,1fr); }}
-.g2 {{ grid-template-columns:repeat(2,1fr); }}
-@media (max-width:820px) {{ .g4,.g3,.g2 {{ grid-template-columns:1fr 1fr; }} }}
+.grid {{ display:grid; gap:14px; min-width:0; }}
+.grid > * {{ min-width:0; }}
+.g4 {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
+.g3 {{ grid-template-columns:repeat(3,minmax(0,1fr)); }}
+.g2 {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
+@media (max-width:820px) {{ .g4,.g3,.g2 {{ grid-template-columns:repeat(2,minmax(0,1fr)); }} }}
 .card {{ background:{CARD}; border:1px solid {BORDER}; border-radius:12px;
-  padding:16px 18px; }}
+  padding:16px 18px; min-width:0; max-width:100%; }}
 .kpi {{ font-size:26px; font-weight:700; margin-top:2px; }}
 .badge {{ display:inline-block; padding:5px 16px; border-radius:999px;
   font-weight:700; font-size:15px; }}
-table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+.table-scroll {{ width:100%; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; }}
+.table-scroll:focus-visible {{ outline:2px solid {GOLD}; outline-offset:3px; }}
+table {{ width:100%; border-collapse:collapse; font-size:13px; overflow-wrap:normal; }}
 th,td {{ padding:7px 9px; border-bottom:1px solid {BORDER}; text-align:left; }}
-th {{ color:{MUTED}; font-weight:500; }}
+th {{ color:{MUTED}; font-weight:500; white-space:nowrap; }}
+.lifecycle-steps {{ display:flex; align-items:center; margin:10px 0 6px; }}
 .bar-row {{ display:flex; align-items:center; gap:10px; margin:7px 0; }}
 .bar-label {{ width:92px; text-align:right; color:{MUTED}; font-size:12px; }}
 .bar-track {{ flex:1; height:14px; background:#e6eecd; border-radius:7px;
@@ -2283,6 +2360,16 @@ pre.card-block {{ background:#e6eecd; border:1px solid {BORDER}; border-radius:1
 .hero .sub {{ color:#c9c6ac; }}
 .card {{ transition:box-shadow .18s ease, transform .18s ease; }}
 .card:hover {{ box-shadow:0 4px 20px #d4af3733; }}
+@media (max-width:560px) {{
+  .wrap {{ padding:16px 14px 48px; }}
+  .g4,.g3,.g2 {{ grid-template-columns:minmax(0,1fr); }}
+  .card {{ padding:14px 16px; }}
+  .hero-inner {{ padding:36px 20px 32px; }}
+  .hero h1 {{ font-size:28px; }}
+  .tabbtn {{ padding:10px 18px; }}
+  .table-scroll table {{ min-width:480px; }}
+  .lifecycle-steps {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 8px; }}
+}}
 """
 
 _TAB_JS = """
@@ -2331,6 +2418,8 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                 journal_entries: list[dict] | None = None,
                 sim: dict | None = None, bench: dict | None = None) -> str:
     raw = r.raw or {}
+    market = _esc(_market_name(raw))
+    currency = _esc(_market_currency(raw))
     color, action_zh = _action_style(r.action)
     mrs = r.mrs
     P: list[str] = []
@@ -2363,7 +2452,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     P.append(f"<h1>老虎全球资产管理 TGAM <span class='sub'>v3.1 · {r.trade_date}</span></h1>")
     P.append("<div class='bigline'>别人预测市场，我们执行纪律。</div>")
     P.append("<div class='sub' style='margin:2px 0'>AI 基金经理统筹的全自动化交易系统（美股 · A股 · 港股）"
-             " ｜ 本报告市场：<b style='color:#ffd700'>美股</b>（纽交所 + 纳斯达克 · 全市场全行业）</div>")
+             f" ｜ 本报告市场：<b style='color:#ffd700'>{market}</b></div>")
     # —— 战绩条：亮剑三数（今日状态 / 小虎净值 / 逐笔留痕）——
     sim_stats = (sim or {}).get("stats") or {}
     eq = sim_stats.get("equity")
@@ -2411,7 +2500,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     # ---- 决策日报门面：今日行动摘要 + 行情脉搏图 + 数据源公示（提升公信力）----
     P.append(f"<div class='card' style='margin:10px 0 14px;display:flex;gap:14px;"
              f"align-items:flex-start;justify-content:space-between;flex-wrap:wrap'>"
-             f"<div style='flex:1;min-width:260px'>"
+             f"<div style='flex:1;min-width:min(260px,100%)'>"
              f"<span class='badge' style='background:{color}22;color:{color};"
              f"border:1px solid {color}66'>{_esc(r.action)} · {action_zh}</span>")
     if mrs:
@@ -2429,12 +2518,14 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     if lineage0:
         used0 = "、".join(sorted({_src_zh(src) for _, src in lineage0}))
         prov_txt = (f"{prov_zh} ｜ 本轮实际拉取：{_esc(used0)}"
-                    f"（共 {len(lineage0)} 次，四环降级制全程留痕）")
+                    f"（共 {len(lineage0)} 次，按实际来源留痕）")
     else:
         prov_txt = prov_zh
     P.append(f"<div class='sub' style='flex:1 0 100%;margin-top:0;padding-top:8px;"
              f"border-top:1px dashed {BORDER}'>数据源：<b style='color:{FG}'>"
-             f"{prov_txt}</b></div></div>")
+             f"{prov_txt}</b><br>{_esc(_freshness_note(raw))}"
+             f"<br>{_esc(_universe_note(raw))}"
+             f"<br>行情报价币种：{currency}</div></div>")
 
     # ---- 决策日报·二级栏目导航（今日决策报告 / 个股深度报告 / 策略验证）----
     P.append("<div style='display:flex;gap:8px;margin:10px 0 14px;flex-wrap:wrap;"
@@ -2465,7 +2556,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
              f"<div class='sub'>六条科技赛道中景气居首</div></div>"
              f"<div class='card'><div class='sub'>今日放行</div>"
              f"<div class='kpi'>{len(r.picks)} 只</div>"
-             f"<div class='sub'>{' '.join(p.ticker for p in r.picks) or '空仓等待'}</div>"
+             f"<div class='sub'>{' '.join(p.ticker for p in r.picks) or '无新放行信号'}</div>"
              + (f"<div class='sub'>{' · '.join(filter(None, (_name_zh(p.ticker) for p in r.picks)))}</div>"
                 if any(_name_zh(p.ticker) for p in r.picks) else "")
              + "</div>"
@@ -2499,15 +2590,15 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                   + "、".join(f"<b>{p.ticker}</b>" for p in r.picks)
                   + f" 这 {len(r.picks)} 枪——每笔都写清认错线，跌破就走，不商量。")
     else:
-        k_line = "没有值得动的刀口。宁可错过，不可做错——空仓看戏。"
+        k_line = "今日无新放行标的；既有持仓继续按出场规则管理。"
     P.append(f"<div class='card' style='border-color:#d4af3766;margin-bottom:12px'>"
              f"<div class='eyebrow-l'>TODAY'S BATTLE PLAN · 今日作战三句话</div>"
              f"<div style='display:flex;gap:12px;flex-wrap:wrap;margin-top:4px'>"
-             f"<div style='flex:1;min-width:220px'><b>① 天气</b>"
+             f"<div style='flex:1;min-width:min(220px,100%)'><b>① 天气</b>"
              f"<div class='sub' style='margin-top:2px'>{w_line}</div></div>"
-             f"<div style='flex:1;min-width:220px'><b>② 方向</b>"
+             f"<div style='flex:1;min-width:min(220px,100%)'><b>② 方向</b>"
              f"<div class='sub' style='margin-top:2px'>{d_line}</div></div>"
-             f"<div style='flex:1;min-width:220px'><b>③ 刀口</b>"
+             f"<div style='flex:1;min-width:min(220px,100%)'><b>③ 刀口</b>"
              f"<div class='sub' style='margin-top:2px'>{k_line}</div></div></div></div>")
     if r.picks:
         bull = THEME_ART_B64.get("tech", "")
@@ -2532,18 +2623,18 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                  f"<button class='subbtn' style='margin-top:8px' "
                  f"onclick='showDaily(\"history\")'>查看完整验证 →</button></div>")
     else:
-        P.append(f"<div class='card'><b>空仓等待</b><div class='sub' style='margin-top:6px'>"
-                 f"今日未开仓。{_esc(r.market_view)}"
-                 f"——纪律优先于交易：不是市场没有机会，而是当前环境不符合我们的出手标准。</div></div>")
+        P.append(f"<div class='card'><b>今日无新放行标的</b><div class='sub' style='margin-top:6px'>"
+                 f"{_esc(r.market_view)}；新的推荐信号与既有持仓分开管理，"
+                 f"实际持仓和待成交记录见台账。</div></div>")
         # —— 开门条件（业务化，告诉投资者"等什么"）——
         if mrs:
             weak = []
             dims = mrs.dimensions
             for key, cond_zh in (
-                ("macro", "宏观利率企稳（10 年期美债收益率停止快速上行）"),
-                ("tech", "大盘收复关键均线（标普 500 站回 50 日线上方）"),
+                ("macro", "本市场利率与流动性数据改善或恢复可用"),
+                ("tech", "本市场基准指数趋势与关键均线结构改善"),
                 ("flow", "市场广度修复（更多个股回到中期均线上方）"),
-                ("sent", "恐慌情绪降温（VIX 明显回落）"),
+                ("sent", "本市场波动率与风险偏好数据改善或恢复可用"),
                 ("micro", "期权微观结构数据恢复可用"),
             ):
                 d = dims.get(key)
@@ -2553,7 +2644,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
             if weak:
                 P.append("<div class='card' style='margin-top:10px'><b>开门条件</b>"
                          "<div class='sub' style='margin-top:4px'>以下条件改善后，"
-                         "市场环境门将重新打开，预备名单内标的优先获得评估：</div>")
+                         "将重新评估市场环境；是否放行仍取决于当轮全部闸门：</div>")
                 for w_ in weak:
                     P.append(f"<div class='sub'>· {_esc(w_)}</div>")
                 P.append("</div>")
@@ -2562,7 +2653,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
             P.append("<div class='card' style='margin-top:10px'><b>预备观察名单</b>"
                      "<div class='sub' style='margin-top:4px'>个股质量已评估完毕，"
                      "等待市场环境开门——开门后按此优先级复核入场：</div><table style='margin-top:6px'>"
-                     "<tr><th>#</th><th>标的</th><th>现价</th><th>综合质量</th>"
+                     "<tr><th>#</th><th>标的</th><th>日K收盘价</th><th>综合质量</th>"
                      "<th>入场形态</th><th>关键位</th><th>产业链</th></tr>")
             for i, c in enumerate(r.watchlist[:5], 1):
                 nm = _name_zh(c.ticker)
@@ -2578,9 +2669,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     if mrs:
         P.append("<h2>一、市场环境体检</h2><div class='grid g2'>")
         cap = mrs.position_cap if isinstance(mrs.position_cap, (tuple, list)) else (0.0, mrs.position_cap)
-        harmony = ("五维协调度：高（无明显短板）" if mrs.delta < 4 else
-                   "五维协调度：中（存在一定分化）" if mrs.delta <= 6 else
-                   "五维协调度：低（分化较大，评级取保守档）")
+        harmony = _harmony(mrs)
         P.append(f"<div class='card'>{_radar_svg(mrs.dimensions)}"
                  f"<div class='sub'>综合 {mrs.mrs_star}/10（{mrs.regime}）｜ {harmony}"
                  f" ｜ 建议总仓位 {cap[0]:.0%}–{cap[1]:.0%}</div></div>")
@@ -2603,7 +2692,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         P.append(_bar_row(f"{_ETF_ZH.get(s.etf, s.etf)}{badge}", s.shs, 10.0, c,
                           extra=f"｜{s.breadth:.0f}% 成分股趋势向上"))
     P.append("<div class='sub' style='margin-top:8px'>读法：金色=当前最强主线，蓝色=次主线"
-             "（热区链支撑），绿色=普通板块；括号内为美股板块 ETF 代码，可对照行情软件。</div></div>")
+             "（热区链支撑），绿色=普通板块；括号内为本市场板块标识，可对照行情软件。</div></div>")
 
     # ---- 产业链景气周期 ----
     if r.chains:
@@ -2611,7 +2700,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         P.append("<h2>三、产业链景气周期</h2><div class='card'>"
                  f"<div style='display:flex;gap:18px;align-items:center;flex-wrap:wrap'>"
                  f"<div style='flex:0 0 auto'>{_cycle_svg()}</div>"
-                 f"<div class='sub' style='flex:1;min-width:240px'>产业链利润在"
+                 f"<div class='sub' style='flex:1;min-width:min(240px,100%)'>产业链利润在"
                  f"<b>复苏 → 扩张 → 过热 → 衰退</b>四个阶段间循环轮动："
                  f"复苏与扩张期给持仓加成，过热期警惕补涨尾声，衰退期坚决回避——"
                  f"下表为十条产业链当前所处的阶段与领涨环节。</div></div>"
@@ -2635,7 +2724,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
             lead_art = _theme_art_html(lead["chain_id"], width=110)
             P.append(f"<div class='card' style='margin-bottom:12px;border-color:{GOLD}66;"
                      f"display:flex;gap:16px;align-items:center;flex-wrap:wrap'>"
-                     f"<div style='flex:1;min-width:260px'>"
+                     f"<div style='flex:1;min-width:min(260px,100%)'>"
                      f"<b>一句话结论：</b>六条科技赛道中，"
                      f"<b style='color:{GOLD}'>{_chain_zh(lead['chain_id'])}</b>"
                      f"当前景气居首（{_prosperity_label(lead['prosperity'])}），"
@@ -2680,14 +2769,14 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     # ---- 今日选股漏斗 ----
     if ss:
         rej = ss.get("rejected", {})
-        total = ss.get("universe_size", 0) or 1
+        total = ss.get("universe_size", 0) or 0
         passed, selected = ss.get("passed", 0), ss.get("selected", 0)
         n_pick = len(r.picks)
         rej_parts = [f"{_REJ_ZH.get(k, k)} {v} 只" for k, v in rej.items() if v]
         rej_txt = "、".join(rej_parts) if rej_parts else "本轮无标的触发基础门槛淘汰"
 
         def _funnel_row(label: str, n: int, note: str, color: str) -> str:
-            w = max(6, round(n / total * 100))
+            w = max(6, round(n / total * 100)) if total else 0
             return (f"<div style='margin:8px 0'><div style='display:flex;"
                     f"justify-content:space-between;font-size:13px'>"
                     f"<span>{label}</span><b>{n} 只</b></div>"
@@ -2699,27 +2788,27 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         if total:
             P.append(f"<div style='margin-bottom:6px'>"
                      f"{_funnel_svg(total, passed or 0, selected or 0, n_pick or 0)}</div>")
-        P.append(_funnel_row("① 全市场股票池（官方清单全量）", total,
-                             "纽交所 + 纳斯达克全市场清单，一个都不漏", "#d8e6b8"))
+        P.append(_funnel_row("① 本轮扫描池", total,
+                             _esc(_universe_note(raw)), "#d8e6b8"))
         P.append(_funnel_row("② 通过基础门槛", passed,
                              f"淘汰 {total - passed} 只：{rej_txt}", "#84cc1688"))
-        P.append(_funnel_row("③ 进入深度精评（四维质量打分）", selected,
+        P.append(_funnel_row("③ 进入深度精评", selected,
                              f"含主线板块额外补扫 {ss.get('mainline_boost', 0)} 只", BLUE))
         P.append(_funnel_row("④ 今日最终放行", n_pick,
                              ("三道关全部通过才放行" if n_pick else
-                              "三道关未全部通过，纪律锁仓"), GOLD))
+                              "本轮无新放行信号，既有持仓按出场规则管理"), GOLD))
         if total and n_pick is not None:
             rate = (1 - n_pick / total) * 100
             verdict = (f"从 {total} 只到 {n_pick} 只，淘汰率 {rate:.1f}%。"
-                       + ("宁可错过，不可做错——漏斗越严，留下的越值得信任。"
-                          if n_pick else "一只都没放行——市场环境不允许时，空仓就是最佳决策。"))
+                       + ("通过筛选仍需承担市场风险。"
+                          if n_pick else "本轮未形成新的推荐信号；不据此推断台账已经空仓。"))
             P.append(f"<div style='margin-top:10px;padding-top:8px;border-top:1px dashed {BORDER}'>"
                      f"<b>漏斗结论：</b>{verdict}</div>")
         top10 = ss.get("top10") or []
         if top10:
-            P.append("<div style='margin-top:12px'><b>全市场质量前十</b>"
-                     "<div class='sub' style='margin:2px 0 6px'>精评中综合质量最高的十只"
-                     "（含未放行标的，可从中读懂系统的审美）：</div>")
+            P.append("<div style='margin-top:12px'><b>扫描初排前十</b>"
+                     "<div class='sub' style='margin:2px 0 6px'>本轮候选的扫描初排分"
+                     "（含未放行标的，与后续综合精评分不同）：</div>")
             for i, item in enumerate(top10, 1):
                 tk, sc = item[0], item[1]
                 mark = " ✅ 今日放行" if any(p.ticker == tk for p in r.picks) else ""
@@ -2728,7 +2817,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
             P.append("</div>")
         P.append("</div>")
     P.append("<h2>六、个股精选清单（深度精评 Top 15）</h2><div class='card'><table>"
-             "<tr><th>标的</th><th>现价</th><th>综合质量</th><th>价格结构</th><th>动能</th>"
+             "<tr><th>标的</th><th>日K收盘价</th><th>综合质量</th><th>价格结构</th><th>动能</th>"
              "<th>衍生品</th><th>入场形态</th><th>关键位</th><th>所属赛道</th></tr>")
     for c in r.watchlist[:15]:
         s_opt = c.s_options if c.s_options is not None else "—"
@@ -2751,7 +2840,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         for p in r.picks:
             P.append(f"<pre class='card-block'>{_esc(p.card)}</pre>")
     else:
-        P.append("<div class='card sub'>无放行标的——今日纪律：空仓等待。</div>")
+        P.append("<div class='card sub'>今日无新放行标的；既有持仓继续按出场规则管理。</div>")
 
     # ---- 系统执行自检 ----
     redline = raw.get("redline", [])
@@ -2761,16 +2850,17 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
         n_skip = n_all - n_pass
         summary_txt = (f"{n_all} 个环节全部执行完成 ✅"
                        if not n_skip else
-                       f"{n_pass}/{n_all} 个环节正常执行 ✅；{n_skip} 个 AI 语义环节本轮不可用，"
-                       "按系统纪律如实留痕、按中性处理（不以简化规则冒充）")
+                       f"{n_pass}/{n_all} 个环节已执行；{n_skip} 个环节处于其他状态，"
+                       "具体状态与原因逐项披露")
         P.append(f"<h2>八、系统执行自检</h2><div class='card'>{summary_txt}"
                  "<details style='margin-top:8px'><summary class='sub'>查看逐环节明细"
                  "（含耗时与备注）</summary><table style='margin-top:8px'>"
                  "<tr><th>环节</th><th>状态</th><th>耗时</th><th>备注</th></tr>")
         for s in redline:
             ok = s["status"] == "executed"
-            mark = (f"<span class='ok'>✅ 正常</span>" if ok else
-                    f"<span class='pass'>⚠️ AI 不可用·留痕</span>")
+            status = {"executed": "已执行", "deferred": "待编排", "failed": "失败",
+                      "skipped": "已跳过", "passthrough": "透传"}.get(s["status"], s["status"])
+            mark = f"<span class='{'ok' if ok else 'pass'}'>{_esc(status)}</span>"
             P.append(f"<tr><td>{_STEP_ZH.get(s['step'], _esc(s['step']))}</td><td>{mark}</td>"
                      f"<td class='sub'>{s['ms']}ms</td>"
                      f"<td class='sub'>{_esc(s.get('note', '')[:70])}</td></tr>")
@@ -2790,8 +2880,10 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
             if svg:
                 P.append(f"<div style='margin-top:10px'>{svg}</div>")
     else:
-        open_n = len([e for e in (journal_entries or []) if e.get("status") == "open"])
-        P.append(f"<div class='sub'>尚无已结算信号（持仓中 {open_n} 笔）——"
+        open_entries = [e for e in (journal_entries or []) if e.get("status") == "open"]
+        held_n = sum(e.get("entry") is not None for e in open_entries)
+        pending_n = len(open_entries) - held_n
+        P.append(f"<div class='sub'>尚无已结算信号（持仓中 {held_n} 笔，待成交 {pending_n} 笔）——"
                  "账本逐日积累，每笔放行信号按出场规则自动结算。</div>")
     P.append("</div>")
 
@@ -2806,8 +2898,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     lineage = raw.get("source_lineage", [])
     if lineage:
         used = sorted({_src_zh(src) for _, src in lineage})
-        P.append(f"<div class='sub'>· 行情来源血缘（四环降级制 yahoo→stooq→agentgw→ifind，"
-                 f"全程可审计）：本轮实际使用 <b>{_esc('、'.join(used))}</b>"
+        P.append(f"<div class='sub'>· 行情来源血缘：本轮实际使用 <b>{_esc('、'.join(used))}</b>"
                  f"（{len(lineage)} 次拉取）</div>")
     P.append("</div>")
 
@@ -2836,21 +2927,20 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
     if sim:
         P.append(_sim_tab(sim))
     else:
-        P.append("<div class='card sub'>小虎 账本初始化中——"
-                 "首个交易日后开始记账，初始资金 $100,000。</div>")
+        P.append("<div class='card sub'>未提供模拟盘台账，初始资金、持仓与成交状态未知。</div>")
     P.append("</div>")  # /tab-sim
 
     # ---- 一级页签：核心交易理念 ----
     P.append("<div id='tab-philosophy' style='display:none'>")
-    P.append(_philosophy_tab())
+    P.append(_philosophy_tab(raw))
     P.append("</div>")
 
     P.append(f"<div class='footer'>老虎全球资产管理（Tiger Global Asset Management）v3.1 · 生成于 {_esc(r.trade_date)}"
-             " · 汇聚顶级基金经理思想 × AI 能力的美股交易系统</div>")
+             f" · 汇聚顶级基金经理思想 × AI 能力的{market}交易系统</div>")
     P.append("</div>")
     P.append(f"<script>{_TAB_JS}</script>")
     P.append("</body></html>")
-    return "".join(P)
+    return _scrollable_tables("".join(P))
 
 
 # ---------------------------------------------------------------- CLI

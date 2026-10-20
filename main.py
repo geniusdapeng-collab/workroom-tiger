@@ -12,7 +12,7 @@
 
 示例：
   python main.py --demo                          # 离线演示
-  python main.py --universe full                 # 真实全市场（6000+只两级拉取）
+  python main.py --universe full                 # 请求所选市场列表，实际范围见报告
   python main.py --mode premarket --universe full
   python main.py --mode intraday --interval 300 --cycles 12
   python main.py --backtest --demo --bt-days 260
@@ -87,7 +87,7 @@ def _journal_section(stats: dict) -> str:
         return "## 十一、胜率追踪（信号日记）\n\n尚无已结算信号——账本从今天开始积累，" \
                "每笔放行信号将按出场规则自动结算。\n"
     lines = ["## 十一、胜率追踪（信号日记）", ""]
-    lines.append(f"- 已结算 **{stats['closed']}** 笔（持仓中 {stats['open']}）｜ "
+    lines.append(f"- 已结算 **{stats['closed']}** 笔（未结算信号 {stats['open']}）｜ "
                  f"累计 **{stats['total_r']}R**")
     lines.append(f"- 总胜率 **{stats['win_rate']:.1%}** ｜ 期望 **{stats['expectancy_r']}R** ｜ "
                  f"利润因子 {stats['profit_factor']}")
@@ -461,7 +461,7 @@ def main() -> None:
     parser.add_argument("--demo", action="store_true", help="离线演示模式（合成数据）")
     parser.add_argument("--universe", choices=["core", "extended", "full", "file"],
                         default="extended",
-                        help="full=官方全市场清单（纽交所+纳斯达克 6000+只，两级拉取）")
+                        help="full=请求所选市场股票列表，实际范围以输出中的来源和预筛记录为准")
     parser.add_argument("--universe-file", default=None)
     parser.add_argument("--top", type=int, default=config.SCAN_TOP_N, help="扫描精评候选数")
     parser.add_argument("--picks", type=int, default=config.MAX_PICKS_DEFAULT, help="最终放行标的数上限")

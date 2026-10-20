@@ -393,7 +393,7 @@ class ReviewChief:
         lines.append("## 一、日度归因")
         lines.append("")
         lines.append(f"- 台账 {len(att['attributions'])} 笔：已结算 {len(closed)}，"
-                     f"持仓中 {len(open_)}")
+                     f"未结算信号 {len(open_)}")
         if att["attributions"]:
             lines.append("")
             lines.append("| 信号日 | 标的 | 信号层（MRS区间/主线/链/模板） | "

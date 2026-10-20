@@ -91,7 +91,7 @@ class MRSAgent(BaseAgent):
         for d in dims.values():
             evidence.extend(d.evidence)
             for m in d.missing:
-                evidence.append(f"[缺失→中性5] {d.name}: {m}")
+                evidence.append(f"[缺失→剔除再归一化] {d.name}: {m}")
 
         result = MRSResult(
             mrs_raw=mrs_raw, delta=delta, k=k, mrs_star=mrs_star,
