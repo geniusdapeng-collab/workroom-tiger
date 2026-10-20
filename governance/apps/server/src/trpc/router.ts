@@ -19,8 +19,7 @@ import {
   signDemoToken,
   type Identity,
 } from "@workloom/base/tenancy";
-import { gatewayAppend, gatewayAppendOnClient, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
-import { makeReadableId } from "@workloom/shared";
+import { gatewayAppend, gatewayAppendOnClient, insertWithReadableId, THREAD_ID_SOURCE, MockEmbedder, upsertMemoryInTx } from "@workloom/base/workdata";
 import { actionProcedure, capabilityWriteProcedure, protectedProcedure, publicProcedure, router, scopeOf, sessionProcedure, writeProcedure } from "./context.js";
 import { accountsRouter } from "./accounts-router.js";
 import { overlayRouter } from "./overlay-router.js";
@@ -644,17 +643,15 @@ const threadsRouter = router({
             message: `并发上限 ${MAX_CONCURRENT_THREADS}/工作区（L3.1/G11），已超出请稍后或排队`,
           });
         }
-        // 号源走 SECURITY DEFINER 函数（0016：全库最大值绕 RLS——主键全库唯一，按本区分配必撞他区；
-        // 历史教训：第二次派遣即 duplicate key，ASK/QUEST 主链路故障）
-        const max = await client.query<{ n: number }>(
-          `SELECT public.threads_max_t_no() AS n`,
-        );
-        threadId = makeReadableId("T", Number(max.rows[0]?.n ?? 100) + 1); // bigint 驱动返回 string，必须 Number() 防拼接（D29 教训）
-        await client.query(
-          `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by)
-           VALUES ($1,$2,$3,$4,$5,'queued',$6)`,
-          [threadId, scope.tenantId, scope.workspaceId, input.title, intent.mode, ctx.identity.memberNo],
-        );
+        // 0037 的号源直接分配序列值；与巡检派单共用 SAVEPOINT 重试，不能再次 +1。
+        threadId = (await insertWithReadableId(client, THREAD_ID_SOURCE, async (id) => {
+          await client.query(
+            `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by)
+             VALUES ($1,$2,$3,$4,$5,'queued',$6)`,
+            [id, scope.tenantId, scope.workspaceId, input.title, intent.mode, ctx.identity.memberNo],
+          );
+          return id;
+        })).id;
         // D16（#1/A）：建线程与派遣事件同一事务（G8 留痕不再独立于状态）
         await gatewayAppendOnClient(client, {
           ...scope,
