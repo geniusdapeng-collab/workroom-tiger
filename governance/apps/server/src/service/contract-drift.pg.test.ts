@@ -278,6 +278,13 @@ describe.skipIf(!RUN_DB)("治理 API 契约漂移（真实 PostgreSQL）", () =>
 
   it("考试使用真实对话服务并持久化答卷，无知识依据时诚实拒答", async () => {
     const other = await makeIdentity();
+    // 对话考试与真实入口遵守同一个活动装配前置条件；只补本用例夹具，
+    // 不给其他“未装配”契约用例隐式安装，也不绕过服务端装配校验。
+    await owner.query("UPDATE workspaces SET industry='trading',bundle_id='trading' WHERE id=$1", [identity.workspaceId]);
+    await owner.query(
+      "INSERT INTO bundle_installs(id,workspace_id,bundle_id,status) VALUES($1,$2,'trading','active')",
+      [`mc010-exam-install-${randomUUID()}`, identity.workspaceId],
+    );
     const result = await runExam(identity.workspaceId, {
       examType: "on-change", perStructure: 1,
       questionFixture: { id: "mc010-unknown-fact", questions: [{

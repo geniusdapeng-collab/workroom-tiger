@@ -63,6 +63,20 @@ jobs:
           touch "$WORKLOOM_DIR/.env"
           pnpm -C "$WORKLOOM_DIR" db:migrate
           pnpm -C "$WORKLOOM_DIR" db:seed:trading
+      - name: 在独立数据库验证交易种子幂等与回滚
+        run: |
+          set -euo pipefail
+          (cd "$WORKLOOM_DIR" && node --input-type=module -e '
+            import pg from "pg";
+            const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+            try { await db.connect(); await db.query("CREATE DATABASE workloom_tiger_ci_seed"); }
+            finally { await db.end(); }
+          ')
+          export DATABASE_URL="${DATABASE_URL%/workloom_tiger_ci}/workloom_tiger_ci_seed"
+          export DATABASE_APP_URL="${DATABASE_APP_URL%/workloom_tiger_ci}/workloom_tiger_ci_seed"
+          export DATABASE_GATEWAY_URL="${DATABASE_GATEWAY_URL%/workloom_tiger_ci}/workloom_tiger_ci_seed"
+          pnpm -C "$WORKLOOM_DIR" db:migrate
+          (cd "$WORKLOOM_DIR" && RUN_TRADING_SEED_PG_TESTS=1 node --test --test-concurrency=1 scripts/seed-trading.pg.test.mjs)
       - name: 禁止 UI 分叉并校验三端版本
         run: node "$WORKLOOM_DIR/scripts/verify-ui-consumer.mjs" --repo "$WORKLOOM_DIR" --require-governance-state
       - name: 校验三端应用壳指纹与行业扩展边界
@@ -84,6 +98,7 @@ jobs:
           RUN_SERVICE_GATEWAY_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/apps/server" test src/service/gateway.pg.test.ts
           RUN_MEMORY_SCOPE_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test review-console/approval-memory.pg.test.ts workdata/memory-id.test.ts
           RUN_CAPTAIN_BREAKER_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test captain/breaker.pg.test.ts captain/kpi.test.ts
+          RUN_CAPTAIN_QUEUE_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test captain/queue.pg.test.ts
           pnpm -C "$WORKLOOM_DIR" suite
           if [ -f requirements.txt ] && [ -d tests ] && find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
             python -m pip install --disable-pip-version-check -r requirements.txt
