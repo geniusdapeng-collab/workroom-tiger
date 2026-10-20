@@ -3,11 +3,13 @@
  * 用法：pnpm tsx --env-file=.env scripts/seed-trading.ts（幂等，可重复执行）
  *
  * 内容：tiger 租户 / trading 工作区 / 1 人类成员（投资者 owner）/
- *      bundles/trading 的 33 个 Agent preset 实例 / 三层围栏包装载 /
- *      6 个官方技能安装 / 三市交易时段 cron 触发器 / 账户档案（风险预算）
+ *      bundles/trading 的全部 Agent preset 实例 / 三层围栏包装载 /
+ *      官方技能安装（数量从资产目录读取）/ 三市交易时段 cron 触发器 / 账户档案（风险预算）
  *
  * 纪律（与 hotel 种子一致）：
  *  - 组织模型写入 ON CONFLICT DO NOTHING（幂等）；
+ *  - 技能安装快照取 skills 实际登记；仅修补旧 seed 的双空快照，不升级有效安装；
+ *  - 已有客户档案与活动装配保持原样；整次 seed 同一事务，任何失败全部回滚；
  *  - 围栏包由 scripts/gen_fences.py 从内核 config 生成（单一口径），本脚本原样装载；
  *  - 本脚本不写任何 biz_events（事件只来自内核 ingestion adapter）。
  */
@@ -43,9 +45,8 @@ interface FenceRule {
   is_baseline?: boolean; note?: string;
 }
 
-async function main() {
-  const pool = new pg.Pool({ connectionString: DATABASE_URL });
-  const q = (text: string, params: unknown[] = []) => pool.query(text, params);
+async function seed(client: pg.Client) {
+  const q = (text: string, params: unknown[] = []) => client.query(text, params);
 
   // 租户与工作区
   await q(
@@ -54,8 +55,17 @@ async function main() {
   await q(
     `INSERT INTO workspaces (id, tenant_id, slug, name, industry, stage, bundle_id, is_example)
      VALUES ($1,$2,$3,$4,'trading','paper','trading',true)
-     ON CONFLICT (id) DO UPDATE SET bundle_id='trading', is_example=true`,
+     ON CONFLICT (id) DO NOTHING`,
     [WS_ID, TENANT_ID, WS_SLUG, WS_NAME]);
+  // 固定 seed ID 不能覆盖其他租户/行业；同一工作区并发 seed 由行锁串行。
+  const workspace = await q(
+    `SELECT tenant_id, industry, bundle_id FROM workspaces WHERE id=$1 FOR UPDATE`, [WS_ID]);
+  const existing = workspace.rows[0];
+  if (!existing || existing.tenant_id !== TENANT_ID || existing.industry !== "trading"
+    || (existing.bundle_id && existing.bundle_id !== "trading")) {
+    throw new Error("seed-trading 拒绝覆盖已有工作区的租户或行业归属");
+  }
+  await q(`UPDATE workspaces SET bundle_id='trading' WHERE id=$1 AND (bundle_id IS NULL OR bundle_id='')`, [WS_ID]);
   // 阶段三要素之一（装配 L3.7）：已存在工作区也确保 stage 就位
   await q(`UPDATE workspaces SET stage='paper' WHERE id=$1 AND (stage IS NULL OR stage='')`, [WS_ID]);
   console.log("✓ 租户与工作区：tiger / 老虎交易工作台");
@@ -138,32 +148,40 @@ async function main() {
        ON CONFLICT (id) DO NOTHING`,
       [skillId, meta.name ?? d, meta.description ?? "", body]);
     await q(
-      `INSERT INTO skill_installs (skill_id, workspace_id, installed_by)
-       VALUES ($1,$2,'MEM-T001') ON CONFLICT (skill_id, workspace_id) DO NOTHING`,
+      `INSERT INTO skill_installs (skill_id, workspace_id, installed_by, fence_bindings_snapshot, installed_version)
+       SELECT s.id, $2, 'MEM-T001', s.fence_bindings, s.version FROM skills s WHERE s.id=$1
+       ON CONFLICT (skill_id, workspace_id) DO UPDATE
+       SET fence_bindings_snapshot=EXCLUDED.fence_bindings_snapshot, installed_version=EXCLUDED.installed_version
+       WHERE skill_installs.installed_version='' AND skill_installs.fence_bindings_snapshot='[]'::jsonb`,
       [skillId, WS_ID]);
     nSkill++;
   }
   console.log(`✓ 官方技能 ×${nSkill} 已安装（安装即绑定围栏）`);
 
-  // 游客首进场只接受与产品 defaultBundle 精确匹配的唯一 active 安装。
-  await q(
-    `UPDATE bundle_installs SET status='inactive'
-     WHERE workspace_id=$1 AND bundle_id<>'trading' AND status='active'`,
-    [WS_ID],
-  );
-  await q(
-    `INSERT INTO bundle_installs (id, workspace_id, bundle_id, assets, status)
-     VALUES ($1,$2,'trading',$3,'active')
-     ON CONFLICT (id) DO UPDATE SET bundle_id='trading', status='active'`,
-    [`bi-${WS_ID}-trading`, WS_ID, JSON.stringify({ seed_batch_id: `seed-trading-${WS_ID}` })],
-  );
+  // 保留已有有效装配及其考试/资产元数据；seed 不替换客户活动包或重新激活已卸载候选。
+  const active = await q(
+    `SELECT id, bundle_id FROM bundle_installs WHERE workspace_id=$1 AND status='active' FOR UPDATE`, [WS_ID]);
+  if (active.rows.length > 0) {
+    if (active.rows.length !== 1 || active.rows[0].bundle_id !== "trading") {
+      throw new Error("seed-trading 与已有活动行业包冲突，保留原装配");
+    }
+  } else {
+    const installed = await q(
+      `INSERT INTO bundle_installs (id, workspace_id, bundle_id, assets, status)
+       VALUES ($1,$2,'trading',$3,'active') ON CONFLICT (id) DO NOTHING RETURNING id`,
+      [`bi-${WS_ID}-trading`, WS_ID, JSON.stringify({ seed_batch_id: `seed-trading-${WS_ID}` })],
+    );
+    if (installed.rowCount !== 1) {
+      throw new Error("seed-trading 安装 ID 已存在，拒绝覆盖或重新激活原装配");
+    }
+  }
   console.log("✓ 交易 Bundle active 装配台账已就绪（游客体验入口）");
 
   // 账户档案（风险预算——客户 patch 层的合法来源）
   await q(
     `INSERT INTO profiles (workspace_id, tenant_id, industry, archive, forbidden, pii_vault)
      VALUES ($1,$2,'trading',$3,$4,NULL)
-     ON CONFLICT (workspace_id) DO UPDATE SET archive = EXCLUDED.archive, updated_at = now()`,
+     ON CONFLICT (workspace_id) DO NOTHING`,
     [WS_ID, TENANT_ID,
      JSON.stringify({
        account: {
@@ -201,8 +219,28 @@ async function main() {
   }
   console.log(`✓ 触发器 ×${triggers.length}（三市时段 + 夜班值守 + 月度 WFA）`);
 
-  console.log("\n老虎交易种子完成 ✅（trading bundle 全量就绪）");
-  await pool.end();
+}
+
+async function main() {
+  const client = new pg.Client({ connectionString: DATABASE_URL });
+  try {
+    await client.connect();
+    await client.query("BEGIN");
+    try {
+      await seed(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "seed-trading 失败且回滚未获确认");
+      }
+      throw error;
+    }
+    console.log("\n老虎交易种子完成 ✅（trading bundle 全量就绪）");
+  } finally {
+    await client.end();
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
