@@ -11,7 +11,6 @@ import type pg from "pg";
 import { getGatewayPool } from "@workloom/db";
 import { svcQuery, serviceTx } from "./events.js";
 import { handleMessage } from "./dialog.js";
-import { resolveWorkspaceBusinessAdapter } from "./adapters/business-registry.js";
 import { resolveWorkspaceActiveBundle } from "./active-bundle.js";
 import { routedLlmCall } from "./llm.js";
 import {
@@ -409,8 +408,6 @@ export async function runExam(workspaceId: string, opts: {
     throw new Error("定制上岗考必须使用逐候选岗位评测管线，通用题库不能作为上岗凭据");
   }
   const verifiedQuestions = await ensureVerifiedQuestions(workspaceId, opts.questionFixture);
-  const businessBinding = await resolveWorkspaceBusinessAdapter(workspaceId);
-  const businessAdapter = businessBinding.state === "ready" ? businessBinding.adapter : null;
 
   const examId = newId("evx");
   const perStructure = opts.perStructure ?? 5;
@@ -455,7 +452,7 @@ export async function runExam(workspaceId: string, opts: {
       const replies = await import("@workloom/base/eval-core").then(async ({ runQuestion }) =>
         runQuestion(q, async ({ conversationId, text, cUserId }) => {
           const r = await handleMessage({
-            workspaceId, cUserId, channel: "h5", text, conversationId, businessAdapter,
+            workspaceId, cUserId, channel: "h5", text, conversationId,
           });
           return {
             conversationId: r.conversationId,

@@ -37,7 +37,7 @@ import { routedLlmCall, resetLlmAssembly } from "../service/llm.js";
 import { creditsRouter, modelFeedbackRouter } from "./credits-router.js";
 import { runRouterReviewBeat } from "@workloom/base/model-router";
 import {
-  loadCharter, parseCharter, transition, defaultCharter,
+  loadCharter, parseCharter, transition, defaultCharter, charterSchema,
   runBriefingBeat, runQueueBeat, runDeviationBeat, runBreakerBeat, buildScorecard,
   runOutcomeReviewBeat, runHrReviewBeat, runBoardPackBeat, runOrgScanBeat, applyReplacement,
   buildFloor,
@@ -2339,11 +2339,7 @@ const captainRouter = router({
   grant: capabilityWriteProcedure("quest")
     .input(z.object({
       clauses: z.array(z.string()),
-      autonomy: z.object({
-        price_band: z.tuple([z.number(), z.number()]),
-        procurement_cap: z.number(),
-        campaign_cap: z.number(),
-      }),
+      autonomy: charterSchema.shape.autonomy.removeDefault(),
       shadowDays: z.number().int().min(1).max(14).default(3),
       trialDays: z.number().int().min(3).max(30).default(7),
       identityConfirmed: z.boolean(), // §12.2 第⑤步身份核验（演示环境布尔确认）

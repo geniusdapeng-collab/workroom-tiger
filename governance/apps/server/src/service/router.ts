@@ -20,7 +20,7 @@ import { appendEventOn, serviceTx, svcQuery } from "./events.js";
 import { llmCall } from "./llm.js";
 import { ensureServiceSchema } from "./store.js";
 import {
-  activeInstall, clearBundle, clearPreview, generateStaffing,
+  activeInstall, clearBundle, clearPreview, confirmAndAssembleStaffing, customizationStatus, generateStaffing,
   onboardingExam, rollbackSnapshot,
 } from "./bundle.js";
 import {
@@ -447,6 +447,10 @@ const bundleRouter = router({
   activeInstall: protectedProcedure.query(async ({ ctx }) => {
     return { install: await activeInstall(scopeOf(ctx.identity).workspaceId) };
   }),
+  /** 刷新后从当前工作区的服务端事实恢复定制进度。 */
+  customizationStatus: protectedProcedure.query(async ({ ctx }) => {
+    return customizationStatus(scopeOf(ctx.identity).workspaceId);
+  }),
   /** 清空预览（明示范围：将卸什么/将留什么） */
   clearPreview: protectedProcedure.query(async ({ ctx }) => {
     return clearPreview(scopeOf(ctx.identity).workspaceId);
@@ -465,12 +469,20 @@ const bundleRouter = router({
   generateStaffing: writeProcedure
     .input(z.object({ industryText: z.string().min(4).max(2000) }))
     .mutation(async ({ ctx, input }) => {
-      return generateStaffing(scopeOf(ctx.identity).workspaceId, input.industryText);
+      return generateStaffing(scopeOf(ctx.identity).workspaceId, input.industryText, { id: ctx.identity.memberNo, type: "human" });
+    }),
+  /** 人审确认精确草案指纹，只创建停用候选装配。 */
+  confirmAndAssembleStaffing: writeProcedure
+    .input(z.object({ draftId: z.string().min(1), expectedDraftHash: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      return confirmAndAssembleStaffing(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
     }),
   /** 上岗考（exam 门禁：达标才 activated） */
-  onboardingExam: writeProcedure.mutation(async ({ ctx }) => {
-    return onboardingExam(scopeOf(ctx.identity).workspaceId);
-  }),
+  onboardingExam: writeProcedure
+    .input(z.object({ installId: z.string().min(1), expectedAssemblyHash: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      return onboardingExam(scopeOf(ctx.identity).workspaceId, input, { id: ctx.identity.memberNo, type: "human" });
+    }),
 });
 
 /**
