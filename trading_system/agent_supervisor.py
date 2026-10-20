@@ -341,8 +341,56 @@ def _read_control_until_eof(fd: int, deadline: float) -> list[dict]:
     return rows
 
 
+def _wait_for_owned_exit(pid: int, deadline: float) -> None:
+    """Observe termination without reaping the retained process-group leader."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Business deadline elapsed")
+        if sys.platform == "linux":
+            try:
+                result = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            except ChildProcessError as exc:
+                raise EvidenceInvalid("RUNNER_FAILED", "Guardian ownership was lost") from exc
+            exited = result is not None
+            if exited and (result.si_pid != pid or result.si_code not in {
+                    os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED}):
+                raise EvidenceInvalid("RUNNER_FAILED", "Unexpected guardian wait state")
+        elif sys.platform == "darwin":
+            try:
+                result = subprocess.run(
+                    ["/bin/ps", "-p", str(pid), "-o", "pid=,ppid=,pgid=,stat="],
+                    capture_output=True, text=True, timeout=min(3, remaining), check=True,
+                    env={"PATH": os.defpath, "LC_ALL": "C"},
+                )
+            except subprocess.TimeoutExpired as exc:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Business deadline elapsed") from exc
+                raise EvidenceInvalid("RUNNER_FAILED", "Guardian state query timed out") from exc
+            except TimeoutError:
+                # The supervisor's business alarm may interrupt the query.
+                # Its TimeoutError is an OSError, but retains TIMEOUT semantics.
+                raise
+            except (OSError, subprocess.CalledProcessError) as exc:
+                raise EvidenceInvalid("RUNNER_FAILED", "Guardian state query failed") from exc
+            rows = [line.split() for line in result.stdout.splitlines() if line.strip()]
+            if (len(rows) != 1 or len(rows[0]) != 4
+                    or not all(value.isdigit() for value in rows[0][:3])
+                    or tuple(map(int, rows[0][:3])) != (pid, os.getpid(), pid)):
+                raise EvidenceInvalid("RUNNER_FAILED", "Guardian process identity differs")
+            exited = rows[0][3].startswith("Z")
+        else:
+            raise EvidenceInvalid("RUNNER_FAILED", "Unsupported guardian wait platform")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Business deadline elapsed")
+        if exited:
+            return
+        time.sleep(min(0.05, remaining))
+
+
 def supervise_group(run: Path, *, lock_fds: tuple[int, int], deadline: float) -> dict:
-    """Wait on control EOF without reaping the group leader before cleanup."""
+    """Validate control, observe exit, then clean the group before reaping."""
     parent_read, parent_write = os.pipe()
     control_read, control_write = os.pipe()
     leader = None
@@ -369,22 +417,31 @@ def supervise_group(run: Path, *, lock_fds: tuple[int, int], deadline: float) ->
         atomic_json(run, "supervisor-process.json", info, exclusive=True)
         try:
             rows = _read_control_until_eof(control_read, deadline)
+            if any(isinstance(row, dict) and row.get("kind") == "failed"
+                   and row.get("reason") == "deadline" for row in rows):
+                raise TimeoutError("Business deadline elapsed")
+            if (len(rows) != 2 or any(type(row) is not dict for row in rows)
+                    or set(rows[0]) != {"kind", "pid", "pgid"}
+                    or rows[0]["kind"] != "engine_started"
+                    or type(rows[0]["pid"]) is not int or rows[0]["pid"] <= 1
+                    or type(rows[0]["pgid"]) is not int or rows[0]["pgid"] != leader.pid
+                    or set(rows[1]) != {"kind", "exit_code"}
+                    or rows[1]["kind"] != "engine_finished"
+                    or type(rows[1]["exit_code"]) is not int or rows[1]["exit_code"] != 0):
+                raise EvidenceInvalid("RUNNER_FAILED", "Business process did not complete cleanly")
+            # EOF precedes Python interpreter exit. Wait for actual termination
+            # while retaining the child's identity and the original deadline.
+            _wait_for_owned_exit(leader.pid, deadline)
         finally:
             # Do not poll/wait before this. Even a dead leader retains its PID
             # until reap, so the known group identifier cannot be reused.
             _kill_group(leader.pid)
         code = leader.wait(timeout=3)
-        starts = [row for row in rows if row.get("kind") == "engine_started"]
-        finishes = [row for row in rows if row.get("kind") == "engine_finished"]
-        if any(row.get("kind") == "failed" and row.get("reason") == "deadline" for row in rows):
-            raise TimeoutError("Business deadline elapsed")
-        if (code != 0 or len(rows) != 2 or len(starts) != 1 or len(finishes) != 1
-                or starts[0].get("pgid") != leader.pid
-                or finishes[0].get("exit_code") != 0):
+        if code != 0:
             raise EvidenceInvalid("RUNNER_FAILED", "Business process did not complete cleanly")
         return {"schema": "tiger.process-exit.v1", "run_id": run.name,
                 "guardian_pid": leader.pid, "guardian_exit": code,
-                "engine_pid": starts[0]["pid"], "engine_exit": 0,
+                "engine_pid": rows[0]["pid"], "engine_exit": 0,
                 "group_cleanup_before_reap": True}
     finally:
         if leader is not None and leader.returncode is None:
