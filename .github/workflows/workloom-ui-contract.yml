@@ -95,6 +95,7 @@ jobs:
           # The sequence assertions share one database and must run serially.
           RUN_RUNTIME_SCHEMA_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/runtime" test src/runtime-schema.pg.test.ts
           RUN_RUNTIME_SCHEMA_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/apps/server" test src/trpc/thread-number.pg.test.ts
+          RUN_THREAD_RESUME_PG_TESTS=1 ASK_WEB_SEARCH=0 pnpm -C "$WORKLOOM_DIR/apps/server" test src/trpc/thread-resume.pg.test.ts
           # Fault-injection tests temporarily hold table DDL locks; keep each command serial.
           RUN_SERVICE_GATEWAY_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/apps/server" test src/service/gateway.pg.test.ts
           RUN_MEMORY_SCOPE_PG_TESTS=1 pnpm -C "$WORKLOOM_DIR/packages/base" test review-console/approval-memory.pg.test.ts workdata/memory-id.test.ts

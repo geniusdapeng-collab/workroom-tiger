@@ -27,10 +27,13 @@ suite("MC-014 actual thread dispatch numbering", () => {
     await owner.query("INSERT INTO workspaces (id,tenant_id,name,slug,industry) VALUES ($1,$2,'Thread numbering fixture',$1,'test')", [workspaceId, tenantId]);
     await owner.query("INSERT INTO members (id,workspace_id,member_no,name,role) VALUES ($1,$2,'MEM-THREAD','Thread fixture','owner')", [memberId, workspaceId]);
     await owner.query("INSERT INTO profiles (workspace_id,tenant_id,industry,archive) VALUES ($1,$2,'test',$3)", [workspaceId, tenantId, JSON.stringify({ dataMode: "simulated" })]);
+    // New tasks must retain a real installed assignment even when execution is queued.
+    await owner.query("INSERT INTO agents (id,workspace_id,preset_key,name,version,kind) VALUES ($1,$2,'fixture','Thread fixture','v1','test')",
+      [`agent-thread-${id()}`, workspaceId]);
     return { memberId, memberNo: "MEM-THREAD", name: "Thread fixture", role: "owner", tenantId, workspaceId, plan: "pro" };
   }
   async function dispatch(who = identity) {
-    const result = await caller(who).threads.dispatch({ title, runImmediately: false });
+    const result = await caller(who).threads.dispatch({ title, presetKey: "fixture", runImmediately: false });
     expect(result.kind).toBe("routed");
     if (result.kind !== "routed") throw new Error("Thread fixture unexpectedly requested clarification");
     return result;

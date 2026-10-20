@@ -32,6 +32,8 @@ import {
 } from "@workloom/base/review-console";
 import { routeIntent, runAsk, runQuest } from "@workloom/runtime";
 import { LlmIntentClassifier, type IntentClassifier } from "@workloom/runtime";
+import { resolveDispatchPreset, type DispatchPresetResolution } from "../runtime/thread-runner.js";
+import { boundThreadRun, installedThreadAgent, type BoundThreadRun, type InstalledThreadAgent } from "../runtime/thread-binding.js";
 import { providerFromEnv, OpenAiCompatibleProvider } from "@workloom/base/model-router";
 import { routedLlmCall, resetLlmAssembly } from "../service/llm.js";
 import { creditsRouter, modelFeedbackRouter } from "./credits-router.js";
@@ -612,7 +614,7 @@ const threadsRouter = router({
     .input(
       z.object({
         title: z.string().min(1).max(500), // F3.1：≤500 字
-        presetKey: z.string().default("pricing-agent"),
+        presetKey: z.string().trim().min(1).optional(),
         runImmediately: z.boolean().default(false),
       }),
     )
@@ -627,6 +629,8 @@ const threadsRouter = router({
       const app = getAppPool();
       const client = await app.connect();
       let threadId: string;
+      let agent: InstalledThreadAgent;
+      let selection: DispatchPresetResolution;
       try {
         // 事务级 RLS 上下文必须在显式事务内设置：autocommit 下 set_config(...,true) 语句结束即失效
         await client.query("BEGIN");
@@ -643,12 +647,18 @@ const threadsRouter = router({
             message: `并发上限 ${MAX_CONCURRENT_THREADS}/工作区（L3.1/G11），已超出请稍后或排队`,
           });
         }
+        // New tasks may use the installed-workforce selector. Existing tasks
+        // always retain their binding; invalid explicit references never fall back.
+        selection = input.presetKey === undefined
+          ? await resolveDispatchPreset(scope, input.title)
+          : { presetKey: input.presetKey, selection: "explicit" };
+        agent = await installedThreadAgent(client, scope, selection.presetKey);
         // 0037 的号源直接分配序列值；与巡检派单共用 SAVEPOINT 重试，不能再次 +1。
         threadId = (await insertWithReadableId(client, THREAD_ID_SOURCE, async (id) => {
           await client.query(
-            `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by)
-             VALUES ($1,$2,$3,$4,$5,'queued',$6)`,
-            [id, scope.tenantId, scope.workspaceId, input.title, intent.mode, ctx.identity.memberNo],
+            `INSERT INTO threads (id, tenant_id, workspace_id, title, mode, status, created_by, agent_id)
+             VALUES ($1,$2,$3,$4,$5,'queued',$6,$7)`,
+            [id, scope.tenantId, scope.workspaceId, input.title, intent.mode, ctx.identity.memberNo, agent.id],
           );
           return id;
         })).id;
@@ -661,14 +671,19 @@ const threadsRouter = router({
           who: { type: "human", id: ctx.identity.memberNo },
           context: { tenant_id: scope.tenantId, workspace_id: scope.workspaceId, time: new Date().toISOString(), channel: "inapp" },
           object: { type: "thread", id: threadId },
-          decision: { action: "thread.dispatch", after: { threadId, title: input.title, mode: intent.mode, rationale: intent.rationale } },
+          decision: { action: "thread.dispatch", after: {
+            threadId, title: input.title, mode: intent.mode, rationale: intent.rationale,
+            agentId: agent.id, presetKey: agent.presetKey, presetSelection: selection.selection,
+          } },
           rule_impact: [],
         });
+        // Commit failure must prevent execution: never run a task whose creation
+        // or assignment/audit record did not commit.
+        await client.query("COMMIT");
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw err;
       } finally {
-        await client.query("COMMIT").catch(() => undefined);
         client.release();
       }
       // 派遣事件已随建线程同事务落库（D16；G8 三段瀑布同口径）
@@ -676,17 +691,20 @@ const threadsRouter = router({
       // ask 问询：即时应答（B8——取数为真、模型可插拔；不依赖 runImmediately 按钮）
       if (intent.mode === "ask") {
         const ra = await runAsk(getAppPool(), getGatewayPool(), scope, {
-          threadId, goal: input.title, presetKey: "morning-briefing", llmCall: llmCall("ask-synthesize", scope),
+          threadId, goal: input.title, presetKey: agent.presetKey, llmCall: llmCall("ask-synthesize", scope),
         });
-        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: ra.status, answer: ra.answer };
+        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: ra.status, answer: ra.answer,
+          presetKey: agent.presetKey, presetSelection: selection.selection };
       }
       if (input.runImmediately && intent.mode === "quest") {
         const r = await runQuest(app, getGatewayPool(), scope, {
-          threadId, goal: input.title, presetKey: input.presetKey, llmCall: llmCall("quest-plan", scope),
+          threadId, goal: input.title, presetKey: agent.presetKey, llmCall: llmCall("quest-plan", scope),
         });
-        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: r.status, stepsDone: r.stepsDone, stepsTotal: r.stepsTotal };
+        return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: r.status, stepsDone: r.stepsDone, stepsTotal: r.stepsTotal,
+          presetKey: agent.presetKey, presetSelection: selection.selection };
       }
-      return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: "queued" as const };
+      return { kind: "routed" as const, mode: intent.mode, via: intent.via, threadId, status: "queued" as const,
+        presetKey: agent.presetKey, presetSelection: selection.selection };
     }),
 
   /** 线程详情（P2 线程头/信息面板；L7.1 越权返回空） */
@@ -764,29 +782,34 @@ const threadsRouter = router({
 
   /** 运行/续跑线程（replay 断点续跑幂等，E3.3/H-5；按线程模式分流：ask 应答 / agent 逐步确认 / quest 自主执行） */
   run: capabilityWriteProcedure("quest")
-    .input(z.object({ threadId: z.string(), goal: z.string(), presetKey: z.string().default("pricing-agent") }))
+    .input(z.object({
+      threadId: z.string().min(1),
+      // Kept for older clients; the stored task title remains authoritative.
+      goal: z.string().optional(),
+      presetKey: z.string().trim().min(1).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const scope = scopeOf(ctx.identity);
       const app = getAppPool();
       const client = await app.connect();
-      let mode: "ask" | "agent" | "quest" = "quest";
+      let binding: BoundThreadRun;
       try {
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.workspace_id', $1, true)", [scope.workspaceId]);
-        const t = await client.query<{ mode: string }>(`SELECT mode FROM threads WHERE id=$1 AND workspace_id=$2`, [input.threadId, scope.workspaceId]);
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [scope.tenantId]);
+        binding = await boundThreadRun(client, scope, input.threadId, input.presetKey);
         await client.query("COMMIT");
-        if (t.rows[0]?.mode === "ask" || t.rows[0]?.mode === "agent") mode = t.rows[0].mode;
       } catch (err) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw err;
       } finally {
         client.release();
       }
-      if (mode === "ask") {
-        return runAsk(app, getGatewayPool(), scope, { threadId: input.threadId, goal: input.goal, presetKey: input.presetKey, llmCall: llmCall("ask-synthesize", scope) });
+      if (binding.mode === "ask") {
+        return runAsk(app, getGatewayPool(), scope, { threadId: input.threadId, goal: binding.goal, presetKey: binding.agent.presetKey, llmCall: llmCall("ask-synthesize", scope) });
       }
       return runQuest(app, getGatewayPool(), scope, {
-        threadId: input.threadId, goal: input.goal, presetKey: input.presetKey, mode, llmCall: llmCall("quest-plan", scope),
+        threadId: input.threadId, goal: binding.goal, presetKey: binding.agent.presetKey, mode: binding.mode, llmCall: llmCall("quest-plan", scope),
       });
     }),
 });
