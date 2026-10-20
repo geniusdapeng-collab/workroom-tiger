@@ -43,7 +43,7 @@
       "card": "MC-027",
       "upstreamSha256": "b546b370419f42db8e014f3def1703e876ae91d7fec644d96e7383340ec638bd",
       "repairedSha256": "887ffd3b3a7835c25776f618d9c2e2c0ee5da7e225deff85e882b52a85ec506b",
-      "sourceCommit": "e3d609a83e6e43fceb299734b789ad787c1a9d6c",
+      "sourceCommit": "f51f2dd907a0ea2a73a1dc018ab9cda6d30c6b30",
       "reason": "Separate archive mode declaration from formal activation eligibility; show unconfigured and invalid values truthfully and retain the existing shell navigation exit."
     },
     {
@@ -51,7 +51,7 @@
       "card": "MC-027",
       "upstreamSha256": "068d845c135ee2f7cfd83fdc68d90b2940422559f09285a3eeddb57be477ede7",
       "repairedSha256": "69a2378681ed5be11b10b2c5b572d53722328dbe8bebabaeb2868f7c787039f3",
-      "sourceCommit": "e3d609a83e6e43fceb299734b789ad787c1a9d6c",
+      "sourceCommit": "f51f2dd907a0ea2a73a1dc018ab9cda6d30c6b30",
       "reason": "Report archive declaration, default tool requirements and formal eligibility independently; do not relabel missing or invalid data modes as simulated execution."
     }
   ],
