@@ -171,8 +171,11 @@ export async function onboardingStatusOn(client: pg.PoolClient, identity: Identi
      ORDER BY seq DESC LIMIT 1`, [workspaceId, identity.tenantId],
   )).rows[0];
   const formalActivationRecorded = record(activation?.after).activationFingerprint === activationFingerprint;
+  const declaredDataMode = !Object.hasOwn(archive, "dataMode") ? "unconfigured" as const
+    : archive.dataMode === "real" || archive.dataMode === "simulated" ? archive.dataMode : "invalid" as const;
   const persistedDataMode = archive.dataMode === "real" ? "real" as const : "simulated" as const;
   const systemReady = evaluateRealModeReadiness({ ...facts, activationOwner: true }).canActivate;
+  const formalModeActive = persistedDataMode === "real" && formalActivationRecorded && systemReady;
   const counts = (await client.query<{ events: number; members: number; agents: number; memories: number }>(
     `SELECT (SELECT count(*)::int FROM biz_events WHERE workspace_id=$1) AS events,
       (SELECT count(*)::int FROM members WHERE workspace_id=$1) AS members,
@@ -180,8 +183,17 @@ export async function onboardingStatusOn(client: pg.PoolClient, identity: Identi
       (SELECT count(*)::int FROM org_memory WHERE workspace_id=$1) AS memories`, [workspaceId],
   )).rows[0]!;
   return {
-    dataMode: persistedDataMode === "real" && formalActivationRecorded && systemReady ? "real" as const : "simulated" as const,
-    persistedDataMode, formalActivationRecorded, activationFingerprint,
+    /** @deprecated 兼容既有激活调用方的资格标记；simulated 只表示未正式启用，不证明模拟执行。 */
+    dataMode: formalModeActive ? "real" as const : "simulated" as const,
+    /** @deprecated 历史归一化字段（非 real 均归为 simulated）；档案事实请使用 declaredDataMode。 */
+    persistedDataMode,
+    /** 档案的明确声明；缺失与非法值均不能当作模拟许可。 */
+    declaredDataMode,
+    /** 仅描述未注入执行器时的通用工具路径，不证明连接器已接入或业务动作成功。 */
+    defaultToolMode: declaredDataMode === "simulated" ? "simulated" as const : "connector-required" as const,
+    /** 当前启用回执及资格是否有效，与查看者是否有权再次启用分别判断。 */
+    formalModeActive,
+    formalActivationRecorded, activationFingerprint,
     llm: { provider: config.provider, model: config.model, baseUrl: config.baseUrl, real: llmReal },
     business, activationGate: evaluateRealModeReadiness(facts),
     workspace: { name: workspace?.name ?? "", ...counts }, workspaceId,

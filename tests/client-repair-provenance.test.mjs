@@ -13,6 +13,9 @@ const star = "apps/web/src/components/star-ring/StarRing.tsx";
 const api = "apps/webc/src/lib/api.ts";
 const consumer = "apps/web/consumer-e2e/clients.playwright.ts";
 const regression = "apps/web/src/components/star-ring/StarRing.contract.test.tsx";
+const onboarding = "apps/web/src/pages/onboarding/Onboarding.tsx";
+const banner = "apps/web/src/components/SimBanner.tsx";
+const modeRegression = "apps/web/src/pages/onboarding/Onboarding.mode.test.tsx";
 const manifestFile = ".workloom-client-repairs.json";
 const write = (root, path, content) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); };
 
@@ -20,7 +23,7 @@ function fixture(t, repaired = true) {
   const root = mkdtempSync(join(tmpdir(), "tiger-client-repairs-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const g = join(root, "governance");
-  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer];
+  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner];
   for (const path of entries) write(g, path, `original:${path}\n`);
   write(g, ".workloom-ui.json", JSON.stringify({ version: "0.1.17" }));
   const state = {
@@ -39,12 +42,14 @@ function fixture(t, repaired = true) {
     repairs: [], testAdditions: [],
   };
   if (repaired) {
-    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"]]) {
+    for (const [path, card] of [[star, "MC-012"], [api, "MC-018"], [consumer, "MC-015"], [onboarding, "MC-027"], [banner, "MC-027"]]) {
       write(g, path, `reviewed repair:${path}\n`);
       manifest.repairs.push({ path, card, upstreamSha256: state.managedFiles[path].sha256, repairedSha256: digest(readFileSync(join(g, path))), sourceCommit: "a".repeat(40), reason: "Reviewed contract repair with focused behavioral regression coverage." });
     }
     write(g, regression, "test('real component contract', () => {});\n");
     manifest.testAdditions.push({ path: regression, card: "MC-012", sha256: digest(readFileSync(join(g, regression))) });
+    write(g, modeRegression, "test('mode declaration and formal qualification', () => {});\n");
+    manifest.testAdditions.push({ path: modeRegression, card: "MC-027", sha256: digest(readFileSync(join(g, modeRegression))) });
     write(g, manifestFile, JSON.stringify(manifest));
   }
   return { root, g, manifest, state, save: () => write(g, manifestFile, JSON.stringify(manifest)) };
@@ -139,4 +144,39 @@ test("malformed JSON is reported as a validation failure", (t) => {
 test("a symlink cannot substitute a reviewed source", (t) => {
   const f = fixture(t); copyFileSync(join(f.g, star), join(f.root, "outside.tsx")); rmSync(join(f.g, star)); symlinkSync(join(f.root, "outside.tsx"), join(f.g, star));
   assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+});
+for (const path of [onboarding, banner]) {
+  test(`MC027 reviewed source ${path} rejects later byte changes`, (t) => {
+    const f = fixture(t); write(f.g, path, "unreviewed mode claim\n");
+    assert.ok(verifyTigerClientRepairs(f.root).some((e) => e.includes(path)));
+  });
+  test(`MC027 source ${path} requires the exact card`, (t) => {
+    const f = fixture(t);
+    f.manifest.repairs.find((entry) => entry.path === path).card = "MC-012";
+    f.save();
+    assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+  });
+}
+for (const kind of ["missing-registration", "changed-bytes", "wrong-card", "duplicate", "executable", "symlink"]) {
+  test(`MC027 mode regression ${kind} fails closed`, (t) => {
+    const f = fixture(t);
+    const registered = f.manifest.testAdditions.find((entry) => entry.path === modeRegression);
+    if (kind === "missing-registration") f.manifest.testAdditions = f.manifest.testAdditions.filter((entry) => entry.path !== modeRegression);
+    if (kind === "changed-bytes") write(f.g, modeRegression, "unreviewed tests\n");
+    if (kind === "wrong-card") registered.card = "MC-012";
+    if (kind === "duplicate") f.manifest.testAdditions[1] = { ...f.manifest.testAdditions[0] };
+    if (kind === "executable") chmodSync(join(f.g, modeRegression), 0o755);
+    if (kind === "symlink") {
+      copyFileSync(join(f.g, modeRegression), join(f.root, "outside-mode.test.tsx"));
+      rmSync(join(f.g, modeRegression));
+      symlinkSync(join(f.root, "outside-mode.test.tsx"), join(f.g, modeRegression));
+    }
+    f.save();
+    assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+  });
+}
+test("MC027 regression cannot authorize an unrelated new client source", (t) => {
+  const f = fixture(t);
+  write(f.g, "apps/web/src/pages/onboarding/unreviewed.ts", "export const invented = 'simulated';\n");
+  assert.ok(verifyTigerClientRepairs(f.root).some((e) => e.includes("unreviewed.ts")));
 });

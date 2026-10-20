@@ -14,8 +14,17 @@ const REPAIR_PATHS = new Map([
   ["apps/web/src/components/star-ring/StarRing.tsx", "MC-012"],
   ["apps/webc/src/lib/api.ts", "MC-018"],
   ["apps/web/consumer-e2e/clients.playwright.ts", "MC-015"],
+  ["apps/web/src/pages/onboarding/Onboarding.tsx", "MC-027"],
+  ["apps/web/src/components/SimBanner.tsx", "MC-027"],
 ]);
-const TEST_PATH = "apps/web/src/components/star-ring/StarRing.contract.test.tsx";
+const TEST_PATHS = new Map([
+  ["apps/web/src/components/star-ring/StarRing.contract.test.tsx", {
+    card: "MC-012", repairs: ["apps/web/src/components/star-ring/StarRing.tsx"],
+  }],
+  ["apps/web/src/pages/onboarding/Onboarding.mode.test.tsx", {
+    card: "MC-027", repairs: ["apps/web/src/pages/onboarding/Onboarding.tsx", "apps/web/src/components/SimBanner.tsx"],
+  }],
+]);
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT = /^[a-f0-9]{40}$/;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -74,11 +83,16 @@ export function verifyTigerClientRepairs(repoRoot) {
       if (hash(readFileSync(regularFile(root, repair.path))) !== repair.repairedSha256) throw new Error(`已审查修复摘要不匹配：${repair.path}`);
       registered.add(`受管客户端文件指纹漂移：${repair.path}`);
     }
-    if (!Array.isArray(doc.testAdditions) || doc.testAdditions.length !== (seen.has(TEST_PATH.replace(".contract.test", "")) ? 1 : 0)) {
-      throw new Error("StarRing 修复必须绑定唯一回归测试文件");
+    const requiredTests = new Set([...TEST_PATHS].filter(([, binding]) => binding.repairs.some((path) => seen.has(path))).map(([path]) => path));
+    if (!Array.isArray(doc.testAdditions) || doc.testAdditions.length !== requiredTests.size) {
+      throw new Error("客户端修复必须绑定对应的精确回归测试文件");
     }
+    const seenTests = new Set();
     for (const test of doc.testAdditions) {
-      if (test?.path !== TEST_PATH || test.card !== "MC-012" || !SHA256.test(test.sha256) || state.managedFiles?.[test.path]) throw new Error("回归测试登记路径、卡号或摘要非法");
+      if (!test || !requiredTests.has(test.path) || seenTests.has(test.path)
+        || test.card !== TEST_PATHS.get(test.path)?.card || !SHA256.test(test.sha256)
+        || state.managedFiles?.[test.path]) throw new Error("回归测试登记路径、卡号或摘要非法");
+      seenTests.add(test.path);
       const file = regularFile(root, test.path);
       if (hash(readFileSync(file)) !== test.sha256 || (lstatSync(file).mode & 0o111)) throw new Error("回归测试文件摘要或模式不匹配");
       registered.add(`客户端根存在非白名单行业文件：${test.path}`);
@@ -86,7 +100,7 @@ export function verifyTigerClientRepairs(repoRoot) {
   } catch (error) {
     errors.push(`Tiger 本仓修复登记无效：${error.message}`);
   }
-  // Only the four exact, hash-bound differences may be accepted. Missing files,
+  // Only the exact, hash-bound source/test differences above may be accepted. Missing files,
   // modes, versions, symlinks and every other original gate error remain failures.
   return [...new Set([...original.filter((error) => errors.length > 0 || !registered.has(error)), ...errors])];
 }
@@ -97,6 +111,6 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     for (const error of errors) console.error(error);
     process.exitCode = 1;
   } else if (existsSync(resolve("governance", MANIFEST))) {
-    console.log("✅ 原客户端基座与校验器摘要保留；本任务三项客户端修复及回归测试已逐文件核验，其余受管文件零漂移");
+    console.log("✅ 原客户端基座与校验器摘要保留；本任务登记的客户端修复及对应回归测试已逐文件核验，其余受管文件零漂移");
   } else console.log("✅ Tiger 客户端原基座严格校验通过；无本仓修复登记");
 }

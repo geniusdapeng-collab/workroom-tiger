@@ -37,6 +37,22 @@
       "repairedSha256": "aeb883b818774ca12c311d39cc978ba65d4526bd5910002898ed903521de8b56",
       "sourceCommit": "bf260d75a6b80b300f957e0e2ebe481f246eb799",
       "reason": "Bind the existing production login heading assertion to the controlled product manifest, retaining exact matching and every responsive interaction assertion."
+    },
+    {
+      "path": "apps/web/src/pages/onboarding/Onboarding.tsx",
+      "card": "MC-027",
+      "upstreamSha256": "b546b370419f42db8e014f3def1703e876ae91d7fec644d96e7383340ec638bd",
+      "repairedSha256": "887ffd3b3a7835c25776f618d9c2e2c0ee5da7e225deff85e882b52a85ec506b",
+      "sourceCommit": "e3d609a83e6e43fceb299734b789ad787c1a9d6c",
+      "reason": "Separate archive mode declaration from formal activation eligibility; show unconfigured and invalid values truthfully and retain the existing shell navigation exit."
+    },
+    {
+      "path": "apps/web/src/components/SimBanner.tsx",
+      "card": "MC-027",
+      "upstreamSha256": "068d845c135ee2f7cfd83fdc68d90b2940422559f09285a3eeddb57be477ede7",
+      "repairedSha256": "69a2378681ed5be11b10b2c5b572d53722328dbe8bebabaeb2868f7c787039f3",
+      "sourceCommit": "e3d609a83e6e43fceb299734b789ad787c1a9d6c",
+      "reason": "Report archive declaration, default tool requirements and formal eligibility independently; do not relabel missing or invalid data modes as simulated execution."
     }
   ],
   "testAdditions": [
@@ -44,6 +60,11 @@
       "path": "apps/web/src/components/star-ring/StarRing.contract.test.tsx",
       "card": "MC-012",
       "sha256": "31e20148294c32a7970245839ebbfb7e91f5e0d77dc03b43eeb68ccf62b12af3"
+    },
+    {
+      "path": "apps/web/src/pages/onboarding/Onboarding.mode.test.tsx",
+      "card": "MC-027",
+      "sha256": "5e75ae201ad3cd4283f856d9991c6f47d9d9489b638076b59b5cfc9b6b515b6a"
     }
   ]
 }
