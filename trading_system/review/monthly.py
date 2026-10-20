@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -113,6 +114,42 @@ def _save_proposal_unlocked(p: Proposal, proposals_dir: str) -> str:
     return path
 
 
+def _create_proposal_unlocked(p: Proposal, proposals_dir: str) -> None:
+    """Choose and publish a new ID while holding the proposal-directory lock.
+
+    Every existing directory entry reserves its ID, including corrupt JSON,
+    directories and dangling symlinks. Publish complete bytes with a hard link
+    so an unexpected target created after selection also cannot be replaced.
+    Filesystems without hard-link support fail explicitly.
+    """
+    base_id = p.proposal_id
+    sequence = 1
+    while True:
+        target = Path(_proposal_path(proposals_dir, p.proposal_id))
+        try:
+            target.lstat()
+        except FileNotFoundError:
+            break
+        sequence += 1
+        p.proposal_id = f"{base_id}-{sequence}"
+
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent,
+            prefix=f".{target.name}.", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(asdict(p), handle, ensure_ascii=False, indent=2,
+                      allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def load_proposal(proposals_dir: str, proposal_id: str) -> Proposal:
     try:
         with _approval_lock(Path(proposals_dir).resolve() / ".approval.lock"):
@@ -166,11 +203,6 @@ def generate_proposal(wfa: dict,
     now = datetime.now()
     proposal_id = f"PROP-{now.strftime('%Y%m%d-%H%M%S')}"
     d = proposals_dir or config.REVIEW_PROPOSALS_DIR
-    if os.path.isdir(d):            # 同秒幂等：追加序号防撞
-        seq = sum(1 for n in os.listdir(d)
-                  if n.startswith(f"{proposal_id}")) 
-        if seq:
-            proposal_id = f"{proposal_id}-{seq + 1}"
 
     dsr = float(wfa.get("dsr") or 0.0)
     oos = wfa.get("oos_aggregate") or {}
@@ -207,7 +239,14 @@ def generate_proposal(wfa: dict,
         reason=reason,
         oos_aggregate=oos,
     )
-    save_proposal(p, d)
+    try:
+        root = Path(d).resolve()
+        with _approval_lock(root / ".approval.lock"):
+            _ensure_no_approval_transaction(str(root))
+            _create_proposal_unlocked(p, str(root))
+    except Exception:
+        logger.exception("提案 %s 创建失败: %s", p.proposal_id, d)
+        raise
     logger.info("月度提案 %s: verdict=%s（DSR=%.3f, OOS期望=%.3fR）",
                 p.proposal_id, p.verdict, p.dsr, p.oos_expectancy)
     return p
