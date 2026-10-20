@@ -82,9 +82,9 @@
       "path": "apps/web/src/components/loommate/LoomMate.tsx",
       "card": "MC-034",
       "upstreamSha256": "7713f3c1332937d2781720bc67d1fc7a4acee4641f30d863ae15bd2b212218f1",
-      "repairedSha256": "95e6309739e0b5e35f675052c6201cc51ecc8fde420e498a33cb31eaf3ed55f5",
-      "sourceCommit": "9df5cdb84d3dd5c8873fe7cc6ed7bc186486e842",
-      "reason": "MC-034 corrects unread-count contrast with existing tokens; MC-035 bounds scrollable surfaces and preserves full numeric badges, avatar dimensions and ordinary pointer and keyboard controls. Both distinct regressions are required."
+      "repairedSha256": "e58d7d0e24ae456258be028cf1e63c3066e1185859a97ce44ed0482838303cf5",
+      "sourceCommit": "1fa7462206778206da699ff1280564120a000d17",
+      "reason": "MC-034 corrects unread-count contrast; MC-035 bounds scrollable surfaces and preserves full numeric badges; MC-039 aggregates mini-mode notifications behind an explicit accessible control so ordinary task launch actions remain reachable. All three distinct regressions are required."
     },
     {
       "path": "apps/web/src/components/SkillDistBanner.tsx",
@@ -93,6 +93,14 @@
       "repairedSha256": "dc1c2fc217983be104b6212aa6739770d46ff13b42d30541be93bed877f63cdc",
       "sourceCommit": "d995fa74eb5f1f5c9af598dbd3a15faba5ebffb4",
       "reason": "Place pending and applied inline skill status banners below the assistant; preserve status semantics and higher-priority dialogs, with real pointer and keyboard regression evidence."
+    },
+    {
+      "path": "apps/web/src/pages/p6/P6.tsx",
+      "card": "MC-038",
+      "upstreamSha256": "e13d40b9b0d6c08d8461d3965d7d81daa66bf6491c199fcd6b8e6a3fee9e8b08",
+      "repairedSha256": "4e353e5281401a2c30f4aa9e2f70f23d671f6b8b073973bb4c9f06a0b015e392",
+      "sourceCommit": "1fa7462206778206da699ff1280564120a000d17",
+      "reason": "Give skill-suggestion copy and actions separate responsive rows while retaining confirmation, rejection and draft creation; verify ordinary pointer and keyboard actions across narrow and enlarged-text layouts."
     }
   ],
   "testAdditions": [
@@ -119,17 +127,27 @@
     {
       "path": "scripts/acceptance/lib/loommate-unread-contrast.test.mjs",
       "card": "MC-034",
-      "sha256": "46d50e66847e68a0d6665182d0004404707d64d3a8afd17c4d98d0a8c0077fc5"
+      "sha256": "660f9162a29f61272c75cbb39a774463f9b4633766457e00a043a15ea5cc64c4"
     },
     {
       "path": "scripts/acceptance/lib/loommate-viewport.test.mjs",
       "card": "MC-035",
-      "sha256": "d3f43a6af1e15797ed217ced24924a77d68aa22ad62d2c51240f23fed9d7a038"
+      "sha256": "935acae5987ee468567c32623701f5f92a981cab3412f5c48e29e80d8cbb0739"
     },
     {
       "path": "scripts/acceptance/lib/loommate-stacking.test.mjs",
       "card": "MC-037",
-      "sha256": "388a826fff5705ad452a407c18994c6d344eb63d04a097c4bb41f6283634656f"
+      "sha256": "c17d345701637aa354d127442e0072e9ca651a99c999b8269ad43b780adf689e"
+    },
+    {
+      "path": "scripts/acceptance/lib/skill-suggestion-layout.test.mjs",
+      "card": "MC-038",
+      "sha256": "08d38c67c328b708b0a45e26c2c3c72d49a41ae7d6748c065e9b77ac2cbc4df4"
+    },
+    {
+      "path": "scripts/acceptance/lib/task-notification-interception.test.mjs",
+      "card": "MC-039",
+      "sha256": "3c796d9f309b9d61b933196513fc2cb9c68a5e303ff9cd8145e332a2f0878ae2"
     }
   ]
 }
