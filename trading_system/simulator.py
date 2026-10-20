@@ -21,6 +21,7 @@ import json
 import logging
 import math
 from dataclasses import dataclass, field
+from datetime import date
 
 from . import config
 from .ledger_io import write_json_atomic
@@ -38,12 +39,14 @@ class Bar:
 
     adv: 20 日平均成交额（USD），用于 ADV 分档滑点（v6.3 摩擦模型）；
     adv≤0 表示未知（旧台账/外部注入），回落 v6.0 合并口径 COST_BPS。
+    date: 行情本身的交易日期（YYYY-MM-DD），未知日期的行情不得执行成交。
     """
     open: float
     high: float
     low: float
     close: float
     adv: float = 0.0
+    date: str | None = None
 
 
 def friction_bps(adv: float) -> float:
@@ -71,6 +74,7 @@ class SimEngine:
             "cash": initial_cash, "positions": [], "pending": [],
             "closed": [], "equity_curve": [], "ops_log": [],
         }
+        self.initial_cash = self.state["initial_cash"]
 
     # ---------------------------------------------------------------- 持久化
     def _load(self) -> dict | None:
@@ -112,16 +116,45 @@ class SimEngine:
         # 让"合成数据是否进过公开台账"在事后可机器判定，而不是靠信任。
         from .providers.base import source_label
         source = source_label(getattr(result, "provider", ""))
+        allow_new = (result.action != "AVOID" and
+                     getattr(getattr(result, "mrs", None), "allow_new_positions", True))
+        bar_cache: dict[str, tuple[Bar, str] | None] = {}
+
+        def dated_bar(ticker: str) -> tuple[Bar, str] | None:
+            """本轮每票只读一次；未知/未来日期不能借运行日补造成交日期。"""
+            if ticker not in bar_cache:
+                bar = get_bar(ticker)
+                observed = None
+                if bar is not None:
+                    try:
+                        bar_date = date.fromisoformat(bar.date).isoformat()
+                    except (TypeError, ValueError):
+                        ops.append(f"⏸️ {ticker} 日K日期缺失或无效，等待可核实行情")
+                    else:
+                        if bar_date <= trade_date:
+                            observed = (bar, bar_date)
+                        else:
+                            ops.append(f"⏸️ {ticker} 日K日期 {bar_date} 晚于运行日，等待可核实行情")
+                bar_cache[ticker] = observed
+            return bar_cache[ticker]
 
         # ---------- 1. 昨日信号成交（T+1 开盘价，无未来函数） ----------
         still_pending = []
         for p in s["pending"]:
-            if p.get("signal_date") and p["signal_date"] >= trade_date:
+            if not allow_new:
+                still_pending.append(p)
+                ops.append(f"⏸️ {p['ticker']} 今日禁止新开仓，待成交信号顺延")
+                continue
+            if not p.get("signal_date") or p["signal_date"] >= trade_date:
                 still_pending.append(p)          # 当日信号次日才成交（同日重跑幂等）
                 continue
-            bar = get_bar(p["ticker"])
-            if bar is None or bar.open <= 0:
+            observed = dated_bar(p["ticker"])
+            if observed is None:
                 still_pending.append(p)          # 无行情，顺延一日
+                continue
+            bar, bar_date = observed
+            if bar_date <= p["signal_date"] or bar.open <= 0:
+                still_pending.append(p)          # 必须是信号之后的真实交易日
                 continue
             fill = round(bar.open, 2)
             if fill <= p["stop_price"]:
@@ -152,7 +185,7 @@ class SimEngine:
             s["cash"] = round(s["cash"] - cost, 2)
             s["positions"].append({
                 "ticker": p["ticker"], "shares": shares, "entry_price": fill_net,
-                "stop": p["stop_price"], "entry_date": trade_date,
+                "stop": p["stop_price"], "entry_date": bar_date,
                 "chain": p.get("chain", ""), "sector": p.get("sector", ""),
                 "risk_usd": round(shares * risk_ps, 2),
                 "time_stop_days": p.get("time_stop_days", 0),
@@ -160,6 +193,7 @@ class SimEngine:
                 "source": source,
                 # v6.3 三栏台账：毛口径入场价与入场摩擦档位（出场摩擦按当时 ADV 重定档）
                 "entry_raw": fill, "friction_bps": bps,
+                "bars_held": 0,
             })
             ops.append(f"🟢 买入 {p['ticker']} {shares} 股 @ {fill:.2f}"
                        f"（开盘价成交，止损 {p['stop_price']:.2f}）")
@@ -168,14 +202,33 @@ class SimEngine:
         # ---------- 2. 出场纪律 ----------
         kept = []
         for pos in s["positions"]:
-            bar = get_bar(pos["ticker"])
-            if bar is None:
+            last_bar_date = pos.get("last_bar_date")
+            if last_bar_date is None and "bars_held" not in pos and s["equity_curve"]:
+                # 旧台账的保守水位只迁移一次，避免后续记账日不断向前推水位，
+                # 导致早晨取得的昨日 K 永远被误判为已经处理。
+                last_bar_date = max(e["date"] for e in s["equity_curve"])
+                pos.update(last_bar_date=last_bar_date,
+                           bars_held=_trading_days(pos["entry_date"], last_bar_date,
+                                                   s["equity_curve"]))
+            observed = dated_bar(pos["ticker"])
+            if observed is None:
+                kept.append(pos)
+                continue
+            bar, bar_date = observed
+            if "last_price" not in pos and bar_date >= pos["entry_date"]:
+                # 旧台账即使不重放出场，也应保留有效收盘估值，不能退回成本价。
+                pos["last_price"] = bar.close
+            if (bar_date < pos["entry_date"]
+                    or last_bar_date is not None and bar_date <= last_bar_date):
                 kept.append(pos)
                 continue
             # v6.0：出场判定统一调用 exit_engine.evaluate_day（与 journal/回测同一套
             # 规则语义，含 ATR 档位化时间止损）；卖出按净价（v6.3 ADV 分档摩擦）。
             from .exit_engine import evaluate_day
-            days = _trading_days(pos["entry_date"], trade_date, s["equity_curve"])
+            # 新持仓只按不同的真实日 K 累计，周末/陈旧行情重跑不增加持仓日数。
+            # 旧台账首次迁移保留已有记账日计数，此后同样按实际 K 线推进。
+            days = (pos["bars_held"] + 1 if "bars_held" in pos else
+                    _trading_days(pos["entry_date"], bar_date, s["equity_curve"]))
             act = evaluate_day(bar.open, bar.high, bar.low, bar.close,
                                pos["entry_price"], pos["stop"], days,
                                time_stop=pos.get("time_stop_days") or TIME_STOP_DAYS)
@@ -202,10 +255,10 @@ class SimEngine:
                 s["cash"] = round(s["cash"] + proceeds, 2)
                 s["closed"].append({
                     "ticker": pos["ticker"], "entry_date": pos["entry_date"],
-                    "exit_date": trade_date, "entry": pos["entry_price"],
+                    "exit_date": bar_date, "entry": pos["entry_price"],
                     "exit": exit_price, "shares": pos["shares"],
                     "pnl_usd": pnl, "r_multiple": r_mult, "reason": reason,
-                    "days": _trading_days(pos["entry_date"], trade_date, s["equity_curve"]),
+                    "days": days,
                     "gross_pnl": gross_pnl, "gross_r": gross_r,
                     "friction_cost": friction, "net_r": r_mult,
                     "source": source,
@@ -214,6 +267,7 @@ class SimEngine:
                            f"（{reason}，{'盈' if pnl >= 0 else '亏'} ${abs(pnl):,.0f}，{r_mult}R）")
             else:
                 pos["peak_price"] = max(pos["peak_price"], bar.high)
+                pos.update(last_bar_date=bar_date, bars_held=days, last_price=bar.close)
                 kept.append(pos)
         s["positions"] = kept
 
@@ -221,8 +275,7 @@ class SimEngine:
         equity = s["cash"]
         marks: dict[str, float] = {}
         for pos in s["positions"]:
-            bar = get_bar(pos["ticker"])
-            px = bar.close if bar else pos["entry_price"]
+            px = pos.get("last_price", pos["entry_price"])
             marks[pos["ticker"]] = px
             equity += pos["shares"] * px
         equity = round(equity, 2)
@@ -237,7 +290,7 @@ class SimEngine:
         # 不再镜像（白皮书 §15.2）。L4 闸门已把五态语义编码进 picks 本身，
         # 故 HOLD/BUY/LIGHT 日只要存在放行 picks 即与 journal 同口径登记；
         # 唯独 AVOID 是白皮书绝对禁止项（MRS*<4 不开新仓），防御性拒绝登记。
-        if result.picks and result.action != "AVOID":
+        if result.picks and allow_new:
             held = ({p["ticker"] for p in s["positions"]}
                     | {p["ticker"] for p in s["pending"]})
             added = 0

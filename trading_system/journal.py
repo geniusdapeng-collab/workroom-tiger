@@ -103,7 +103,7 @@ class Journal:
                 continue
             sig_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
             age = (today - sig_date).days
-            if age < 2:                      # 入场日未到，跳过
+            if age < 1:                      # 信号日不得当日入场
                 continue
             try:
                 df = provider.ohlcv(rec["ticker"], days=min(90, horizon_days * 3))
@@ -115,14 +115,19 @@ class Journal:
             if df is None or len(df) == 0:
                 self.last_failed.append(rec["ticker"])
                 continue
-            df = df[df.index.date >= sig_date]
+            # 保留信号前的覆盖证据；先裁去未来行，不能用未来行情结算。
+            df = df[df.index.date <= today]
             if len(df) < 1:
                 continue
-            prev_status = rec["status"]
+            if df.index.min().date() > sig_date:
+                # 滚动历史已越过信号日：无法证明哪一根才是真实 T+1，等待补齐。
+                self.last_failed.append(rec["ticker"])
+                continue
+            previous = rec.copy()
             self._settle_one(rec, df)
             if rec["status"] == "closed":
                 settled += 1
-            if rec["status"] != prev_status:      # closed 或 void（作废）均需落盘
+            if rec != previous:                 # 入场日期/浮动状态同样属于会计事实
                 changed = True
         if settled or changed:
             self.save()
@@ -140,17 +145,25 @@ class Journal:
         """
         from .exit_engine import cost_adj_buy, simulate_trade
 
+        if df is None or len(df) == 0:
+            return
+        df = df.sort_index()
+        dates = [d.date() for d in df.index]
+        signal_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
+        if dates[0] > signal_date:
+            return                              # 历史窗口不覆盖信号，不捏造入场
+        entry_i = next((i for i, day in enumerate(dates) if day > signal_date), None)
+        if entry_i is None:
+            return                              # 只有信号日或更早数据，尚不可成交
+
         stop0 = float(rec["stop"])
         time_stop = int(rec.get("time_stop_days") or config.TIME_STOP_DAYS[1])
         o, h, l_, c = (df["Open"].values, df["High"].values,
                        df["Low"].values, df["Close"].values)
-        dates = [d.date() for d in df.index]
-
-        # 入场：信号日之后第一个交易日开盘
-        entry_i = 1 if len(o) > 1 else 0
         # v6.1 公司行动检测（必须先于引擎判定：拆股重定基后开盘价必然
         # "跌破止损"，会被通用作废逻辑拦截而丢失拆股语义）
-        ref = (float(c[0]) if len(c) and float(c[0]) > 0
+        signal_i = next((i for i, day in enumerate(dates) if day == signal_date), None)
+        ref = (float(c[signal_i]) if signal_i is not None and float(c[signal_i]) > 0
                else float(rec.get("entry_ref") or 0))
         if ref > 0 and entry_i < len(o):
             open_next = float(o[entry_i])

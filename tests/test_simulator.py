@@ -36,12 +36,12 @@ def _engine(tmp_path) -> SimEngine:
 # ---------------------------------------------------------------- T+1 成交
 def test_signal_fills_next_day_open(tmp_path):
     eng = _engine(tmp_path)
-    bars = {"AAA": Bar(open=100.0, high=102.0, low=98.0, close=101.0)}
+    bars = {"AAA": Bar(open=100.0, high=102.0, low=98.0, close=101.0, date="2026-07-29")}
     # T 日：登记信号，不成交（无未来函数）
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
     assert not eng.state["positions"] and len(eng.state["pending"]) == 1
     # T+1 日：按开盘价成交
-    eng.step("2026-07-29", _result("AVOID"), lambda t: bars.get(t))
+    eng.step("2026-07-29", _result("HOLD"), lambda t: bars.get(t))
     pos = eng.state["positions"]
     # v6.0 净口径：entry_price 含单边成本（100 × 1.001）
     assert len(pos) == 1 and pos[0]["entry_price"] == 100.1
@@ -54,19 +54,21 @@ def test_open_drift_recalculates_shares(tmp_path):
     eng.step("2026-07-28", _result("BUY", [_pick(shares=100, stop=90.0, risk=1000.0)]),
              lambda t: None)
     # 开盘价从信号价漂移到 105 → 每股风险 15 → 股数收缩到 66
-    eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=105.0, high=106.0, low=104.0, close=105.5))
+    eng.step("2026-07-29", _result("HOLD"),
+             lambda t: Bar(open=105.0, high=106.0, low=104.0, close=105.5,
+                           date="2026-07-29"))
     assert eng.state["positions"][0]["shares"] == 66
 
 
 def test_same_day_rerun_never_fills_today_signal(tmp_path):
     eng = _engine(tmp_path)
-    bar = Bar(open=100.0, high=102.0, low=98.0, close=101.0)
+    bar = Bar(open=100.0, high=102.0, low=98.0, close=101.0, date="2026-07-28")
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: bar)
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: bar)  # 同日重跑
     assert not eng.state["positions"]            # T+1 铁律：当日信号绝不当日成交
     assert len(eng.state["ops_log"]) == 1        # 操作日志同日幂等覆盖
-    eng.step("2026-07-29", _result("AVOID"), lambda t: bar)
+    bar.date = "2026-07-29"                     # 下一交易日的新行情
+    eng.step("2026-07-29", _result("HOLD"), lambda t: bar)
     assert len(eng.state["positions"]) == 1      # 次日才按开盘价成交
 
 
@@ -74,8 +76,9 @@ def test_gap_through_stop_voids_signal(tmp_path):
     eng = _engine(tmp_path)
     eng.step("2026-07-28", _result("BUY", [_pick(stop=90.0)]), lambda t: None)
     # 次日开盘价 89 直接跌破止损 90 → 风险模型失效，信号作废
-    eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=89.0, high=90.0, low=88.0, close=89.5))
+    eng.step("2026-07-29", _result("HOLD"),
+             lambda t: Bar(open=89.0, high=90.0, low=88.0, close=89.5,
+                           date="2026-07-29"))
     assert not eng.state["positions"] and not eng.state["pending"]
     assert any("信号作废" in op for op in eng.state["ops_log"][-1]["ops"])
 
@@ -83,7 +86,7 @@ def test_gap_through_stop_voids_signal(tmp_path):
 def test_no_quote_defers_fill(tmp_path):
     eng = _engine(tmp_path)
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"), lambda t: None)  # 无行情
+    eng.step("2026-07-29", _result("HOLD"), lambda t: None)  # 无行情
     assert not eng.state["positions"] and len(eng.state["pending"]) == 1  # 顺延
 
 
@@ -92,7 +95,8 @@ def test_stop_loss_at_stop_price(tmp_path):
     eng = _engine(tmp_path)
     eng.state["positions"].append(_pos())
     eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0))
+             lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0,
+                           date="2026-07-29"))
     closed = eng.state["closed"]
     # v6.0 净口径：卖出扣单边成本（90 × 0.999）
     assert len(closed) == 1 and closed[0]["exit"] == 89.91
@@ -104,7 +108,8 @@ def test_gap_down_exits_at_open(tmp_path):
     eng = _engine(tmp_path)
     eng.state["positions"].append(_pos())
     eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=85.0, high=86.0, low=84.0, close=85.5))
+             lambda t: Bar(open=85.0, high=86.0, low=84.0, close=85.5,
+                           date="2026-07-29"))
     closed = eng.state["closed"]
     # v6.0 净口径：85 × 0.999
     assert closed[0]["exit"] == 84.915 and closed[0]["reason"] == "跳空低开触发止损"
@@ -117,7 +122,8 @@ def test_time_stop_after_seven_days(tmp_path):
         {"date": f"2026-07-{d:02d}", "equity": 100_000.0} for d in range(2, 11)]
     # 第 9 个持仓交易日，收盘价未推进 +1%
     eng.step("2026-07-11", _result("AVOID"),
-             lambda t: Bar(open=100.2, high=100.8, low=99.5, close=100.5))
+             lambda t: Bar(open=100.2, high=100.8, low=99.5, close=100.5,
+                           date="2026-07-11"))
     assert eng.state["closed"][0]["reason"].startswith("时间止损")
 
 
@@ -127,7 +133,8 @@ def test_time_stop_not_triggered_when_profitable(tmp_path):
     eng.state["equity_curve"] = [
         {"date": f"2026-07-{d:02d}", "equity": 100_000.0} for d in range(2, 11)]
     eng.step("2026-07-11", _result("AVOID"),
-             lambda t: Bar(open=101.5, high=102.0, low=101.0, close=101.5))
+             lambda t: Bar(open=101.5, high=102.0, low=101.0, close=101.5,
+                           date="2026-07-11"))
     assert not eng.state["closed"] and len(eng.state["positions"]) == 1
 
 
@@ -135,7 +142,8 @@ def test_profit_protection_moves_stop_to_cost(tmp_path):
     eng = _engine(tmp_path)
     eng.state["positions"].append(_pos())  # entry 100 / stop 90 / 风险 10
     eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=119.0, high=121.0, low=118.0, close=120.0))
+             lambda t: Bar(open=119.0, high=121.0, low=118.0, close=120.0,
+                           date="2026-07-29"))
     pos = eng.state["positions"][0]
     assert pos["stop"] == 100.0  # 浮盈 2R → 止损移成本线
     assert any("2R" in op for op in eng.state["ops_log"][-1]["ops"])
@@ -152,7 +160,8 @@ def test_avoid_day_still_manages_positions(tmp_path):
     eng = _engine(tmp_path)
     eng.state["positions"].append(_pos())
     eng.step("2026-07-29", _result("AVOID", [_pick("BBB")]),
-             lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0))
+             lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0,
+                           date="2026-07-29"))
     assert len(eng.state["closed"]) == 1        # 持仓仍按纪律出场
     assert not eng.state["pending"]             # 但不登记新信号
 

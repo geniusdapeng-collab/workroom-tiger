@@ -131,6 +131,7 @@ def test_hold_day_signal_fills_next_open(tmp_path):
     eng.step("2026-08-30", _result("HOLD", [_pick("BDX", shares=100, stop=90.0)]),
              lambda t: None)
     eng.step("2026-08-31", _result("HOLD"),
-             lambda t: Bar(open=100.0, high=101.0, low=99.0, close=100.5))
+             lambda t: Bar(open=100.0, high=101.0, low=99.0, close=100.5,
+                           date="2026-08-31"))
     assert len(eng.state["positions"]) == 1
     assert eng.state["positions"][0]["ticker"] == "BDX"

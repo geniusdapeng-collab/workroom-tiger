@@ -159,11 +159,11 @@ def _daily(args, provider) -> None:
     if added or settled:
         logging.getLogger(__name__).info("信号日记: 新落账 %d，新结算 %d", added, settled)
 
-    # ---- 小G模拟盘：全AI掌控模拟盘（初始 $100,000，T+1 开盘价成交，无未来函数）----
+    # ---- 小G模拟盘：初始净值遵从 --account（默认 $100,000），T+1 开盘价成交 ----
     # 台账 sim_portfolio.json 为会计账（零基线白名单保留）；行情一律当日实时拉取。
     from trading_system.pipeline import _single_with_fallback
     from trading_system.simulator import Bar, SimEngine
-    sim = SimEngine(os.path.join(args.out, "sim_portfolio.json"))
+    sim = SimEngine(os.path.join(args.out, "sim_portfolio.json"), initial_cash=args.account)
     _bar_cache: dict = {}
 
     def get_bar(ticker: str):
@@ -179,7 +179,7 @@ def _daily(args, provider) -> None:
                     if "Volume" in df.columns else 0.0
                 bar = Bar(open=float(row["Open"]), high=float(row["High"]),
                           low=float(row["Low"]), close=float(row["Close"]),
-                          adv=adv)
+                          adv=adv, date=str(df.index[-1].date()))
         except Exception as exc:
             logging.getLogger(__name__).warning("小G模拟盘取 %s 日K失败（顺延）: %s", ticker, exc)
         _bar_cache[ticker] = bar

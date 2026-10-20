@@ -37,10 +37,12 @@ def _engine(tmp_path, name="sim_portfolio.json") -> SimEngine:
 def _run_roundtrip(eng, adv):
     """信号 → T+1 成交（含摩擦）→ 止损出场。返回 closed 记录。"""
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0, adv=adv))
+    eng.step("2026-07-29", _result("HOLD"),
+             lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0, adv=adv,
+                           date="2026-07-29"))
     eng.step("2026-07-30", _result("AVOID"),
-             lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0, adv=adv))
+             lambda t: Bar(open=95.0, high=96.0, low=89.0, close=94.0, adv=adv,
+                           date="2026-07-30"))
     return eng.state["closed"][0]
 
 
@@ -88,16 +90,18 @@ def test_smaller_adv_costs_more_in_ledger(tmp_path):
 def test_friction_never_negative_on_winning_trade(tmp_path):
     eng = _engine(tmp_path)
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"),
+    eng.step("2026-07-29", _result("HOLD"),
              lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0,
-                           adv=50_000_000))
-    # 时间止损小幅盈利出场：持仓满 7 日记账日，收盘 101.3 低于成本×1.01
+                           adv=50_000_000, date="2026-07-29"))
+    # 时间止损小幅盈利出场：处理第 7 根持仓日K，收盘 101.3 低于成本×1.01
     # （入场净价 100×1.0035=100.35，101.3 < 100.35×1.01=101.35 → 触发）
-    eng.state["equity_curve"] = [
-        {"date": f"2026-08-{d:02d}", "equity": 100_000.0} for d in range(1, 10)]
+    for day in ("2026-07-30", "2026-07-31", "2026-08-03", "2026-08-04", "2026-08-05"):
+        eng.step(day, _result("AVOID"),
+                 lambda t: Bar(open=101.5, high=102.5, low=101.0, close=102.0,
+                               adv=50_000_000, date=day))
     eng.step("2026-08-10", _result("AVOID"),
              lambda t: Bar(open=100.8, high=101.6, low=100.5, close=101.3,
-                           adv=50_000_000))
+                           adv=50_000_000, date="2026-08-10"))
     closed = eng.state["closed"][0]
     assert closed["reason"].startswith("时间止损")
     assert closed["pnl_usd"] > 0                             # 盈利单
@@ -118,8 +122,9 @@ def test_unknown_adv_falls_back_to_legacy_10bp(tmp_path):
     assert friction_bps(0.0) == config.COST_BPS              # ADV 未知 → v6.0 口径
     eng = _engine(tmp_path)
     eng.step("2026-07-28", _result("BUY", [_pick()]), lambda t: None)
-    eng.step("2026-07-29", _result("AVOID"),
-             lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0))
+    eng.step("2026-07-29", _result("HOLD"),
+             lambda t: Bar(open=100.0, high=102.0, low=98.0, close=101.0,
+                           date="2026-07-29"))
     pos = eng.state["positions"][0]
     assert pos["entry_price"] == 100.1                       # 与 v6.0 完全一致
     assert pos["entry_raw"] == 100.0 and pos["friction_bps"] == config.COST_BPS
