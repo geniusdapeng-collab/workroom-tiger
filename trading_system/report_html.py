@@ -2721,7 +2721,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
                  f"<div class='sub' style='flex:1;min-width:min(240px,100%)'>产业链利润在"
                  f"<b>复苏 → 扩张 → 过热 → 衰退</b>四个阶段间循环轮动："
                  f"复苏与扩张期给持仓加成，过热期警惕补涨尾声，衰退期坚决回避——"
-                 f"下表为十条产业链当前所处的阶段与领涨环节。</div></div>"
+                 f"下表为{len(r.chains)}条产业链当前所处的阶段与领涨环节。</div></div>"
                  "<table>"
                  "<tr><th>产业链</th><th>景气</th><th>阶段</th><th>领涨环节</th>"
                  "<th>轮动</th><th>热区</th></tr>")
