@@ -19,10 +19,17 @@ from __future__ import annotations
 import argparse
 import glob
 import json
-import shutil
+import sys
 from datetime import datetime
 from html import escape
 from pathlib import Path
+
+# Keep this exporter standard-library-only; importing report_html would load the
+# trading/reporting stack and embedded artwork merely to inspect attachments.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from trading_system.report_assets import (
+    ReportAssetError, declared_pdf_paths, read_pdf_asset, safe_relative_target, write_pdf_asset,
+)
 
 MARKETS = [
     {"id": "us", "name": "美股", "full": "美国（NYSE/NASDAQ）", "ccy": "USD",
@@ -232,19 +239,37 @@ def main() -> None:
     args = ap.parse_args()
 
     out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
     infos = {mid: load_market(mid, getattr(args, mid)) for mid in ("us", "cn", "hk")}
 
-    # 各市场日报原样分发
+    # 先核对所有页面声明的 PDF，再发布页面，避免成功生成一个缺附件的站点。
+    pages: dict[str, bytes] = {}
+    assets: dict[Path, bytes] = {}
     for mid in ("us", "cn", "hk"):
         src = infos[mid].get("html_src")
         if src:
-            shutil.copyfile(src, out / f"{mid}.html")
+            source = Path(src)
+            page = safe_relative_target(source.parent, source.name).read_bytes()
+            for relative in declared_pdf_paths(page.decode("utf-8")):
+                content = read_pdf_asset(source.parent, relative)
+                if relative in assets and assets[relative] != content:
+                    raise ReportAssetError("Market reports declare conflicting PDF bytes at one URL")
+                assets[relative] = content
+            pages[mid] = page
         else:
-            (out / f"{mid}.html").write_text(
+            pages[mid] = (
                 f"<!DOCTYPE html><meta charset='utf-8'><body style='font-family:sans-serif;padding:40px'>"
                 f"<h2>{mid.upper()} 当日无有效日报</h2><p>该市场当日未运行或独立诚实失败（D2），"
-                f"详见 <a href='index.html'>组合总览</a>。</p></body>", encoding="utf-8")
+                f"详见 <a href='index.html'>组合总览</a>。</p></body>").encode("utf-8")
+
+    if out.is_symlink():
+        raise ReportAssetError("Site output directory must not be a symlink")
+    out.mkdir(parents=True, exist_ok=True)
+    for relative in [*assets, *(Path(f"{mid}.html") for mid in pages), Path("index.html")]:
+        safe_relative_target(out, relative)
+    for relative, content in assets.items():
+        write_pdf_asset(out, relative, content)
+    for mid, page in pages.items():
+        safe_relative_target(out, f"{mid}.html").write_bytes(page)
 
     pday = None
     pday_path = Path(args.portfolio) / "portfolio_day.json"

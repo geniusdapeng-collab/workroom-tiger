@@ -15,9 +15,10 @@ import html
 import json
 import math
 import os
+from pathlib import Path
 import re as _re
 
-from . import config
+from . import config, report_assets
 from .data_models import PipelineResult
 from .redline import STEP_REGISTRY
 from .report import (
@@ -2094,7 +2095,7 @@ def _verify_tab(entries: list[dict] | None, stats: dict | None,
 
 
 # ---------------------------------------------------------------- 交易理念
-def _philosophy_tab(raw: dict | None = None) -> str:
+def _philosophy_tab(raw: dict | None = None, *, asset_dir: str | os.PathLike | None = None) -> str:
     """页签·核心交易理念：按《AI短线美股交易（1-15天波段版）白皮书》整理。"""
     raw = raw or {}
     market = _esc(_market_name(raw))
@@ -2243,16 +2244,28 @@ def _philosophy_tab(raw: dict | None = None) -> str:
              "把每一次迭代都交给<b>统计检验</b>，而不是交给盘感。<br>"
              f"<b style='color:{GOLD};font-size:15px'>Discipline is the edge.</b></div>")
 
-    # —— 白皮书完整版下载 ——
+    # 只有实际输出目录内的可用 PDF 才能承诺相对路径下载。默认字符串渲染
+    # （含严格工作流）没有附件授权，不从 cwd/仓库报告目录猜测或补拷贝。
+    download = "<div class='sub'>本报告未附白皮书 PDF，当前没有可用的下载附件。</div>"
+    if asset_dir is not None:
+        try:
+            pdf = report_assets.read_pdf_asset(asset_dir, report_assets.WHITEPAPER_FILENAME)
+        except (OSError, ValueError):
+            download = ("<div class='sub'>本报告未附可用的白皮书 PDF："
+                        "文件缺失、不可读取或校验未通过。</div>")
+        else:
+            download = (
+                f"<a href='{_esc(report_assets.WHITEPAPER_FILENAME)}' download "
+                f"style='display:inline-block;background:{LIME};color:#1c2a10;font-weight:800;"
+                f"padding:10px 28px;border-radius:10px;text-decoration:none;font-size:14.5px;"
+                f"box-shadow:0 2px 14px #ccff0080'>⬇ 下载完整白皮书（PDF · {len(pdf):,} 字节）</a>")
+    # —— 白皮书完整版及附件状态 ——
     P.append(f"<div class='card' style='margin-top:16px;border-color:#a8d400;text-align:center'>"
              "<div style='font-size:15px'><b>📕 《AI短线美股交易（1–15天波段版）白皮书》</b></div>"
              "<div class='sub' style='margin:6px 0 10px'>完整版 PDF · 16 章 + 4 附录：四层共振全章详解、"
              f"五环架构（白皮书原始口径 17 环节，现行内核 {len(STEP_REGISTRY)} 环节）、"
              "阈值与权限总表、交易卡片模板、每日看板读法</div>"
-             f"<a href='AI短线美股交易白皮书_20260730.pdf' download "
-             f"style='display:inline-block;background:{LIME};color:#1c2a10;font-weight:800;"
-             f"padding:10px 28px;border-radius:10px;text-decoration:none;font-size:14.5px;"
-             f"box-shadow:0 2px 14px #ccff0080'>⬇ 下载完整白皮书（PDF · 4.1MB）</a>"
+             f"{download}"
              "<div class='sub' style='margin-top:8px'>本白皮书为交易系统的方法论与工程说明，"
              "不构成任何证券买卖建议。</div></div>")
     return "".join(P)
@@ -2421,7 +2434,13 @@ function showStock(id){
 
 def render_html(r: PipelineResult, journal_stats: dict | None = None,
                 journal_entries: list[dict] | None = None,
-                sim: dict | None = None, bench: dict | None = None) -> str:
+                sim: dict | None = None, bench: dict | None = None,
+                *, asset_dir: str | os.PathLike | None = None) -> str:
+    """Render HTML; asset_dir is its actual destination directory, when known.
+
+    No companion is read or promised by default. Callers supplying asset_dir
+    must save this HTML there and preserve the declared PDF when distributing it.
+    """
     raw = r.raw or {}
     accounting_blocked = _execution_blocked(raw)
     accounting_note = _esc(_accounting_note(raw))
@@ -2961,7 +2980,7 @@ def render_html(r: PipelineResult, journal_stats: dict | None = None,
 
     # ---- 一级页签：核心交易理念 ----
     P.append("<div id='tab-philosophy' style='display:none'>")
-    P.append(_philosophy_tab(raw))
+    P.append(_philosophy_tab(raw, asset_dir=asset_dir))
     P.append("</div>")
 
     P.append(f"<div class='footer'>老虎全球资产管理（Tiger Global Asset Management）v3.1 · 生成于 {_esc(r.trade_date)}"
@@ -3033,10 +3052,10 @@ def main() -> None:
         stats = j.stats()
         entries = json.load(open(jpath, encoding="utf-8"))
 
-    html_text = render_html(result, stats, entries)
     out = args.out or os.path.join(
         os.path.dirname(args.result_json),
         f"日报_{result.trade_date.replace('-', '')}.html")
+    html_text = render_html(result, stats, entries, asset_dir=Path(out).parent)
     with open(out, "w", encoding="utf-8") as f:
         f.write(html_text)
     print(f"HTML 报告: {out}")
