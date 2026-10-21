@@ -82,9 +82,9 @@
       "path": "apps/web/src/components/loommate/LoomMate.tsx",
       "card": "MC-034",
       "upstreamSha256": "7713f3c1332937d2781720bc67d1fc7a4acee4641f30d863ae15bd2b212218f1",
-      "repairedSha256": "e58d7d0e24ae456258be028cf1e63c3066e1185859a97ce44ed0482838303cf5",
-      "sourceCommit": "1fa7462206778206da699ff1280564120a000d17",
-      "reason": "MC-034 corrects unread-count contrast; MC-035 bounds scrollable surfaces and preserves full numeric badges; MC-039 aggregates mini-mode notifications behind an explicit accessible control so ordinary task launch actions remain reachable. All three distinct regressions are required."
+      "repairedSha256": "9346e3c5f20ba1823160b83379d63a7dc6b31037a24e581b1b2c89736271f775",
+      "sourceCommit": "31135339dce470c7705e007eb5359b4b22f6c255",
+      "reason": "MC-034 corrects unread-count contrast; MC-035 bounds scrollable surfaces and preserves full numeric badges; MC-039 aggregates mini-mode notifications behind an explicit accessible control. MC-054 orders settings reads and writes, preserves pending drafts and visible recovery paths, and retires obsolete heartbeat work. All four distinct regressions are required. The MC-054 follow-up is task T-2026-1021-0903, reviewed under https://github.com/geniusdapeng-collab/workroom-tiger/issues/28 and https://github.com/geniusdapeng-collab/workroom-tiger/pull/29."
     },
     {
       "path": "apps/web/src/components/SkillDistBanner.tsx",
@@ -161,6 +161,11 @@
       "path": "scripts/acceptance/lib/task-plan-visibility.test.mjs",
       "card": "MC-041",
       "sha256": "795ead39baaadc5eaf571e81a8142c15f28b96d063d599ef20fd73f282921807"
+    },
+    {
+      "path": "apps/web/src/components/loommate/LoomMate.settings-race.test.tsx",
+      "card": "MC-054",
+      "sha256": "4926b964319f058c9032a15bfaa24b77862d2214998bd6b7049c4dc385ac5fe2"
     }
   ]
 }
