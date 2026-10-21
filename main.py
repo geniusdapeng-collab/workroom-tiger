@@ -121,7 +121,7 @@ def _research_daily_reports(args, result, reason: str) -> None:
         from trading_system.report_html import render_html
         html_path = os.path.join(args.out, f"日报_{result.trade_date.replace('-', '')}.html")
         with open(html_path, "w", encoding="utf-8") as handle:
-            handle.write(render_html(result))
+            handle.write(render_html(result, asset_dir=args.out))
     plan_path = None
     if args.mode == "premarket":
         plan_path = os.path.join(args.out, f"盘前计划_{result.trade_date.replace('-', '')}.md")
@@ -619,7 +619,8 @@ def _daily(args, provider, *, execution=None):
                 logging.getLogger(__name__).warning("基准 %s 日线获取失败（页面降级）: %s", bmk, exc)
         html_path = os.path.join(args.out, f"日报_{result.trade_date.replace('-', '')}.html")
         with open(html_path, "w", encoding="utf-8") as f:
-            f.write(render_html(result, stats, entries, sim=sim_payload, bench=bench))
+            f.write(render_html(result, stats, entries, sim=sim_payload, bench=bench,
+                                asset_dir=args.out))
 
     print(f"\n报告已生成:\n  {md_path}\n  {json_path}" +
           (f"\n  {html_path}" if html_path else "") +
