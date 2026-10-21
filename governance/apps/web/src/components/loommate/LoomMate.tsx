@@ -351,7 +351,7 @@ export function LoomMate() {
       if (!active()) return;
       const [s, box] = await Promise.all([
         svc().secretary.settings.query().catch((error) => { console.warn("小织设置读取失败", error); return null; }),
-        svc().secretary.inbox.query({ unreadOnly: true }).catch((error) => { console.warn("小织收件箱读取失败", error); return null; }),
+        svc().secretary.inbox.query({ unreadOnly: true }).catch((error) => { console.warn("小织收件箱读取失败", error); return { items: [] }; }),
       ]);
       if (!active()) return;
       if (startedWithoutWrite && pendingSettings.current.length === 0 && revision === settingsRevision.current) {
@@ -361,7 +361,6 @@ export function LoomMate() {
           applySettings(s.settings);
         }
       }
-      if (!box) return;
       const fresh = box.items.filter((it) => !seenIds.current.has(it.id));
       for (const it of box.items) seenIds.current.add(it.id);
       setItems(box.items);

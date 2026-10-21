@@ -44,6 +44,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const snapshot = (settings: Settings) => ({ settings: structuredClone(settings) });
+const reminder = (id: string, title = "本地模拟提醒") => ({
+  id, kind: "judge", level: "high", title, body: "本地模拟收件箱内容",
+  actions: [], link: null, status: "unread", created_at: "2026-10-20T00:00:00Z",
+});
 
 describe("MC-054 LoomMate settings request ordering", () => {
   let container: HTMLDivElement;
@@ -108,6 +112,86 @@ describe("MC-054 LoomMate settings request ordering", () => {
   }
   function nameInput() { return container.querySelector<HTMLInputElement>("label input")!; }
   function saveButton() { return [...container.querySelectorAll<HTMLButtonElement>("button")].find(node => /^保存（/.test(node.textContent ?? ""))!; }
+  function unreadCounts() {
+    return [...container.querySelectorAll("span")]
+      .map(node => node.textContent?.trim() ?? "").filter(text => /^\d+$/.test(text));
+  }
+
+  it("clears reminders on the current inbox failure and recovers on the next heartbeat", async () => {
+    api.inbox.mockResolvedValueOnce({ items: [reminder("before-failure", "失败前的旧提醒")] });
+    await mount();
+    expect(unreadCounts()).toEqual(["1"]);
+    api.inbox.mockRejectedValueOnce(new Error("inbox unavailable"));
+    await heartbeat();
+    expect(unreadCounts()).toEqual([]);
+    expect(container.textContent).not.toContain("失败前的旧提醒");
+    expect(sizeButton().textContent).toBe("全屏");
+    api.inbox.mockResolvedValueOnce({ items: [reminder("recovered-a", "恢复后的提醒"), reminder("recovered-b")] });
+    await heartbeat();
+    expect(unreadCounts()).toEqual(["2"]);
+    expect(container.textContent).toContain("恢复后的提醒");
+    expect(api.inbox).toHaveBeenCalledTimes(3);
+    expect(api.scan).toHaveBeenCalledTimes(2);
+  });
+
+  it("consumes a successful inbox when settings fail without discarding accepted settings", async () => {
+    api.inbox.mockResolvedValueOnce({ items: [reminder("initial", "初始提醒")] });
+    await mount();
+    api.settings.mockRejectedValueOnce(new Error("settings unavailable"));
+    api.inbox.mockResolvedValueOnce({ items: [reminder("fresh-a", "独立刷新的提醒"), reminder("fresh-b")] });
+    await heartbeat();
+    expect(unreadCounts()).toEqual(["2"]);
+    expect(container.textContent).toContain("独立刷新的提醒");
+    expect(container.textContent).not.toContain("初始提醒");
+    expect(sizeButton().textContent).toBe("全屏");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("读取");
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
+  it("clears a failed current inbox during a pending size save without rolling back fullscreen", async () => {
+    api.inbox.mockResolvedValueOnce({ items: [reminder("pending-save")] });
+    await mount();
+    const saving = deferred<{ settings: Settings }>();
+    api.save.mockReturnValueOnce(saving.promise);
+    await click(sizeButton());
+    expect(dialog()).not.toBeNull();
+    expect(unreadCounts()).toEqual(["1"]);
+    api.inbox.mockRejectedValueOnce(new Error("inbox unavailable during save"));
+    await heartbeat();
+    expect(unreadCounts()).toEqual([]);
+    expect(dialog()).not.toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("正在保存");
+    server.widget_size = "fullscreen";
+    await settle(saving, snapshot(server));
+    expect(dialog()).not.toBeNull();
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    api.inbox.mockResolvedValueOnce({ items: [reminder("after-save", "保存后的提醒")] });
+    await heartbeat();
+    expect(unreadCounts()).toEqual(["1"]);
+    expect(container.textContent).toContain("保存后的提醒");
+  });
+
+  it("does not let an obsolete inbox failure clear a newer manual read", async () => {
+    api.settings.mockRejectedValueOnce(new Error("initial settings unavailable"));
+    api.inbox.mockResolvedValueOnce({ items: [reminder("initial")] });
+    await mount();
+    const oldSettings = deferred<{ settings: Settings }>();
+    const oldInbox = deferred<{ items: unknown[] }>();
+    api.settings.mockReturnValueOnce(oldSettings.promise);
+    api.inbox.mockReturnValueOnce(oldInbox.promise);
+    await click(button("重新读取"));
+    server.widget_size = "small";
+    api.inbox.mockResolvedValueOnce({ items: [reminder("new-a", "较新读取的提醒"), reminder("new-b")] });
+    await click(button("重新读取"));
+    expect(unreadCounts()).toEqual(["2"]);
+    expect(sizeButton().textContent).toBe("变大");
+    await act(async () => oldInbox.reject(new Error("obsolete inbox failure")));
+    await settle(oldSettings, snapshot(initial()));
+    expect(unreadCounts()).toEqual(["2"]);
+    expect(container.textContent).toContain("较新读取的提醒");
+    expect(sizeButton().textContent).toBe("变大");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
 
   it("waits for initialization before enabling the size control", async () => {
     const first = deferred<{ settings: Settings }>();
