@@ -29,6 +29,7 @@ const stackingRegression = "scripts/acceptance/lib/loommate-stacking.test.mjs";
 const skillsPage = "apps/web/src/pages/p6/P6.tsx";
 const suggestionRegression = "scripts/acceptance/lib/skill-suggestion-layout.test.mjs";
 const notificationRegression = "scripts/acceptance/lib/task-notification-interception.test.mjs";
+const settingsRaceRegression = "apps/web/src/components/loommate/LoomMate.settings-race.test.tsx";
 const taskPage = "apps/web/src/pages/p2/P2.tsx";
 const taskPlanRegression = "scripts/acceptance/lib/task-plan-visibility.test.mjs";
 const manifestFile = ".workloom-client-repairs.json";
@@ -67,7 +68,7 @@ function fixture(t, repaired = true) {
     manifest.testAdditions.push({ path: modeRegression, card: "MC-027", sha256: digest(readFileSync(join(g, modeRegression))) });
     write(g, ballRegression, "test('decorative animation stays outside sequential keyboard focus', () => {});\n");
     manifest.testAdditions.push({ path: ballRegression, card: "MC-032", sha256: digest(readFileSync(join(g, ballRegression))) });
-    for (const [path, card] of [[levelRegression, "MC-033"], [unreadRegression, "MC-034"], [viewportRegression, "MC-035"], [stackingRegression, "MC-037"], [suggestionRegression, "MC-038"], [notificationRegression, "MC-039"], [taskPlanRegression, "MC-041"]]) {
+    for (const [path, card] of [[levelRegression, "MC-033"], [unreadRegression, "MC-034"], [viewportRegression, "MC-035"], [stackingRegression, "MC-037"], [suggestionRegression, "MC-038"], [notificationRegression, "MC-039"], [taskPlanRegression, "MC-041"], [settingsRaceRegression, "MC-054"]]) {
       write(g, path, "test('real browser component evidence', () => {});\n");
       manifest.testAdditions.push({ path, card, sha256: digest(readFileSync(join(g, path))) });
     }
@@ -232,9 +233,10 @@ for (const [card, source, regressionPath] of [
   ["MC-038", skillsPage, suggestionRegression],
   ["MC-039", loomMate, notificationRegression],
   ["MC-041", taskPage, taskPlanRegression],
+  ["MC-054", loomMate, settingsRaceRegression],
 ]) {
   for (const kind of ["changed-source", "missing-source-registration", "wrong-source-card", "missing-test-registration", "changed-test", "wrong-test-card", "executable-test", "symlink-test"]) {
-    test(`${card} ${source} browser regression binding ${kind} fails closed`, (t) => {
+    test(`${card} ${source} ${card === "MC-054" ? "component" : "browser"} regression binding ${kind} fails closed`, (t) => {
       const f = fixture(t);
       const repair = f.manifest.repairs.find((entry) => entry.path === source);
       const boundTest = f.manifest.testAdditions.find((entry) => entry.path === regressionPath);

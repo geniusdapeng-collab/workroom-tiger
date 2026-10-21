@@ -55,6 +55,9 @@ const TEST_PATHS = new Map([
   ["scripts/acceptance/lib/task-plan-visibility.test.mjs", {
     card: "MC-041", repairs: ["apps/web/src/pages/p2/P2.tsx"],
   }],
+  ["apps/web/src/components/loommate/LoomMate.settings-race.test.tsx", {
+    card: "MC-054", repairs: ["apps/web/src/components/loommate/LoomMate.tsx"],
+  }],
 ]);
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT = /^[a-f0-9]{40}$/;

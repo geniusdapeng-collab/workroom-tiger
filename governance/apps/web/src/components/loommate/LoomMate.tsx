@@ -22,6 +22,19 @@ interface Settings {
   widget_size: "small" | "large" | "fullscreen"; quiet_start: string; quiet_end: string;
   channels: { im?: { provider: string; target: string }; outbox_urls?: string[] };
 }
+/** Settings saves replace nested objects on the server; preserve untouched sibling keys. */
+function patchSettings(settings: Settings, patch: Partial<Settings>): Settings {
+  return {
+    ...settings, ...patch,
+    persona_custom: { ...settings.persona_custom, ...patch.persona_custom },
+    channels: { ...settings.channels, ...patch.channels },
+  };
+}
+function settingsPatchKeys(patch: Partial<Settings>): string[] {
+  return Object.entries(patch).flatMap(([key, value]) =>
+    key === "channels" || key === "persona_custom"
+      ? Object.keys(value ?? {}).map(child => `${key}.${child}`) : [key]);
+}
 interface InboxItem {
   id: string; kind: "judge" | "done" | "alert" | "daily"; level: "red" | "high" | "mid" | "low";
   title: string; body: string; actions: Array<{ label: string; link: string }>; link: string | null;
@@ -111,6 +124,113 @@ export function LoomMate() {
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const [surfaceWidth, setSurfaceWidth] = useState(0);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const failedSettingsFields = useRef(new Set<string>());
+  const [settingsLoadError, setSettingsLoadError] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  // The panel remounts when entering/leaving fullscreen; keep its draft and submission
+  // state with the request owner so that neither edits nor disabled state disappear.
+  const [settingsDraft, setSettingsDraft] = useState<Partial<Settings>>({});
+  const [outboxDraft, setOutboxDraft] = useState<string | null>(null);
+  const [settingsFormSaving, setSettingsFormSaving] = useState(false);
+  const formSubmitting = useRef(false);
+  const currentSettings = useRef<Settings | null>(null);
+  const committedSettings = useRef<Settings | null>(null);
+  const pendingSettings = useRef<Array<{ id: number; patch: Partial<Settings> }>>([]);
+  const settingsRevision = useRef(0);
+  const settingsRead = useRef(0);
+  const activeSettingsReads = useRef(new Set<number>());
+  const settingsWrite = useRef(0);
+  const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const settingsGeneration = useRef(0);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      settingsGeneration.current += 1;
+      settingsRead.current += 1;
+      activeSettingsReads.current.clear();
+      settingsRevision.current += 1;
+      pendingSettings.current = [];
+    };
+  }, []);
+  const applySettings = useCallback((value: Settings) => {
+    currentSettings.current = value;
+    setSettings(value);
+  }, []);
+  const saveSettings = useCallback((patch: Partial<Settings>): Promise<boolean> => {
+    if (!mounted.current || !currentSettings.current || !committedSettings.current) return Promise.resolve(false);
+    const generation = settingsGeneration.current;
+    const operation = { id: ++settingsWrite.current, patch };
+    pendingSettings.current.push(operation);
+    settingsRevision.current += 1;
+    setSettingsSaving(true);
+    applySettings(patchSettings(currentSettings.current, patch));
+    const active = () => mounted.current && generation === settingsGeneration.current;
+    const task = settingsQueue.current.then(async () => {
+      if (!active()) return false;
+      // Serialize writes and merge nested fields against the last acknowledged response,
+      // not against an old form snapshot or a later optimistic intent.
+      const merged = patchSettings(committedSettings.current!, patch);
+      const request = {
+        ...patch,
+        ...(patch.persona_custom ? { persona_custom: merged.persona_custom } : {}),
+        ...(patch.channels ? { channels: merged.channels } : {}),
+      };
+      try {
+        const result = await svc().secretary.saveSettings.mutate(request);
+        if (!active()) return false;
+        committedSettings.current = result.settings;
+        for (const key of settingsPatchKeys(patch)) failedSettingsFields.current.delete(key);
+        if (failedSettingsFields.current.size === 0) setSettingsError(null);
+        return true;
+      } catch (error) {
+        if (active()) {
+          console.warn("小织设置保存失败", error);
+          for (const key of settingsPatchKeys(patch)) failedSettingsFields.current.add(key);
+          setSettingsError("有一项设置未保存，请重试。已保存的设置仍然有效。");
+        }
+        return false;
+      } finally {
+        if (active()) {
+          pendingSettings.current = pendingSettings.current.filter(item => item.id !== operation.id);
+          settingsRevision.current += 1;
+          // Rebase after every settlement: a failed earlier patch must disappear even
+          // while a later intent is pending; a successful one is the next rollback base.
+          applySettings(pendingSettings.current.reduce(
+            (value, item) => patchSettings(value, item.patch), committedSettings.current!,
+          ));
+          setSettingsSaving(pendingSettings.current.length > 0);
+        }
+      }
+    });
+    settingsQueue.current = task;
+    return task;
+  }, [applySettings]);
+  const submitSettings = async () => {
+    if (formSubmitting.current || (Object.keys(settingsDraft).length === 0 && outboxDraft === null)) return;
+    const patch = {
+      ...settingsDraft,
+      ...(outboxDraft !== null ? { channels: { ...settingsDraft.channels,
+        outbox_urls: outboxDraft.split(",").map(value => value.trim()).filter(Boolean).slice(0, 3),
+      } } : {}),
+    };
+    const generation = settingsGeneration.current;
+    formSubmitting.current = true;
+    setSettingsFormSaving(true);
+    try {
+      if (await saveSettings(patch) && mounted.current && generation === settingsGeneration.current) {
+        setSettingsDraft({});
+        setOutboxDraft(null);
+      }
+    } finally {
+      if (mounted.current && generation === settingsGeneration.current) {
+        formSubmitting.current = false;
+        setSettingsFormSaving(false);
+      }
+    }
+  };
   const [items, setItems] = useState<InboxItem[]>([]);
   const [open, setOpen] = useState<"none" | "chat" | "settings" | "memory">("none");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -216,28 +336,58 @@ export function LoomMate() {
   const systemEmotionText = emotionLabelOf(systemEmotion);
 
   const load = useCallback(async () => {
-    await ensureDemoLogin();
-    const [s, box] = await Promise.all([
-      svc().secretary.settings.query().catch(() => null),
-      svc().secretary.inbox.query({ unreadOnly: true }).catch(() => ({ items: [] })),
-    ]);
-    if (s) setSettings(s.settings);
-    const fresh = box.items.filter((it) => !seenIds.current.has(it.id));
-    for (const it of box.items) seenIds.current.add(it.id);
-    setItems(box.items);
-    // 新事件语音播报（红线/高，voice_on 才发声；字幕永远发——VoiceEngine 纪律）
-    if (s?.settings.voice_on) {
-      for (const it of fresh.filter((x) => x.level === "red" || x.level === "high").slice(0, 2)) {
-        VoiceEngine.speak({
-          role: "loommate", persona: personaName,
-          text: inboxSpeechText(it.title, it.body).slice(0, 120),
-          priority: it.level === "red" ? "fuse" : "ambient",
-          voiceOverride: VOICE_MAP[s.settings.voice_key] ?? VOICE_MAP.sweet,
-        });
+    // Capture before authentication: a slower earlier login must not become the newest read.
+    const request = ++settingsRead.current;
+    // A manual retry supersedes older reads. Their eventual cleanup cannot block
+    // background refresh after this current read has completed successfully.
+    activeSettingsReads.current.clear();
+    activeSettingsReads.current.add(request);
+    const revision = settingsRevision.current;
+    const startedWithoutWrite = pendingSettings.current.length === 0;
+    const generation = settingsGeneration.current;
+    const active = () => mounted.current && generation === settingsGeneration.current && request === settingsRead.current;
+    try {
+      await ensureDemoLogin();
+      if (!active()) return;
+      const [s, box] = await Promise.all([
+        svc().secretary.settings.query().catch((error) => { console.warn("小织设置读取失败", error); return null; }),
+        svc().secretary.inbox.query({ unreadOnly: true }).catch((error) => { console.warn("小织收件箱读取失败", error); return { items: [] }; }),
+      ]);
+      if (!active()) return;
+      if (startedWithoutWrite && pendingSettings.current.length === 0 && revision === settingsRevision.current) {
+        setSettingsLoadError(!s);
+        if (s) {
+          committedSettings.current = s.settings;
+          applySettings(s.settings);
+        }
       }
+      const fresh = box.items.filter((it) => !seenIds.current.has(it.id));
+      for (const it of box.items) seenIds.current.add(it.id);
+      setItems(box.items);
+      // Inbox refresh is independent of a rejected stale settings snapshot. Respect the
+      // current accepted/optimistic voice preference, including a pending disable action.
+      const current = currentSettings.current;
+      if (current?.voice_on) {
+        const persona = current.persona_key === "custom"
+          ? (current.persona_custom.name ?? "小织") : (PERSONA_NAME[current.persona_key] ?? "小织");
+        for (const it of fresh.filter((x) => x.level === "red" || x.level === "high").slice(0, 2)) {
+          VoiceEngine.speak({
+            role: "loommate", persona,
+            text: inboxSpeechText(it.title, it.body).slice(0, 120),
+            priority: it.level === "red" ? "fuse" : "ambient",
+            voiceOverride: VOICE_MAP[current.voice_key] ?? VOICE_MAP.sweet,
+          });
+        }
+      }
+    } catch (error) {
+      if (active()) {
+        console.warn("小织设置会话读取失败", error);
+        setSettingsLoadError(true);
+      }
+    } finally {
+      activeSettingsReads.current.delete(request);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personaName]);
+  }, [applySettings]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -292,14 +442,34 @@ export function LoomMate() {
   // clampPos 按当前左右栏/尺寸计算；这些值变化时重新校正一次即可。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navW, railW, viewport.width, viewport.height, widgetW, widgetH, footprintW]);
-  // 20s 心跳：先扫描事件源再拉收件箱
+  // 20s 心跳：先扫描事件源再拉收件箱。慢于一个周期的请求必须有机会完成，
+  // 不能每 20s 再发一个较新的读，把初始化或合法刷新永久淘汰。
   useEffect(() => {
+    let running: { read: number } | null = null;
+    let cancelled = false;
+    const generation = settingsGeneration.current;
+    const active = () => !cancelled && mounted.current && generation === settingsGeneration.current;
     const h = setInterval(async () => {
-      await ensureDemoLogin();
-      await svc().secretary.scan.mutate().catch(() => ({ added: 0 }));
-      await load();
+      if (!active() || activeSettingsReads.current.size > 0 || running?.read === settingsRead.current) return;
+      // A manual read retires an earlier heartbeat, including one still awaiting
+      // authentication or scan. Its late completion cannot start another read.
+      const operation = { read: settingsRead.current };
+      running = operation;
+      const ownsScan = () => active() && running === operation && operation.read === settingsRead.current;
+      try {
+        try {
+          await ensureDemoLogin();
+          if (!ownsScan()) return;
+          await svc().secretary.scan.mutate();
+        } catch (error) {
+          if (ownsScan()) console.warn("小织事件扫描失败", error);
+        }
+        // load synchronously claims activeSettingsReads; that owner enforces read
+        // single-flight without a retired read keeping this scan lock forever.
+        if (ownsScan() && activeSettingsReads.current.size === 0) void load();
+      } finally { if (running === operation) running = null; }
     }, 20_000);
-    return () => clearInterval(h);
+    return () => { cancelled = true; clearInterval(h); };
   }, [load]);
 
   const act = async (it: InboxItem) => {
@@ -316,9 +486,9 @@ export function LoomMate() {
   const MODE_NEXT: Record<string, "small" | "large" | "fullscreen"> = { small: "large", large: "fullscreen", fullscreen: "small" };
   const MODE_LABEL: Record<string, string> = { small: "变大", large: "全屏", fullscreen: "变小" };
   const toggleSize = async () => {
-    const next = MODE_NEXT[size] ?? "large";
-    setSettings((s) => s ? { ...s, widget_size: next } : s);
-    await svc().secretary.saveSettings.mutate({ widget_size: next }).catch(() => undefined);
+    if (!currentSettings.current) return;
+    const next = MODE_NEXT[currentSettings.current.widget_size] ?? "large";
+    await saveSettings({ widget_size: next });
   };
   const mateSurface = useManagedSurface<HTMLDivElement>({
     open: size === "fullscreen" || (!hidden && (open !== "none" || notificationsOpen)),
@@ -400,6 +570,15 @@ export function LoomMate() {
 
   const dim = size === "large" ? widgetW : Math.min(96, widgetW);
   const unread = items.length;
+  const settingsStatus = (
+    <>
+      {settingsError && <div role="alert" style={{ pointerEvents: "auto" }} className="relative max-w-full shrink-0 rounded-lg border border-alert/50 bg-bg900 px-3 py-2 text-body text-alert">{settingsError}</div>}
+      {settingsLoadError && <div role="alert" style={{ pointerEvents: "auto" }} className="relative max-w-full shrink-0 rounded-lg border border-alert/50 bg-bg900 px-3 py-2 text-body text-alert">
+        设置暂时未能读取。<button onClick={() => void load()} className="ml-2 underline">重新读取</button>
+      </div>}
+      {settingsSaving && <div role="status" className="relative shrink-0 rounded-lg bg-bg900 px-3 py-1 text-body text-ink2">正在保存设置…</div>}
+    </>
+  );
 
   // —— 全屏屏保模式：她守着整个场，有事直接喊你 ——
   if (size === "fullscreen") {
@@ -410,14 +589,15 @@ export function LoomMate() {
         {/* 环境微光背景 */}
         <div className="pointer-events-none absolute inset-0 opacity-30"
           style={{ background: "radial-gradient(ellipse at 50% 62%, rgba(232,160,191,.25), transparent 60%)" }} />
-        <div className="relative flex w-full shrink-0 justify-end p-5 pb-2">
+        <div className="relative flex w-full shrink-0 justify-end p-5 pb-2" style={{ paddingRight: railW + 20 }}>
           <button ref={sizeToggleRef} onClick={() => void toggleSize()}
             className="rounded-full border border-line bg-bg900/80 px-3 py-1.5 text-body text-ink2 hover:text-ink">
             退出屏保（Esc）
           </button>
         </div>
+        {open === "none" && settingsStatus}
         {/* 主内容独立滚动，长提醒不会被底部实况遮挡。形象尺寸保持原值。 */}
-        <div className="relative flex min-h-0 w-full flex-1 flex-col items-center overflow-x-hidden overflow-y-auto px-4 pb-5">
+        <div className="relative isolate flex min-h-0 w-full flex-1 flex-col items-center overflow-x-hidden overflow-y-auto px-4 pb-5">
         <div className="my-auto flex w-full shrink-0 flex-col items-center">
         <button onClick={() => void openPanel("chat")} className="relative flex max-w-full shrink-0 items-center justify-center cursor-pointer transition-transform hover:scale-[1.02]">
           <span className="pointer-events-none shrink-0">
@@ -461,11 +641,15 @@ export function LoomMate() {
         </div>
         {/* 面板（聊/设置/记忆）在全屏态同样可用 */}
         {open !== "none" && (
-          <div className="absolute bottom-4 right-4 top-16 flex min-h-0 w-[min(var(--wl-assistant-expanded),calc(100vw-2rem))] flex-col">
+          <div className="absolute bottom-4 top-16 flex min-h-0 w-[min(var(--wl-assistant-expanded),calc(100vw-2rem))] flex-col"
+            style={{ right: railW + 16, maxWidth: Math.max(96, viewport.width - railW - 32) }}>
             <MatePanel
               open={open} setOpen={setOpen} openPanel={openPanel}
               chat={chat} busy={busy} input={input} setInput={setInput} send={send}
-              personaName={personaName} settings={settings} setSettings={setSettings}
+              personaName={personaName} settings={settings}
+              settingsDraft={settingsDraft} setSettingsDraft={setSettingsDraft}
+              outboxDraft={outboxDraft} setOutboxDraft={setOutboxDraft}
+              settingsFormSaving={settingsFormSaving} submitSettings={submitSettings} settingsStatus={settingsStatus}
               memory={memory} setMemory={setMemory}
             />
           </div>
@@ -500,6 +684,7 @@ export function LoomMate() {
       className={`flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain p-2 [&>*]:shrink-0 ${docked === "left" ? "items-start" : "items-end"}`}
       style={{ fontFamily: "inherit", pointerEvents: "none", maxHeight: Math.max(0, viewport.height - (pos?.y ?? 8) - 8),
         maxWidth: Math.max(96, viewport.width - railW - navW - 16), ...rootStyle }}>
+      {open === "none" && settingsStatus}
       {/* 小球默认聚合提醒；用户主动查看后才展开卡片，避免遮住业务操作。 */}
       {open === "none" && unread > 0 && (!mini || notificationsOpen) && (
       <div id={notificationsId} role="region" aria-label="小织未读提醒" className="flex max-w-full flex-col gap-2">
@@ -525,7 +710,10 @@ export function LoomMate() {
         <MatePanel
           open={open} setOpen={setOpen} openPanel={openPanel}
           chat={chat} busy={busy} input={input} setInput={setInput} send={send}
-          personaName={personaName} settings={settings} setSettings={setSettings}
+          personaName={personaName} settings={settings}
+          settingsDraft={settingsDraft} setSettingsDraft={setSettingsDraft}
+          outboxDraft={outboxDraft} setOutboxDraft={setOutboxDraft}
+          settingsFormSaving={settingsFormSaving} submitSettings={submitSettings} settingsStatus={settingsStatus}
           memory={memory} setMemory={setMemory}
         />
       )}
@@ -614,9 +802,9 @@ export function LoomMate() {
             <span className="rounded-full bg-bg900/90 px-2.5 py-0.5 text-body text-ink shadow">
             {personaName}
           </span>
-          <button ref={sizeToggleRef} onClick={() => void toggleSize()} title="切换大小"
-            className="rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100">
-            {MODE_LABEL[size] ?? "变大"}
+          <button ref={sizeToggleRef} onClick={() => void toggleSize()} title="切换大小" disabled={!settings}
+            className="rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100 disabled:cursor-wait disabled:opacity-50">
+            {settings ? (MODE_LABEL[size] ?? "变大") : "读取设置中…"}
           </button>
           <button onClick={() => { setMini(true); persistLocal("loommate.mini", "1"); }} title="收起为小球（不挡界面）"
             className="rounded-full border border-line bg-bg900/90 px-1.5 py-0.5 text-body text-ink2 opacity-70 shadow hover:text-ink hover:opacity-100">
@@ -634,14 +822,17 @@ export function LoomMate() {
 }
 
 /* ---------------- 展开面板（聊/设置/记忆——角落态与全屏态复用） ---------------- */
-function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send, personaName, settings, setSettings, memory, setMemory }: {
+function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send, personaName, settings, settingsDraft, setSettingsDraft, outboxDraft, setOutboxDraft, settingsFormSaving, submitSettings, settingsStatus, memory, setMemory }: {
   open: "chat" | "settings" | "memory";
   setOpen: (v: "none" | "chat" | "settings" | "memory") => void;
   openPanel: (p: "chat" | "settings" | "memory") => Promise<void>;
   chat: ChatMsg[]; busy: boolean; input: string; setInput: (v: string) => void;
   send: (text: string) => Promise<void>;
   personaName: string; settings: Settings | null;
-  setSettings: React.Dispatch<React.SetStateAction<Settings | null>>;
+  settingsDraft: Partial<Settings>;
+  outboxDraft: string | null; setOutboxDraft: (value: string | null) => void;
+  setSettingsDraft: React.Dispatch<React.SetStateAction<Partial<Settings>>>;
+  settingsFormSaving: boolean; submitSettings: () => Promise<void>; settingsStatus: React.ReactNode;
   memory: Record<string, MemRow[]> | null;
   setMemory: React.Dispatch<React.SetStateAction<Record<string, MemRow[]> | null>>;
 }) {
@@ -658,6 +849,7 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
             </div>
             <button onClick={() => setOpen("none")} className="text-ink3 hover:text-ink" aria-label="关闭小织助手面板" title="关闭小织助手面板"><Icon name="close" size={16} /></button>
           </div>
+          {settingsStatus}
           {open === "chat" && (
             <>
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
@@ -693,10 +885,8 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
           )}
           {open === "settings" && settings && (
             <SettingsPanel settings={settings} personaName={personaName}
-              onSave={async (patch) => {
-                const r = await svc().secretary.saveSettings.mutate(patch);
-                setSettings(r.settings);
-              }} />
+              patch={settingsDraft} setPatch={setSettingsDraft} outboxDraft={outboxDraft} setOutboxDraft={setOutboxDraft}
+              saving={settingsFormSaving} onSave={submitSettings} />
           )}
           {open === "memory" && (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -728,13 +918,16 @@ function MatePanel({ open, setOpen, openPanel, chat, busy, input, setInput, send
 }
 
 /* ---------------- 设置面板 ---------------- */
-function SettingsPanel({ settings, personaName, onSave }: {
-  settings: Settings; personaName: string; onSave: (patch: Partial<Settings>) => Promise<void>;
+function SettingsPanel({ settings, personaName, patch, setPatch, outboxDraft, setOutboxDraft, saving, onSave }: {
+  settings: Settings; personaName: string; patch: Partial<Settings>;
+  outboxDraft: string | null; setOutboxDraft: (value: string | null) => void;
+  setPatch: React.Dispatch<React.SetStateAction<Partial<Settings>>>;
+  saving: boolean; onSave: () => Promise<void>;
 }) {
-  const [s, setS] = useState(settings);
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((x) => ({ ...x, [k]: v }));
+  const s = patchSettings(settings, patch);
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setPatch((x) => ({ ...x, [k]: v }));
   return (
-    <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3 text-body">
+    <fieldset disabled={saving} className="m-0 min-h-0 min-w-0 flex-1 space-y-2.5 overflow-y-auto border-0 p-3 text-body">
       <label className="block">
         <span className="text-ink2">它怎么称呼您</span>
         <input value={s.display_name} onChange={(e) => set("display_name", e.target.value)}
@@ -753,10 +946,10 @@ function SettingsPanel({ settings, personaName, onSave }: {
         {s.persona_key === "custom" && (
           <div className="mt-1.5 space-y-1.5">
             <input value={s.persona_custom?.name ?? ""} placeholder="她的名字"
-              onChange={(e) => set("persona_custom", { ...s.persona_custom, name: e.target.value })}
+              onChange={(e) => set("persona_custom", { ...patch.persona_custom, name: e.target.value })}
               className="w-full rounded-lg border border-line bg-bg950 px-2.5 py-1.5 outline-none focus:border-gline" />
             <input value={s.persona_custom?.tone ?? ""} placeholder="性格语气（如：毒舌但靠谱）"
-              onChange={(e) => set("persona_custom", { ...s.persona_custom, tone: e.target.value })}
+              onChange={(e) => set("persona_custom", { ...patch.persona_custom, tone: e.target.value })}
               className="w-full rounded-lg border border-line bg-bg950 px-2.5 py-1.5 outline-none focus:border-gline" />
           </div>
         )}
@@ -800,15 +993,15 @@ function SettingsPanel({ settings, personaName, onSave }: {
       </div>
       <label className="block">
         <span className="text-ink2">外部通知回调地址（最多 3 个，用逗号分隔）</span>
-        <input defaultValue={(s.channels?.outbox_urls ?? []).join(",")}
-          onBlur={(e) => set("channels", { ...s.channels, outbox_urls: e.target.value.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 3) })}
+        <input value={outboxDraft ?? (s.channels?.outbox_urls ?? []).join(",")}
+          onChange={(e) => setOutboxDraft(e.target.value)}
           placeholder="https://…（红线与高级别实时推送）"
           className="mt-0.5 w-full rounded-lg border border-line bg-bg950 px-2.5 py-1.5 text-body outline-none focus:border-gline" />
       </label>
-      <button onClick={() => void onSave(s)}
-        className="w-full rounded-lg bg-gradient-to-br from-gold to-gold2 py-2 text-body font-semibold text-ongold">
-        保存（{personaName}立即生效）
+      <button onClick={() => void onSave()} disabled={saving || (Object.keys(patch).length === 0 && outboxDraft === null)}
+        className="w-full rounded-lg bg-gradient-to-br from-gold to-gold2 py-2 text-body font-semibold text-ongold disabled:opacity-50">
+        {saving ? "保存中…" : `保存（${personaName}立即生效）`}
       </button>
-    </div>
+    </fieldset>
   );
 }
