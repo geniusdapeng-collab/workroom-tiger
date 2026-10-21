@@ -19,13 +19,20 @@ logger = logging.getLogger(__name__)
 class YahooProvider(DataProvider):
     name = "yahoo"
 
+    def __init__(self, *, keep_exchange_timezone: bool = False):
+        # Strict execution records aware source instants before projecting them
+        # to its admission market. Legacy callers retain yfinance's defaults.
+        self.keep_exchange_timezone = keep_exchange_timezone
+
     def _download(self, ticker: str, days: int) -> pd.DataFrame:
         import yfinance as yf
         period = f"{max(days + 40, 300)}d"
         # v6.0 复权口径统一：auto_adjust=True（前复权 OHLC）。旧代码用未复权
         # 原始价——拆股在序列里就是一根假暴跌（1:4 拆股 = -75%），
         # 止损/指标/回测全坏，且与 stooq（复权）混用时同一面板口径不一致。
-        df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
+        timezone_options = {"ignore_tz": False} if self.keep_exchange_timezone else {}
+        df = yf.download(ticker, period=period, progress=False, auto_adjust=True,
+                         **timezone_options)
         if df is None or len(df) == 0:
             raise ValueError(f"no data for {ticker}")
         df = self._normalize_ohlcv(df)
@@ -43,6 +50,7 @@ class YahooProvider(DataProvider):
         chunks = [tickers[i:i + 50] for i in range(0, len(tickers), 50)]
         consecutive_empty = 0
         t_start = time.time()
+        timezone_options = {"ignore_tz": False} if self.keep_exchange_timezone else {}
         for chunk in chunks:
             # 墙钟保护：总预算 = 8s × chunk 数 + 120s，防止限流环境卡死整层
             if time.time() - t_start > 8 * len(chunks) + 120:
@@ -52,7 +60,7 @@ class YahooProvider(DataProvider):
             try:
                 raw = yf.download(" ".join(chunk), period=period, progress=False,
                                   auto_adjust=True, group_by="ticker", threads=True,
-                                  timeout=20)
+                                  timeout=20, **timezone_options)
             except Exception as exc:
                 logger.warning("batch download failed for chunk: %s", exc)
                 consecutive_empty += 1

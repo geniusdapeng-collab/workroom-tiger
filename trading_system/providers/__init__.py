@@ -20,6 +20,9 @@ def get_provider(name: str | None = None, *, execution=None) -> DataProvider:
             raise StrictSourceSynthetic("Synthetic provider is forbidden by strict public policy")
         if name not in execution.policy.provider_names:
             raise ExecutionContractError("Provider is outside the trusted public allowlist")
+        if name == "yahoo":
+            from .yahoo import YahooProvider
+            return record_provider(YahooProvider(keep_exchange_timezone=True), execution)
         if name == "stooq":
             from .stooq import StooqProvider
             return record_provider(StooqProvider(allow_challenge=False), execution)
