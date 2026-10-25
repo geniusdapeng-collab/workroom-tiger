@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171a17">
+  <meta name="description" content="Tiger PnL｜投资业绩与决策记录。Tiger AI 资产管理系统的真实账户公开账簿，持续记录持仓、决策与盈亏。">
+  <title>Tiger PnL｜投资业绩与决策记录</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#performance">跳至账户业绩</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="Tiger PnL 首页">
+        <svg class="brand-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M4 8h11L7 32H0L4 8Zm15 0h8L17 32H9L19 8Zm12 0h9L27 32h-8L31 8Z" fill="currentColor"/></svg>
+        <span>TIGER<span class="brand-pnl">PnL</span></span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="#performance">业绩</a><a href="#positions">持仓</a><a href="#decisions">决策</a><a href="#principles">记账原则</a>
+      </nav>
+      <a class="header-cta" href="#performance">翻开账簿 <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-topline"><span>TIGER AI 资产管理系统</span><span>PUBLIC ACCOUNT JOURNAL / 公开账户账簿</span></div>
+      <div class="hero-main">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="tiny-square"></span> 投资业绩与决策记录</p>
+          <h1 id="hero-title">让每一次判断，<br>留下<span class="hero-emphasis">盈亏。</span></h1>
+          <p class="hero-description">研究可以有观点，业绩必须有记录。<br>Tiger 的真实账户，持续公开记账。</p>
+          <a class="hero-link" href="#performance">从第一天，看长期结果 <span aria-hidden="true">↓</span></a>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="art-note">NO SHORTCUTS.<br>JUST THE RECORD.</div>
+          <svg class="tiger-orbit" viewBox="0 0 430 430" fill="none">
+            <circle cx="215" cy="215" r="190" fill="currentColor"/>
+            <g fill="#171a17"><path d="M128 28 180 25 133 194 59 290 31 259 91 160Z"/><path d="m217 25 56 13-70 161-93 139-37-21 79-154Z"/><path d="m307 51 48 35-102 146-106 135-40-13 99-157Z"/><path d="m379 127 28 58-106 111-85 108-47-6 87-136Z"/><path d="m403 244-10 64-83 66-61 38-3-49Z"/></g>
+            <circle cx="215" cy="215" r="209" stroke="#74786a" stroke-opacity=".4" stroke-dasharray="1 8"/>
+          </svg>
+          <div class="art-label"><span>PROFIT<br><i>&amp;</i> LOSS</span><span class="art-coordinate">31° / 120°<br>TIGERPNL.COM</span></div>
+        </div>
+      </div>
+      <div class="hero-bottom"><span><i class="status-dot" aria-hidden="true"></i> 真实账户 · 盈亏同记</span><span>Profit &amp; Loss，盈利与亏损，都是答案。</span><span class="hero-edition">THE OPEN LEDGER</span></div>
+    </section>
+
+    <div id="connection-notice" class="connection-notice" role="status" aria-live="polite" hidden></div>
+
+    <section class="section performance-section" id="performance" aria-labelledby="performance-title" aria-busy="true">
+      <div class="section-heading">
+        <div><p class="section-index">01 / PERFORMANCE</p><h2 id="performance-title">真实账户，公开作答。</h2></div>
+        <div class="data-stamp"><span id="account-status" class="state-label">正在读取账簿</span><span id="as-of">正在获取最新记录…</span></div>
+      </div>
+      <div class="metrics" aria-label="账户关键指标">
+        <div class="metric"><span class="metric-label">账户净资产 <small id="nav-currency">USD</small></span><strong id="metric-nav">—</strong><span class="metric-note" id="nav-note">来自账户快照</span></div>
+        <div class="metric"><span class="metric-label">累计收益率</span><strong id="metric-return">—</strong><span class="metric-note" id="return-note">自首笔真实记录起</span></div>
+        <div class="metric"><span class="metric-label">最大回撤</span><strong id="metric-drawdown">—</strong><span class="metric-note" id="drawdown-note">记录期内净值高点至低点</span></div>
+        <div class="metric"><span class="metric-label">公开记账</span><strong id="metric-days">—<small>天</small></strong><span class="metric-note" id="days-note">第一天，从真实开始</span></div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-heading"><div><h3>账户收益记录</h3><p id="chart-subtitle">每一个数据点，对应一笔真实账户记录。</p></div><div class="range-control" role="group" aria-label="收益记录时间范围"><button type="button" data-range="7" disabled>7 日</button><button type="button" data-range="30" disabled>30 日</button><button type="button" data-range="all" class="is-active" aria-pressed="true" disabled>全部</button></div></div>
+        <div id="performance-chart" class="performance-chart" role="img" aria-label="账户收益记录正在加载"><div class="chart-state"><span class="loading-ring" aria-hidden="true"></span><p>正在翻开账户账簿</p></div></div>
+        <div class="chart-footer"><span><i class="legend-swatch" aria-hidden="true"></i> Tiger 账户收益</span><a href="#methodology">查看计算口径 <span aria-hidden="true">↗</span></a><span id="baseline-date">基准日期待建立</span></div>
+      </div>
+      <div class="history-heading"><h3>每日账页 <span id="history-count">/ —</span></h3><button type="button" class="text-button" id="history-toggle" hidden>展开全部记录 <span aria-hidden="true">↓</span></button></div>
+      <div class="table-scroll history-scroll" tabindex="0" role="region" aria-label="每日账户记录，可横向滚动"><table><caption class="visually-hidden">每日账户净资产、累计收益与回撤</caption><thead><tr><th scope="col">记录日期</th><th scope="col" class="numeric">账户净资产</th><th scope="col" class="numeric">累计收益</th><th scope="col" class="numeric">当日回撤</th><th scope="col" class="record-column">账页状态</th></tr></thead><tbody id="history-body"><tr><td colspan="5" class="table-empty"><span class="table-empty-message">正在读取历史账页…</span></td></tr></tbody></table></div>
+    </section>
+
+    <section class="section positions-section" id="positions" aria-labelledby="positions-title">
+      <div class="section-heading"><div><p class="section-index">02 / PORTFOLIO</p><h2 id="positions-title">此刻，持有什么。</h2></div><p class="section-aside">实际账户持仓<br><span id="positions-as-of">截至时间待更新</span></p></div>
+      <div class="allocation-summary"><div><span class="allocation-dot" aria-hidden="true"></span> 股票持仓 <strong id="stock-weight">—</strong></div><div><span class="allocation-dot cash-dot" aria-hidden="true"></span> 现金 <strong id="cash-weight">—</strong></div><span id="position-count">持仓记录待入账</span></div>
+      <div id="allocation-bar" class="allocation-bar" aria-label="资产配置暂无数据"></div>
+      <p class="mobile-table-hint">向左滑动查看完整持仓 <span aria-hidden="true">→</span></p>
+      <div class="table-scroll positions-scroll" tabindex="0" role="region" aria-label="实际账户持仓，可横向滚动"><table><caption class="visually-hidden">实际持仓：股票、数量、现价、成本、仓位与未实现盈亏</caption><thead><tr><th scope="col">股票 / 资产</th><th scope="col" class="numeric">持有数量</th><th scope="col" class="numeric">现价 / 均价</th><th scope="col" class="numeric">市值</th><th scope="col" class="numeric">仓位</th><th scope="col" class="numeric">未实现盈亏</th></tr></thead><tbody id="positions-body"><tr><td colspan="6" class="table-empty"><span class="table-empty-message">正在读取持仓记录…</span></td></tr></tbody></table></div>
+      <p class="table-footnote" id="position-note">金额以账户记账币种列示。持仓以最新账户快照为准，价格并非实时行情。</p>
+    </section>
+
+    <section class="section decisions-section" id="decisions" aria-labelledby="decisions-title">
+      <div class="section-heading"><div><p class="section-index">03 / DECISION JOURNAL</p><h2 id="decisions-title">判断有来处，动作有记录。</h2></div><p class="section-aside">把当时的判断留下，<br>让后来的结果说话。</p></div>
+      <div class="journal-grid">
+        <div class="decision-journal"><div class="journal-title"><h3>研究与决策</h3><span>RESEARCH</span></div><p class="journal-description">Tiger 的研究观点与目标配置。研究决策不代表账户已经成交。</p><div id="research-stamp" class="research-stamp" hidden></div><div id="decisions-list" class="decisions-list"><p class="journal-empty">正在读取决策记录…</p></div></div>
+        <div class="trade-journal"><div class="journal-title"><h3>实际成交记录</h3><span>EXECUTIONS</span></div><p class="journal-description">只记录已入账的真实成交，买入与卖出同样公开。</p><div id="trades-list" class="trades-list"><p class="journal-empty">正在读取成交记录…</p></div></div>
+      </div>
+    </section>
+
+    <section class="principles-section" id="principles" aria-labelledby="principles-title">
+      <div class="principles-inner"><div class="principles-intro"><p class="section-index">04 / OUR COMMITMENT</p><h2 id="principles-title">盈利不加滤镜。<br>亏损不翻篇。</h2><p>PnL 是 Profit &amp; Loss。<br>这个名字，同时容纳两种结果。</p><span class="principles-signature">TIGER PnL <span aria-hidden="true">↗</span></span></div><div class="principles-list">
+        <article><span>01</span><div><h3>从真实账户开始</h3><p>业绩只取自真实账户记录。研究建议、模拟结果与账户实际表现分别看待，缺失的数据保留空白。</p></div></article>
+        <article><span>02</span><div><h3>从第一天持续记账</h3><p>盈利与亏损采用相同口径。每次更新标明数据截至时间，历史更正通过新增记录说明原因。</p></div></article>
+        <article id="methodology"><span>03</span><div><h3>把计算口径摊开</h3><p id="methodology-text">首笔真实账户记录建立基准。收益需区分市场盈亏与出入金；口径与资金流信息完整后展示可比收益，不把入金算成盈利。</p><p class="methodology-detail" id="methodology-detail">样本不足时不展示年化收益或胜率。回撤衡量记账期内的净值回落。</p></div></article>
+        <article><span>04</span><div><h3>记录结果，不承诺结果</h3><p>本网站用于公开记录与研究交流，不构成投资建议。历史表现不代表未来收益，投资存在本金损失风险。</p></div></article>
+      </div></div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="footer-top"><a class="brand" href="#top" aria-label="返回顶部">TIGER<span class="brand-pnl">PnL</span></a><span>一份持续书写的真实账户账簿。</span><a class="back-top" href="#top">返回顶部 <span aria-hidden="true">↑</span></a></div><div class="footer-bottom"><span>© <span id="copyright-year">2026</span> TIGER PnL · PROFIT &amp; LOSS</span><span>投资业绩与决策记录</span><span>TIGERPNL.COM</span></div></footer>
+  <noscript><div class="noscript-notice">请启用 JavaScript 以读取实时账户账簿。本页未预置任何账户业绩数据。</div></noscript>
+</body>
+</html>

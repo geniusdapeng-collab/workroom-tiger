@@ -88,6 +88,8 @@ jobs:
       - name: 执行仓库已有测试
         run: |
           set -euo pipefail
+          node --test pnl/test/*.test.mjs
+          for script in pnl/deploy/*.sh; do bash -n "$script"; done
           node --test tests/install-contract.test.mjs tests/ui-artifact-mirror.test.mjs tests/client-repair-provenance.test.mjs tests/acceptance-route-contract.test.mjs
           pnpm -C "$WORKLOOM_DIR" exec vitest run scripts/release-gate.test.ts
           pnpm -C "$WORKLOOM_DIR" test

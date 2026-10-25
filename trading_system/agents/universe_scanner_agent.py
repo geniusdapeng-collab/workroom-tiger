@@ -127,10 +127,13 @@ class UniverseScannerAgent(BaseAgent):
         candidates: list[StockCandidate] = []
         for row in top:
             cid, link = chain_of(row["ticker"])
+            from ..activity import enabled, sector_evidence
+            sector = sector_evidence(row["ticker"], cid or "", active=enabled(context))
             candidates.append(StockCandidate(
                 ticker=row["ticker"], rank_score=row["rank"],
                 price=row["price"], adv_usd=row["adv"], atr_pct=row["atr_pct"],
                 chain_id=cid or "", chain_link=link or "",
+                sector_etf=sector["etf"],
             ))
 
         context["scan_stats"] = {

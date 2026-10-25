@@ -24,7 +24,7 @@ from .agent_evidence import (
     read_bytes, read_json, safe_path, strict_json,
 )
 from .agent_runtime import (
-    ACCOUNT, DEPENDENCIES, KEY_RE, PROFILE, RUN_RE, SOURCE_ROOT,
+    ACCOUNT, DEPENDENCIES, KEY_RE, PROFILE, SUPPORTED_PROFILES, RUN_RE, SOURCE_ROOT,
     committed_pointer, freeze_source, frozen_clock, pointer_read, policy_manifest,
     run_environment, stage_account, stage_calendar, verify_run,
 )
@@ -78,7 +78,8 @@ def validate_request(operation: str, request: object) -> dict:
     }[operation]
     if set(request) != fields:
         raise EvidenceInvalid("INVALID_REQUEST", "Request fields differ from the fixed contract")
-    if operation in {"describe", "run"} and request["profile"] != PROFILE:
+    if operation in {"describe", "run"} and (not isinstance(request["profile"], str)
+                                            or request["profile"] not in SUPPORTED_PROFILES):
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
     if operation == "run":
         if (request["schema_version"] != "tiger.agent-request/v1"
@@ -283,7 +284,7 @@ def submit(state: Path, request: dict, *, source: Path = SOURCE_ROOT) -> dict:
             })
             clock = frozen_clock()
             parent = pointer_read(state)
-            policy = policy_manifest()
+            policy = policy_manifest(request["profile"])
             atomic_json(run, "policy.json", policy, exclusive=True)
             freeze_source(run, source)
             stage_account(state, run, parent)
@@ -376,8 +377,9 @@ def execute(operation: str, request: object, *, mode: str, state: Path) -> dict:
         if operation == "doctor":
             return doctor(state, mode)
         if operation == "describe":
-            value = envelope(operation, data={"profile": policy_manifest(), "access_mode": mode})
-            value["limitations"] = policy_manifest()["limitations"]
+            selected = policy_manifest(request["profile"])
+            value = envelope(operation, data={"profile": selected, "access_mode": mode})
+            value["limitations"] = selected["limitations"]
             return value
         if operation == "run":
             return submit(state, request)

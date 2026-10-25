@@ -27,7 +27,11 @@ P0 为完整阶段执行、固定请求边界、独立模拟账户、持久幂�
 
 ## 固定 profile 和版本
 
-当前 profile 为 `us-public-paper-v1`，账户名称为 `public-usd`，初始资金为 100000 USD，股票池使用已有 `extended` 定义。独立 state-root 对应独立本地模拟账户；另建 state-root 不会继承旧账户，更不表示导入了真实券商资产。
+默认 profile 为 `us-public-paper-v1`，新增的显式 profile 为 `us-public-active-paper-v1`。两者账户名称均为 `public-usd`，初始资金为 100000 USD，股票池使用已有 `extended` 定义；应使用独立 state-root，避免在同一账户混用决策/待成交语义。另建 state-root 不会继承旧账户，更不表示导入了真实券商资产。
+
+两 profile 共用的运行正确性修复与可选实验见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。评分、数据、单笔风险、总敞口和集中度阈值不变。两个严格入口均要求真实 A/B/C 入场模板，在排序后预约完整持仓及待成交预算；下一开盘只消费昨日冻结预算、信号时 ADV 摩擦档及实际开盘估值。今日收盘结论不能回写昨日信号开盘准入。错过指定 T+1 后释放待成交预算，无新鲜日 K 时也不会永久占用名额。旧待成交若无原信号冻结预算则显式拒绝，不能用今天数据补造昨天的证据。
+
+本次按产品所有者明确授权修复原有执行缺陷；`raw.paper_execution_version=signal-budgeted-open-v1` 与 `raw.paper_execution_budgeted=true` 区分新运行。保留原 policy manifest 精确字节用于旧回执验证，由每次冻结源码 hash、版本标记和执行快照说明修复前后代码身份。旧已封存回执不会改写成修复后的执行；原 profile 的分数阈值、主/次池与产业链优先规则保留。新增 activity profile 另启用板块代理及主线溢出实验；没有足够收益与活跃度改善证据，正式自动化仍选择默认 profile。
 
 市场日期在接纳时以 `America/New_York` 冻结，保存 UTC 时间、宿主偏移和市场日期。后续计算使用该日期，不能在运行跨日时重新读取“今天”来改变记账日期。外部数据自身的日期、缺失和来源另行披露。
 
@@ -95,6 +99,10 @@ daily.preflight → state.reset → pipeline.prepare
 一个 state-root 的模拟账户同时只允许一个业务写者，短期提交锁负责键映射和锁交接。专用 MCP 最多允许四个在途请求；多数为只读观察，这不会放宽账户写互斥。
 
 所有外部调用均需区分普通来源不可用和运行合同/证据失败。普通公开源失败按原有真实源回退规则处理并披露；不能切换合成数据。证据写入、日期边界、阶段合同、账户状态或回执校验失败必须终止严格任务，不允许转为合法 LLM 透传。
+
+严格工作流的 Stooq 串行日线批次采用每批连续三次无有效产出的可用性探测预算；观察到有效 DataFrame 即重置连续计数，已取得的原始帧保留。预算耗尽后，未尝试的 ticker 交给原有可信真实源回退链，不降低覆盖率、新鲜度或数据质量门槛。少数普通缺失不能证明远端服务失败，所以证据只声明 `source_exhausted=true`、`reason=availability_budget_exhausted`、`service_failure_asserted=false`，列明尝试数、无产出数、按类型汇总的错误及未尝试清单；不序列化原始错误正文。批次恰好结束或空输入不会伪报预算耗尽。普通非严格 Stooq 调用默认仍无此探测数量上限。
+
+`EvidenceWriteError`、`ExecutionContractError` 和 `StrictObservationError` 必须原样终止，不能作为无产出累计后继续回退。严格模式保持 `allow_challenge=false`，遇到访问验证仍拒绝，不求解或绕过挑战。三次是探测次数边界，不保证整个公开取数阶段的墙钟上限；各原有来源仍有自己的网络等待，最外层2400秒截止时间继续有效。该修复只避免一个连续无产出的串行来源先消耗数百次请求，不能保证公开源一定提供足够数据。
 
 错误返回统一 envelope 和受控 code/message/run_id/stage/details_ref；不把原始 HTTP 正文、密钥或完整环境返回给 Agent。详细退出码见操作指南。
 

@@ -29,6 +29,8 @@ from .agent_evidence import (
 from .redline.execution import ExecutionPolicy, daily_stage_contract
 
 PROFILE = "us-public-paper-v1"
+ACTIVE_PROFILE = "us-public-active-paper-v1"
+SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE})
 ACCOUNT = "public-usd"
 POLICY_ID = "tiger.public-paper-policy.v1"
 RUN_RE = re.compile(r"run-[0-9a-f]{32}\Z")
@@ -42,14 +44,18 @@ REQUIRED_ACCOUNT_FILES = frozenset({
 DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 
 
-def policy_manifest() -> dict:
-    return {
-        "schema": "tiger.policy.v1", "profile": PROFILE,
+def policy_manifest(profile: str = PROFILE) -> dict:
+    if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
+        raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
+    active = profile == ACTIVE_PROFILE
+    policy_id = "tiger.public-active-paper-policy.v1" if active else POLICY_ID
+    value = {
+        "schema": "tiger.policy.v1", "profile": profile,
         "paper_account": ACCOUNT, "execution_mode": "paper",
         "initial_cash_usd": 100000.0, "market": "us",
-        "universe": "extended", "strategy": "reviewed_source_defaults",
+        "universe": "extended", "strategy": "evidence-complete-active-v1" if active else "reviewed_source_defaults",
         "use_tuned": False, "real_broker": False,
-        "execution": asdict(ExecutionPolicy(policy_id=POLICY_ID)),
+        "execution": asdict(ExecutionPolicy(policy_id=policy_id)),
         "market_timezone": "America/New_York",
         "date_basis": "admission instant in market timezone",
         "search_collection_budget_seconds": 45.0,
@@ -65,6 +71,16 @@ def policy_manifest() -> dict:
             "Local cooperative processes; no hostile same-user or external rollback anchoring guarantee.",
         ],
     }
+    if active:
+        from .sector_classification import OBSERVED_DATE, SOURCE_RESPONSE_SHA256, SOURCE_URL
+        value["sector_proxy_snapshot"] = {"observed_date": OBSERVED_DATE,
+            "response_sha256": SOURCE_RESPONSE_SHA256, "source_url": SOURCE_URL,
+            "historical_point_in_time": False}
+        value["limitations"] += [
+            "Activity repairs retain all score/data/risk thresholds; more utilization can still increase realized risk.",
+            "Fallback sectors are frozen NASDAQ vendor proxies, not GICS membership or historical point-in-time classifications.",
+        ]
+    return value
 
 
 def frozen_clock(instant: datetime | None = None) -> dict:
@@ -412,9 +428,11 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
             or admission.get("run_id") != run.name or not RUN_RE.fullmatch(run.name)
             or admission.get("request_sha256") != digest(json_bytes(request))
             or admission.get("policy_sha256") != digest(json_bytes(policy))
-            or policy != strict_json(json_bytes(policy_manifest()))):
+            or not isinstance(request.get("profile"), str)
+            or request.get("profile") not in SUPPORTED_PROFILES
+            or policy != strict_json(json_bytes(policy_manifest(request["profile"])))):
         raise EvidenceInvalid("RESULT_INVALID", "Admission policy or request identity differs")
-    expected = {"schema_version": "tiger.agent-request/v1", "profile": PROFILE,
+    expected = {"schema_version": "tiger.agent-request/v1", "profile": request["profile"],
                 "paper_account": ACCOUNT, "idempotency_key": request.get("idempotency_key")}
     if (request != expected or not isinstance(request.get("idempotency_key"), str)
             or not KEY_RE.fullmatch(request["idempotency_key"])):
@@ -522,7 +540,7 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
     for lineage in raw["source_lineage"]:
         if (not isinstance(lineage, list) or len(lineage) != 2
                 or not isinstance(lineage[0], str) or not lineage[0]
-                or lineage[1] not in policy_manifest()["execution"]["provider_names"]):
+                or lineage[1] not in policy_manifest(read_json(run, "request.json")["profile"])["execution"]["provider_names"]):
             raise EvidenceInvalid("RESULT_INVALID", "Data-source lineage differs from public policy")
     try:
         benchmark_date = datetime.fromisoformat(freshness["benchmark_last_bar"]).date()
@@ -606,7 +624,7 @@ def verify_run(state: Path, run_id: str, *, require_committed: bool = True,
     admission, policy, source = validate_admission(run)
     receipt = read_json(run, "receipt.json")
     if (not isinstance(receipt, dict) or receipt.get("schema") != "tiger.receipt.v1" or receipt.get("run_id") != run_id
-            or receipt.get("profile") != PROFILE or receipt.get("paper_account") != ACCOUNT):
+            or receipt.get("profile") != policy["profile"] or receipt.get("paper_account") != ACCOUNT):
         raise EvidenceInvalid("RESULT_INVALID", "Receipt identity differs")
     try:
         sealed_at = datetime.fromisoformat(receipt["sealed_at_utc"])
@@ -771,7 +789,7 @@ def seal_and_publish(state: Path, run: Path, *, deadline: float | None = None) -
     summary = business_summary(run, admission, engine["artifacts"])
     materialize_version(state, run, admission)
     receipt = {
-        "schema": "tiger.receipt.v1", "run_id": run.name, "profile": PROFILE,
+        "schema": "tiger.receipt.v1", "run_id": run.name, "profile": policy["profile"],
         "sealed_at_utc": datetime.now(timezone.utc).isoformat(),
         "paper_account": ACCOUNT,
         "status": "completed_degraded" if stages["degraded"] else "completed",

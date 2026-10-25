@@ -15,7 +15,9 @@ node scripts/tiger-agent.mjs describe --python /absolute/path/to/python
 
 默认 `--mode readonly`。执行完整 paper 工作流必须由操作者在启动参数或项目部署配置中显式选择 `--mode paper`。请求 JSON 不能改变 mode、解释器、state-root、阶段或策略。
 
-当前只开放 `us-public-paper-v1`：美股公开数据、USD 本地 paper 账户 `public-usd`、独立初始资金 100000 USD；不继承旧账户、不连接真实券商、不执行真实资金订单。内置语义模型关闭，合法 passthrough 及原因会进入证据和回执。外层 Codex/DSH 的模型不会自动接入内层模型。
+当前开放两个显式 profile，默认仍为 `us-public-paper-v1`。新增 `us-public-active-paper-v1` 修复已取得板块证据却未使用、第三条达标主线遗漏及组合预算空转；保留相同 MRS/SHS/TSS、数据质量和风险上限。它仍是美股公开数据、USD 本地 paper 账户 `public-usd`、独立初始资金 100000 USD，不连接真实券商、不执行真实资金订单。更高资金使用率会改变实际风险，不能把“上限不变”解释为“收益或回撤不变”。内置语义模型关闭，合法 passthrough 及原因进入证据和回执；外层宿主的模型不会自动接入内层模型。
+
+新 profile 的回退板块是冻结的 NASDAQ 供应商分类代理，不是 GICS、真实 ETF 成分或历史时点分类。原 Tiger 产业链映射优先，未知分类仍不猜测。运行和评测边界见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。
 
 ## 2. CLI：提交一次，持续查询同一个身份
 
@@ -38,6 +40,8 @@ node scripts/tiger-agent.mjs run \
   --state-root /absolute/path/to/tiger-state \
   --mode paper --input-file request.json
 ```
+
+选择新 profile 时，将请求中的 `profile` 明确改为 `us-public-active-paper-v1`，使用新的逻辑幂等键和独立 state-root；默认请求不会被升级。`describe` 可用 `--input-file` 读取 `{"profile":"us-public-active-paper-v1"}` 返回对应 policy。两个 profile 不应在同一个账户历史中混用；切换时应新建独立 state-root，不复制待成交/净值来冒充迁移。
 
 成功提交返回 `run_id` 和 `status=accepted` 或 `running`。这只表示请求身份被接纳，不能报告分析或账户处理完成。将实际 `run_id` 写入查询文件：
 
