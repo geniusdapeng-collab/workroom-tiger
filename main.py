@@ -231,6 +231,7 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
         universe_file=str(universe_path) if universe_path else None, top_n=args.top, max_picks=args.picks,
         account_usd=args.account, trade_date=execution.run_date.isoformat(),
         use_tuned=False, market="us", execution=execution,
+        portfolio_state=before_sim,
     )
 
     with execution.step("accounting.validate", {"result": result, "journal": j.records,

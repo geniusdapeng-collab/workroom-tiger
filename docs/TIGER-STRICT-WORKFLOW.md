@@ -27,7 +27,11 @@ P0 为完整阶段执行、固定请求边界、独立模拟账户、持久幂�
 
 ## 固定 profile 和版本
 
-当前 profile 为 `us-public-paper-v1`，账户名称为 `public-usd`，初始资金为 100000 USD，股票池使用已有 `extended` 定义。独立 state-root 对应独立本地模拟账户；另建 state-root 不会继承旧账户，更不表示导入了真实券商资产。
+默认 profile 为 `us-public-paper-v1`，新增的显式 profile 为 `us-public-active-paper-v1`。两者账户名称均为 `public-usd`，初始资金为 100000 USD，股票池使用已有 `extended` 定义；应使用独立 state-root，避免在同一账户混用决策/待成交语义。另建 state-root 不会继承旧账户，更不表示导入了真实券商资产。
+
+两 profile 共用的运行正确性修复与可选实验见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。评分、数据、单笔风险、总敞口和集中度阈值不变。两个严格入口均要求真实 A/B/C 入场模板，在排序后预约完整持仓及待成交预算；下一开盘只消费昨日冻结预算、信号时 ADV 摩擦档及实际开盘估值。今日收盘结论不能回写昨日信号开盘准入。错过指定 T+1 后释放待成交预算，无新鲜日 K 时也不会永久占用名额。旧待成交若无原信号冻结预算则显式拒绝，不能用今天数据补造昨天的证据。
+
+本次按产品所有者明确授权修复原有执行缺陷；`raw.paper_execution_version=signal-budgeted-open-v1` 与 `raw.paper_execution_budgeted=true` 区分新运行。保留原 policy manifest 精确字节用于旧回执验证，由每次冻结源码 hash、版本标记和执行快照说明修复前后代码身份。旧已封存回执不会改写成修复后的执行；原 profile 的分数阈值、主/次池与产业链优先规则保留。新增 activity profile 另启用板块代理及主线溢出实验；没有足够收益与活跃度改善证据，正式自动化仍选择默认 profile。
 
 市场日期在接纳时以 `America/New_York` 冻结，保存 UTC 时间、宿主偏移和市场日期。后续计算使用该日期，不能在运行跨日时重新读取“今天”来改变记账日期。外部数据自身的日期、缺失和来源另行披露。
 

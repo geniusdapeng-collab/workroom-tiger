@@ -59,19 +59,8 @@ class SectorAgent(BaseAgent):
         # v5.4 修复：广度【缺失】（NaN，如 IWM/XLRE 无产业链成分映射）旧代码
         # 视同通过——"广度≥60%"硬条件形同虚设。白皮书口径：无广度证据不得进
         # 主线池，降入次主线（观察/轻仓）并在证据中披露。
-        main_count = 0
-        for s in results:
-            if s.shs >= config.SHS_MAIN_POOL and not math.isnan(s.breadth) \
-                    and s.breadth >= config.BREADTH_HEALTHY:
-                if main_count < config.MAIN_POOL_MAX:
-                    s.in_main_pool = True
-                    main_count += 1
-            elif s.shs >= config.SHS_SUB_POOL:
-                s.in_sub_pool = True
-                if s.shs >= config.SHS_MAIN_POOL and math.isnan(s.breadth):
-                    s.evidence.append(
-                        f"{s.etf} SHS≥{config.SHS_MAIN_POOL} 但广度数据缺失 → "
-                        "不进主线池（白皮书：主线入池需广度≥60% 证据），降次主线")
+        from ..activity import assign_pools, enabled
+        assign_pools(results, active=enabled(context))
 
         context["sectors"] = results
         context["sector_map"] = {s.etf: s for s in results}

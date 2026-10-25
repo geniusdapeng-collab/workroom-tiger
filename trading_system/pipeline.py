@@ -416,6 +416,7 @@ def run_pipeline(
     use_tuned: bool = False,
     market: str = "us",
     accounting_blocked_reason: str | None = None,
+    portfolio_state: dict | None = None,
     *, execution=None,
 ) -> PipelineResult:
     with optional_step(execution, "pipeline.prepare", {
@@ -424,6 +425,7 @@ def run_pipeline(
         "account_usd": account_usd, "market": market, "use_tuned": use_tuned,
         "run_date": execution.run_date if execution else trade_date,
         "policy": execution.policy if execution else None,
+        "portfolio_state": portfolio_state,
     }) as prepared:
         started = time.time()
         _LINEAGE.clear()   # 零基线：来源血缘每轮重新记录
@@ -782,6 +784,12 @@ def run_pipeline(
         # SHS 叙事维度 LLM 注入（空 dict = 透传，维度剔除再归一化）
         "narrative_llm": narrative_llm,
     }
+    from .activity import ACTIVE_POLICY_ID, ACTIVE_PROFILE
+    active = execution is not None and execution.policy.policy_id == ACTIVE_POLICY_ID
+    if execution is not None:
+        context.update(paper_execution_budgeted=True, portfolio_state=portfolio_state)
+    if active:
+        context.update(activity_profile=ACTIVE_PROFILE)
 
     # ---------- 六层流水线 ----------
     with tracer.step("layer1.mrs", {"market_data": market_data}) as stage:
@@ -813,7 +821,7 @@ def run_pipeline(
                                  max_picks=max_picks).execute(context)
 
         stage.output({key: context.get(key) for key in
-                      ("picks", "pick_rationale", "action", "market_view", "notes", "currency_policy", "compliance")})
+                      ("picks", "pick_rationale", "action", "market_view", "notes", "currency_policy", "compliance", "rejections", "entry_budget")})
 
     # ================= 多空辩论证据层（v6.3 S2，桥水 AIA 辩论制） =================
     # 铁律：辩论在 L4 闸门产出【之后】执行，只读 picks/rationale/watchlist，
@@ -914,6 +922,11 @@ def run_pipeline(
                 "account_currency": "USD",
                 "currency_policy": context["currency_policy"],
                 "pick_rationale": context.get("pick_rationale", {}),
+                "rejections": context.get("rejections", {}),
+                "activity_profile": ACTIVE_PROFILE if active else None,
+                "paper_execution_budgeted": execution is not None,
+                "paper_execution_version": "signal-budgeted-open-v1" if execution is not None else "legacy",
+                "entry_budget": context.get("entry_budget"),
                 "source_lineage": list(_LINEAGE),
                 "provider_health": ({name: dict(health) for name, health in _HEALTH.items()}
                                     if execution is not None else dict(_HEALTH)),

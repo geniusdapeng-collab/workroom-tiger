@@ -122,10 +122,16 @@ class SimEngine:
         # v6.5 来源留痕：每条成交/持仓记录数据来源（合成数据统一记 "demo"），
         # 让"合成数据是否进过公开台账"在事后可机器判定，而不是靠信任。
         from .providers.base import source_label
+        from .activity import result_enabled
+        budgeted = result_enabled(result)
+        if budgeted:
+            from .activity import risk_group
+            from .paper_policy import freeze_entry_budget, frozen_entry_friction, opening_allocation
         source = source_label(getattr(result, "provider", ""))
         allow_new = (result.action != "AVOID" and
                      getattr(getattr(result, "mrs", None), "allow_new_positions", True))
         bar_cache: dict[str, tuple[Bar, str] | None] = {}
+        fill_checks = []
 
         def dated_bar(ticker: str) -> tuple[Bar, str] | None:
             """本轮每票只读一次；未知/未来日期不能借运行日补造成交日期。"""
@@ -148,13 +154,26 @@ class SimEngine:
         # ---------- 1. 昨日信号成交（T+1 开盘价，无未来函数） ----------
         still_pending = []
         for p in s["pending"]:
-            if not allow_new:
+            if not budgeted and not allow_new:
                 still_pending.append(p)
                 ops.append(f"⏸️ {p['ticker']} 今日禁止新开仓，待成交信号顺延")
                 continue
             if not p.get("signal_date") or p["signal_date"] >= trade_date:
                 still_pending.append(p)          # 当日信号次日才成交（同日重跑幂等）
                 continue
+            if budgeted:
+                if not isinstance(p.get("entry_budget"), dict):
+                    fill_checks.append({"ticker": p["ticker"], "date": trade_date,
+                                        "shares": 0, "reason": "signal_budget_missing"})
+                    ops.append(f"⏸️ {p['ticker']} 缺少原信号冻结预算，释放待成交预算")
+                    continue
+                from .calendar import next_trading_day
+                expected = next_trading_day(date.fromisoformat(p["signal_date"])).isoformat()
+                if trade_date > expected:
+                    fill_checks.append({"ticker": p["ticker"], "date": trade_date,
+                                        "shares": 0, "reason": "execution_window_missed"})
+                    ops.append(f"⏸️ {p['ticker']} 已错过信号指定开盘，释放待成交预算")
+                    continue
             observed = dated_bar(p["ticker"])
             if observed is None:
                 still_pending.append(p)          # 无行情，顺延一日
@@ -174,9 +193,28 @@ class SimEngine:
             shares = min(p["shares"], int(p["risk_usd"] / risk_ps))
             # v6.3：成交价 = 开盘价 × (1 + 单边摩擦)——ADV 分档滑点 + 单边佣金
             # （保守摩擦口径，防滑点断崖；ADV 未知时回落 v6.0 合并 10bp）
-            bps = friction_bps(bar.adv)
+            bps = frozen_entry_friction(p) if budgeted else friction_bps(bar.adv)
+            if bps is None:
+                fill_checks.append({"ticker": p["ticker"], "date": bar_date,
+                                    "shares": 0, "reason": "signal_budget_invalid"})
+                ops.append(f"⏸️ {p['ticker']} 信号时点成本证据无效，释放待成交预算")
+                continue
             fill_net = round(fill * (1 + bps / 10_000), 4)
             cost = shares * fill_net
+            allocation = None
+            if budgeted:
+                allocation = opening_allocation(s, p, bar, bar_date, dated_bar, fill_net)
+                fill_checks.append({"ticker": p["ticker"], "date": bar_date, **allocation})
+                if not allocation["shares"]:
+                    # Missing the one admitted opening is never repaired by
+                    # inventing a later fill at an unrelated day's opening.
+                    ops.append(f"⏸️ {p['ticker']} 公开模拟开盘拒绝：{allocation['reason']}")
+                    # A known opening refusal is terminal. Retrying after this
+                    # session's exits would use later freed cash/slots at an
+                    # earlier opening and manufacture an executable history.
+                    continue
+                shares = allocation["shares"]
+                cost = shares * fill_net
             if shares <= 0 or cost > s["cash"]:
                 ops.append(f"⚠️ {p['ticker']} 开盘价漂移后风险/现金超限，放弃该信号")
                 continue
@@ -184,7 +222,7 @@ class SimEngine:
             cap = (result.mrs.position_cap[1] if getattr(result, "mrs", None) else 1.0)
             invested_now = sum(x["shares"] * x["entry_price"] for x in s["positions"])
             equity_est = s["cash"] + invested_now
-            if cap < 1.0 and equity_est > 0 and (invested_now + cost) / equity_est > cap:
+            if not budgeted and cap < 1.0 and equity_est > 0 and (invested_now + cost) / equity_est > cap:
                 still_pending.append(p)
                 ops.append(f"⏸️ {p['ticker']} 敞口将达 {(invested_now + cost) / equity_est:.0%}"
                            f" 超上限 {cap:.0%}，顺延（仓位是风险预算，不是观点表达）")
@@ -194,13 +232,15 @@ class SimEngine:
                 "ticker": p["ticker"], "shares": shares, "entry_price": fill_net,
                 "stop": p["stop_price"], "entry_date": bar_date,
                 "chain": p.get("chain", ""), "sector": p.get("sector", ""),
-                "risk_usd": round(shares * risk_ps, 2),
+                "risk_usd": (allocation["risk_usd"] if allocation else round(shares * risk_ps, 2)),
                 "time_stop_days": p.get("time_stop_days", 0),
                 "peak_price": fill, "note": p.get("note", ""),
                 "source": source,
                 # v6.3 三栏台账：毛口径入场价与入场摩擦档位（出场摩擦按当时 ADV 重定档）
                 "entry_raw": fill, "friction_bps": bps,
                 "bars_held": 0,
+                **({"risk_group": allocation["risk_group"], "entry_budget": allocation["budget"],
+                    "opening_allocation": allocation} if allocation else {}),
             })
             ops.append(f"🟢 买入 {p['ticker']} {shares} 股 @ {fill:.2f}"
                        f"（开盘价成交，止损 {p['stop_price']:.2f}）")
@@ -269,6 +309,9 @@ class SimEngine:
                     "gross_pnl": gross_pnl, "gross_r": gross_r,
                     "friction_cost": friction, "net_r": r_mult,
                     "source": source,
+                    **({"entry_raw": entry_raw, "exit_raw": exit_raw,
+                        "entry_friction_cost": (pos["entry_price"] - entry_raw) * pos["shares"],
+                        "exit_friction_cost": (exit_raw - exit_price) * pos["shares"]} if budgeted else {}),
                 })
                 ops.append(f"🔴 卖出 {pos['ticker']} {pos['shares']} 股 @ {exit_price:.2f}"
                            f"（{reason}，{'盈' if pnl >= 0 else '亏'} ${abs(pnl):,.0f}，{r_mult}R）")
@@ -312,6 +355,9 @@ class SimEngine:
                     "time_stop_days": getattr(pick, "time_stop_days", 0) or 0,
                     "source": source,
                     "note": f"{pick.entry_template or '标准'}｜质量 {pick.tss_final}/10",
+                    **({"entry_ref": pick.entry_price,
+                        "entry_budget": freeze_entry_budget(result, pick),
+                        "risk_group": risk_group(pick.chain, pick.sector)} if budgeted else {}),
                 })
                 held.add(pick.ticker)
                 added += 1
@@ -327,7 +373,8 @@ class SimEngine:
         else:
             s["ops_log"].append(entry)
         self.save()
-        return {"equity": equity, "ops": ops, "marks": marks}
+        return {"equity": equity, "ops": ops, "marks": marks,
+                **({"fill_checks": fill_checks} if budgeted else {})}
 
     # ---------------------------------------------------------------- 统计
     def stats(self) -> dict:

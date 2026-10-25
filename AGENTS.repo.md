@@ -6,7 +6,7 @@
 
 - Agent 运行完整业务只使用 `scripts/tiger-agent.mjs` 或独立 `scripts/tiger-agent-mcp.mjs`；它们共同调用 `trading_system.agent_runner`。操作限 doctor/describe/run/status/receipt/verify。
 - 先 doctor 和 describe。默认 readonly，paper 权限只能由操作者在可信启动配置中显式选定；工具请求不能修改权限、Python、state-root、策略或阶段。
-- 当前只允许固定 `us-public-paper-v1`、`public-usd` 本地 paper 账户和公开美股数据。不得连接真实券商、真实资金或复用旧账户；不得注入演示数据掩盖公开源失败。
+- 默认固定 `us-public-paper-v1`、`public-usd` 本地 paper 账户和公开美股数据；`us-public-active-paper-v1` 是必须显式选择的板块证据实验配置，不因可运行而自动升级为默认。两个配置均执行信号时冻结预算、次日开盘组合限额及 A/B/C 入场模板门禁。不得连接真实券商、真实资金或复用旧账户；不得注入演示数据掩盖公开源失败。
 - 不开放自由 CLI argv、skip、tune、score、approve、live 或单阶段执行。不得把原通用能力 loader 的 local+execute 限制改成例外，不得绕过 Python 的顺序、锁、幂等和证据校验。
 - Node 只负责边界校验、进程/协议传输和等待；Python 是阶段、账户、持久幂等、worker 生命周期和独立证据验证的唯一执行方。外层宿主模型不等于内层模型；内层禁用/合法 passthrough 必须如实披露。
 
