@@ -2,7 +2,8 @@ import { createServer } from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './lib/cli.mjs';
 import { Ledger, ResearchLedger } from './lib/ledger.mjs';
 import { PnlError, validKey } from './lib/schema.mjs';
 import { dashboard, publicRecord } from './lib/projection.mjs';
@@ -150,4 +151,5 @@ async function main() {
     try { await app.close(); clearTimeout(deadline); process.exit(0); } catch { process.exit(1); }
   });
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch(error => { console.error(JSON.stringify({ event: 'startup_failed', message: error.message })); process.exitCode = 1; });
+try { if (await isCliEntry(import.meta.url)) await main(); }
+catch (error) { console.error(JSON.stringify({ event: 'startup_failed', message: error.message })); process.exitCode = 1; }

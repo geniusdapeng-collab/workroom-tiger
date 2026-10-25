@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, stat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { backupLedger, parseArgs } from '../backup.mjs';
 import { Ledger, ResearchLedger } from '../lib/ledger.mjs';
 import { digest } from '../lib/schema.mjs';
@@ -63,3 +65,33 @@ test('backup CLI accepts only explicit absolute source and new destination', asy
   assert.throws(() => parseArgs(['--data-dir', '/one', '--data-dir', '/two']), /Usage/);
   await assert.rejects(backupLedger({ dataDir: 'relative', destination: '/private/new' }), /absolute/);
 });
+
+for (const kind of ['directory', 'file']) {
+  test(`backup CLI through a ${kind} symlink really writes and verifies both chains`, async t => {
+    const f = await setup(t); const repository = fileURLToPath(new URL('../../', import.meta.url));
+    const current = join(f.path, kind === 'directory' ? 'current' : 'backup-link.mjs');
+    await symlink(kind === 'directory' ? repository : join(repository, 'pnl', 'backup.mjs'), current);
+    const entry = kind === 'directory' ? join(current, 'pnl', 'backup.mjs') : current;
+    const sourceFiles = [join(f.dataDir, 'records', '000000000001.json'), join(f.dataDir, 'research', 'records', '000000000001.json')];
+    const before = await Promise.all(sourceFiles.map(file => readFile(file, 'utf8')));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('TIGER_') && key !== 'NODE_TEST_CONTEXT'));
+    const args = [entry, '--data-dir', f.dataDir, '--destination', f.destination];
+    const result = spawnSync(process.execPath, args, { cwd: f.path, env, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(result.error, undefined); assert.equal(result.signal, null); assert.equal(result.status, 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.status, 'backup_restored_and_verified');
+    assert.equal(summary.account.files, 1); assert.equal(summary.research.files, 1);
+    assert.equal(summary.account.headHash, f.a.entries[0].hash); assert.equal(summary.research.headHash, f.r.entries[0].hash);
+    assert.deepEqual(JSON.parse(await readFile(join(f.destination, 'backup-summary.json'), 'utf8')), summary);
+    const restoredAccount = await Ledger.open(f.destination); const restoredResearch = await ResearchLedger.open(join(f.destination, 'research'));
+    try {
+      assert.equal(restoredAccount.entries[0].hash, summary.account.headHash);
+      assert.equal(restoredResearch.entries[0].hash, summary.research.headHash);
+    } finally { await Promise.all([restoredResearch.close(), restoredAccount.close()]); }
+    assert.deepEqual(await Promise.all(sourceFiles.map(file => readFile(file, 'utf8'))), before);
+    const duplicate = spawnSync(process.execPath, args, { cwd: f.path, env, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(duplicate.error, undefined); assert.equal(duplicate.status, 1);
+    assert.equal(JSON.parse(duplicate.stderr).code, 'EEXIST'); assert.equal(duplicate.stdout, '');
+    assert.deepEqual(JSON.parse(await readFile(join(f.destination, 'backup-summary.json'), 'utf8')), summary);
+  });
+}

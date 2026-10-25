@@ -1,6 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isCliEntry } from './lib/cli.mjs';
 import { digest, validateRecord, validateResearch } from './lib/schema.mjs';
 
 export async function publishRecord({ baseUrl, token, record, research = false, allowLocalHttp = false, fetcher = fetch }) {
@@ -29,4 +28,5 @@ async function main() {
   const receipt = await publishRecord({ baseUrl: process.env.TIGER_PNL_URL ?? 'https://tigerpnl.com', token: process.env.TIGER_PNL_WRITE_TOKEN, record, research, allowLocalHttp });
   console.log(JSON.stringify({ status: 'published_and_verified', receipt }, null, 2));
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch(error => { console.error(JSON.stringify({ status: 'failed', message: error.message })); process.exitCode = 1; });
+try { if (await isCliEntry(import.meta.url)) await main(); }
+catch (error) { console.error(JSON.stringify({ status: 'failed', message: error.message })); process.exitCode = 1; }

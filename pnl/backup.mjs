@@ -1,7 +1,8 @@
 import { constants } from 'node:fs';
 import { mkdir, open, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './lib/cli.mjs';
 import { Ledger, ResearchLedger } from './lib/ledger.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -74,7 +75,5 @@ export function parseArgs(args) {
   if (!options.dataDir || !options.destination) throw new Error('Both --data-dir and --destination are required');
   return options;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  try { console.log(JSON.stringify(await backupLedger(parseArgs(process.argv.slice(2))))); }
-  catch (cause) { console.error(JSON.stringify({ status: 'failed', code: cause.code ?? 'BACKUP_VERIFICATION_FAILED', message: 'Backup or isolated restore verification failed; inspect the protected destination and retry with a new destination' })); process.exitCode = 1; }
-}
+try { if (await isCliEntry(import.meta.url)) console.log(JSON.stringify(await backupLedger(parseArgs(process.argv.slice(2))))); }
+catch (cause) { console.error(JSON.stringify({ status: 'failed', code: cause.code ?? 'BACKUP_VERIFICATION_FAILED', message: 'Backup or isolated restore verification failed; inspect the protected destination and retry with a new destination' })); process.exitCode = 1; }

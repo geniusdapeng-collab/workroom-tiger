@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { exitCode, parseJson, runtimeEnvironment, safeEvidencePath, sanitizeMessage, validateEnvelope, validateRequest } from '../bundles/trading/capabilities/workflow-client.mjs';
 import { canonical, validateResearch } from './lib/schema.mjs';
+import { isCliEntry } from './lib/cli.mjs';
 import { publishRecord } from './publish.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -200,7 +201,5 @@ export function parseArgs(args) {
   for (let i = 0; i < args.length; i++) { const name = allowed.get(args[i]); if (!name || Object.hasOwn(options, name) || !args[i + 1] || args[i + 1].startsWith('--')) error('INVALID_SYNC_REQUEST', 'Use only --date, --profile and optional --run-id once each'); options[name] = args[++i]; }
   return options;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  try { console.log(JSON.stringify(await syncResearch(parseArgs(process.argv.slice(2))))); }
-  catch (cause) { console.error(JSON.stringify({ status: 'failed', code: cause.code ?? 'SYNC_FAILED', message: sanitizeMessage(cause.message) })); process.exitCode = 1; }
-}
+try { if (await isCliEntry(import.meta.url)) console.log(JSON.stringify(await syncResearch(parseArgs(process.argv.slice(2))))); }
+catch (cause) { console.error(JSON.stringify({ status: 'failed', code: cause.code ?? 'SYNC_FAILED', message: sanitizeMessage(cause.message) })); process.exitCode = 1; }
