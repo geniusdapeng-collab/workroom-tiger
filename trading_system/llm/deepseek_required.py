@@ -23,6 +23,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 import requests
 
 from ..redline import LLMUnavailable
+from ..redline.model_diagnostics import RequiredModelUnavailable
 
 BASE_URL = "https://api.deepseek.com"
 MODEL = "deepseek-flash"
@@ -52,8 +53,12 @@ _SCHEMA_KEYS = frozenset({
 _TYPES = frozenset({"object", "array", "string", "number", "integer", "boolean", "null"})
 
 
-def _fail(code: str) -> None:
-    raise LLMUnavailable(f"DeepSeek required: {code}") from None
+def _fail(code: str, *, schema_path: str | None = None,
+          schema_keyword: str | None = None) -> None:
+    if re.fullmatch(r"HTTP_[1-5][0-9]{2}", code):
+        raise RequiredModelUnavailable("HTTP_ERROR", http_status=int(code[5:])) from None
+    raise RequiredModelUnavailable(code, schema_path=schema_path,
+                                   schema_keyword=schema_keyword) from None
 
 
 def _canonical(value: object) -> bytes:
@@ -205,12 +210,94 @@ def _matches(value: object, schema: dict, depth: int = 0) -> bool:
     return True
 
 
+def _schema_child_path(path: str, segment: str | int) -> str | None:
+    # Property names come only from the trusted schema. Never expose an extra
+    # model-generated key, and mask schema names outside the fixed safe grammar.
+    if type(segment) is int:
+        component = str(segment)
+    else:
+        component = segment if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:-]{0,127}", segment) else "*"
+    child = path + "/" + component
+    return child if len(child) <= 512 else None
+
+
+def _schema_mismatch(value: object, schema: dict, depth: int = 0,
+                     path: str = "") -> tuple[str, str]:
+    """Locate a rejected instance without returning its keys, values or text.
+
+    This runs only after the unchanged acceptance validator rejects the value.
+    Combinator and extra-property failures stay at the parent instance path.
+    """
+    if depth > 64:
+        return path, "depth"
+    kind = schema.get("type")
+    if kind is not None and not any(_matches_type(value, k) for k in
+                                    (kind if isinstance(kind, list) else [kind])):
+        return path, "type"
+    if "const" in schema and not _json_equal(value, schema["const"]):
+        return path, "const"
+    if "enum" in schema and not any(_json_equal(value, item) for item in schema["enum"]):
+        return path, "enum"
+    for key, accept in (("allOf", all), ("anyOf", any)):
+        if key in schema and not accept(_matches(value, child, depth + 1) for child in schema[key]):
+            return path, key
+    if "oneOf" in schema and sum(_matches(value, child, depth + 1) for child in schema["oneOf"]) != 1:
+        return path, "oneOf"
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            return path, "type"
+        props = schema.get("properties", {})
+        if any(key not in value for key in schema.get("required", [])):
+            return path, "required"
+        extra = schema.get("additionalProperties", True)
+        for key, item in value.items():
+            if key in props:
+                if not _matches(item, props[key], depth + 1):
+                    child = _schema_child_path(path, key)
+                    return ((path, "depth") if child is None else
+                            _schema_mismatch(item, props[key], depth + 1, child))
+            elif extra is False or (isinstance(extra, dict) and not _matches(item, extra, depth + 1)):
+                return path, "additionalProperties"
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            return path, "minItems"
+        if len(value) > schema.get("maxItems", len(value)):
+            return path, "maxItems"
+        if schema.get("uniqueItems") and any(_json_equal(item, other)
+                for index, item in enumerate(value) for other in value[index + 1:]):
+            return path, "uniqueItems"
+        if "items" in schema:
+            for index, item in enumerate(value):
+                if not _matches(item, schema["items"], depth + 1):
+                    child = _schema_child_path(path, index)
+                    return ((path, "depth") if child is None else
+                            _schema_mismatch(item, schema["items"], depth + 1, child))
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            return path, "minLength"
+        if len(value) > schema.get("maxLength", len(value)):
+            return path, "maxLength"
+        if "pattern" in schema and re.search(schema["pattern"], value) is None:
+            return path, "pattern"
+    if _finite_number(value):
+        for key, invalid in (("minimum", lambda bound: value < bound),
+                             ("maximum", lambda bound: value > bound),
+                             ("exclusiveMinimum", lambda bound: value <= bound),
+                             ("exclusiveMaximum", lambda bound: value >= bound)):
+            if key in schema and invalid(schema[key]):
+                return path, key
+    # A conservative fixed fallback cannot expose an untrusted value even if a
+    # future acceptance rule has not yet received a more specific diagnostic.
+    return path, "type"
+
+
 def validate_schema(value: object, schema: dict) -> None:
     """Validate the complete supported schema; unknown keywords never pass."""
     _check_schema(schema)
     _canonical(value)  # Reject non-JSON values, nonfinite numbers and deep cycles.
     if not _matches(value, schema):
-        _fail("OUTPUT_SCHEMA_MISMATCH")
+        path, keyword = _schema_mismatch(value, schema)
+        _fail("OUTPUT_SCHEMA_MISMATCH", schema_path=path, schema_keyword=keyword)
 
 
 def _decoded_url_component(value: str) -> str | None:

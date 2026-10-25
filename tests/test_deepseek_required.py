@@ -15,6 +15,7 @@ from trading_system.llm.deepseek_required import (
     DeepSeekRequiredClient, sanitize_url, validate_schema,
 )
 from trading_system.redline import LLMUnavailable
+from trading_system.redline.model_diagnostics import RequiredModelUnavailable
 
 
 KEY = "fixture-deepseek-credential"
@@ -420,3 +421,114 @@ def test_missing_or_oversize_source_title_is_never_invented_or_truncated(
     with pytest.raises(LLMUnavailable, match=expected):
         client.search("public report") if method == "search" else client.fetch(page["url"])
     assert not client.search_receipts and not client.fetch_receipts
+
+
+@pytest.mark.parametrize("value,schema,path,keyword", [
+    ("secret-modeltext", {"type": "number"}, "", "type"),
+    (1, {"const": 2}, "", "const"),
+    (1, {"enum": [2, 3]}, "", "enum"),
+    (1, {"allOf": [{"type": "number"}, {"minimum": 2}]}, "", "allOf"),
+    (1, {"anyOf": [{"type": "string"}, {"type": "null"}]}, "", "anyOf"),
+    (1, {"oneOf": [{"type": "number"}, {"type": "integer"}]}, "", "oneOf"),
+    ({}, {"type": "object", "required": ["declared"]}, "", "required"),
+    ({KEY: "secret-modeltext"}, {"type": "object", "additionalProperties": False}, "", "additionalProperties"),
+    ({KEY: "secret-modeltext"}, {"type": "object", "additionalProperties": {"type": "number"}}, "", "additionalProperties"),
+    ([], {"type": "array", "minItems": 1}, "", "minItems"),
+    ([1, 2], {"type": "array", "maxItems": 1}, "", "maxItems"),
+    ([1, 1.0], {"type": "array", "uniqueItems": True}, "", "uniqueItems"),
+    ([1, "secret-modeltext"], {"type": "array", "items": {"type": "number"}}, "/1", "type"),
+    ("", {"type": "string", "minLength": 1}, "", "minLength"),
+    ("secret-modeltext", {"type": "string", "maxLength": 3}, "", "maxLength"),
+    ("secret-modeltext", {"type": "string", "pattern": "^public$"}, "", "pattern"),
+    (0, {"type": "number", "minimum": 1}, "", "minimum"),
+    (2, {"type": "number", "maximum": 1}, "", "maximum"),
+    (1, {"type": "number", "exclusiveMinimum": 1}, "", "exclusiveMinimum"),
+    (1, {"type": "number", "exclusiveMaximum": 1}, "", "exclusiveMaximum"),
+])
+def test_schema_failure_diagnostic_has_only_controlled_location(value, schema, path, keyword):
+    with pytest.raises(RequiredModelUnavailable) as error:
+        validate_schema(value, schema)
+    assert error.value.diagnostic == {
+        "schema": "tiger.model-failure.v1", "provider": "deepseek",
+        "code": "OUTPUT_SCHEMA_MISMATCH", "schema_path": path, "schema_keyword": keyword,
+    }
+    assert KEY not in json.dumps(error.value.diagnostic)
+    assert "secret-modeltext" not in json.dumps(error.value.diagnostic)
+
+
+def test_schema_diagnostic_nested_path_masks_unsafe_schema_names():
+    schema = {"type": "object", "properties": {"chains": {"type": "array", "items": {
+        "type": "object", "properties": {"heat": {"type": "number", "maximum": 10}},
+        "additionalProperties": False}}}}
+    with pytest.raises(RequiredModelUnavailable) as error:
+        validate_schema({"chains": [{"heat": 11}]}, schema)
+    assert error.value.diagnostic["schema_path"] == "/chains/0/heat"
+    assert error.value.diagnostic["schema_keyword"] == "maximum"
+    unsafe = "unsafe/schema-key"
+    with pytest.raises(RequiredModelUnavailable) as error:
+        validate_schema({unsafe: "secret-modeltext"}, {"type": "object", "properties": {
+            unsafe: {"type": "number"}}})
+    assert error.value.diagnostic["schema_path"] == "/*"
+    assert unsafe not in json.dumps(error.value.diagnostic)
+
+
+def test_schema_diagnostic_path_is_bounded_without_partial_property_names():
+    name = "a" * 127
+    value, schema = "secret-modeltext", {"type": "number"}
+    for _ in range(6):
+        value, schema = {name: value}, {"type": "object", "properties": {name: schema}}
+    with pytest.raises(RequiredModelUnavailable) as error:
+        validate_schema(value, schema)
+    diagnostic = error.value.diagnostic
+    assert len(diagnostic["schema_path"]) <= 512
+    assert all(component == name for component in diagnostic["schema_path"].split("/")[1:])
+    assert diagnostic["schema_keyword"] == "depth"
+
+
+@pytest.mark.parametrize("failure,code,status", [
+    ("http", "HTTP_ERROR", 401), ("timeout", "NETWORK_TIMEOUT", None),
+    ("network", "TRANSPORT_FAILURE", None), ("json", "INVALID_RESPONSE_JSON", None),
+])
+def test_transport_failure_diagnostic_never_contains_body_headers_or_exception_text(
+        configured, monkeypatch, failure, code, status):
+    tainted = f"{KEY} secret-modeltext https://example.com/?token=private-token"
+    def post(*args, **kwargs):
+        if failure == "timeout":
+            raise requests.Timeout(tainted)
+        if failure == "network":
+            raise OSError(tainted)
+        return Response(body=tainted.encode(), status=401 if failure == "http" else 200)
+    monkeypatch.setattr(requests, "post", post)
+    with pytest.raises(RequiredModelUnavailable) as error:
+        DeepSeekRequiredClient(configured).complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    expected = {"schema": "tiger.model-failure.v1", "provider": "deepseek", "code": code}
+    if status is not None:
+        expected["http_status"] = status
+        assert str(error.value) == "DeepSeek required: HTTP_401"
+    assert error.value.diagnostic == expected
+    persisted = json.dumps([configured.calls, error.value.diagnostic, str(error.value)])
+    assert KEY not in persisted and "secret-modeltext" not in persisted and "private-token" not in persisted
+
+
+def test_model_schema_failure_keeps_no_reasoning_content_or_unknown_key(configured, monkeypatch):
+    payload = chat_response({"score": 7, "reason": "public", KEY: "secret-modeltext"})
+    payload["choices"][0]["message"]["reasoning_content"] = KEY + " secret-reasoning"
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
+    client = DeepSeekRequiredClient(configured)
+    with pytest.raises(RequiredModelUnavailable) as error:
+        client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert error.value.diagnostic["schema_path"] == ""
+    assert error.value.diagnostic["schema_keyword"] == "additionalProperties"
+    serialized = json.dumps([configured.calls, error.value.diagnostic, str(error.value)])
+    assert KEY not in serialized and "secret-modeltext" not in serialized and "secret-reasoning" not in serialized
+    assert not client.receipts
+
+
+def test_actual_key_in_schema_name_fails_before_schema_location_is_reported(configured):
+    schema = {"type": "object", "properties": {KEY: {"type": "number"}}}
+    with pytest.raises(RequiredModelUnavailable) as error:
+        DeepSeekRequiredClient(configured).complete_json(system="s", user="u", schema_hint={}, schema=schema)
+    assert error.value.diagnostic == {"schema": "tiger.model-failure.v1", "provider": "deepseek",
+                                      "code": "UNSAFE_OUTPUT_SCHEMA"}
+    assert KEY not in json.dumps(error.value.diagnostic)
+    assert configured.calls == []

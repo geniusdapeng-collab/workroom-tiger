@@ -13,6 +13,8 @@ from threading import get_ident
 from time import perf_counter
 from typing import Any, Callable, Mapping, Protocol
 
+from .model_diagnostics import MODEL_IO_METHODS, model_failure_diagnostic
+
 
 class EvidenceWriteError(RuntimeError):
     """Evidence could not be durably recorded; never a provider fallback."""
@@ -363,6 +365,10 @@ class ExecutionContext:
         value = ({"error_type": type(error).__name__, "message": "External call failed",
                   "outcome_observed": outcome_observed}
                  if error is not None else output)
+        if error is not None and self.model_required and handle.method in MODEL_IO_METHODS:
+            diagnostic = model_failure_diagnostic(error)
+            if diagnostic is not None:
+                value["diagnostic"] = diagnostic
         ref = self._snapshot(scope.spec.name, "output", value)
         scope.io_calls.append({"index": handle.index, "method": handle.method,
                                "input_ref": handle.input_ref,

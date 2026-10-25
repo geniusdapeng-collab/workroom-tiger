@@ -189,6 +189,7 @@ TIGER_TEST_PYTHON=/absolute/path/to/python node --test \
 | doctor not_ready / Python 版本不符 | 指定已安装本仓依赖且满足 3.11+ 的实际 Python，再检查 doctor |
 | READ_ONLY | 由操作者在部署配置中选择 paper；请求字段不能升级权限 |
 | RESULT_INVALID / EVIDENCE_* | 保留原 run_id 和证据，调查格式/哈希/绑定；不得拼接成功摘要 |
+| MODEL_REQUIRED_FAILED | 保留原失败身份和证据。新模型 I/O 错误可附固定安全码、HTTP 状态或 schema 路径/关键字；不保存响应正文、推理内容或任意错误字符串。旧证据没有诊断字段时，不能事后断言原始原因。修复并验证新的源代码后，才为新尝试分配独立身份；不得改原失败、内部重跑或自动换键重试 |
 | 配置锁存在 | 先确认写入进程是否仍活跃；不要绕过锁覆盖其他配置 |
 | MCP 菜单没有 run | readonly 的正常结果；配置改动须在实际宿主重新连接后验证 |
 | 公开源失败/访问挑战/数据不足 | 依据回执如实报告缺口；不注入演示行情，不绕过访问控制 |
