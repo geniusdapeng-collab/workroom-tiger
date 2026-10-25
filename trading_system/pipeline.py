@@ -481,6 +481,7 @@ def run_pipeline(
             from .llm import required as semantic
             try:
                 llm = DeepSeekRequiredClient(execution)
+                assessment = semantic.assessment_context(execution)
             except Exception as exc:
                 from .redline import LLMUnavailable
                 from .redline.execution import RequiredModelFailed
@@ -540,7 +541,8 @@ def run_pipeline(
 
         stage.output({"documents": base_docs})
 
-    with tracer.step("clean.llm_semantic", {"documents": base_docs}) as stage:
+    with tracer.step("clean.llm_semantic", {"documents": base_docs,
+                     **({"assessment": assessment} if required else {})}) as stage:
         cleaned = semantic.clean(llm, base_docs) if required else unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer))
         degraded_n = sum(1 for c in cleaned if c.degraded)
         logger.info("clean.llm_semantic: %d 篇（语义缺失 %d）", len(cleaned), degraded_n)
@@ -761,10 +763,12 @@ def run_pipeline(
     with tracer.step("tech.cycle_linkage", {"leaders": CycleLinkageAgent.LEADERS, "provider": provider.name}) as stage:
         tech_linkage = CycleLinkageAgent(provider).execute(tracer)
         stage.output(tech_linkage)
-    with tracer.step("tech.sentiment", {"documents": score_docs}) as stage:
+    with tracer.step("tech.sentiment", {"documents": score_docs,
+                     **({"assessment": assessment} if required else {})}) as stage:
         tech_sentiment = semantic.sentiment(llm, score_docs) if required else ChainSentimentAgent(llm).execute(score_docs, tracer)
         stage.output(tech_sentiment)
-    with tracer.step("tech.risk", {"documents": cleaned}) as stage:
+    with tracer.step("tech.risk", {"documents": cleaned,
+                     **({"assessment": assessment} if required else {})}) as stage:
         tech_alerts = semantic.risk(llm, cleaned) if required else ChainRiskAgent(llm).execute(cleaned, tracer)
         stage.output(tech_alerts)
     with tracer.step("tech.fusion", {"monitor": tech_monitor, "linkage": tech_linkage,
@@ -778,7 +782,8 @@ def run_pipeline(
 
     # ================= SHS 叙事维度（LLM 化） =================
     narrative_llm: dict = {}
-    with tracer.step("sector.narrative", {"documents": score_docs, "sector_symbols": spec.sector_symbols}) as stage:
+    with tracer.step("sector.narrative", {"documents": score_docs, "sector_symbols": spec.sector_symbols,
+                     **({"assessment": assessment} if required else {})}) as stage:
         narr_res = semantic.narrative(llm, score_docs, spec.sector_symbols) if required else NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer)
         if not isinstance(narr_res, Passthrough):
             narrative_llm = narr_res
@@ -853,11 +858,17 @@ def run_pipeline(
     # 铁律：辩论在 L4 闸门产出【之后】执行，只读 picks/rationale/watchlist，
     # 绝不回写任何分数与闸门输出；产出仅作交易卡片"第六段"进报告层。
     # 回测路径不经过本 pipeline（无未来函数：历史回放禁止注入 LLM）。
+    if required:
+        approved_symbols = [pick.ticker for pick in picks]
+        decision_symbols = approved_symbols + [candidate.ticker for candidate in context.get("watchlist", [])
+                                               if candidate.ticker not in approved_symbols][:5]
+        decision_asof = semantic.market_asof(market_data, decision_symbols, assessment)
     with tracer.step("decision.debate", {"enabled": config.DEBATE_ENABLED, "picks": picks,
                      "rationale": context.get("pick_rationale", {}), "watchlist": context.get("watchlist", []),
                      "action": context.get("action", "HOLD"), "documents": cleaned,
                      **({"mrs": context.get("mrs"), "sectors": context.get("sectors"),
-                         "rejections": context.get("rejections"), "account_usd": account_usd} if required else {})}) as stage:
+                         "rejections": context.get("rejections"), "account_usd": account_usd,
+                         "assessment": assessment, "market_asof": decision_asof} if required else {})}) as stage:
         from .agents.debate_agent import DebateAgent, select_debate_targets
         debate_raw: dict = {"status": "disabled", "triggered": [], "evidence": {}}
         if required:

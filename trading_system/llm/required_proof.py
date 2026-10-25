@@ -1,7 +1,7 @@
 """Read-only reconstruction of required-model evidence before publication."""
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 import hashlib
 import json
 import re
@@ -14,11 +14,11 @@ from ..search.credibility import CrossValidator, scoring_docs, evidence_for
 from ..search.models import CleanDocument, RawDocument
 from ..tech_chain.agents import SentimentRow, RiskAlert
 from ..redline import LLMUnavailable
-from ..redline.execution import REQUIRED_MODEL_STAGES
+from ..redline.execution import REQUIRED_MODEL_STAGES, RequiredModelFailed
 from ..tech_chain.universe import CHAIN_TOPICS, SECTOR_TOPICS, TECH_SUBCHAINS
 from .deepseek_required import MODEL, RELEASE, SEARCH_MODE, sanitize_url, validate_schema, DeepSeekRequiredClient
 from .required_schemas import clean_schema, sentiment_schema, risk_schema, narrative_schema, decision_schema
-from .required import SYSTEM, TASKS, _docs
+from .required import SYSTEM, TASKS, _docs, market_asof
 
 
 def _fail():
@@ -46,11 +46,18 @@ def verify_required_model(run, result: dict, admission: dict) -> dict:
         return _verify(run, result, admission)
     except EvidenceInvalid:
         raise
-    except (KeyError, ValueError, TypeError, IndexError, LLMUnavailable, OverflowError):
+    except (KeyError, ValueError, TypeError, IndexError, LLMUnavailable,
+            RequiredModelFailed, OverflowError):
         _fail()
 
 
 def _verify(run, result, admission):
+    clock = admission["clock"]
+    run_date, market_timezone = clock["run_date"], clock["market_timezone"]
+    if (type(run_date) is not str or date.fromisoformat(run_date).isoformat() != run_date
+            or type(market_timezone) is not str or market_timezone != "America/New_York"):
+        _fail()
+    assessment = {"run_date": run_date, "market_timezone": market_timezone}
     events = [strict_json(line) for line in read_bytes(run, "events.jsonl").splitlines()]
     by_stage = {row["stage"]: row for row in events if row["kind"] == "end"}
     counts = {stage: 0 for stage in REQUIRED_MODEL_STAGES}
@@ -65,6 +72,8 @@ def _verify(run, result, admission):
             _fail()
         bound_inputs = snapshot(end, "input")
         inputs = _plain(bound_inputs)
+        if stage != "search.collect" and inputs.get("assessment") != assessment:
+            _fail()
         output = read_snapshot(run, end["output_ref"], run_id=run.name, stage=stage, role="output")
         docs = inputs.get("documents", [])
         ids = [doc.get("raw", doc)["doc_id"] for doc in docs]
@@ -153,12 +162,18 @@ def _verify(run, result, admission):
                 watch = [row["ticker"] for row in inputs["watchlist"] if row["ticker"] not in approved][:5]
                 expected_schema = decision_schema(approved + watch, ids)
                 decision_inputs, decision_value = inputs, output["value"]
+                prepared_market_data = snapshot(by_stage["data.prepare"], "output")["value"]["market_data"]
+                expected_market_asof = market_asof(prepared_market_data, approved + watch, assessment)
+                if inputs.get("market_asof") != expected_market_asof:
+                    _fail()
                 expected_payload = {
                     "approved_picks": inputs["picks"],
                     "watch_candidates": [row for row in inputs["watchlist"] if row["ticker"] not in approved][:5],
                     "numeric_action": inputs["action"], "mrs": bound_inputs["mrs"],
                     "sectors": bound_inputs["sectors"], "rejections": inputs["rejections"],
-                    "risk_rationale": inputs["rationale"], "documents": _docs(docs)}
+                    "risk_rationale": inputs["rationale"], "documents": _docs(docs),
+                    "market_asof": expected_market_asof}
+            expected_payload["assessment"] = assessment
             body = request["request"]
             expected_messages = [
                 {"role": "system", "content": SYSTEM + "\nReturn exactly one JSON object. JSON only."},
@@ -245,7 +260,8 @@ def _verify(run, result, admission):
             base_expected = rule_base_clean(collected_expected)
             if (snapshot(base_end, "input") != normalize({"documents": collected_expected})
                     or snapshot(base_end, "output")["value"] != normalize({"documents": base_expected})
-                    or snapshot(by_stage["clean.llm_semantic"], "input") != normalize({"documents": base_expected})):
+                    or snapshot(by_stage["clean.llm_semantic"], "input") != normalize({
+                        "documents": base_expected, "assessment": assessment})):
                 _fail()
         elif stage == "clean.llm_semantic":
             if output["value"] != normalize({"documents": clean_expected, "degraded_count": 0}):

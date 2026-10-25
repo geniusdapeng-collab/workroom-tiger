@@ -31,6 +31,11 @@ def _hash(value):
         separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
+def _admission(execution):
+    return {"clock": {"run_date": execution.run_date.isoformat(),
+                      "market_timezone": execution.policy.market_timezone}}
+
+
 def _answer(stage, schema):
     props = schema["properties"]
     if stage == "clean.llm_semantic":
@@ -105,7 +110,7 @@ def test_all39_stages_require_model_proof_and_model_plan(tmp_path, monkeypatch):
     assert all(row["status"] == "completed" for row in execution.summary())
     assert stage_value(execution, root, "report.plan")["enabled"] is True
     result = asdict(output.result)
-    proof = verify_required_model(root, result, {"clock": {"run_date": execution.run_date.isoformat()}})
+    proof = verify_required_model(root, result, _admission(execution))
     assert proof == result["raw"]["model"]
     assert proof["search_count"] == 14 and proof["call_count"] == 6
     assert result["action"] == "WAIT" and result["picks"] == []
@@ -143,7 +148,7 @@ def test_independent_proof_rejects_unbound_summary_and_instructions(tmp_path, mo
     else:
         result["picks"] = [{"ticker": "ZZZ", "shares": 100}]
     with pytest.raises(EvidenceInvalid) as exc:
-        verify_required_model(root, result, {"clock": {"run_date": execution.run_date.isoformat()}})
+        verify_required_model(root, result, _admission(execution))
     assert exc.value.code == "MODEL_REQUIRED_FAILED"
 
 
@@ -219,7 +224,7 @@ def test_valid_model_call_does_not_authorize_replaced_semantic_output_or_missing
     # All byte hashes and event links remain valid; model semantics still fail.
     verify_events(root, execution.run_id, daily_stage_contract(True))
     with pytest.raises(EvidenceInvalid) as exc:
-        verify_required_model(root, asdict(output.result), {"clock": {"run_date": execution.run_date.isoformat()}})
+        verify_required_model(root, asdict(output.result), _admission(execution))
     assert exc.value.code == "MODEL_REQUIRED_FAILED"
 
 
