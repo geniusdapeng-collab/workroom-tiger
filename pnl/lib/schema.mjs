@@ -34,6 +34,62 @@ const symbol = (value, path) => text(value, path, 20, /^[A-Z0-9][A-Z0-9.^=-]*$/)
 export const validKey = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/.test(value);
 const near = (a, b) => Math.abs(a - b) <= Math.max(0.02, Math.abs(b) * 1e-8);
 
+export const MODEL_PROFILE = 'us-public-model-required-paper-v1';
+export const REQUIRED_MODEL_STAGES = Object.freeze(['clean.llm_semantic', 'tech.sentiment', 'tech.risk', 'sector.narrative', 'decision.debate']);
+export function validateModelEvidence(model) {
+  shape(model, ['provider', 'model', 'release', 'required', 'response_ids', 'call_count', 'required_stages', 'stage_counts', 'search_count', 'search_mode', 'all_required_completed'], 'model');
+  if (model.provider !== 'deepseek' || model.model !== 'deepseek-flash' || model.release !== 'DeepSeek-V4.1-Flash-1017' || model.required !== true || model.all_required_completed !== true || model.search_mode !== 'provider_native_search') fail('A completed required DeepSeek model assessment is required', 'MODEL_REQUIRED');
+  list(model.required_stages, 'model.required_stages', REQUIRED_MODEL_STAGES.length);
+  if (model.required_stages.length !== REQUIRED_MODEL_STAGES.length || new Set(model.required_stages).size !== REQUIRED_MODEL_STAGES.length || REQUIRED_MODEL_STAGES.some(stage => !model.required_stages.includes(stage))) fail('Every required semantic stage must be completed by the model', 'MODEL_REQUIRED');
+  shape(model.stage_counts, REQUIRED_MODEL_STAGES, 'model.stage_counts');
+  for (const stage of REQUIRED_MODEL_STAGES) {
+    number(model.stage_counts[stage], `model.stage_counts.${stage}`, 1, 100);
+    if (!Number.isSafeInteger(model.stage_counts[stage])) fail('Model stage counts must be integers', 'MODEL_REQUIRED');
+  }
+  number(model.call_count, 'model.call_count', REQUIRED_MODEL_STAGES.length, 500);
+  number(model.search_count, 'model.search_count', 14, 14);
+  if (!Number.isSafeInteger(model.call_count) || !Number.isSafeInteger(model.search_count) || model.call_count !== Object.values(model.stage_counts).reduce((sum, count) => sum + count, 0)) fail('Model response counts must reconcile with completed stages', 'MODEL_REQUIRED');
+  list(model.response_ids, 'model.response_ids', 500);
+  if (model.response_ids.length !== model.call_count || new Set(model.response_ids).size !== model.call_count) fail('Every completed model response requires a unique provider identity', 'MODEL_REQUIRED');
+  for (const id of model.response_ids) text(id, 'model.response_id', 160, /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/);
+  return model;
+}
+function validateSources(sources) {
+  list(sources, 'instruction.sources', 20);
+  for (const source of sources) {
+    shape(source, ['id', 'title', 'url', 'published_at'], 'instruction.source');
+    text(source.id, 'instruction.source.id', 100); text(source.title, 'instruction.source.title', 500); text(source.url, 'instruction.source.url', 2048);
+    let url;
+    try { url = new URL(source.url); } catch { fail('Source URL is invalid'); }
+    if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.hash || [...url.searchParams.keys()].some(key => /token|key|signature|authorization|credential|secret|password/i.test(key.replace(/[_-]/g, '')))) fail('Source URLs must be public links without credentials');
+    if (source.published_at !== null) {
+      text(source.published_at, 'instruction.source.published_at', 80);
+      if (!Number.isFinite(Date.parse(source.published_at))) fail('Source publication time is invalid');
+    }
+  }
+  unique(sources, 'id', 'instruction.sources');
+}
+function validateExecutionDecisions(instructions, decisions) {
+  list(instructions, 'executionDecisions', 500);
+  if (instructions.length !== decisions.length) fail('Model instructions must match the published decision set');
+  for (const item of instructions) {
+    shape(item, ['symbol', 'action', 'target_weight', 'action_summary', 'why_this', 'why_now', 'entry_condition', 'invalidation', 'risk_note', 'sources', 'entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days', 'valid_for', 'reference_capital_usd'], 'executionDecision');
+    symbol(item.symbol, 'executionDecision.symbol');
+    const decision = decisions.find(row => row.symbol === item.symbol);
+    if (!decision || decision.action !== item.action || decision.targetWeight !== item.target_weight) fail('Execution instruction differs from the published action or allocation');
+    for (const key of ['action_summary', 'why_this', 'why_now', 'entry_condition', 'invalidation', 'risk_note']) text(item[key], `executionDecision.${key}`, 2000);
+    time(item.valid_for, 'executionDecision.valid_for');
+    validateSources(item.sources);
+    for (const key of ['entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days', 'reference_capital_usd']) {
+      if (item[key] !== null) number(item[key], `executionDecision.${key}`, Number.MIN_VALUE);
+    }
+    if ((item.shares !== null && !Number.isSafeInteger(item.shares)) || (item.time_stop_days !== null && !Number.isSafeInteger(item.time_stop_days))) fail('Shares and time stop must be whole numbers');
+    if (item.action === 'buy' && (item.target_weight <= 0 || item.entry_price === null || item.stop_price === null || item.shares === null || item.risk_usd === null || item.reference_capital_usd === null || item.stop_price >= item.entry_price)) fail('Buy instructions need the verified entry, stop, size and risk facts');
+    if (item.action === 'watch' && item.target_weight !== 0) fail('Watch instructions cannot claim an executed allocation');
+  }
+  unique(instructions, 'symbol', 'executionDecisions');
+}
+
 function validateDecisions(decisions, asOf) {
   list(decisions, 'decisions', 500);
   for (const d of decisions) {
@@ -91,8 +147,9 @@ export function validateRecord(record, now = Date.now()) {
 }
 
 export function validateResearch(record, now = Date.now()) {
-  shape(record, ['schemaVersion', 'idempotencyKey', 'asOf', 'runId', 'receiptHash', 'dataAsOf', 'executionMode', 'modelMode', 'status', 'universeSize', 'summary', 'decisions'], 'research');
-  if (record.schemaVersion !== 1) fail('schemaVersion must be 1');
+  const fields = ['schemaVersion', 'idempotencyKey', 'asOf', 'runId', 'receiptHash', 'dataAsOf', 'executionMode', 'modelMode', 'status', 'universeSize', 'summary', 'decisions'];
+  shape(record, record?.schemaVersion === 2 ? [...fields, 'model', 'executionDecisions'] : fields, 'research');
+  if (![1, 2].includes(record.schemaVersion)) fail('Research schemaVersion must be 1 or 2');
   if (!validKey(record.idempotencyKey)) fail('idempotencyKey must be 8-128 safe characters');
   time(record.asOf, 'asOf');
   if (Date.parse(record.asOf) > now + 5 * 60_000) fail('asOf cannot be in the future');
@@ -108,5 +165,10 @@ export function validateResearch(record, now = Date.now()) {
   if (!Number.isInteger(record.universeSize)) fail('universeSize must be an integer');
   text(record.summary, 'summary', 10000); validateDecisions(record.decisions, record.asOf);
   if (record.decisions.some(d => d.runId !== record.runId)) fail('Research decisions must refer to this verified runId');
+  if (record.schemaVersion === 2) {
+    if (record.modelMode !== 'enabled' || record.status !== 'completed') fail('Only fully completed required models can produce execution instructions', 'MODEL_REQUIRED');
+    validateModelEvidence(record.model);
+    validateExecutionDecisions(record.executionDecisions, record.decisions);
+  }
   return record;
 }

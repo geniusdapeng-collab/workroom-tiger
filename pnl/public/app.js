@@ -7,7 +7,8 @@
   const DATE_TIME = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const ACTION_NAMES = { buy: "买入计划", sell: "卖出计划", hold: "继续持有", watch: "保持观察" };
+  const ACTION_NAMES = { buy: "买入指令", sell: "卖出指令", hold: "继续持有", watch: "暂不买入" };
+  const REQUIRED_MODEL_STAGES = ["clean.llm_semantic", "tech.sentiment", "tech.risk", "sector.narrative", "decision.debate"];
   let dashboard = null;
   let range = "all";
   let historyExpanded = false;
@@ -58,8 +59,7 @@
     if (!["history", "records"].every((key) => Array.isArray(data[key]))) throw new Error("INVALID_HISTORY");
     if (data.research !== undefined) {
       if (!data.research || !Array.isArray(data.research.history)) throw new Error("INVALID_RESEARCH");
-      const research = data.research.latest;
-      if (research !== null) {
+      for (const research of [...data.research.history, ...(data.research.latest === null ? [] : [data.research.latest])]) {
         if (!research || !validDate(research.asOf) || !validDate(research.dataAsOf) || research.executionMode !== "paper" || !["disabled", "enabled", "passthrough"].includes(research.modelMode) || !["completed", "completed_degraded"].includes(research.status) || !finite(research.universeSize) || !Array.isArray(research.decisions)) throw new Error("INVALID_RESEARCH_RECORD");
         validateDecisions(research.decisions);
       }
@@ -82,6 +82,59 @@
   function validateDecisions(decisions) {
     for (const row of decisions) if (typeof row.symbol !== "string" || !Object.hasOwn(ACTION_NAMES, row.action) || !validDate(row.decidedAt) || typeof row.thesis !== "string" || !finite(row.targetWeight) || row.targetWeight < 0 || row.targetWeight > 1) throw new Error("INVALID_DECISION");
   }
+
+  const plainText = (value) => typeof value === "string" && value.trim().length > 0;
+  const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+  function sourceUrl(value) {
+    try {
+      const url = new URL(value);
+      return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+    } catch { return null; }
+  }
+
+  function modelQualified(record) {
+    const model = record?.model;
+    return record?.modelMode === "enabled" && record.status === "completed"
+      && model?.provider === "deepseek" && model.model === "deepseek-flash" && model.release === "DeepSeek-V4.1-Flash-1017"
+      && model.required === true && model.all_required_completed === true && positiveInteger(model.call_count)
+      && Array.isArray(model.response_ids) && model.response_ids.length === model.call_count && model.response_ids.every(plainText)
+      && new Set(model.response_ids).size === model.call_count
+      && Array.isArray(model.required_stages) && model.required_stages.length === REQUIRED_MODEL_STAGES.length
+      && new Set(model.required_stages).size === model.required_stages.length
+      && model.stage_counts && Object.keys(model.stage_counts).length === REQUIRED_MODEL_STAGES.length
+      && REQUIRED_MODEL_STAGES.every((stage) => model.required_stages.includes(stage) && positiveInteger(model.stage_counts[stage]))
+      && Object.values(model.stage_counts).reduce((sum, count) => sum + count, 0) === model.call_count
+      && model.search_mode === "provider_native_search" && model.search_count === 14;
+  }
+
+  function structuredDecisionsValid(record) {
+    if (!plainText(record?.summary) || !Array.isArray(record.executionDecisions)) return false;
+    const seen = new Set();
+    let totalWeight = 0;
+    for (const decision of record.executionDecisions) {
+      if (!decision || typeof decision.symbol !== "string" || !/^[A-Z0-9][A-Z0-9.^=-]{0,19}$/.test(decision.symbol)
+        || seen.has(decision.symbol) || !Object.hasOwn(ACTION_NAMES, decision.action)
+        || !finite(decision.target_weight) || decision.target_weight < 0 || decision.target_weight > 1
+        || !["action_summary", "why_this", "why_now", "entry_condition", "invalidation", "risk_note", "valid_for"].every((key) => plainText(decision[key]))
+        || !["entry_price", "stop_price", "shares", "risk_usd", "time_stop_days", "reference_capital_usd"].every((key) => decision[key] === null || (finite(decision[key]) && decision[key] >= 0))
+        || !Array.isArray(decision.sources) || decision.sources.some((source) => !source || !plainText(source.id) || !plainText(source.title) || !sourceUrl(source.url))) return false;
+      if (decision.action === "watch" && decision.target_weight !== 0) return false;
+      if (decision.action === "buy" && (!(decision.target_weight > 0) || !(decision.entry_price > 0)
+        || !(decision.stop_price > 0) || !(decision.stop_price < decision.entry_price)
+        || !positiveInteger(decision.shares) || !(decision.risk_usd > 0) || !(decision.reference_capital_usd > 0))) return false;
+      seen.add(decision.symbol);
+      totalWeight += decision.target_weight;
+    }
+    return totalWeight <= 1.000001;
+  }
+
+  function expiryTimestamp(value) {
+    // Only an explicit ISO expiry can be interpreted here. Session descriptions
+    // remain verbatim; the display never derives an expiry from a trading phrase.
+    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+      && validDate(value) ? Date.parse(value) : null;
+  }
+  const expiredAt = (value) => expiryTimestamp(value) !== null && expiryTimestamp(value) < Date.now();
 
   function renderChartState(title, description, loading = false) {
     const container = byId("performance-chart");
@@ -224,40 +277,156 @@
   function renderResearch(data) {
     const research = data.research?.latest;
     const stamp = byId("research-stamp");
-    stamp.hidden = !research;
-    stamp.replaceChildren();
-    if (research) {
-      stamp.append(element("span", "", `研究更新 ${dateTime(research.asOf)}`), element("span", "", `行情截至 ${dateOnly(research.dataAsOf)} · 覆盖 ${number(research.universeSize)} 只标的`));
-      if (research.modelMode === "disabled") stamp.append(element("span", "research-disclosure", "本轮未启用模型，研究按公开行情与系统规则生成。"));
-      else if (research.modelMode === "passthrough") stamp.append(element("span", "research-disclosure", "本轮模型环节未产生完整结论，研究结果存在降级。"));
-      renderDecisions(research.decisions, true);
-    } else renderDecisions(data.latest?.decisions || []);
+    const qualified = modelQualified(research) && structuredDecisionsValid(research);
+    renderHistoricalResearch(data, qualified ? research : null);
+    if (!qualified) {
+      renderInstructionState(research ? "unqualified" : "pending",
+        research ? "等待满足要求的模型指令" : "等待新一轮模型指令",
+        research ? "已有运行记录未满足本轮必需模型与完整指令的核验条件，已收进历史记录。当前不据此发出新的落单指令。" : "实际模型完成分析并通过核验后，交易指令将在这里公开。没有完整产出时不以规则结果替代。" );
+      return;
+    }
+
+    const status = byId("instruction-status");
+    const allExpired = research.executionDecisions.length > 0 && research.executionDecisions.every((item) => expiredAt(item.valid_for));
+    status.textContent = allExpired ? "历史指令 · 已过有效期" : "必需模型与搜索 · 已核验";
+    status.className = `instruction-status ${allExpired ? "is-pending" : "is-verified"}`;
+    const proof = byId("model-proof");
+    proof.hidden = false;
+    proof.replaceChildren();
+    const identity = element("div", "model-identity");
+    identity.append(element("span", "model-proof-label", "本轮实际模型"), element("strong", "", "DeepSeek"), element("span", "model-release", research.model.release), element("span", "model-api-name", research.model.model));
+    const facts = element("div", "model-proof-facts");
+    for (const [value, label] of [[research.model.call_count, "次真实模型调用"], [research.model.required_stages.length, "个必需模型阶段完成"], [research.model.search_count, "次模型原生搜索"]]) {
+      const fact = element("div");
+      fact.append(element("strong", "", number(value)), element("span", "", label));
+      facts.append(fact);
+    }
+    proof.append(identity, facts);
+    stamp.hidden = false;
+    stamp.replaceChildren(element("span", "", `指令生成 ${dateTime(research.asOf)}`), element("span", "", `行情截至 ${dateOnly(research.dataAsOf)} · 本轮扫描 ${number(research.universeSize)} 只标的`));
+    const summary = byId("instruction-summary");
+    summary.hidden = false;
+    summary.replaceChildren(element("p", "instruction-summary-label", allExpired ? "当时的总体指令" : "本轮总体指令"), element("p", "instruction-summary-text", research.summary));
+    if (allExpired) summary.append(element("p", "instruction-summary-note", "以下指令已过其明确有效期，保留当时的判断用于复核；等待新的已核验模型指令。"));
+    renderExecutionDecisions(research);
   }
 
-  function renderDecisions(decisions, hasResearch = false) {
+  function renderInstructionState(kind, title, description) {
+    const status = byId("instruction-status");
+    status.textContent = kind === "error" ? "本轮指令暂不可核验" : kind === "unqualified" ? "历史运行不作本轮指令" : "等待必需模型完成";
+    status.className = `instruction-status ${kind === "error" ? "is-error" : "is-pending"}`;
+    for (const id of ["model-proof", "research-stamp", "instruction-summary"]) {
+      byId(id).hidden = true;
+      byId(id).replaceChildren();
+    }
+    const empty = element("div", `instruction-empty${kind === "error" ? " is-error" : ""}`);
+    empty.append(element("strong", "", title), element("p", "", description));
+    byId("decisions-list").replaceChildren(empty);
+  }
+
+  function addInstructionReason(container, label, value, className = "") {
+    const section = element("div", `instruction-reason${className ? ` ${className}` : ""}`);
+    section.append(element("h5", "", label), element("p", "", value));
+    container.append(section);
+  }
+
+  function renderExecutionDecisions(research) {
     const list = byId("decisions-list");
-    if (!decisions.length) {
-      list.replaceChildren(element("p", "journal-empty", hasResearch ? "本轮研究未给出新的股票买卖计划，账户实际配置以持仓记录为准。" : "截至该快照，暂无已公开的研究决策。"));
+    if (!research.executionDecisions.length) {
+      const empty = element("div", "instruction-empty");
+      empty.append(element("strong", "", "本轮没有新增单票落单指令"), element("p", "", "执行团队按上方总体指令行动。账户已有持仓与已回报成交，分别查看持仓记录和实际执行回报。"));
+      list.replaceChildren(empty);
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (const item of [...decisions].sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt))) {
-      const article = element("article", "decision-entry");
-      const header = element("div", "decision-entry-head");
-      header.append(element("span", `action-badge action-${item.action}`, ACTION_NAMES[item.action]), element("h4", "", item.symbol), element("span", "decision-target", `目标仓位 ${percent(item.targetWeight * 100)}`));
-      const meta = element("div", "entry-meta");
-      meta.append(element("time", "", dateTime(item.decidedAt)), element("span", "", item.runId ? `记录 ${item.runId}` : "研究决策记录"));
-      meta.firstChild.dateTime = item.decidedAt;
-      article.append(header, element("p", "decision-thesis", item.thesis), meta);
+    for (const item of research.executionDecisions) {
+      const expired = expiredAt(item.valid_for);
+      const article = element("article", `instruction-entry${expired ? " is-expired" : ""}`);
+      const header = element("div", "instruction-entry-head");
+      const identity = element("div", "instruction-symbol");
+      identity.append(element("span", `action-badge action-${item.action}`, ACTION_NAMES[item.action]), element("h4", "", item.symbol));
+      header.append(identity, element("span", "instruction-target", `目标仓位 ${percent(item.target_weight * 100)}`));
+      article.append(header, element("p", "instruction-headline", item.action_summary));
+      if (expired) article.append(element("p", "instruction-expired-note", "已过明确有效期 · 等待新指令"));
+
+      const reasons = element("div", "instruction-reasons");
+      addInstructionReason(reasons, "为什么选它", item.why_this);
+      addInstructionReason(reasons, "为什么现在", item.why_now);
+      article.append(reasons);
+
+      const metrics = element("dl", `instruction-metrics${item.action === "watch" ? " is-observation" : ""}`);
+      for (const [label, value] of [["入场参考", money(item.entry_price)], ["认错线 / 止损", money(item.stop_price)], ["计划股数", item.shares === null ? "—" : `${number(item.shares)} 股`]]) {
+        const metric = element("div");
+        metric.append(element("dt", "", label), element("dd", "", value));
+        metrics.append(metric);
+      }
+      article.append(metrics);
+      addInstructionReason(article, "执行办法", item.entry_condition, "instruction-execution");
+      addInstructionReason(article, "何时撤销 / 离场", item.invalidation, "instruction-invalidation");
+      addInstructionReason(article, "主要风险", item.risk_note, "instruction-risk");
+
+      const validity = element("div", "instruction-validity");
+      validity.append(element("span", "", "有效范围"), element("p", "", expiryTimestamp(item.valid_for) === null ? item.valid_for : `截至 ${dateTime(item.valid_for)}`));
+      article.append(validity);
+      const evidence = element("details", "instruction-evidence");
+      const evidenceSummary = element("summary", "", "查看来源与核验记录");
+      evidence.append(evidenceSummary);
+      const numeric = element("p", "instruction-numeric-note", `计划风险 ${money(item.risk_usd)} · 计划资金基准 ${money(item.reference_capital_usd)} · 时间纪律 ${item.time_stop_days === null ? "—" : `${number(item.time_stop_days)} 个交易日`}`);
+      evidence.append(numeric);
+      if (item.action === "watch") evidence.append(element("p", "instruction-numeric-note", "本项为观察指令；未提供下单价格或股数的字段保持空白。0% 是目标配置，不代替实际持仓。"));
+      else evidence.append(element("p", "instruction-numeric-note", "以上为已核验计划值，成交以团队执行回报为准；跳空、滑点与费用可能使实际损失超过计划风险。"));
+      if (item.sources.length) {
+        const sources = element("ol", "instruction-sources");
+        for (const source of item.sources) {
+          const row = element("li");
+          const link = element("a", "", source.title);
+          link.href = sourceUrl(source.url); link.target = "_blank"; link.rel = "noopener noreferrer";
+          row.append(link, element("span", "", validDate(source.published_at) ? ` · ${dateOnly(source.published_at)}` : " · 发布日期未提供"));
+          sources.append(row);
+        }
+        evidence.append(sources);
+      } else evidence.append(element("p", "instruction-numeric-note", "本项没有独立公开来源链接；不补造引用。"));
+      const meta = element("div", "instruction-identifiers");
+      meta.append(element("span", "", `运行 ${research.runId}`), element("span", "", `原始有效范围 ${item.valid_for}`), element("span", "", `原始回执 SHA256 ${research.receiptHash}`));
+      evidence.append(meta);
+      article.append(evidence);
       fragment.append(article);
     }
     list.replaceChildren(fragment);
   }
 
+  function renderHistoricalResearch(data, qualifiedCurrent = null, connectionFailed = false) {
+    const history = [...(data.research?.history || [])];
+    if (data.research?.latest && !history.some((item) => item.runId === data.research.latest.runId)) history.unshift(data.research.latest);
+    const rows = history.filter((item) => item && item.runId !== qualifiedCurrent?.runId);
+    const container = byId("legacy-research");
+    container.hidden = rows.length === 0;
+    byId("legacy-research-title").textContent = `历史指令与运行记录（${rows.length}）`;
+    const body = byId("legacy-research-body");
+    body.replaceChildren();
+    for (const record of rows) {
+      const entry = element("details", "historical-entry");
+      const qualification = modelQualified(record) && structuredDecisionsValid(record);
+      const label = connectionFailed && record.runId === data.research?.latest?.runId ? "上次读取记录 · 当前连接未核验" : qualification ? "历史模型指令 · 以当时有效范围为准" : "历史运行 · 未满足模型必需条件";
+      entry.append(element("summary", "", `${dateTime(record.asOf)} · ${label}`));
+      entry.append(element("p", "historical-summary", typeof record.summary === "string" ? record.summary : "原记录未提供总体说明。"));
+      if (!qualification) entry.append(element("p", "historical-qualification", record.modelMode === "disabled" ? "这条历史运行没有启用模型，不作为本轮交易指令。" : "这条历史运行没有完整的必需模型执行凭据，不作为本轮交易指令。"));
+      for (const decision of record.decisions || []) {
+        const note = element("div", "historical-decision");
+        note.append(element("strong", "", `${decision.symbol} · 当时目标 ${percent(decision.targetWeight * 100)}`), element("p", "", decision.thesis));
+        entry.append(note);
+      }
+      const metadata = element("div", "instruction-identifiers");
+      metadata.append(element("span", "", `运行 ${record.runId || "未提供"}`), element("span", "", `行情截至 ${dateOnly(record.dataAsOf)}`));
+      entry.append(metadata);
+      body.append(entry);
+    }
+  }
+
   function renderTrades(trades) {
     const list = byId("trades-list");
     if (!trades.length) {
-      list.replaceChildren(element("p", "journal-empty", "截至该快照，暂无已入账的真实成交。"));
+      list.replaceChildren(element("p", "journal-empty", "截至账户快照，暂无已入账的真实成交。新的团队执行回报待更新。"));
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -378,6 +547,8 @@
       renderResearch(data);
     } catch (error) {
       if (!dashboard) renderAwaiting(true);
+      renderInstructionState("error", "当前无法核验最新模型指令", "本轮未取得完整的最新记录，当前不展示可执行的新指令。请重新读取；历史记录的原生成时间和有效范围保持不变。" );
+      if (dashboard) renderHistoricalResearch(dashboard, null, true);
       showConnectionNotice(dashboard?.status === "active" ? "最新账簿暂时无法读取，当前保留上次成功读取的记录，请以标注的截至时间为准。" : "账户数据暂时无法读取。页面不展示未经核实的业绩，请重新读取。" );
     } finally {
       window.clearTimeout(timeout);

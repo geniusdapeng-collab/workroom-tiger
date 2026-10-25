@@ -38,6 +38,16 @@ class StrictSourceSynthetic(ExecutionContractError):
     code = "SOURCE_SYNTHETIC"
 
 
+class RequiredModelFailed(ExecutionContractError):
+    code = "MODEL_REQUIRED_FAILED"
+
+
+REQUIRED_PROFILE = "us-public-model-required-paper-v1"
+REQUIRED_POLICY_ID = "tiger.public-model-required-paper-policy.v1"
+REQUIRED_MODEL_STAGES = ("clean.llm_semantic", "tech.sentiment", "tech.risk",
+                         "sector.narrative", "decision.debate")
+
+
 PUBLIC_PROVIDER_NAMES = ("yahoo", "stooq", "official", "tencent", "sina", "eastmoney")
 PUBLIC_SEARCH_SOURCE_NAMES = (
     "google_news", "reddit", "edgar", "patentsview", "federal_register",
@@ -54,13 +64,14 @@ class ExecutionPolicy:
     market_timezone: str = "America/New_York"
 
     def __post_init__(self):
-        if not self.policy_id or self.model_mode != "disabled":
+        required = self.policy_id == REQUIRED_POLICY_ID
+        if not self.policy_id or self.model_mode != ("enabled" if required else "disabled"):
             raise ExecutionContractError("Strict public paper requires a disabled model policy")
         if self.market_timezone != "America/New_York":
             raise ExecutionContractError("Strict public paper has a fixed market timezone")
         for values, allowed, label in (
             (self.provider_names, PUBLIC_PROVIDER_NAMES, "provider"),
-            (self.search_source_names, PUBLIC_SEARCH_SOURCE_NAMES, "search source"),
+            (self.search_source_names, ("deepseek_search",) if required else PUBLIC_SEARCH_SOURCE_NAMES, "search source"),
         ):
             if (not values or len(set(values)) != len(values)
                     or any(name not in allowed for name in values)):
@@ -100,7 +111,7 @@ class DailyStageSpec:
     allow_passthrough: bool = False
 
 
-def daily_stage_specs() -> tuple[DailyStageSpec, ...]:
+def daily_stage_specs(model_required: bool = False) -> tuple[DailyStageSpec, ...]:
     """The sole strict daily order: 3 setup + 20 registered pipeline + 16 tail."""
     from . import DEFERRED_STEPS, STEP_REGISTRY
     setup = (
@@ -108,7 +119,7 @@ def daily_stage_specs() -> tuple[DailyStageSpec, ...]:
         DailyStageSpec("state.reset", "rules", "state"),
         DailyStageSpec("pipeline.prepare", "rules", "pipeline"),
     )
-    pipeline = tuple(DailyStageSpec(s.name, s.driver, s.owner, s.driver == "llm")
+    pipeline = tuple(DailyStageSpec(s.name, s.driver, s.owner, s.driver == "llm" and not model_required)
                      for s in STEP_REGISTRY if s.name not in DEFERRED_STEPS)
     tail = tuple(DailyStageSpec(name, "rules", owner) for name, owner in (
         ("accounting.validate", "main"), ("report.initial", "report"),
@@ -123,8 +134,8 @@ def daily_stage_specs() -> tuple[DailyStageSpec, ...]:
     return setup + pipeline + tail
 
 
-def daily_stage_contract() -> list[dict]:
-    return [asdict(spec) for spec in daily_stage_specs()]
+def daily_stage_contract(model_required: bool = False) -> list[dict]:
+    return [asdict(spec) for spec in daily_stage_specs(model_required)]
 
 
 class EvidenceStore(Protocol):
@@ -205,7 +216,8 @@ class ExecutionContext:
             raise ExecutionContractError("run_date must be the frozen admission-market date")
         self.run_id, self.run_date = run_id, run_date
         self.paths, self.policy, self.store = paths, policy, store
-        self._specs = daily_stage_specs()
+        self.model_required = policy.policy_id == REQUIRED_POLICY_ID
+        self._specs = daily_stage_specs(self.model_required)
         self._cursor = 0
         self._sequence = 0
         self._owner_thread = get_ident()

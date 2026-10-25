@@ -1,0 +1,422 @@
+"""Required DeepSeek transport contracts; all HTTP is deterministic and mocked."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import io
+import json
+from types import SimpleNamespace
+from urllib.parse import quote
+
+import pytest
+import requests
+
+from trading_system.llm.deepseek_required import (
+    DeepSeekRequiredClient, sanitize_url, validate_schema,
+)
+from trading_system.redline import LLMUnavailable
+
+
+KEY = "fixture-deepseek-credential"
+SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {"score": {"type": "number", "minimum": 0, "maximum": 10},
+                   "reason": {"type": "string", "minLength": 1}},
+    "required": ["score", "reason"],
+}
+
+
+class RecordingExecution:
+    def __init__(self, stage="clean.llm_semantic"):
+        self._active = SimpleNamespace(spec=SimpleNamespace(name=stage))
+        self.calls = []
+
+    def call_io(self, method, inputs, fn):
+        call = {"method": method, "inputs": copy.deepcopy(inputs)}
+        self.calls.append(call)
+        result = fn()
+        call["output"] = copy.deepcopy(result)
+        return result
+
+
+class Response:
+    def __init__(self, payload=None, *, body=None, status=200, headers=None):
+        self.body = body if body is not None else json.dumps(payload).encode()
+        self.status_code = status
+        self.headers = {"Content-Type": "application/json", **(headers or {})}
+        self.raw = io.BytesIO(self.body)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def chat_response(parsed=None, **overrides):
+    payload = {
+        "id": "deepseek-response-1", "model": "deepseek-flash",
+        "system_fingerprint": "fp-fixture", "object": "chat.completion",
+        "choices": [{"finish_reason": "stop", "index": 0,
+                     "message": {"role": "assistant", "content": json.dumps(
+                         parsed if parsed is not None else {"score": 7, "reason": "evidence"})}}],
+        "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50,
+                  "completion_tokens_details": {"reasoning_tokens": 5}},
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.fixture
+def configured(monkeypatch):
+    for key, value in {"LLM_BACKEND": "api", "LLM_BASE_URL": "https://api.deepseek.com",
+                       "LLM_MODEL": "deepseek-flash", "LLM_API_KEY": KEY}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: pytest.fail("Unexpected HTTP"))
+    return RecordingExecution()
+
+
+def test_required_chat_binds_keyless_request_and_actual_response(configured, monkeypatch):
+    seen = []
+    response = Response(chat_response())
+
+    def post(url, **kwargs):
+        seen.append((url, kwargs))
+        return response
+
+    monkeypatch.setattr(requests, "post", post)
+    client = DeepSeekRequiredClient(configured)
+    out = client.complete_json(system="Analyze JSON only", user="public evidence",
+                               schema_hint={"score": 0}, schema=SCHEMA, max_tokens=16384)
+    assert out == {"score": 7, "reason": "evidence"}
+    assert client.required is True
+    url, kwargs = seen[0]
+    assert url == "https://api.deepseek.com/chat/completions"
+    assert kwargs["headers"]["Authorization"] == f"Bearer {KEY}"
+    assert kwargs["allow_redirects"] is False and kwargs["verify"] is True
+    assert kwargs["stream"] is True
+    assert kwargs["json"]["model"] == "deepseek-flash"
+    assert kwargs["json"]["response_format"] == {"type": "json_object"}
+    assert kwargs["json"]["thinking"] == {"type": "enabled"}
+    assert kwargs["json"]["reasoning_effort"] == "high"
+    assert kwargs["json"]["stream"] is False
+    call = configured.calls[0]
+    assert call["method"] == "model.deepseek.chat"
+    proof = call["output"]
+    assert proof["schema"] == "tiger.deepseek-call.v1"
+    assert proof["parsed"] == out
+    assert proof["stage"] == "clean.llm_semantic"
+    assert proof["response_id"] == "deepseek-response-1"
+    assert proof["transport_response_sha256"] == hashlib.sha256(response.body).hexdigest()
+    assert json.loads(proof["response"]["choices"][0]["message"]["content"]) == out
+    assert proof["response_sha256"] == hashlib.sha256(json.dumps(
+        proof["response"], ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False).encode()).hexdigest()
+    assert proof["schema_sha256"] == call["inputs"]["schema_sha256"]
+    assert proof["request_sha256"] == call["inputs"]["request_sha256"]
+    assert proof["usage"]["total_tokens"] == 50
+    assert client.receipts[0]["response_id"] == proof["response_id"]
+    assert "parsed" not in client.receipts[0]
+    assert "response" not in client.receipts[0]
+    assert KEY not in json.dumps(configured.calls)
+    assert KEY not in json.dumps(client.describe())
+    assert client.describe()["remote_requests"] == 1
+    assert response.closed
+
+
+@pytest.mark.parametrize("name,value", [
+    ("LLM_BACKEND", "auto"), ("LLM_BACKEND", "kimi"),
+    ("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+    ("LLM_BASE_URL", "http://api.deepseek.com"),
+    ("LLM_BASE_URL", "https://api.deepseek.com@evil.example"),
+    ("LLM_MODEL", "deepseek-chat"), ("LLM_MODEL", "deepseek-v4-pro"),
+    ("LLM_API_KEY", ""), ("LLM_API_KEY", "unsafe\r\nheader"),
+])
+def test_trusted_configuration_fails_closed(configured, monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(LLMUnavailable):
+        DeepSeekRequiredClient(configured)
+
+
+@pytest.mark.parametrize("status", [301, 400, 401, 402, 403, 408, 429, 500, 504])
+def test_http_error_never_retries_or_leaks_body(configured, monkeypatch, status):
+    seen = []
+    response = Response(body=f"{KEY} accessToken=private-token".encode(), status=status)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: seen.append(1) or response)
+    client = DeepSeekRequiredClient(configured)
+    with pytest.raises(LLMUnavailable) as error:
+        client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert str(status) in str(error.value)
+    assert KEY not in str(error.value) and "private-token" not in str(error.value)
+    assert len(seen) == 1 and not client.receipts and response.closed
+
+
+@pytest.mark.parametrize("change", [
+    {"model": "deepseek-v4-pro"}, {"id": ""}, {"usage": None},
+    {"object": "not-chat-completion"},
+    {"id": "r" * 161},
+    {"choices": [{"index": 1, "finish_reason": "stop", "message": {"role": "assistant", "content": "{}"}}]},
+    {"usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 51}},
+    {"usage": {"prompt_tokens": True, "completion_tokens": 10, "total_tokens": 11}},
+    {"choices": [{"finish_reason": "length", "message": {"content": "{}"}}]},
+    {"choices": [{"finish_reason": "tool_calls", "message": {"content": "{}"}}]},
+    {"choices": [{"finish_reason": "stop", "message": {"content": "{}", "tool_calls": [{}]}}]},
+    {"choices": [{"finish_reason": "stop", "message": {"content": "```json\n{}\n```"}}]},
+    {"choices": [{"finish_reason": "stop", "message": {"content": '{"score":NaN,"reason":"x"}'}}]},
+    {"choices": [{"finish_reason": "stop", "message": {"content": '{"score":7,"score":8,"reason":"x"}'}}]},
+])
+def test_response_identity_completion_and_strict_json_required(configured, monkeypatch, change):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(chat_response(**change)))
+    client = DeepSeekRequiredClient(configured)
+    with pytest.raises(LLMUnavailable):
+        client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert not client.receipts
+
+
+def test_network_exception_is_sanitized(configured, monkeypatch):
+    def post(*args, **kwargs):
+        raise requests.Timeout(f"{KEY} https://x.example?token=private-token")
+    monkeypatch.setattr(requests, "post", post)
+    with pytest.raises(LLMUnavailable) as error:
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert KEY not in str(error.value) and "private-token" not in str(error.value)
+
+
+@pytest.mark.parametrize("headers,body", [
+    ({"Content-Length": str(1024 * 1024 + 1)}, b"{}"),
+    ({}, b" " * (1024 * 1024 + 1)),
+    ({"Content-Encoding": "gzip"}, b"{}"),
+    ({"Content-Type": "text/html"}, b"{}"),
+])
+def test_response_size_and_encoding_limits(configured, monkeypatch, headers, body):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(body=body, headers=headers))
+    with pytest.raises(LLMUnavailable):
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=SCHEMA)
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.com/?accessToken=private-token", "https://example.com/?ACCESS_TOKEN=x",
+    "https://example.com/?%74oken=x", "https://example.com/?X-Amz-Signature=x",
+    "https://user:pass@example.com/", "https://example.com/?foo=1&amp;api_key=x",
+    "file:///etc/passwd", "http://localhost/", "http://127.0.0.1/", "http://2130706433/",
+    "https://example.com/?%2561ccessToken=x", "https://exa%mple.com/",
+    "https://example.com/?redirect=https%3A%2F%2Fother.example%2F%3Ftoken%3Dprivate",
+])
+def test_unsafe_urls_rejected(url):
+    assert sanitize_url(url) is None
+
+
+@pytest.mark.parametrize("layers", [4, 6, 8, 12])
+def test_nested_percent_encoding_cannot_hide_credentials(layers):
+    key = "%74oken"
+    encoded_secret = "".join("%%%02X" % ord(char) for char in KEY)
+    for _ in range(layers):
+        key = quote(key, safe="")
+        encoded_secret = quote(encoded_secret, safe="")
+    assert sanitize_url("https://example.com/?" + key + "=private-value") is None
+    assert sanitize_url("https://example.com/" + encoded_secret, secret=KEY) is None
+
+
+def test_native_search_sanitizes_before_evidence_and_model(configured, monkeypatch):
+    configured._active.spec.name = "search.collect"
+    unsafe = "https://example.com/doc?accessToken=private-jwt"
+    body = {"results": [
+        {"url": unsafe, "title": "bad", "content": "do not persist"},
+        {"url": "https://example.com/release#fragment", "title": f"Public {KEY}",
+         "content": f"Evidence {unsafe} second https://user:pass@evil.example/ {KEY}",
+         "date": "2026-10-25T00:00:00Z"},
+    ]}
+    response = Response(body)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: response)
+    client = DeepSeekRequiredClient(configured)
+    result = client.search("public evidence", count=4, need_content=True)
+    assert len(result) == 1
+    assert result[0]["url"] == "https://example.com/release"
+    assert result[0]["published"] == "2026-10-25T00:00:00Z"
+    proof = configured.calls[0]["output"]
+    assert proof["schema"] == "tiger.deepseek-search.v1"
+    assert proof["result_count"] == 2 and proof["usable_result_count"] == 1
+    assert proof["results"] == result
+    assert proof["transport_response_sha256"] == hashlib.sha256(response.body).hexdigest()
+    assert proof["response_sha256"] == hashlib.sha256(json.dumps(
+        {"results": result}, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False).encode()).hexdigest()
+    persisted = json.dumps(configured.calls)
+    assert KEY not in persisted and "private-jwt" not in persisted
+    assert "user:pass" not in persisted and "#fragment" not in persisted
+    assert client.search_receipts[0]["usable_result_count"] == 1
+    assert "results" not in client.search_receipts[0]
+
+
+def test_chat_redacts_key_and_credential_links_before_persistence(configured, monkeypatch):
+    dangerous = f"source https://example.com/?token=private-jwt {KEY}"
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(chat_response(
+        {"score": 7, "reason": dangerous})))
+    client = DeepSeekRequiredClient(configured)
+    output = client.complete_json(system=f"JSON {KEY}", user=dangerous,
+                                  schema_hint={}, schema=SCHEMA)
+    serialized = json.dumps([output, configured.calls])
+    assert KEY not in serialized and "private-jwt" not in serialized
+
+
+@pytest.mark.parametrize("payload", [{}, {"results": []}, {"results": [
+    {"url": "https://example.com/?token=x", "title": "unsafe", "content": "body"}]}])
+def test_search_without_usable_evidence_fails(configured, monkeypatch, payload):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
+    client = DeepSeekRequiredClient(configured)
+    with pytest.raises(LLMUnavailable):
+        client.search("public evidence")
+    assert not client.search_receipts
+
+
+def test_fetch_validates_url_and_records_sanitized_page(configured, monkeypatch):
+    seen = []
+    monkeypatch.setattr(requests, "post", lambda url, **kw: seen.append((url, kw)) or Response(
+        {"title": "Original", "content": "Verified public page"}))
+    client = DeepSeekRequiredClient(configured)
+    with pytest.raises(LLMUnavailable):
+        client.fetch("https://example.com/?token=private")
+    assert not seen
+    result = client.fetch("https://example.com/article#part")
+    assert seen[0][0] == "https://api.deepseek.com/v1/tools/fetch"
+    assert result["url"] == "https://example.com/article"
+    assert configured.calls[0]["method"] == "model.deepseek.fetch"
+
+
+@pytest.mark.parametrize("value", [
+    {"score": True, "reason": "bad"}, {"score": float("nan"), "reason": "bad"},
+    {"score": 11, "reason": "bad"}, {"score": 1, "reason": ""},
+    {"score": 1}, {"score": 1, "reason": "ok", "extra": 1},
+])
+def test_closed_schema_rejects_bad_values(value):
+    with pytest.raises(LLMUnavailable):
+        validate_schema(value, SCHEMA)
+
+
+def test_schema_combinators_and_arrays():
+    schema = {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": True,
+              "items": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]}}
+    validate_schema([1, None], schema)
+    for value in [[1, 1], [], [0], [True], [1, None, 2]]:
+        with pytest.raises(LLMUnavailable):
+            validate_schema(value, schema)
+
+
+def test_unknown_schema_keyword_rejected_before_http(configured):
+    with pytest.raises(LLMUnavailable):
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema={"type": "object", "unknown": True})
+
+
+def test_optional_usage_detail_fields_are_not_fabricated(configured, monkeypatch):
+    payload = chat_response()
+    payload["usage"]["prompt_tokens_details"] = {}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
+    client = DeepSeekRequiredClient(configured)
+    client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert "prompt_tokens_details" not in client.receipts[0]["usage"]
+
+
+def test_requires_active_owned_execution(configured):
+    with pytest.raises(LLMUnavailable):
+        DeepSeekRequiredClient(None)
+    client = DeepSeekRequiredClient(configured)
+    configured._active = None
+    with pytest.raises(LLMUnavailable):
+        client.search("evidence")
+
+
+def test_close_failure_and_deadline_are_safe(configured, monkeypatch):
+    response = Response(chat_response())
+    def bad_close():
+        raise OSError(KEY)
+    response.close = bad_close
+    monkeypatch.setattr(requests, "post", lambda *a, **k: response)
+    with pytest.raises(LLMUnavailable, match="RESPONSE_CLOSE_FAILURE") as error:
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert KEY not in str(error.value)
+    import trading_system.llm.deepseek_required as transport
+    moments = iter([0.0, 181.0])
+    monkeypatch.setattr(transport.time, "monotonic", lambda: next(moments))
+    response = Response(chat_response())
+    monkeypatch.setattr(requests, "post", lambda *a, **k: response)
+    with pytest.raises(LLMUnavailable, match="RESPONSE_DEADLINE"):
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert response.closed
+
+
+def test_tainted_schema_and_deep_model_json_fail_without_secret_leak(configured, monkeypatch):
+    unsafe = copy.deepcopy(SCHEMA)
+    unsafe["properties"]["reason"]["enum"] = [KEY]
+    with pytest.raises(LLMUnavailable, match="UNSAFE_OUTPUT_SCHEMA"):
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=unsafe)
+    nested = "leaf"
+    for _ in range(70):
+        nested = [nested]
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(chat_response(
+        {"score": 1, "reason": nested})))
+    with pytest.raises(LLMUnavailable, match="RESPONSE_DEPTH_LIMIT"):
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=SCHEMA)
+
+
+def test_evidence_failure_is_preserved_before_network(configured):
+    from trading_system.redline.execution import EvidenceWriteError
+    original = EvidenceWriteError("fixture evidence store failed")
+    def reject(*args, **kwargs):
+        raise original
+    configured.call_io = reject
+    client = DeepSeekRequiredClient(configured)
+    with pytest.raises(EvidenceWriteError) as error:
+        client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert error.value is original
+    assert client.describe()["remote_requests"] == 0
+
+
+def test_search_publisher_limits_reject_without_truncation(configured, monkeypatch):
+    long_url = "https://example.com/" + "a" * 2050
+    assert sanitize_url(long_url) is None
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response({"results": [
+        {"url": "https://example.com/", "title": "a" * 501, "content": "public evidence"}]}))
+    with pytest.raises(LLMUnavailable, match="NO_USABLE_SEARCH_RESULTS"):
+        DeepSeekRequiredClient(configured).search("public evidence")
+
+
+@pytest.mark.parametrize("method", ["search", "fetch"])
+def test_source_title_is_formatted_before_identity_and_proof(configured, monkeypatch, method):
+    title = "\t<SEC>\r\n Q3\x00\x7f\x85  Report  "
+    page = {"url": "https://example.com/report", "title": title,
+            "content": "Original public report content"}
+    payload = {"results": [page]} if method == "search" else page
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
+    client = DeepSeekRequiredClient(configured)
+    if method == "search":
+        result = client.search("public report")[0]
+        proof_result = configured.calls[0]["output"]["results"][0]
+    else:
+        result = client.fetch(page["url"])
+        proof_result = configured.calls[0]["output"]["page"]
+    assert result["title"] == "SEC Q3 Report"
+    assert proof_result == result
+    identity = {key: result[key] for key in ("url", "title", "content", "published")}
+    assert result["id"] == "ds_" + hashlib.sha256(json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False).encode()).hexdigest()[:24]
+
+
+@pytest.mark.parametrize("title", ["", " <>\x00\t\x7f ", "A" * 501])
+@pytest.mark.parametrize("method", ["search", "fetch"])
+def test_missing_or_oversize_source_title_is_never_invented_or_truncated(
+        configured, monkeypatch, title, method):
+    page = {"url": "https://example.com/report", "title": title,
+            "content": "Original public report content"}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(
+        {"results": [page]} if method == "search" else page))
+    client = DeepSeekRequiredClient(configured)
+    expected = "NO_USABLE_SEARCH_RESULTS" if method == "search" else "SOURCE_TITLE_"
+    with pytest.raises(LLMUnavailable, match=expected):
+        client.search("public report") if method == "search" else client.fetch(page["url"])
+    assert not client.search_receipts and not client.fetch_receipts

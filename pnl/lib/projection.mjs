@@ -11,7 +11,13 @@ export function publicRecord(entry) {
 }
 export function publicResearch(entry) {
   const r = entry.record;
-  return { sequence: entry.sequence, hash: entry.hash, asOf: r.asOf, runId: r.runId, receiptHash: r.receiptHash, dataAsOf: r.dataAsOf, executionMode: r.executionMode, modelMode: r.modelMode, status: r.status, universeSize: r.universeSize, summary: r.summary, decisions: r.decisions.map(d => ({ id: d.id, symbol: d.symbol, action: d.action, targetWeight: d.targetWeight, thesis: d.thesis, decidedAt: d.decidedAt, runId: d.runId })) };
+  const output = { schemaVersion: r.schemaVersion, sequence: entry.sequence, hash: entry.hash, asOf: r.asOf, runId: r.runId, receiptHash: r.receiptHash, dataAsOf: r.dataAsOf, executionMode: r.executionMode, modelMode: r.modelMode, status: r.status, universeSize: r.universeSize, summary: r.summary, decisions: r.decisions.map(d => ({ id: d.id, symbol: d.symbol, action: d.action, targetWeight: d.targetWeight, thesis: d.thesis, decidedAt: d.decidedAt, runId: d.runId })) };
+  if (r.schemaVersion === 2) {
+    const m = r.model;
+    output.model = { provider: m.provider, model: m.model, release: m.release, required: m.required, response_ids: [...m.response_ids], call_count: m.call_count, required_stages: [...m.required_stages], stage_counts: { ...m.stage_counts }, search_count: m.search_count, search_mode: m.search_mode, all_required_completed: m.all_required_completed };
+    output.executionDecisions = r.executionDecisions.map(d => ({ symbol: d.symbol, action: d.action, target_weight: d.target_weight, action_summary: d.action_summary, why_this: d.why_this, why_now: d.why_now, entry_condition: d.entry_condition, invalidation: d.invalidation, risk_note: d.risk_note, sources: d.sources.map(s => ({ id: s.id, title: s.title, url: s.url, published_at: s.published_at })), entry_price: d.entry_price, stop_price: d.stop_price, shares: d.shares, risk_usd: d.risk_usd, time_stop_days: d.time_stop_days, valid_for: d.valid_for, reference_capital_usd: d.reference_capital_usd }));
+  }
+  return output;
 }
 export function dashboard(entries, now = new Date().toISOString(), researchEntries = []) {
   const result = { schemaVersion: 1, status: entries.length ? 'active' : 'awaiting_first_record', generatedAt: now, baseline: null, latest: null, metrics: null, history: [], records: [], research: { latest: researchEntries.length ? publicResearch(researchEntries.at(-1)) : null, history: researchEntries.slice().reverse().map(publicResearch) } };

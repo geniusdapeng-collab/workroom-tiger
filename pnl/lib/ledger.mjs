@@ -109,6 +109,11 @@ export class Ledger {
 
 export class ResearchLedger extends Ledger {
   constructor(path) { super(path); this.validate = validateResearch; }
+  append(input) {
+    // Old immutable records remain readable. A historical retry cannot create a new entry.
+    if (!this.keys.has(input?.idempotencyKey) && (input?.schemaVersion !== 2 || input?.modelMode !== 'enabled')) return Promise.reject(new PnlError(422, 'MODEL_REQUIRED', 'New execution decisions require the verified DeepSeek model contract'));
+    return super.append(input);
+  }
   checkOrder(record) {
     const previous = this.entries.at(-1)?.record;
     if (previous && Date.parse(record.asOf) <= Date.parse(previous.asOf)) throw new PnlError(409, 'AS_OF_NOT_INCREASING', 'Research asOf must be later than the latest accepted research');

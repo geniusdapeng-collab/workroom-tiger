@@ -9,7 +9,7 @@ The prepared layout uses `/opt/tiger-pnl/releases/<full-source-sha>`, an atomic 
 1. Confirm the exact host, available disk/memory, current Nginx configuration, occupied ports, existing applications' HTTP/HTTPS behavior, and the actual trusted Node 24 executable. Record this baseline for regression checks.
 2. Resolve both `tigerpnl.com` and `www.tigerpnl.com` to this host. Check the authoritative nameserver and an external recursive resolver. Avoid publishing a stale IPv6 record.
 3. Create `/etc/tiger-pnl` with mode 0700 and place the genuine service environment inside it as `runtime.env`, root-owned mode 0600. It contains `TIGER_PNL_WRITE_TOKEN`, `TIGER_PNL_DATA_DIR=/var/lib/tiger-pnl` and `PORT=4348`. Transfer the secret through a private upload or authenticated encrypted channel; never paste its plaintext into an audited terminal.
-4. Package the reviewed, merged full commit's `pnl/` subtree and record the exact archive SHA-256 before transfer. The installer rejects archive paths outside `pnl/`, links and other special entries. It does not download or execute a mutable branch.
+4. Package the reviewed, merged full commit's complete `pnl/` subtree, including the 4,104,128-byte registered whitepaper at `pnl/public/whitepaper/tiger-trading-20260730.pdf`, and record the exact archive SHA-256 before transfer. The installer rejects archive paths outside `pnl/`, links and other special entries. It does not download or execute a mutable branch.
 
 A Git package can be produced with `git archive --format=tar.gz --output <private-archive-path> <full-merged-sha> pnl`. The SHA-256 must be calculated over those exact archive bytes. If a different transport repacks the source, independently verify every file against the merged commit and calculate the new archive hash before executing its installer.
 
@@ -33,7 +33,7 @@ Use `nginx-http.conf` as a dedicated exact-domain bootstrap virtual host. It ser
 
 Obtain a separate SAN certificate with Certbot's `certonly --webroot`, webroot `/var/lib/tiger-pnl-acme`, domains `tigerpnl.com` and `www.tigerpnl.com`, and certificate name `tiger-pnl-tigerpnl.com`. Reuse the host's already accepted ACME account when available. Preserve other applications' certificate lineages and the existing renewal timer. See the official [Certbot webroot guide](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot).
 
-Before activation, use the protected publisher from the full checkout to submit and independently read back one genuine account baseline and one completed, independently verified research result. A paper portfolio is never a genuine account source. Do not send a Bearer token over public HTTP.
+Before activation, use the protected publisher from the full checkout to submit and independently read back one genuine account baseline and one completed, independently verified **model-required** result. A paper portfolio is never a genuine account source. Do not send a Bearer token over public HTTP.
 
 Run `bash /opt/tiger-pnl/current/pnl/deploy/activate.sh` as root. It requires healthy JSON with at least one record in each chain and an existing certificate, snapshots the exact old Tiger virtual-host file, enabled symlink and renewal hook, checks the candidate, and reloads Nginx. Any configuration or reload failure restores those exact previous components and reloads the restored configuration. It changes only the Tiger virtual host and hook.
 
@@ -43,7 +43,7 @@ To seed before public activation, install `nginx-bootstrap.conf` with the same s
 
 ## Operational verification
 
-- Read the public homepage, static files, health and dashboard over certificate-validated HTTPS. Check the actual page title/body and source assets, not only a 200 status. Duplicate server-name warnings can leave another virtual host serving the domain.
+- Read the public homepage, static files, full registered PDF (compare exact SHA-256 and HEAD length), health and dashboard over certificate-validated HTTPS. Check the actual page title/body and source assets, not only a 200 status. Duplicate server-name warnings can leave another virtual host serving the domain.
 - Verify HTTP and `www` path/query redirects, unauthenticated writes and private receipts returning 401, public projection redaction, and absence of credentials/account evidence in static assets.
 - Restart Tiger and confirm both immutable chains retain the same counts and head hashes. Invoke `tiger-pnl-backup.service`, inspect success, and verify the resulting isolated backup. The timer runs daily at 03:35 UTC with a small randomized delay and catches up after downtime.
 - Repeat the pre-install checks on every cohosted application. Do not infer their behavior from Tiger's health endpoint.

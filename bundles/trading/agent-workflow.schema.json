@@ -38,9 +38,30 @@
           "properties": {
             "synthetic": {"type": "boolean", "const": false},
             "execution_mode": {"type": "string", "const": "paper"},
-            "model_mode": {"type": "string", "const": "disabled"}
+            "model_mode": {"type": "string", "enum": ["disabled", "enabled"]},
+            "model_required": {"type": "boolean", "const": true}
           }
-        }
+        },
+        "model": {"type": "object", "additionalProperties": false,
+          "required": ["provider", "model", "release", "required", "response_ids", "call_count", "required_stages", "stage_counts", "search_count", "search_mode", "all_required_completed"],
+          "properties": {
+            "provider": {"type": "string", "const": "deepseek"},
+            "model": {"type": "string", "const": "deepseek-flash"},
+            "release": {"type": "string", "const": "DeepSeek-V4.1-Flash-1017"},
+            "required": {"type": "boolean", "const": true},
+            "response_ids": {"type": "array", "minItems": 5, "maxItems": 100,
+              "items": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$"}},
+            "call_count": {"type": "integer", "minimum": 5, "maximum": 100},
+            "required_stages": {"type": "array", "minItems": 5, "maxItems": 5,
+              "items": {"type": "string", "enum": ["clean.llm_semantic", "tech.sentiment", "tech.risk", "sector.narrative", "decision.debate"]}},
+            "stage_counts": {"type": "object"},
+            "search_count": {"type": "integer", "minimum": 14, "maximum": 14},
+            "search_mode": {"type": "string", "const": "provider_native_search"},
+            "all_required_completed": {"type": "boolean", "const": true}
+          }
+        },
+        "action_summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "execution_decisions": {"type": "array", "maxItems": 500}
       }
     },
     "verification": {
@@ -85,14 +106,14 @@
     "doctor_request": {"type": "object", "properties": {}, "additionalProperties": false},
     "describe_request": {
       "type": "object", "additionalProperties": false, "required": ["profile"],
-      "properties": {"profile": {"type": "string", "enum": ["us-public-paper-v1", "us-public-active-paper-v1"]}}
+      "properties": {"profile": {"type": "string", "enum": ["us-public-paper-v1", "us-public-active-paper-v1", "us-public-model-required-paper-v1"]}}
     },
     "run_request": {
       "type": "object", "additionalProperties": false,
       "required": ["schema_version", "profile", "paper_account", "idempotency_key"],
       "properties": {
         "schema_version": {"type": "string", "const": "tiger.agent-request/v1"},
-        "profile": {"type": "string", "enum": ["us-public-paper-v1", "us-public-active-paper-v1"]},
+        "profile": {"type": "string", "enum": ["us-public-paper-v1", "us-public-active-paper-v1", "us-public-model-required-paper-v1"]},
         "paper_account": {"type": "string", "const": "public-usd"},
         "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{7,95}$"}
       }

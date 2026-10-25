@@ -117,6 +117,7 @@ jobs:
           set -euo pipefail
           TIGER_TEST_PYTHON="$(command -v python)" node --test \
             bundles/trading/capabilities/workflow-client.test.mjs \
+            bundles/trading/capabilities/workflow-model-required.test.mjs \
             bundles/trading/capabilities/repo.test.mjs \
             scripts/tiger-agent.test.mjs scripts/tiger-agent-mcp.test.mjs \
             scripts/tiger-agent-config.test.mjs \

@@ -4,21 +4,23 @@ import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exitCode, parseJson, runtimeEnvironment, safeEvidencePath, sanitizeMessage, validateEnvelope, validateRequest } from '../bundles/trading/capabilities/workflow-client.mjs';
-import { canonical, validateResearch } from './lib/schema.mjs';
+import { canonical, MODEL_PROFILE, validateResearch } from './lib/schema.mjs';
 import { isCliEntry } from './lib/cli.mjs';
 import { publishRecord } from './publish.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROFILES = new Set(['us-public-paper-v1', 'us-public-active-paper-v1']);
+const PROFILES = new Set([MODEL_PROFILE]);
 const RUN_ID = /^run-[0-9a-f]{32}$/;
-const COMPLETE = new Set(['completed', 'completed_degraded']);
+const COMPLETE = new Set(['completed']);
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 export class SyncError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const error = (code, message) => { throw new SyncError(code, message); };
 async function syncDir(path) { const fd = await open(path, 'r'); try { await fd.sync(); } finally { await fd.close(); } }
-async function saveState(file, value, token) {
+async function saveState(file, value, env) {
   const serialized = canonical(value);
-  if (typeof token === 'string' && token.length >= 4 && serialized.includes(token)) error('STATE_SECRET_REJECTED', 'Sync state unexpectedly contains the website token and was not persisted');
+  for (const [name, secret] of Object.entries(env)) {
+    if (/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name) && typeof secret === 'string' && secret.length >= 4 && serialized.includes(secret)) error('STATE_SECRET_REJECTED', 'Sync state unexpectedly contains a protected credential and was not persisted');
+  }
   const pending = `${file}.pending-${randomUUID()}`; const fd = await open(pending, 'wx', 0o600);
   try { await fd.writeFile(`${serialized}\n`); await fd.sync(); } finally { await fd.close(); }
   await rename(pending, file); await syncDir(dirname(file));
@@ -41,14 +43,13 @@ async function acquireLock(path) {
 }
 function validDate(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value; }
 function marketDate() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
-function plain(value, max) { if (typeof value !== 'string') error('EVIDENCE_INVALID', 'Verified research text is missing'); return value.replace(/[<>]/g, char => char === '<' ? '＜' : '＞').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max); }
 
 /** Invoke only the existing controlled Node CLI; no free Python or trading commands. */
 export function invokeAgent(operation, input, config, timeoutMs) {
   validateRequest(operation, input);
   return new Promise((accept, reject) => {
     const args = [resolve(ROOT, 'scripts/tiger-agent.mjs'), operation, '--python', config.python, '--state-root', config.stateRoot, '--mode', 'paper', '--input-file', '-'];
-    const child = spawn(process.execPath, args, { cwd: ROOT, env: runtimeEnvironment(config.env), stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, args, { cwd: ROOT, env: runtimeEnvironment(config.env, operation === 'run' && input.profile === MODEL_PROFILE), stdio: ['pipe', 'pipe', 'pipe'] });
     const chunks = []; let stdoutBytes = 0; let stderrBytes = 0; let failure; let forced;
     const stop = value => { failure ??= value; child.kill('SIGTERM'); forced ??= setTimeout(() => child.kill('SIGKILL'), 750); };
     const timer = setTimeout(() => stop(new SyncError('OBSERVATION_TIMEOUT', 'Observation stopped; accepted workers continue independently')), Math.max(1, timeoutMs));
@@ -81,6 +82,7 @@ async function evidenceFile(stateRoot, runId, name, refs) {
 }
 
 export async function buildResearch({ receipt, verification, stateRoot, profile, idempotencyKey, expectedRequest = null }) {
+  if (profile !== MODEL_PROFILE) error('MODEL_REQUIRED', 'New publication requires the reviewed model-required profile');
   if (!receipt?.run_id || !RUN_ID.test(receipt.run_id)) error('EVIDENCE_INVALID', 'Verified run identity is missing');
   const runId = receipt.run_id;
   validateEnvelope(receipt, 'receipt', { run_id: runId }); validateEnvelope(verification, 'verify', { run_id: runId });
@@ -93,35 +95,22 @@ export async function buildResearch({ receipt, verification, stateRoot, profile,
   const receiptRef = verification.evidence_refs.find(ref => ref.path === 'receipt.json');
   if (receiptRef.sha256 !== receipt.verification.receipt_sha256) error('EVIDENCE_HASH_MISMATCH', 'Original receipt hash differs from the independent verification');
   const summary = receipt.summary; const disclosures = summary?.disclosures;
-  if (!summary || disclosures?.synthetic !== false || disclosures.execution_mode !== 'paper' || !['disabled', 'enabled', 'passthrough'].includes(disclosures.model_mode)) error('EVIDENCE_INVALID', 'Verified research disclosures are invalid');
+  if (!summary || canonical(summary) !== canonical(raw.summary)) error('EVIDENCE_INVALID', 'Displayed summary differs from the hash-bound original receipt');
+  if (disclosures?.synthetic !== false || disclosures.execution_mode !== 'paper' || disclosures.model_mode !== 'enabled' || disclosures.model_required !== true) error('MODEL_REQUIRED', 'A genuine required model assessment is mandatory; disabled and passthrough runs cannot be published');
   if (!Array.isArray(summary.picks) || !Array.isArray(summary.watchlist)) error('EVIDENCE_INVALID', 'Verified research recommendations are missing');
   const stamp = Date.parse(raw.sealed_at_utc);
   if (!Number.isFinite(stamp)) error('EVIDENCE_INVALID', 'Verified completion timestamp is missing');
-  const asOf = new Date(stamp).toISOString(); const decisions = []; const symbols = new Set();
-  for (const pick of summary.picks) {
-    if (typeof pick?.ticker !== 'string' || !Number.isFinite(pick.position_pct) || pick.position_pct <= 0 || pick.position_pct > 1) error('EVIDENCE_INVALID', 'Verified buy recommendation is invalid');
-    if (symbols.has(pick.ticker)) error('EVIDENCE_INVALID', 'Duplicate verified recommendation symbol'); symbols.add(pick.ticker);
-    const thesis = plain(pick.card, 1800);
-    if (!thesis) error('EVIDENCE_INVALID', 'Verified buy thesis is missing');
-    decisions.push({ id: `${runId}-buy-${pick.ticker}`, symbol: pick.ticker, action: 'buy', targetWeight: pick.position_pct, thesis, decidedAt: asOf, runId });
-  }
-  for (const watch of summary.watchlist) {
-    if (symbols.has(watch?.ticker)) continue;
-    if (typeof watch?.ticker !== 'string' || !Array.isArray(watch.evidence) || watch.evidence.some(value => typeof value !== 'string')) error('EVIDENCE_INVALID', 'Verified watch observation is invalid');
-    const thesis = plain([...watch.evidence, typeof watch.stop_plan === 'string' ? watch.stop_plan : ''].join('；'), 2000);
-    if (!thesis) error('EVIDENCE_INVALID', 'Verified watch rationale is missing'); symbols.add(watch.ticker);
-    decisions.push({ id: `${runId}-watch-${watch.ticker}`, symbol: watch.ticker, action: 'watch', targetWeight: 0, thesis, decidedAt: asOf, runId });
-  }
+  if (!Array.isArray(summary.execution_decisions)) error('MODEL_REQUIRED', 'Verified model execution decisions are missing');
+  const asOf = new Date(stamp).toISOString();
+  const decisions = summary.execution_decisions.map(item => ({ id: `${runId}-${item.action}-${item.symbol}`, symbol: item.symbol, action: item.action, targetWeight: item.target_weight, thesis: item.action_summary, decidedAt: asOf, runId }));
   const universeSize = disclosures.scan_stats?.universe_size;
   if (!Number.isSafeInteger(universeSize) || universeSize < 0) error('EVIDENCE_INVALID', 'Verified research universe size is missing');
-  const marketView = plain(summary.market_view, 4000); const coverage = plain(disclosures.data_coverage, 100);
-  const text = `${marketView}；扫描范围 ${universeSize} 只，数据覆盖 ${coverage}；研究买入计划 ${summary.picks.length} 条，观察 ${decisions.filter(d => d.action === 'watch').length} 条；${disclosures.model_mode === 'disabled' ? '内层语义模型未启用，已披露规则流程与合法透传。' : `内层模型状态 ${disclosures.model_mode}。`}`;
-  const record = { schemaVersion: 1, idempotencyKey, asOf, runId, receiptHash: receipt.verification.receipt_sha256, dataAsOf: summary.as_of?.benchmark_last_bar, executionMode: 'paper', modelMode: disclosures.model_mode, status: receipt.status, universeSize, summary: text, decisions };
+  const record = { schemaVersion: 2, idempotencyKey, asOf, runId, receiptHash: receipt.verification.receipt_sha256, dataAsOf: summary.as_of?.benchmark_last_bar, executionMode: 'paper', modelMode: 'enabled', status: receipt.status, universeSize, summary: summary.action_summary, decisions, model: summary.model, executionDecisions: summary.execution_decisions };
   validateResearch(record);
   return { record, originalRequest: original, evidence: { runId, receiptHash: record.receiptHash, sourceTreeHash: verification.data?.source?.tree_sha256 ?? null, status: record.status, evidenceCount: verification.verification.evidence_count, checks: verification.verification.checks } };
 }
 
-export async function syncResearch({ env = process.env, date = marketDate(), profile = env.TIGER_PNL_RESEARCH_PROFILE ?? 'us-public-paper-v1', runId = null, observeMs = 50000, allowLocalHttp = false } = {}, { invoke = invokeAgent, publish = publishRecord } = {}) {
+export async function syncResearch({ env = process.env, date = marketDate(), profile = env.TIGER_PNL_RESEARCH_PROFILE ?? MODEL_PROFILE, runId = null, observeMs = 50000, allowLocalHttp = false } = {}, { invoke = invokeAgent, publish = publishRecord } = {}) {
   if (!PROFILES.has(profile) || !validDate(date) || (runId !== null && !RUN_ID.test(runId))) error('INVALID_SYNC_REQUEST', 'Use a reviewed profile, ISO date and valid optional run ID');
   if (env.TIGER_AGENT_PERMISSION !== 'paper' || !isAbsolute(env.TIGER_AGENT_PYTHON ?? '') || !isAbsolute(env.TIGER_AGENT_STATE_ROOT ?? '') || !isAbsolute(env.TIGER_PNL_SYNC_STATE_DIR ?? '')) error('INVALID_TRUSTED_CONFIGURATION', 'Trusted paper permission and absolute Python, agent-state and sync-state paths are required');
   if (typeof env.TIGER_PNL_WRITE_TOKEN !== 'string' || env.TIGER_PNL_WRITE_TOKEN.length < 32 || env.TIGER_PNL_WRITE_TOKEN.length > 512 || /\s/.test(env.TIGER_PNL_WRITE_TOKEN)) error('INVALID_TRUSTED_CONFIGURATION', 'A protected valid website write token is required');
@@ -146,20 +135,23 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
       if (state.phase === 'published' && (state.websiteReceipt?.idempotencyKey !== state.payload.idempotencyKey || state.websiteReceipt?.payloadHash !== sha256(canonical(state.payload)) || !/^[a-f0-9]{64}$/.test(state.websiteReceipt?.hash ?? '') || !Number.isSafeInteger(state.websiteReceipt?.sequence) || state.websiteReceipt.sequence < 1)) error('SYNC_STATE_CONFLICT', 'Persistent published receipt is missing or differs');
     } else {
       state = { schemaVersion: 1, date, profile, python: config.python, runnerStateRoot: config.stateRoot, request: runId ? null : request, imported: Boolean(runId), runId, phase: 'prepared', payload: null, evidence: null, websiteReceipt: null };
-      await saveState(file, state, env.TIGER_PNL_WRITE_TOKEN);
+      await saveState(file, state, env);
     }
     if (state.phase === 'published') return { status: 'already_published', runId: state.runId, receipt: state.websiteReceipt };
     const deadline = Date.now() + observeMs;
-    const pending = async reason => { await saveState(file, state, env.TIGER_PNL_WRITE_TOKEN); return { status: 'pending', reason, phase: state.phase, runId: state.runId, idempotencyKey: state.request?.idempotency_key ?? null, observationStopped: true, workerCancellationRequested: false }; };
+    const pending = async reason => { await saveState(file, state, env); return { status: 'pending', reason, phase: state.phase, runId: state.runId, idempotencyKey: state.request?.idempotency_key ?? null, observationStopped: true, workerCancellationRequested: false }; };
     const call = async (operation, input) => { const remaining = deadline - Date.now(); if (remaining < 1000) error('OBSERVATION_TIMEOUT', 'Observation stopped; accepted workers continue independently'); return invoke(operation, input, config, Math.max(1, remaining - 500)); };
     try {
       const doctor = await call('doctor', {});
       if (!doctor.operation_ok || doctor.status !== 'ready' || doctor.data?.access_mode !== 'paper') error('RUNNER_NOT_READY', 'Controlled Tiger doctor did not report a ready paper deployment');
       const description = await call('describe', { profile });
       if (!description.operation_ok || description.data?.profile?.profile !== profile || description.data?.access_mode !== 'paper') error('PROFILE_NOT_AVAILABLE', 'Controlled Tiger describe did not match the reviewed profile');
+      const modelContract = description.data.profile.model_contract;
+      if (description.data.profile.execution?.model_mode !== 'enabled' || modelContract?.required !== true || modelContract.provider !== 'deepseek' || modelContract.model !== 'deepseek-flash' || modelContract.release !== 'DeepSeek-V4.1-Flash-1017' || modelContract.search_mode !== 'provider_native_search') error('MODEL_REQUIRED', 'Controlled Tiger describe did not advertise the exact required DeepSeek policy');
       if (!state.runId) {
+        if (env.LLM_BACKEND !== 'api' || env.LLM_BASE_URL !== 'https://api.deepseek.com' || env.LLM_MODEL !== 'deepseek-flash' || typeof env.LLM_API_KEY !== 'string' || !env.LLM_API_KEY.length || env.LLM_API_KEY.length > 4096 || /[^\x21-\x7e]/.test(env.LLM_API_KEY)) error('MODEL_CONFIGURATION_REQUIRED', 'Load the protected fixed DeepSeek configuration before starting a new run');
         const accepted = await call('run', state.request);
-        if (accepted.run_id && RUN_ID.test(accepted.run_id)) { state.runId = accepted.run_id; state.phase = 'accepted'; await saveState(file, state, env.TIGER_PNL_WRITE_TOKEN); }
+        if (accepted.run_id && RUN_ID.test(accepted.run_id)) { state.runId = accepted.run_id; state.phase = 'accepted'; await saveState(file, state, env); }
         if (!accepted.operation_ok) {
           if (['TIMEOUT', 'INTERRUPTED', 'CANCELLED', 'ACCOUNT_BUSY'].includes(accepted.error?.code)) return pending(accepted.error.code);
           error(accepted.error?.code ?? 'RUNNER_FAILED', 'Controlled Tiger did not accept the persistent request');
@@ -173,9 +165,9 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
           const receipt = await call('receipt', { run_id: state.runId });
           const verification = await call('verify', { run_id: state.runId });
           const built = await buildResearch({ receipt, verification, stateRoot: config.stateRoot, profile, idempotencyKey: `pnl-${identity}`, expectedRequest: state.request });
-          state.payload = built.record; state.evidence = built.evidence; state.request = built.originalRequest; state.phase = 'verified'; await saveState(file, state, env.TIGER_PNL_WRITE_TOKEN); break;
+          state.payload = built.record; state.evidence = built.evidence; state.request = built.originalRequest; state.phase = 'verified'; await saveState(file, state, env); break;
         }
-        if (!['accepted', 'running'].includes(observed.status)) { state.phase = 'failed'; await saveState(file, state, env.TIGER_PNL_WRITE_TOKEN); error('RUN_NOT_COMPLETED', 'Existing research run failed; its original identity is retained and will not be replaced'); }
+        if (!['accepted', 'running'].includes(observed.status)) { state.phase = 'failed'; await saveState(file, state, env); error('RUN_NOT_COMPLETED', 'Existing research run failed; its original identity is retained and will not be replaced'); }
         if (deadline - Date.now() < 2000) return pending('OBSERVATION_TIMEOUT');
         await new Promise(accept => setTimeout(accept, Math.min(1000, Math.max(1, deadline - Date.now() - 1000))));
       }
@@ -185,7 +177,7 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
       if (written?.idempotencyKey !== state.payload.idempotencyKey || written?.payloadHash !== sha256(canonical(state.payload))) error('PUBLICATION_RECEIPT_INVALID', 'Website receipt does not match the persistent research payload');
       // Preserve only the narrow receipt, never arbitrary remote response fields.
       state.websiteReceipt = Object.fromEntries(['schemaVersion', 'idempotencyKey', 'sequence', 'asOf', 'acceptedAt', 'hash', 'previousHash', 'payloadHash', 'replayed'].filter(key => Object.hasOwn(written, key)).map(key => [key, written[key]]));
-      state.phase = 'published'; await saveState(file, state, env.TIGER_PNL_WRITE_TOKEN);
+      state.phase = 'published'; await saveState(file, state, env);
       return { status: 'published_and_verified', runId: state.runId, receipt: state.websiteReceipt, research: { asOf: state.payload.asOf, dataAsOf: state.payload.dataAsOf, decisions: state.payload.decisions.length } };
     } catch (cause) {
       if (['OBSERVATION_TIMEOUT', 'TIMEOUT', 'INTERRUPTED', 'CANCELLED', 'AbortError', 'TimeoutError'].includes(cause.code ?? cause.name)) return pending(cause.code ?? cause.name);

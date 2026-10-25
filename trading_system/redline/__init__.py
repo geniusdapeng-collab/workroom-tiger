@@ -194,9 +194,14 @@ def llm_guard(step_name: str, fn: Callable[[], Any], fallback_payload: Any,
     """
     if step_name not in LLM_STEPS:
         raise RedlineViolation(f"llm_guard 用于非 LLM 环节: {step_name}")
+    required = bool(tracer is not None and tracer.execution is not None
+                    and tracer.execution.model_required)
     try:
         out = fn()
     except LLMUnavailable as e:
+        if required:
+            from .execution import RequiredModelFailed
+            raise RequiredModelFailed("Mandatory semantic model failed") from None
         if tracer is not None:
             tracer.mark_passthrough(step_name, f"LLM不可用: {e}")
         else:
@@ -204,8 +209,14 @@ def llm_guard(step_name: str, fn: Callable[[], Any], fallback_payload: Any,
         return Passthrough(payload=fallback_payload, origin=step_name,
                            reason=f"LLM不可用: {e}")
     if out is None:
+        if required:
+            from .execution import RequiredModelFailed
+            raise RequiredModelFailed("Mandatory semantic model returned no result")
         if tracer is not None:
             tracer.mark_passthrough(step_name, "LLM无有效产出")
         return Passthrough(payload=fallback_payload, origin=step_name,
                            reason="LLM无有效产出")
+    if required and isinstance(out, Passthrough):
+        from .execution import RequiredModelFailed
+        raise RequiredModelFailed("Mandatory semantic model cannot pass through")
     return out

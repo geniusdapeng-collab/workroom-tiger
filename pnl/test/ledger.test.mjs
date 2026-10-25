@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Ledger, ResearchLedger } from '../lib/ledger.mjs';
 import { digest, validateRecord } from '../lib/schema.mjs';
 import { dashboard } from '../lib/projection.mjs';
+import { modelResearchFixture } from './model-fixture.mjs';
 
 // Deliberately synthetic unit-test fixture; never copied into runtime storage.
 export function fixture(overrides = {}) {
@@ -134,7 +135,7 @@ test('deposit and withdrawal adjusted returns, observed drawdown and public reda
 test('research hash chain independently restarts and refuses tampering', async t => {
   const path = await storage(t); const store = await ResearchLedger.open(path);
   t.after(() => rm(path, { recursive: true, force: true }));
-  const record = { schemaVersion: 1, idempotencyKey: 'ledger-research-only-test', asOf: '2026-01-03T21:00:00Z', runId: 'unit-test-verified-run', receiptHash: digest('TEST RECEIPT ONLY'), dataAsOf: '2026-01-02', executionMode: 'paper', modelMode: 'passthrough', status: 'completed_degraded', universeSize: 0, summary: 'UNIT TEST ONLY RESEARCH NO REAL POSITIONS', decisions: [] };
+  const record = modelResearchFixture({ idempotencyKey: 'ledger-research-only-test' });
   const accepted = await store.append(record); await store.close();
   const reopened = await ResearchLedger.open(path); assert.equal(reopened.entries.length, 1); assert.equal(reopened.getReceipt(record.idempotencyKey).hash, accepted.hash); await reopened.close();
   const file = join(path, 'records', '000000000001.json'); const changed = JSON.parse(await readFile(file, 'utf8')); changed.record.summary = 'Tampered test summary'; await writeFile(file, JSON.stringify(changed));

@@ -415,7 +415,8 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
         refs[begin["input_ref"]["path"]] = begin["input_ref"]
         state = end.get("status")
         if state == "passthrough":
-            if spec["driver"] != "llm" or not isinstance(end.get("reason"), str) or not end["reason"].strip():
+            if (spec["driver"] != "llm" or spec.get("allow_passthrough") is not True
+                    or not isinstance(end.get("reason"), str) or not end["reason"].strip()):
                 raise EvidenceInvalid("STEP_FAILED", "Illegal stage passthrough", stage=stage)
             degraded.append({"stage": stage, "reason": end["reason"]})
         elif state != "completed":

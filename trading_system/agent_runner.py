@@ -39,7 +39,7 @@ EXIT_CODES = {
     "DATA_UNAVAILABLE": 6, "DATA_STALE": 6, "SOURCE_SYNTHETIC": 6, "CURRENCY_BLOCKED": 6,
     "RUNNER_FAILED": 7, "RESULT_INVALID": 7, "EVIDENCE_MISSING": 7,
     "EVIDENCE_HASH_MISMATCH": 7, "ARTIFACT_WRITE_FAILED": 7, "RUN_NOT_FOUND": 7,
-    "STEP_ORDER_VIOLATION": 8, "STEP_FAILED": 8, "RUN_INCOMPLETE": 8,
+    "STEP_ORDER_VIOLATION": 8, "STEP_FAILED": 8, "RUN_INCOMPLETE": 8, "MODEL_REQUIRED_FAILED": 8,
     "TIMEOUT": 9, "INTERRUPTED": 9, "CANCELLED": 130,
 }
 
@@ -300,7 +300,7 @@ def submit(state: Path, request: dict, *, source: Path = SOURCE_ROOT) -> dict:
             worker = subprocess.Popen(
                 [sys.executable, "-I", "-B", str(entry), "supervisor", str(state), run_id,
                  str(account_fd), str(run_fd), str(ack_write)],
-                cwd=run / "work", env=run_environment(run / "work"),
+                cwd=run / "work", env=run_environment(run / "work", model_required=policy["execution"]["model_mode"] == "enabled"),
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True, close_fds=True,
                 pass_fds=(account_fd, run_fd, ack_write),

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from enum import IntEnum
+from urllib.parse import urlsplit
 
 from .. import config
 from .models import CleanDocument, Evidence, RawDocument
@@ -140,6 +141,22 @@ def _entity_key(doc: CleanDocument) -> str:
     return "H:" + hashlib.sha1(base.encode("utf-8", "ignore")).hexdigest()[:12]
 
 
+def corroboration_source(doc: CleanDocument) -> str:
+    """Native search is a retriever; corroborate the original publisher hosts.
+
+    Preserve every legacy source identity. For the new provider, domains already
+    present in the reviewed tier table also consolidate their subdomains. An
+    unknown publisher is counted by its complete host, never by a model label.
+    """
+    if doc.raw.source != "deepseek_search":
+        return doc.raw.source
+    host = (urlsplit(doc.raw.url).hostname or "").lower().rstrip(".")
+    for suffix in sorted(config.DOMAIN_TIERS, key=len, reverse=True):
+        if host == suffix or host.endswith("." + suffix):
+            return "publisher:" + suffix
+    return "publisher:" + host.removeprefix("www.")
+
+
 @dataclass
 class CrossValidationStats:
     total: int = 0                  # 进入验证的文档总数
@@ -194,7 +211,7 @@ class CrossValidator:
             groups.setdefault((_entity_key(d), canon), []).append(d)
 
         for (entity, canon), members in groups.items():
-            sources = {m.raw.source for m in members}
+            sources = {corroboration_source(m) for m in members}
             best_tier = min(SourceTier.of(m.evidence.tier) for m in members)
             ok = len(sources) >= self.min_sources and best_tier <= self.max_tier
             for m in members:

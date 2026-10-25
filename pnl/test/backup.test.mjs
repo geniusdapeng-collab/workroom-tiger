@@ -8,9 +8,11 @@ import { fileURLToPath } from 'node:url';
 import { backupLedger, parseArgs } from '../backup.mjs';
 import { Ledger, ResearchLedger } from '../lib/ledger.mjs';
 import { digest } from '../lib/schema.mjs';
+import { modelResearchFixture } from './model-fixture.mjs';
 
 function account() { return { schemaVersion: 1, idempotencyKey: 'BACKUP-TEST-ONLY-ACCOUNT', asOf: '2026-01-02T21:00:00Z', account: { label: 'BACKUP UNIT TEST PRIVATE ACCOUNT', currency: 'USD', nav: 100000, cash: 100000 }, positions: [], trades: [], decisions: [], netExternalFlow: 0, provenance: { kind: 'operator_attested', evidenceSha256: digest('BACKUP UNIT TEST ONLY'), sourceRef: 'private-backup-unit-test', attestedBy: 'private-test-attestor' } }; }
-function research() { return { schemaVersion: 1, idempotencyKey: 'BACKUP-TEST-ONLY-RESEARCH', asOf: '2026-01-03T21:00:00Z', runId: 'unit-test-run', receiptHash: digest('TEST RECEIPT ONLY'), dataAsOf: '2026-01-02', executionMode: 'paper', modelMode: 'disabled', status: 'completed_degraded', universeSize: 0, summary: 'UNIT TEST RESEARCH ONLY', decisions: [] }; }
+function research() { return modelResearchFixture({ idempotencyKey: 'BACKUP-TEST-ONLY-RESEARCH' }); }
+
 async function setup(t) {
   const path = await mkdtemp(join(tmpdir(), 'tiger-pnl-backup-test-')); const dataDir = join(path, 'source');
   const a = await Ledger.open(dataDir); const r = await ResearchLedger.open(join(dataDir, 'research')); await a.append(account()); await r.append(research());

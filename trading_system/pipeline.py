@@ -475,7 +475,20 @@ def run_pipeline(
         demo_mode = is_synthetic(provider)
 
         # ================= 搜索与清洗（系统的命脉环节） =================
-        llm = DisabledLLMClient(execution) if execution is not None else default_client()
+        required = execution is not None and execution.model_required
+        if required:
+            from .llm.deepseek_required import DeepSeekRequiredClient
+            from .llm import required as semantic
+            try:
+                llm = DeepSeekRequiredClient(execution)
+            except Exception as exc:
+                from .redline import LLMUnavailable
+                from .redline.execution import RequiredModelFailed
+                if isinstance(exc, LLMUnavailable):
+                    raise RequiredModelFailed("Required DeepSeek startup configuration is invalid") from None
+                raise
+        else:
+            llm = DisabledLLMClient(execution) if execution is not None else default_client()
         event_calendar = (EventCalendar(str(execution.paths.calendar_override_path), strict=True)
                           if execution is not None else None)
         options_store = None
@@ -495,25 +508,31 @@ def run_pipeline(
     with tracer.step("search.collect", {"chains": CHAIN_TOPICS, "sectors": SECTOR_TOPICS,
                      "ah": config.AH_TOPICS, "ah_enabled": ah_enabled, "limit_per_query": 4,
                      "deep": True, "source_allowlist": execution.policy.search_source_names if execution else None}) as stage:
-        hub = SearchHub(demo=demo_mode, execution=execution) if execution else SearchHub(demo=demo_mode)
+        if required:
+            all_topics = {**CHAIN_TOPICS, **SECTOR_TOPICS}
+            raw_docs = semantic.collect(llm, all_topics, trade_date)
+            search_cleanup, batches = {"native_calls_completed": len(llm.search_receipts)}, []
+        else:
+            hub = SearchHub(demo=demo_mode, execution=execution) if execution else SearchHub(demo=demo_mode)
         # 主题集注册（SearchHub 同款机制）：科技六子链 + 全领域八主题——每个板块
         # 都要有自己的情报输入，否则非科技板块的 LLM 叙事维度被架空（情报偏科即评分偏科）。
         # S3：AH（A股/港股）主题默认关闭（config.AH_TOPICS_ENABLED，S4 多市场启用），
         # 关闭时整体缺席、不产生任何网络调用，开关状态写入日报披露。
-        hub.register_topic_set("chains", CHAIN_TOPICS)
-        hub.register_topic_set("sectors", SECTOR_TOPICS)
-        hub.register_topic_set("ah", config.AH_TOPICS, enabled=ah_enabled)
-        raw_docs = hub.gather_topic_sets(limit_per_query=4, deep=True)
-        search_cleanup = (execution.call_io("search.workers.settle",
+            hub.register_topic_set("chains", CHAIN_TOPICS)
+            hub.register_topic_set("sectors", SECTOR_TOPICS)
+            hub.register_topic_set("ah", config.AH_TOPICS, enabled=ah_enabled)
+            raw_docs = hub.gather_topic_sets(limit_per_query=4, deep=True)
+            search_cleanup = (execution.call_io("search.workers.settle",
                           {"collection_budget_s": hub.budget, "cleanup_budget_s": hub.cleanup_budget},
                           hub.settle_workers) if execution is not None else {})
-        all_topics = hub.active_topics()
+            all_topics = hub.active_topics()
+            batches = hub.batches if execution else []
         logger.info("search.collect: %d 篇原始文档（%d 主题；AH主题=%s）",
                     len(raw_docs), len(all_topics),
                     "启用" if ah_enabled else "关闭")
 
         stage.output({"documents": raw_docs, "topics": all_topics,
-                      "batches": hub.batches if execution else [], "cleanup": search_cleanup})
+                      "batches": batches, "cleanup": search_cleanup})
 
     with tracer.step("clean.rule_base", {"documents": raw_docs}) as stage:
         base_docs = rule_base_clean(raw_docs)
@@ -522,7 +541,7 @@ def run_pipeline(
         stage.output({"documents": base_docs})
 
     with tracer.step("clean.llm_semantic", {"documents": base_docs}) as stage:
-        cleaned = unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer))
+        cleaned = semantic.clean(llm, base_docs) if required else unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer))
         degraded_n = sum(1 for c in cleaned if c.degraded)
         logger.info("clean.llm_semantic: %d 篇（语义缺失 %d）", len(cleaned), degraded_n)
 
@@ -743,10 +762,10 @@ def run_pipeline(
         tech_linkage = CycleLinkageAgent(provider).execute(tracer)
         stage.output(tech_linkage)
     with tracer.step("tech.sentiment", {"documents": score_docs}) as stage:
-        tech_sentiment = ChainSentimentAgent(llm).execute(score_docs, tracer)
+        tech_sentiment = semantic.sentiment(llm, score_docs) if required else ChainSentimentAgent(llm).execute(score_docs, tracer)
         stage.output(tech_sentiment)
     with tracer.step("tech.risk", {"documents": cleaned}) as stage:
-        tech_alerts = ChainRiskAgent(llm).execute(cleaned, tracer)
+        tech_alerts = semantic.risk(llm, cleaned) if required else ChainRiskAgent(llm).execute(cleaned, tracer)
         stage.output(tech_alerts)
     with tracer.step("tech.fusion", {"monitor": tech_monitor, "linkage": tech_linkage,
                      "sentiment": tech_sentiment, "alerts": tech_alerts}) as stage:
@@ -760,7 +779,7 @@ def run_pipeline(
     # ================= SHS 叙事维度（LLM 化） =================
     narrative_llm: dict = {}
     with tracer.step("sector.narrative", {"documents": score_docs, "sector_symbols": spec.sector_symbols}) as stage:
-        narr_res = NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer)
+        narr_res = semantic.narrative(llm, score_docs, spec.sector_symbols) if required else NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer)
         if not isinstance(narr_res, Passthrough):
             narrative_llm = narr_res
 
@@ -836,10 +855,14 @@ def run_pipeline(
     # 回测路径不经过本 pipeline（无未来函数：历史回放禁止注入 LLM）。
     with tracer.step("decision.debate", {"enabled": config.DEBATE_ENABLED, "picks": picks,
                      "rationale": context.get("pick_rationale", {}), "watchlist": context.get("watchlist", []),
-                     "action": context.get("action", "HOLD"), "documents": cleaned}) as stage:
+                     "action": context.get("action", "HOLD"), "documents": cleaned,
+                     **({"mrs": context.get("mrs"), "sectors": context.get("sectors"),
+                         "rejections": context.get("rejections"), "account_usd": account_usd} if required else {})}) as stage:
         from .agents.debate_agent import DebateAgent, select_debate_targets
         debate_raw: dict = {"status": "disabled", "triggered": [], "evidence": {}}
-        if config.DEBATE_ENABLED:
+        if required:
+            debate_raw = semantic.decision(llm, context, cleaned, account_usd)
+        elif config.DEBATE_ENABLED:
             targets = select_debate_targets(
                 context.get("picks", []), context.get("pick_rationale", {}),
                 context.get("watchlist", []), context.get("action", "HOLD"))
@@ -958,6 +981,9 @@ def run_pipeline(
                 # v6.3 S2：辩论证据与校准摘要（只读证据/披露，不含决策输入）
                 "debate": context.get("debate", {}),
                 "calibration": context.get("calibration", {}),
+                **({"model": semantic.model_summary(llm),
+                    "action_summary": context["action_summary"],
+                    "execution_decisions": context["execution_decisions"]} if required else {}),
             },
         )
         stage.output(result)
