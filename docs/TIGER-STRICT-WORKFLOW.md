@@ -100,6 +100,10 @@ daily.preflight → state.reset → pipeline.prepare
 
 所有外部调用均需区分普通来源不可用和运行合同/证据失败。普通公开源失败按原有真实源回退规则处理并披露；不能切换合成数据。证据写入、日期边界、阶段合同、账户状态或回执校验失败必须终止严格任务，不允许转为合法 LLM 透传。
 
+严格工作流的 Stooq 串行日线批次采用每批连续三次无有效产出的可用性探测预算；观察到有效 DataFrame 即重置连续计数，已取得的原始帧保留。预算耗尽后，未尝试的 ticker 交给原有可信真实源回退链，不降低覆盖率、新鲜度或数据质量门槛。少数普通缺失不能证明远端服务失败，所以证据只声明 `source_exhausted=true`、`reason=availability_budget_exhausted`、`service_failure_asserted=false`，列明尝试数、无产出数、按类型汇总的错误及未尝试清单；不序列化原始错误正文。批次恰好结束或空输入不会伪报预算耗尽。普通非严格 Stooq 调用默认仍无此探测数量上限。
+
+`EvidenceWriteError`、`ExecutionContractError` 和 `StrictObservationError` 必须原样终止，不能作为无产出累计后继续回退。严格模式保持 `allow_challenge=false`，遇到访问验证仍拒绝，不求解或绕过挑战。三次是探测次数边界，不保证整个公开取数阶段的墙钟上限；各原有来源仍有自己的网络等待，最外层2400秒截止时间继续有效。该修复只避免一个连续无产出的串行来源先消耗数百次请求，不能保证公开源一定提供足够数据。
+
 错误返回统一 envelope 和受控 code/message/run_id/stage/details_ref；不把原始 HTTP 正文、密钥或完整环境返回给 Agent。详细退出码见操作指南。
 
 ## 验证、发布和恢复

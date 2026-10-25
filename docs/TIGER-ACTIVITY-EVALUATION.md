@@ -99,7 +99,7 @@ python -m pytest -q tests/test_activity_profile.py tests/test_simulator.py \
 
 本轮全量Python回归与专用Node/CLI/MCP/配置及能力契约均实际运行，精确结果由交付回执记录。包含正常、边界、错误、访问权限、并发/重复请求、证据篡改及旧回执回归；新增pending+held断言实测预约总gross、重复ticker、3%组风险刚好满额拒绝及剩余风险按股数缩量。回放由未参与实现的审计者在另一独立目录实际重跑，进一步核对净值、现金、实际成交、成本、无空模板与源hash；不是作者自验。真实公开数据新运行另以CLI `status`→`receipt`→`verify`取得完成证据，accepted不等于完成。完整托管宿主或网站部署由对应交付回执证明，本研究脚本不发布账户。
 
-研究期间因必要核心修复先后产生三个过时源码测试运行，已正常SIGTERM并由CLI读回 `interrupted`、`active=false`、`commitment_present=false`：`run-9f9214018a1f4d839045832a1a6e4cea`、`run-fa7c8c97a5b94710b08928ff78dfb90f`、`run-9554497b1ec647cc81380121af939d81`。它们的请求、原幂等键、阶段快照、错误身份均保留，不算完成成果，也未发布账户指针。最终新源码运行使用独立身份 `run-6947593afdaa4622abd5c727d13f40b3`；只有取得独立验证回执后才能用于首发研究说明。
+研究期间因必要核心修复及连续无产出串行来源的可用性修复，先后有四个过时源码测试运行正常SIGTERM，并由CLI读回 `interrupted`、`active=false`、`commitment_present=false`：`run-9f9214018a1f4d839045832a1a6e4cea`、`run-fa7c8c97a5b94710b08928ff78dfb90f`、`run-9554497b1ec647cc81380121af939d81`、`run-6947593afdaa4622abd5c727d13f40b3`。它们的请求、原幂等键、阶段快照、错误身份均保留，不算完成成果，也未发布账户指针。最后一个运行的Yahoo限流和Stooq串行长等待仅为本机观察；不据此断言远端服务整体故障。Stooq预算只让后续可信真实源及时接管，不降低数据质量和访问验证边界，详见 [严格工作流的时间、并发和错误约束](TIGER-STRICT-WORKFLOW.md#时间并发和错误)。最终运行须在修复源码冻结后另立身份，只有取得独立验证回执后才能用于首发研究说明。
 
 ## 收尾报告
 

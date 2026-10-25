@@ -39,7 +39,7 @@ Run `bash /opt/tiger-pnl/current/pnl/deploy/activate.sh` as root. It requires he
 
 The HTTPS configuration uses exact server names, TLS 1.2/1.3, a 1 MiB body limit, bounded proxy timeouts and a loopback upstream. HTTP and HTTPS `www` requests redirect to `https://tigerpnl.com`, preserving the path and query. The renewal hook tests and reloads Nginx only for the Tiger certificate lineage.
 
-If the application must be seeded before public activation, expose its loopback API through the valid Tiger HTTPS virtual host while keeping ordinary page requests gated, or use an already authenticated private tunnel. The public endpoint must never be used with certificate validation disabled. Complete the normal activation gate after the two verified first records exist.
+To seed before public activation, install `nginx-bootstrap.conf` with the same saved-file/symlink rollback discipline and Nginx test/reload checks. It exposes only the authenticated `/api/v1/` API over the valid Tiger certificate and returns 503 for ordinary pages and public dashboard reads. An already authenticated private tunnel is another option. Never disable certificate validation. Complete the normal activation gate after the two verified first records exist.
 
 ## Operational verification
 

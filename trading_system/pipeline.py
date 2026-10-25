@@ -364,6 +364,12 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
             _data_issue(src, "ohlcv_batch", invalid, "invalid_data", label=label)
         if not got:
             _data_issue(src, "ohlcv_batch", missing, "no_data", label=label)
+        availability = getattr(src, "last_batch_status", None)
+        if (src.name == "stooq" and isinstance(availability, dict)
+                and availability.get("source_exhausted") is True):
+            _data_issue(src, "ohlcv_batch", availability["unattempted_symbols"],
+                        "source_exhausted", label=label)
+            _DATA_ISSUES[-1]["availability"] = dict(availability)
         return got
 
     def _finish() -> dict[str, pd.DataFrame]:
@@ -385,7 +391,8 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
                        provider.name, len(data), len(tickers))
         from .providers.stooq import StooqProvider
         missing = [t for t in tickers if t not in data]
-        stooq = record_provider(StooqProvider(allow_challenge=False), execution) if execution else StooqProvider()
+        stooq = (record_provider(StooqProvider(allow_challenge=False,
+                     max_consecutive_no_output=3), execution) if execution else StooqProvider())
         got = _fetch(stooq, missing) if missing else {}
         data.update(got)
         if got:
