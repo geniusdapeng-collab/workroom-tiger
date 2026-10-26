@@ -789,7 +789,7 @@ class BoundedCleanClient:
                 "time_role": "unknown"},
             "claims": [{"statement": f"SYNTHETIC_TEST 本篇绑定事实{number}。",
                 "quote": row["content"][number:number + 40],
-                "claim_key": f"SYNTHETIC_TEST {row['id']} fact {number}",
+                "claim_key": f"synthetic_test_{row['id'].replace('-', '_')}_fact_{number}",
                 "time_role": "unknown"} for number in range(4)],
         } for row in payload["documents"]]}
 
@@ -838,3 +838,97 @@ def test_v2_clean_failed_later_batch_is_not_retried_or_returned_as_partial_succe
     assert [[row["id"] for row in json.loads(request["user"].split("\n", 1)[1])["documents"]]
             for request in client.requests] == [
                 [row.doc_id for row in documents[:4]], [row.doc_id for row in documents[4:]]]
+
+
+@pytest.mark.parametrize("key", ["contains space", "公司_订单", "bad<key>", "bad\nkey",
+    "bad\rkey", "bad\tkey", "bad\u200bkey", "bad\u202ekey", "bad\x7fkey", "trailing\n", "", "a" * 161])
+def test_v2_clean_machine_claim_identity_rejects_ambiguous_or_multiline_keys(key):
+    class InvalidKeyClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            out["documents"][0]["claims"][0]["claim_key"] = key
+            return out
+    client = InvalidKeyClient()
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(client, [public_document()])
+    assert len(client.requests) == 1  # no silent repair or paid retry
+
+
+@pytest.mark.parametrize("field", ["summary_zh", "origin_note", "statement", "quote"])
+@pytest.mark.parametrize("unsafe", ["\n", "\r", "\t", "<", ">", "\u200b", "\u202e", "\x7f", "\u2060", "\ufeff", "\u2028", "\u2029"])
+def test_v2_clean_all_free_text_rejects_unsafe_trailing_characters_without_repair(field, unsafe):
+    class UnsafeTextClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            row = out["documents"][0]
+            target = row if field == "summary_zh" else row["provenance"] if field == "origin_note" else row["claims"][0]
+            target[field] += unsafe
+            return out
+    prefix = ("SYNTHETIC_TEST " + "x" * 50)[:40]
+    # For quote, the unsafe character is actually in the source; rejection must
+    # come from the text contract, not an unrelated source-substring mismatch.
+    doc = public_document(content=prefix + unsafe + " SYNTHETIC_TEST continuation")
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(UnsafeTextClient(), [doc])
+
+
+@pytest.mark.parametrize("key", ["nvda_fy2026_q3_hbm_supply", "aaa:2026-10-26:orders.v1", "a" * 160])
+def test_v2_clean_accepts_bounded_machine_identifiers_without_changing_them(key):
+    class ValidKeyClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            out["documents"][0]["claims"][0]["claim_key"] = key
+            return out
+    result = required.clean_v2(ValidKeyClient(), [public_document()])
+    assert result[0].claims[0]["claim_key"] == key
+
+
+def test_v2_clean_uses_low_effort_with_explicit_identity_and_safe_quote_guidance_only():
+    client = BoundedCleanClient()
+    result = required.clean_v2(client, [public_document("synthetic-one"), public_document("synthetic-two")])
+    request = client.requests[0]
+    assert request["reasoning_effort"] == "low" and request["max_tokens"] == 16384
+    assert "nvda_fy2026_q3_hbm_supply" in request["user"]
+    assert "claim_key" in request["user"] and "[a-z0-9_.:-]" in request["user"]
+    assert "不能按文档ID" in request["user"] and "逐字" in request["user"]
+    assert "单行" in request["system"] and "零宽" in request["system"]
+    assert len(result) == 2 and all(row.raw.content == public_document().content for row in result)
+
+
+def test_v2_clean_same_fact_key_can_cross_documents_and_is_not_regenerated_by_program():
+    class SameFactClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            for row in out["documents"]:
+                row["claims"][0]["claim_key"] = "aaa_fy2026_orders_increased"
+            return out
+    result = required.clean_v2(SameFactClient(), [public_document("synthetic-one"), public_document("synthetic-two")])
+    assert [row.claims[0]["claim_key"] for row in result] == ["aaa_fy2026_orders_increased"] * 2
+
+
+def test_v2_other_semantic_stages_do_not_receive_a_low_effort_override():
+    from trading_system.tech_chain.universe import TECH_SUBCHAINS
+    client = SemanticStub({"chains": [{"chain_id": chain, "heat": None,
+        "sentiment_score": None, "narrative_change": "unknown",
+        "key_drivers": ["SYNTHETIC_TEST no verified source"], "evidence_ids": []}
+        for chain in TECH_SUBCHAINS]})
+    required.sentiment_v2(client, [])
+    assert "reasoning_effort" not in client.requests[0]
+
+
+def test_v2_clean_ticker_identity_cannot_hide_a_trailing_newline():
+    class UnsafeTickerClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            out["documents"][0]["tickers"] = ["AAA\n"]
+            return out
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(UnsafeTickerClient(), [public_document()])
+
+
+def test_v2_thesis_claim_identity_cannot_hide_a_trailing_newline():
+    doc = public_document()
+    value = event_thesis(doc)
+    value["claims"][0]["claim_id"] = "claim-1\n"
+    with pytest.raises(RequiredModelFailed):
+        validate(value, [doc])

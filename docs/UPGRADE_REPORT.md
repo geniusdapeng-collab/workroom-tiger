@@ -506,6 +506,8 @@ SHS 叙事兑现维度（EPS 修正/指引语气）自 v5.0 由 NarrativeAgent L
 
 统一 `request_budget.py` 在付费 I/O 前预留，单任务最多 40 chat、300000 实际加预留 tokens、60 Search、20 Fetch、120 远端请求、保守估算 1 USD、2400 秒。未知付费结果冻结；不自动补跑、切提供方、降模型或规则代写语义。成功要求真实模型身份、schema、六阶段、实际 usage、所有预留和预算结算一致。`required_proof_v2.py` 只读取冻结证据重放，不能为了验证而重新调用网络或模型。
 
+2026-10-27 两次真实任务在清洗阶段分别受控拒绝：首次仅留有 `INCOMPLETE_MODEL_RESPONSE`，不能推定具体停止原因；第二次明确 `finish_reason=stop`，但 `claim_key` 未通过 pattern 校验，首个四篇批次实际用量为 29633 tokens。由此将 v2 清洗固定为每批最多四篇、保留完整规则清洗正文和全来源索引，并仅对 `clean.llm_semantic` 请求 `reasoning_effort=low`；舆情、风险、叙事、发行人研究及最终选择仍为 `high`，所有阶段 `thinking` 均保持 `enabled`，具体请求参数由独立重放核对。官方参数依据：[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。`claim_key` 采用最多 160 字符的小写 ASCII 标识，同一实体、事件和事实跨文档复用；v2 文本与标识符禁止换行、控制/零宽字符及不允许的尖括号，使用严格末尾校验。引文仍须逐字属于实际展示原文；格式失败不得由程序改写、补语义或自动重试。四篇批量、16384 输出上限及全局预算共同约束请求，不承诺低推理强度必然节省多少用量，也不把本次格式修复当成完整真实任务通过或盈利证明。
+
 ### 11.4 回测、发布与复核
 
 普通数值回测 CLI 默认使用共享 v2 policy，显式选择方式如下；命令来自当前 `main.py` 参数定义：

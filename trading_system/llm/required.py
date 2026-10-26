@@ -322,6 +322,8 @@ SYSTEM_V2 = SYSTEM + (
     "不得把索引摘要声称为重新通读全文；原始资料已由清洗模型逐篇解释，"
     "来源归属、时间、相反观点与证据缺口不能在下游压缩掉。"
     "primary/media/commentary是模型识别的材料性质，不是外部真实性担保。"
+    "输出JSON每个字符串值必须单行，禁止换行、回车、制表符、控制字符、零宽或双向格式字符以及小于号和大于号。"
+    "不要在字符串值中写会解码为换行、回车或制表符的转义；这些格式约束同样适用于摘要、来源说明、事实与引文。"
 )
 TASKS_V2 = {
     "clean.llm_semantic": (
@@ -330,6 +332,11 @@ TASKS_V2 = {
         "不能把邻篇事实归给本篇。来源primary/media/commentary/unknown；"
         "仅能识别原始报道时origin_id引用给定源ID，未知用null。"
         "claim_key表达同一实体同一事件同一事实，转载不制造独立事实；"
+        "claim_key是最长160字符的机器ASCII标识：首字符为小写英文字母或数字，其余仅[a-z0-9_.:-]，"
+        "例如nvda_fy2026_q3_hbm_supply。不能有空格、中文或换行，也不能按文档ID生成不同的key；"
+        "同实体同事件同事实在不同文档中复用同一个key，不同事实分开，未知日期不编造日期。"
+        "quote必须是本篇content中的逐字连续片段；若片段含禁止字符，另选安全的逐字片段或不提取该claim，"
+        "不能通过删除或改写引文字符来满足格式。"
         "旧/未知日期、AI评论、未具名消息、反证等限定必须进入摘要与origin_note。"
         "没有依据可不提取claims，不能补造。"
     ),
@@ -425,9 +432,10 @@ def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
     if "assessment" in payload:
         _fail("V2 assessment must come from frozen execution")
     inputs = {"assessment": assessment_context_v2(llm.execution), **payload}
+    effort = {"reasoning_effort": "low"} if stage == "clean.llm_semantic" else {}
     try:
         out = llm.complete_json(system=SYSTEM_V2, user=TASKS_V2[stage] + "\n" + canonical(inputs),
-                                schema_hint={}, schema=schema, max_tokens=max_tokens)
+                                schema_hint={}, schema=schema, max_tokens=max_tokens, **effort)
         validate_schema(out, schema)
         return out
     except LLMUnavailable:

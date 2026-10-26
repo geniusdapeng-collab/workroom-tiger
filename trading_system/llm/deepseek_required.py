@@ -385,7 +385,7 @@ def _json_loads(value: bytes | str) -> object:
 
 def build_chat_request(*, system: str, user: str, schema_hint: dict,
                        schema: dict, max_tokens: int = 16384,
-                       temperature: float = 0.2) -> dict:
+                       temperature: float = 0.2, reasoning_effort: str = "high") -> dict:
     """Pure exact request framing, also used by the read-only proof replay."""
     return {"model": MODEL, "messages": [
         {"role": "system", "content": system + "\nReturn exactly one JSON object. JSON only."},
@@ -394,7 +394,17 @@ def build_chat_request(*, system: str, user: str, schema_hint: dict,
          _canonical(schema_hint).decode()}],
         "max_tokens": max_tokens, "temperature": temperature, "stream": False,
         "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"},
-        "reasoning_effort": "high"}
+        "reasoning_effort": reasoning_effort}
+
+
+def stage_reasoning_effort(stage: str, *, upgrade: bool = False) -> str:
+    """Extraction gets bounded low effort; research and decisions retain high.
+
+    Official low/high support was checked on 2026-10-27 at
+    https://api-docs.deepseek.com/guides/thinking_mode/ . This is a versioned
+    request policy, not evidence that lower effort improves semantic accuracy.
+    """
+    return "low" if upgrade and stage == "clean.llm_semantic" else "high"
 
 
 class DeepSeekRequiredClient:
@@ -622,7 +632,8 @@ class DeepSeekRequiredClient:
         return result
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 16384, temperature: float = 0.2, schema: dict) -> dict:
+                      max_tokens: int = 16384, temperature: float = 0.2, schema: dict,
+                      reasoning_effort: str = "high") -> dict:
         stage = self._stage()
         _check_schema(schema)
         if _canonical(self._clean(schema)) != _canonical(schema):
@@ -630,11 +641,12 @@ class DeepSeekRequiredClient:
         if (not isinstance(system, str) or not system.strip() or not isinstance(user, str) or not user.strip()
                 or not isinstance(schema_hint, dict) or type(max_tokens) is not int
                 or not 1 <= max_tokens <= 393216 or not _finite_number(temperature)
-                or not 0 <= temperature <= 2):
+                or not 0 <= temperature <= 2 or type(reasoning_effort) is not str
+                or reasoning_effort != stage_reasoning_effort(stage, upgrade=self.budget is not None)):
             _fail("INVALID_CHAT_REQUEST")
         request = build_chat_request(system=self._text(system), user=self._text(user),
             schema_hint=self._clean(schema_hint), schema=schema,
-            max_tokens=max_tokens, temperature=temperature)
+            max_tokens=max_tokens, temperature=temperature, reasoning_effort=reasoning_effort)
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/chat/completions",

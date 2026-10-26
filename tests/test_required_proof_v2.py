@@ -107,6 +107,66 @@ def test_native_fetch_cannot_acquire_invented_publication_date():
     with pytest.raises(EvidenceInvalid): client([record]).fetch("https://issuer.example/release")
 
 
+def reasoning_record(stage, effort):
+    """Explicit synthetic Chat evidence; never constructs a real API client."""
+    schema = {"type": "object", "properties": {"status": {"const": "SYNTHETIC_TEST"}},
+              "required": ["status"], "additionalProperties": False}
+    kwargs = {"system": "SYNTHETIC_TEST system", "user": "SYNTHETIC_TEST input",
+              "schema_hint": {}, "schema": schema, "max_tokens": 256, "temperature": .2}
+    body = build_chat_request(**kwargs)
+    body["reasoning_effort"] = effort
+    identity = "2" * 32
+    guard = BudgetGuard(**LIMITS, clock=lambda: 0.)
+    reservation = guard.reserve("chat", identity, body)
+    usage = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+    guard.settle(identity, usage)
+    parsed = {"status": "SYNTHETIC_TEST"}
+    response = {"id": "SYNTHETIC_TEST-replay-response", "model": MODEL, "system_fingerprint": None,
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant",
+            "content": json.dumps(parsed, sort_keys=True, separators=(",", ":"))}}], "usage": usage}
+    request = {"schema": "tiger.deepseek-request.v1", "call_id": identity, "stage": stage,
+        "provider": "deepseek", "method": "POST", "endpoint": "https://api.deepseek.com/chat/completions",
+        "request": body, "request_sha256": h(body), "output_schema": schema,
+        "schema_sha256": h(schema), "release": RELEASE, "budget_reservation": reservation,
+        "started_at_utc": START}
+    proof = {"schema": "tiger.deepseek-call.v1", "call_id": identity, "stage": stage,
+        "provider": "deepseek", "requested_model": MODEL, "response_id": response["id"], "model": MODEL,
+        "release": RELEASE, "usage": usage, "finish_reason": "stop", "request_sha256": h(body),
+        "transport_response_sha256": "a" * 64, "response_sha256": h(response),
+        "schema_sha256": h(schema), "response": response, "parsed": parsed,
+        "system_fingerprint": None, "search_mode": SEARCH_MODE, "budget_reservation": reservation,
+        "budget_after": guard.snapshot(), "started_at_utc": START, "finished_at_utc": FINISH,
+        "elapsed_ms": 1000.}
+    module = importlib.import_module("trading_system.llm.required_proof_v2")
+    execution = SimpleNamespace(run_date=date(2026, 10, 27),
+        policy=SimpleNamespace(market_timezone="America/New_York"), admitted_at_utc=ADMITTED)
+    replay = module.ReplayClient(execution, {stage: [{"method": "model.deepseek.chat",
+                                                    "request": request, "proof": proof}]})
+    replay.set_stage(stage)
+    return replay, kwargs, proof
+
+
+def test_offline_clean_replay_uses_exact_low_effort_request_and_settled_budget():
+    replay, kwargs, proof = reasoning_record("clean.llm_semantic", "low")
+    assert replay.complete_json(**kwargs, reasoning_effort="low") == {"status": "SYNTHETIC_TEST"}
+    replay.finish()
+    assert replay.budget.snapshot() == proof["budget_after"]
+
+
+@pytest.mark.parametrize("stage,effort", [("clean.llm_semantic", "high"),
+    ("tech.risk", "low"), ("decision.debate", "low")])
+def test_offline_replay_rejects_effort_outside_the_same_production_stage_policy(stage, effort):
+    replay, kwargs, _ = reasoning_record(stage, effort)
+    with pytest.raises(EvidenceInvalid):
+        replay.complete_json(**kwargs, reasoning_effort=effort)
+
+
+def test_offline_other_stage_keeps_the_default_high_effort_request():
+    replay, kwargs, _ = reasoning_record("decision.debate", "high")
+    assert replay.complete_json(**kwargs) == {"status": "SYNTHETIC_TEST"}
+    replay.finish()
+
+
 def complete_fixture(tmp_path, monkeypatch, *, held=False, empty_candidates=False,
                      optional_missing=False, old_cohort=False, paper_fallback=False, **options):
     """Run the actual 43 stages, then expose only their sealed local evidence."""
@@ -479,7 +539,7 @@ def test_rehashed_tail_requires_actual_account_observations_and_pure_business_re
 
 @pytest.mark.parametrize("tamper", ["risk_assessment", "research_context", "research_plan",
     "source_index", "research_counters", "research_thesis", "numeric_budget", "native_IO_order",
-    "native_IO_omission", "prompt_documents", "final_action", "final_picks", "final_model", "policy_source"])
+    "native_IO_omission", "prompt_documents", "reasoning_effort", "final_action", "final_picks", "final_model", "policy_source"])
 def test_rehashed_semantic_mutations_fail_even_with_valid_event_chain(tmp_path, monkeypatch, tamper):
     from trading_system.agent_evidence import (atomic_json, file_ref, read_json,
         SNAPSHOT_SCHEMA, verify_events)
@@ -508,12 +568,16 @@ def test_rehashed_semantic_mutations_fail_even_with_valid_event_chain(tmp_path, 
         rewrite_stage(root, "search.collect", reverse)
     elif tamper == "native_IO_omission":
         rewrite_stage(root, "search.collect", lambda _, out: out["io_calls"].pop())
-    elif tamper == "prompt_documents":
+    elif tamper in {"prompt_documents", "reasoning_effort"}:
         def change(_, out):
             call = out["io_calls"][0]
             request_blob = read_json(root, call["input_ref"]["path"])
             request = request_blob["value"]
-            request["request"]["messages"][1]["content"] = request["request"]["messages"][1]["content"].replace('"documents":[', '"documents_omitted":[', 1)
+            if tamper == "reasoning_effort":
+                assert request["request"]["reasoning_effort"] == "low"
+                request["request"]["reasoning_effort"] = "high"
+            else:
+                request["request"]["messages"][1]["content"] = request["request"]["messages"][1]["content"].replace('"documents":[', '"documents_omitted":[', 1)
             request["request_sha256"] = h(request["request"])
             atomic_json(root, call["input_ref"]["path"], request_blob)
             call["input_ref"] = file_ref(root, call["input_ref"]["path"], SNAPSHOT_SCHEMA)
