@@ -1,0 +1,404 @@
+{
+  "schema": "workloom.mine-clear/ledger@1",
+  "task_id": "T-2026-1027-0001",
+  "repo": "tiger-source",
+  "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
+  "title": "白皮书短线闭环六项修复与真实评测迭代",
+  "created_at": "2026-10-26T19:26:13.881Z",
+  "updated_at": "2026-10-26T19:37:59.659Z",
+  "baseline": {
+    "audit": {
+      "commit": "deab886aad743451e7f380323824950df4f825fd",
+      "branch": "task/T-2026-1027-0001",
+      "remote": "origin",
+      "fetched_at": null,
+      "fetch_status": "skipped",
+      "notes": ""
+    },
+    "repair": {
+      "commit": null,
+      "reverified_problem_ids": []
+    },
+    "acceptance": {
+      "commit": null,
+      "is_descendant_of_repair": null
+    }
+  },
+  "environment": {
+    "kind": "client-runtime",
+    "notes": ""
+  },
+  "invariants": [
+    {
+      "id": "INV-1",
+      "text": "租户边界覆盖数据库 RLS、运行时上下文、事件、缓存和外部连接器。",
+      "source": "AGENTS.md#4.1"
+    },
+    {
+      "id": "INV-2",
+      "text": "经营事件、审批和关键回执只增不改；纠正通过新事件表达，不静默覆盖证据。",
+      "source": "AGENTS.md#4.2"
+    },
+    {
+      "id": "INV-3",
+      "text": "所有外部或变更性动作及其子调用，统一经过权限、PII、围栏和审批链路。",
+      "source": "AGENTS.md#4.3"
+    },
+    {
+      "id": "INV-4",
+      "text": "涉钱、敏感数据、群发、公开发布、交易和破坏性变更必须按高风险处理并由人审批。",
+      "source": "AGENTS.md#4.4"
+    },
+    {
+      "id": "INV-5",
+      "text": "没有真实回执就不能标记完成；mock、模拟和体验模式在数据结构与界面上都要明确区分。",
+      "source": "AGENTS.md#4.5"
+    },
+    {
+      "id": "INV-6",
+      "text": "客户原始经营数据不得上行；蜂群只接受白名单化、最小化、匿名化且可审计的元数据或派生经验。",
+      "source": "AGENTS.md#4.6"
+    },
+    {
+      "id": "INV-7",
+      "text": "租户覆盖层只能收紧围栏，不能放宽平台不可变红线。",
+      "source": "AGENTS.md#4.7"
+    },
+    {
+      "id": "INV-8",
+      "text": "模型、提示词、技能、bundle、策略和热更新必须先评测再灰度，且始终可回滚。",
+      "source": "AGENTS.md#4.8"
+    },
+    {
+      "id": "INV-9",
+      "text": "platform-ops、平台账户运营和平台秘密只属于 Andromeda。",
+      "source": "AGENTS.md#4.9"
+    },
+    {
+      "id": "INV-10",
+      "text": "Tiger 在获得单独的合规审查和用户明确授权前，只能模拟或纸面交易。",
+      "source": "AGENTS.md#4.10"
+    },
+    {
+      "id": "INV-11",
+      "text": "令牌、密码、API key、私钥、客户凭证和私密客户数据不得进入源码、文档、上下文、提示词、日志或提交。",
+      "source": "AGENTS.md#4.11"
+    },
+    {
+      "id": "INV-12",
+      "text": "个性化与行业扩展不得形成公共机制的第二事实源。",
+      "source": "AGENTS.md#4.12"
+    }
+  ],
+  "cards": [
+    {
+      "id": "MC-001",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "候选扫描后没有逐个发行人补证与完整交易假设",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/llm/required.py:178@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "8fd6a2f895e18d88b724f67064ceba6282f53766fa8fe8ae1feac5c107a0d59b",
+          "note": "上轮只读审计已复现；本轮fetch同一主干后重新登记，完整精读与断言由实际负责者保存"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/llm/required.py",
+        "line": 178,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "collect"
+      },
+      "trigger_path": "广域主题新闻与候选股票分离，最终WATCH缺本股研究，模型无法交付完整五段依据",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_research_v2.py",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_research_v2.py"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python3 -m pytest -q tests/test_short_term_research_v2.py"
+      },
+      "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
+      "fixed_by": null,
+      "verified_by": null,
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+    },
+    {
+      "id": "MC-002",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "WATCH与持仓缺少持续复核到执行回报的状态链",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "main.py:633@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "d08926c159127ab28ffb60156f3d5b4fa85ac006b46524699f467c9587bbeb6e",
+          "note": "上轮只读审计已复现；本轮fetch同一主干后重新登记，完整精读与断言由实际负责者保存"
+        }
+      ],
+      "root_cause": {
+        "file": "main.py",
+        "line": 633,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "_intraday"
+      },
+      "trigger_path": "无picks时监控退出；WATCH不进状态链，持仓不能沿受控入口持续复核",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k not evaluation",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_lifecycle_v2.py",
+              "-k",
+              "not evaluation"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k not evaluation"
+      },
+      "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
+      "fixed_by": null,
+      "verified_by": null,
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+    },
+    {
+      "id": "MC-003",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 1,
+      "state": "open",
+      "title": "信号结算与模拟账户及回测的入场退出口径不同",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/exit_engine.py:51@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "01c372592d1bceb23f8b424763071f24ae3a594da965a106254500bedf7efb23",
+          "note": "上轮只读审计已复现；本轮fetch同一主干后重新登记，完整精读与断言由实际负责者保存"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/exit_engine.py",
+        "line": 51,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "simulate_trade"
+      },
+      "trigger_path": "同一日K跨HIGH2R或7日时间条件时Journal与SimEngine得到不同退出；无模板回测仍可能放行",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k exit or template or backtest or journal",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_execution_v2.py",
+              "-k",
+              "exit or template or backtest or journal"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k exit or template or backtest or journal"
+      },
+      "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
+      "fixed_by": null,
+      "verified_by": null,
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+    },
+    {
+      "id": "MC-004",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "分批建仓只有文字而没有分批执行与风险预留",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/simulator.py:154@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "a725900f947d2b4c69d508c33b998ecceee1e04a66e6dd529d9bd09687b2a78e",
+          "note": "上轮只读审计已复现；本轮fetch同一主干后重新登记，完整精读与断言由实际负责者保存"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/simulator.py",
+        "line": 154,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "SimEngine.step"
+      },
+      "trigger_path": "新信号一次满股数挂单而未保留三批次触发、整数守恒及账户风险承诺",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k tranche",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_execution_v2.py",
+              "-k",
+              "tranche"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k tranche"
+      },
+      "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
+      "fixed_by": null,
+      "verified_by": null,
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+    },
+    {
+      "id": "MC-005",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 1,
+      "state": "open",
+      "title": "信号固定参考资金未完整冻结净值与账户承诺风险",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/agent_supervisor.py:592@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "b4d3837eff708e3c1e56910b6d180f2bec3e2baf260c52d7255c54e72219a599",
+          "note": "上轮只读审计已复现；本轮fetch同一主干后重新登记，完整精读与断言由实际负责者保存"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/agent_supervisor.py",
+        "line": 592,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "engine_main"
+      },
+      "trigger_path": "完整任务无论账户现值均传100000；持仓与未成交分批未在同一冻结NAV口径限制",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k snapshot or allocation or nav or risk",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_execution_v2.py",
+              "-k",
+              "snapshot or allocation or nav or risk"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k snapshot or allocation or nav or risk"
+      },
+      "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
+      "fixed_by": null,
+      "verified_by": null,
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+    },
+    {
+      "id": "MC-006",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 2,
+      "state": "open",
+      "title": "缺少冻结机会队列与资金周转及净损益评估",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:959@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "5fec2c08c33f8ce2532815a71e3b2f5ccfb3fff5ebf7d7d93d6f5469526d6efe",
+          "note": "上轮只读审计已复现；本轮fetch同一主干后重新登记，完整精读与断言由实际负责者保存"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/pipeline.py",
+        "line": 959,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "run_pipeline"
+      },
+      "trigger_path": "运行只报告扫描/调用数量，不能按原始机会、拒绝和有效标签衡量捕获、等待、周转与扣费结果",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k evaluation",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_lifecycle_v2.py",
+              "-k",
+              "evaluation"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k evaluation"
+      },
+      "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
+      "fixed_by": null,
+      "verified_by": null,
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+    }
+  ],
+  "gates": [],
+  "issue": {
+    "slug": "geniusdapeng-collab/workroom-tiger",
+    "number": 39
+  }
+}
