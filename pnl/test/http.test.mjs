@@ -7,14 +7,14 @@ import { request as rawRequest } from 'node:http';
 import { createPnlServer } from '../server.mjs';
 import { publishRecord } from '../publish.mjs';
 import { digest } from '../lib/schema.mjs';
+import { modelResearchFixture } from './model-fixture.mjs';
 
 const TEST_TOKEN = 'test-only-token-never-a-real-secret-00000000';
 function fixture() {
   return { schemaVersion: 1, idempotencyKey: 'http-test-record-0001', asOf: '2026-01-02T21:00:00Z', account: { label: 'HTTP TEST ONLY PRIVATE', currency: 'USD', nav: 100000, cash: 100000 }, positions: [], trades: [], decisions: [], netExternalFlow: 0, provenance: { kind: 'operator_attested', evidenceSha256: digest('HTTP UNIT TEST FIXTURE NOT REAL'), sourceRef: 'http-unit-test-private-ref', attestedBy: 'http-unit-test-private-attestor' } };
 }
-function researchFixture() {
-  return { schemaVersion: 1, idempotencyKey: 'http-research-test-0001', asOf: '2026-01-03T21:00:00Z', runId: 'unit-test-research-run-1', receiptHash: digest('UNIT TEST ONLY VERIFIED RECEIPT FIXTURE'), dataAsOf: '2026-01-02', executionMode: 'paper', modelMode: 'disabled', status: 'completed_degraded', universeSize: 10, summary: 'Unit test research fixture only; no actual executions.', decisions: [{ id: 'research-decision-1', symbol: 'AAPL', action: 'watch', targetWeight: 0, thesis: 'Unit test watch observation only.', decidedAt: '2026-01-03T20:00:00Z', runId: 'unit-test-research-run-1' }] };
-}
+function researchFixture() { return modelResearchFixture({ idempotencyKey: 'http-research-test-0001', runId: 'unit-test-research-run-1' }); }
+
 async function setup(t) {
   const path = await mkdtemp(join(tmpdir(), 'tiger-pnl-http-')); const publicDir = join(path, 'public');
   await mkdir(publicDir); await writeFile(join(publicDir, 'index.html'), '<!doctype html><title>Test fixture only</title>');
@@ -105,11 +105,11 @@ test('independent research publishes without creating or advancing a real accoun
   assert.equal(accepted.sequence, 1);
   let result = await (await fetch(`${baseUrl}/api/public/dashboard`)).json();
   assert.equal(result.status, 'awaiting_first_record'); assert.equal(result.latest, null); assert.deepEqual(result.history, []);
-  assert.equal(result.research.latest.runId, research.runId); assert.equal(result.research.latest.modelMode, 'disabled');
+  assert.equal(result.research.latest.runId, research.runId); assert.equal(result.research.latest.modelMode, 'enabled');
   assert.equal(result.research.latest.executionMode, 'paper'); assert.equal(result.research.latest.receiptHash, research.receiptHash);
   assert.equal(JSON.stringify(result.research).includes('idempotencyKey'), false);
   await post(fixture());
-  const next = { ...research, idempotencyKey: 'http-research-test-0002', runId: 'unit-test-research-run-2', asOf: '2026-01-04T21:00:00Z', decisions: [] };
+  const next = { ...research, idempotencyKey: 'http-research-test-0002', runId: 'unit-test-research-run-2', asOf: '2026-01-04T21:00:00Z', decisions: [], executionDecisions: [] };
   await publishRecord({ baseUrl, token: TEST_TOKEN, record: next, research: true, allowLocalHttp: true });
   result = await (await fetch(`${baseUrl}/api/public/dashboard`)).json();
   assert.equal(result.latest.asOf, fixture().asOf); assert.equal(result.history.length, 1); assert.equal(result.latest.account.nav, 100000);

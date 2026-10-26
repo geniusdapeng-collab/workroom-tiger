@@ -56,7 +56,8 @@ def error_record(exc: BaseException, *, run_id: str, stage: str | None = None) -
             ("StrictDataUnavailable", "DATA_UNAVAILABLE"),
             ("StrictObservationError", "DATA_UNAVAILABLE"),
             ("StrictDataStale", "DATA_STALE"),
-            ("StrictSourceSynthetic", "SOURCE_SYNTHETIC")}:
+            ("StrictSourceSynthetic", "SOURCE_SYNTHETIC"),
+            ("RequiredModelFailed", "MODEL_REQUIRED_FAILED")}:
         code = exc.code
     elif isinstance(exc, TimeoutError):
         code = "TIMEOUT"
@@ -103,6 +104,9 @@ class BoundedLog:
         self.discard_line: set[str] = set()
 
     def _write(self, label: str, content: bytes) -> None:
+        key = os.environ.get("LLM_API_KEY", "")
+        if key:
+            content = content.replace(key.encode(), b"[REDACTED]")
         safe = label.encode() + b": " + _safe_log_line(content) + b"\n"
         room = max(0, self.limit - self.retained)
         if len(safe) > room:
@@ -250,7 +254,7 @@ def guardian(run: Path, *, parent_fd: int, control_fd: int, deadline: float,
     normal = False
     try:
         child = subprocess.Popen(
-            command, cwd=run / "work", env=run_environment(run / "work"),
+            command, cwd=run / "work", env=run_environment(run / "work", model_required=(run / "policy.json").exists() and read_json(run, "policy.json")["execution"]["model_mode"] == "enabled"),
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             close_fds=True, pass_fds=(), start_new_session=False,
         )
@@ -400,7 +404,7 @@ def supervise_group(run: Path, *, lock_fds: tuple[int, int], deadline: float) ->
         leader = subprocess.Popen(
             [sys.executable, "-I", "-B", str(entry), "guardian", str(run),
              str(parent_read), str(control_write), repr(deadline)],
-            cwd=run / "work", env=run_environment(run / "work"),
+            cwd=run / "work", env=run_environment(run / "work", model_required=(run / "policy.json").exists() and read_json(run, "policy.json")["execution"]["model_mode"] == "enabled"),
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             close_fds=True, pass_fds=(*lock_fds, parent_read, control_write),
             start_new_session=True,

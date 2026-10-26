@@ -366,7 +366,11 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
     with execution.step("report.plan", {"mode": args.mode, "result": result}) as stage:
         # The first supported operation is daily. A real, executed mode decision
         # is evidence; no extra trading plan is silently introduced.
-        stage.output({"enabled": False, "mode": args.mode, "path": None, "plan": None})
+        stage.output({"enabled": True, "mode": args.mode, "path": None,
+                      "plan": {"action_summary": result.raw["action_summary"],
+                               "execution_decisions": result.raw["execution_decisions"]}}
+                     if execution.model_required else
+                     {"enabled": False, "mode": args.mode, "path": None, "plan": None})
 
     with execution.step("report.markdown", {"result": result, "journal_stats": stats}) as stage:
         markdown_text = render_markdown(result) + "\n" + _journal_section(stats)

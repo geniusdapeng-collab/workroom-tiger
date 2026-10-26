@@ -6,6 +6,7 @@ import { isAbsolute, resolve } from "node:path";
 
 export const ENGINE_ROOT = resolve(import.meta.dirname, "../../..");
 export const PROFILE = "us-public-paper-v1";
+export const REQUIRED_PROFILE = "us-public-model-required-paper-v1";
 export const OPERATIONS = Object.freeze(["doctor", "describe", "run", "status", "receipt", "verify"]);
 export const LIMITS = Object.freeze({ inputBytes: 65536, outputBytes: 1024 * 1024, stderrBytes: 65536,
   frameBytes: 131072, requestMs: 60000, waitMs: 2460000, pollMs: 1000, depth: 64, concurrent: 4,
@@ -21,7 +22,7 @@ const EXIT_CODES = new Map([
   ...["IDEMPOTENCY_CONFLICT", "ACCOUNT_BUSY"].map((s) => [s, 5]),
   ...["DATA_UNAVAILABLE", "DATA_STALE", "SOURCE_SYNTHETIC", "CURRENCY_BLOCKED"].map((s) => [s, 6]),
   ...["RUNNER_FAILED", "RESULT_INVALID", "EVIDENCE_MISSING", "EVIDENCE_HASH_MISMATCH", "ARTIFACT_WRITE_FAILED", "RUN_NOT_FOUND"].map((s) => [s, 7]),
-  ...["STEP_ORDER_VIOLATION", "STEP_FAILED", "RUN_INCOMPLETE"].map((s) => [s, 8]),
+  ...["STEP_ORDER_VIOLATION", "STEP_FAILED", "RUN_INCOMPLETE", "MODEL_REQUIRED_FAILED"].map((s) => [s, 8]),
   ["TIMEOUT", 9], ["INTERRUPTED", 9], ["CANCELLED", 130],
 ]);
 
@@ -212,6 +213,35 @@ export function safeEvidencePath(value) {
     && value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }
 
+function validMarketDate(value) {
+  if (typeof value !== "string" || value.startsWith("0000-") || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(value)) return false;
+  const milliseconds = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString().slice(0, 10) === value;
+}
+
+function validateModelInstructions(summary) {
+  const researchDate = summary.as_of.market_date;
+  if (!validMarketDate(researchDate)) throw invalid();
+  const symbols = new Set();
+  for (const row of summary.execution_decisions) {
+    const market = row.market_evidence[0];
+    const plan = ["entry_price", "stop_price", "shares", "risk_usd"];
+    if (symbols.has(row.symbol) || market.symbol !== row.symbol || market.close <= 0
+      || !validMarketDate(market.as_of) || market.as_of > researchDate
+      || market.id !== `md_${row.symbol}_${market.as_of.replaceAll("-", "")}_${market.series_sha256.slice(0, 24)}`
+      || row.reference_capital_usd <= 0 || !validMarketDate(row.valid_for.slice(0, 10))
+      || row.valid_for.slice(0, 10) <= researchDate || !Number.isFinite(Date.parse(row.valid_for))
+      || row.action === "buy" && (row.sources.length === 0 || row.target_weight <= 0
+        || plan.some(key => row[key] === null || row[key] <= 0) || row.stop_price >= row.entry_price)
+      || row.action === "watch" && (row.target_weight !== 0
+        || [...plan, "time_stop_days"].some(key => row[key] !== null))
+      || ["action_summary", "why_this", "why_now", "entry_condition", "invalidation", "risk_note"].some(
+        key => !row[key].trim() || /[<>\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(row[key]))
+      || new Set(row.sources.map(source => source.id)).size !== row.sources.length) throw invalid();
+    symbols.add(row.symbol);
+  }
+}
+
 export function validateEnvelope(envelope, operation, input = {}) {
   try {
     validateValue(envelope, RESULT_SCHEMA);
@@ -234,6 +264,19 @@ export function validateEnvelope(envelope, operation, input = {}) {
       && (!envelope.run_id || envelope.execution_mode !== "paper" || !TERMINAL_OK.has(envelope.status)
         || envelope.verification?.ok !== true || !envelope.verification.receipt_sha256)) throw invalid();
     if (operation === "verify" && envelope.summary !== null) throw invalid();
+    if (envelope.summary?.disclosures?.model_mode === "enabled") {
+      const model = envelope.summary.model;
+      const stages = ["clean.llm_semantic", "tech.sentiment", "tech.risk", "sector.narrative", "decision.debate"];
+      if (envelope.status !== "completed" || envelope.summary.disclosures.model_required !== true
+        || !plain(model) || model.required_stages.join("|") !== stages.join("|")
+        || new Set(model.response_ids).size !== model.call_count || model.response_ids.length !== model.call_count
+        || Object.keys(model.stage_counts).sort().join("|") !== [...stages].sort().join("|")
+        || stages.some(stage => !Number.isSafeInteger(model.stage_counts[stage]) || model.stage_counts[stage] < 1)
+        || Object.values(model.stage_counts).reduce((sum, count) => sum + count, 0) !== model.call_count
+        || typeof envelope.summary.action_summary !== "string" || !envelope.summary.action_summary.trim()
+        || !Array.isArray(envelope.summary.execution_decisions)) throw invalid();
+      validateModelInstructions(envelope.summary);
+    }
   } catch (cause) { throw new WorkflowError("RESULT_INVALID", "Python returned an invalid or unverified result envelope.", { runId: input.run_id, cause }); }
   return envelope;
 }
@@ -268,8 +311,11 @@ export function failureEnvelope(operation, error, runId = null) {
 }
 export function exitCode(envelope) { return envelope.operation_ok ? 0 : EXIT_CODES.get(envelope.error?.code) ?? 7; }
 
-export function runtimeEnvironment(env = process.env) {
+export function runtimeEnvironment(env = process.env, modelRequired = false) {
   const result = Object.fromEntries(ENV_NAMES.filter((key) => typeof env[key] === "string").map((key) => [key, env[key]]));
+  if (modelRequired) for (const key of ["LLM_BACKEND", "LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY"]) {
+    if (typeof env[key] === "string") result[key] = env[key];
+  }
   return { ...result, PYTHONNOUSERSITE: "1", PYTHONDONTWRITEBYTECODE: "1", PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" };
 }
 export function startupOptions(options = {}) {
@@ -329,7 +375,7 @@ export async function invokeWorkflow(operation, input, options = {}, { signal, t
         }, LIMITS.cleanupMs);
       }
       function onAbort() { stop(new WorkflowError("CANCELLED", "Request observation was cancelled.", { runId: input.run_id })); }
-      try { child = spawn(config.python, args, { cwd: ENGINE_ROOT, env: runtimeEnvironment(), detached: true, stdio: ["pipe", "pipe", "pipe"] }); }
+      try { child = spawn(config.python, args, { cwd: ENGINE_ROOT, env: runtimeEnvironment(process.env, operation === "run" && input.profile === REQUIRED_PROFILE), detached: true, stdio: ["pipe", "pipe", "pipe"] }); }
       catch (cause) { finish(new WorkflowError("RUNNER_FAILED", "Unable to start the configured Python executable.", { runId: input.run_id, cause })); return; }
       child.on("error", (cause) => finish(new WorkflowError("RUNNER_FAILED", "Unable to start the configured Python executable.", { runId: input.run_id, cause })));
       child.stdout.on("data", (chunk) => {

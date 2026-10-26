@@ -19,7 +19,7 @@
         <span>TIGER<span class="brand-pnl">PnL</span></span>
       </a>
       <nav aria-label="主导航">
-        <a href="#performance">业绩</a><a href="#positions">持仓</a><a href="#decisions">决策</a><a href="#principles">记账原则</a>
+        <a href="#performance">业绩</a><a href="#positions">持仓</a><a href="#decisions">交易指令</a><a href="#whitepaper">交易白皮书</a><a href="#principles">记账原则</a>
       </nav>
       <a class="header-cta" href="#performance">翻开账簿 <span aria-hidden="true">↗</span></a>
     </div>
@@ -32,7 +32,7 @@
         <div class="hero-copy">
           <p class="eyebrow"><span class="tiny-square"></span> 投资业绩与决策记录</p>
           <h1 id="hero-title">让每一次判断，<br>留下<span class="hero-emphasis">盈亏。</span></h1>
-          <p class="hero-description">研究可以有观点，业绩必须有记录。<br>Tiger 的真实账户，持续公开记账。</p>
+          <p class="hero-description">模型生成决策，真人团队执行。<br>Tiger 的交易指令与真实盈亏，持续公开。</p>
           <a class="hero-link" href="#performance">从第一天，看长期结果 <span aria-hidden="true">↓</span></a>
         </div>
         <div class="hero-art" aria-hidden="true">
@@ -80,19 +80,31 @@
     </section>
 
     <section class="section decisions-section" id="decisions" aria-labelledby="decisions-title">
-      <div class="section-heading"><div><p class="section-index">03 / DECISION JOURNAL</p><h2 id="decisions-title">判断有来处，动作有记录。</h2></div><p class="section-aside">把当时的判断留下，<br>让后来的结果说话。</p></div>
+      <div class="section-heading"><div><p class="section-index">03 / TRADING DIRECTIVES</p><h2 id="decisions-title">Tiger 决策，真人执行。</h2></div><p class="section-aside">先读清楚为什么，<br>再按指令执行每一步。</p></div>
       <div class="journal-grid">
-        <div class="decision-journal"><div class="journal-title"><h3>研究与决策</h3><span>RESEARCH</span></div><p class="journal-description">Tiger 的研究观点与目标配置。研究决策不代表账户已经成交。</p><div id="research-stamp" class="research-stamp" hidden></div><div id="decisions-list" class="decisions-list"><p class="journal-empty">正在读取决策记录…</p></div></div>
-        <div class="trade-journal"><div class="journal-title"><h3>实际成交记录</h3><span>EXECUTIONS</span></div><p class="journal-description">只记录已入账的真实成交，买入与卖出同样公开。</p><div id="trades-list" class="trades-list"><p class="journal-empty">正在读取成交记录…</p></div></div>
+        <div class="decision-journal">
+          <div class="journal-title"><h3>Tiger 交易指令</h3><span id="instruction-status" class="instruction-status" role="status">正在核验模型运行</span></div>
+          <p class="journal-description instruction-description">以下为 Tiger 发出的交易指令与目标配置，由真人交易团队在富途、老虎等券商执行。实际成交价格、数量与持仓随执行回报入账。</p>
+          <div id="model-proof" class="model-proof" hidden></div>
+          <div id="research-stamp" class="research-stamp" hidden></div>
+          <div id="instruction-summary" class="instruction-summary" hidden></div>
+          <div id="decisions-list" class="instruction-cards"><p class="instruction-empty">正在读取并核验本轮模型指令…</p></div>
+          <details id="legacy-research" class="instruction-history" hidden><summary id="legacy-research-title">历史运行记录</summary><div id="legacy-research-body"></div></details>
+        </div>
+        <div class="trade-journal"><div class="journal-title"><h3>实际执行回报</h3><span>EXECUTION REPORTS</span></div><p class="journal-description">记录团队已回报并入账的真实成交。未收到新回报时保留原账户截至时间，目标价和目标仓位不会替代实际成交。</p><div id="trades-list" class="trades-list"><p class="journal-empty">正在读取执行回报…</p></div></div>
       </div>
+    </section>
+
+    <section class="section whitepaper-section" id="whitepaper" aria-labelledby="whitepaper-title">
+      <div class="whitepaper-card"><div class="whitepaper-edition" aria-hidden="true">TIGER<br>WHITE<br>PAPER<span>2026 / 07</span></div><div class="whitepaper-copy"><p class="section-index">THE METHOD / 交易方法</p><h2 id="whitepaper-title">先写清楚，<br>为什么值得做。</h2><p class="whitepaper-name">《AI 短线美股交易（1–15 天波段版）白皮书》</p><p class="whitepaper-meta">2026 年 7 月原版 · 29 页 · 4.10 MB</p><p class="whitepaper-description">从市场环境、资金主线与产业链，到入场、止损和复盘，完整说明 Tiger 交易体系的来路。</p><div class="whitepaper-actions"><a class="whitepaper-read" href="/whitepaper/tiger-trading-20260730.pdf" target="_blank" rel="noopener noreferrer">阅读白皮书 <span aria-hidden="true">↗</span></a><a class="whitepaper-download" href="/whitepaper/tiger-trading-20260730.pdf" download="Tiger-Trading-Whitepaper-20260730.pdf">下载原版 PDF <span aria-hidden="true">↓</span></a></div><p class="whitepaper-version-note">这是保留原貌的历史版本，包含当时的规则分工、透传与模拟盘口径。当前交易以本轮经核验的必需模型指令和实际执行回报为准，模型失败时不以规则结果替代。</p></div></div>
     </section>
 
     <section class="principles-section" id="principles" aria-labelledby="principles-title">
       <div class="principles-inner"><div class="principles-intro"><p class="section-index">04 / OUR COMMITMENT</p><h2 id="principles-title">盈利不加滤镜。<br>亏损不翻篇。</h2><p>PnL 是 Profit &amp; Loss。<br>这个名字，同时容纳两种结果。</p><span class="principles-signature">TIGER PnL <span aria-hidden="true">↗</span></span></div><div class="principles-list">
-        <article><span>01</span><div><h3>从真实账户开始</h3><p>业绩只取自真实账户记录。研究建议、模拟结果与账户实际表现分别看待，缺失的数据保留空白。</p></div></article>
+        <article><span>01</span><div><h3>决策与执行，都留下依据</h3><p>Tiger 产出交易指令，真人团队执行落单。指令保留当时的理由与目标配置；真实账户按实际执行回报记账，缺失的回报保留待更新状态。</p></div></article>
         <article><span>02</span><div><h3>从第一天持续记账</h3><p>盈利与亏损采用相同口径。每次更新标明数据截至时间，历史更正通过新增记录说明原因。</p></div></article>
         <article id="methodology"><span>03</span><div><h3>把计算口径摊开</h3><p id="methodology-text">首笔真实账户记录建立基准。收益需区分市场盈亏与出入金；口径与资金流信息完整后展示可比收益，不把入金算成盈利。</p><p class="methodology-detail" id="methodology-detail">样本不足时不展示年化收益或胜率。回撤衡量记账期内的净值回落。</p></div></article>
-        <article><span>04</span><div><h3>记录结果，不承诺结果</h3><p>本网站用于公开记录与研究交流，不构成投资建议。历史表现不代表未来收益，投资存在本金损失风险。</p></div></article>
+        <article><span>04</span><div><h3>记录结果，不承诺结果</h3><p>本网站公开 Tiger 的交易决策、团队执行与账户结果，不向读者承诺收益。历史表现不代表未来收益，投资存在本金损失风险。</p></div></article>
       </div></div>
     </section>
   </main>

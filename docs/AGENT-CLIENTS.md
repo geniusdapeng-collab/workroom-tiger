@@ -8,16 +8,49 @@
 
 ```bash
 node scripts/tiger-agent.mjs doctor --python /absolute/path/to/python
-node scripts/tiger-agent.mjs describe --python /absolute/path/to/python
+printf '%s\n' '{"profile":"us-public-model-required-paper-v1"}' | \
+  node scripts/tiger-agent.mjs describe --python /absolute/path/to/python --input-file -
 ```
 
 这两条命令不调用行情或模型、不创建账户、不启动业务 worker。doctor 检查实际解释器和依赖；describe 返回固定 profile、阶段顺序和限制。`trading.repo.readiness` 只检查文件布局，不能代替 doctor。
 
 默认 `--mode readonly`。执行完整 paper 工作流必须由操作者在启动参数或项目部署配置中显式选择 `--mode paper`。请求 JSON 不能改变 mode、解释器、state-root、阶段或策略。
 
-当前开放两个显式 profile，默认仍为 `us-public-paper-v1`。新增 `us-public-active-paper-v1` 修复已取得板块证据却未使用、第三条达标主线遗漏及组合预算空转；保留相同 MRS/SHS/TSS、数据质量和风险上限。它仍是美股公开数据、USD 本地 paper 账户 `public-usd`、独立初始资金 100000 USD，不连接真实券商、不执行真实资金订单。更高资金使用率会改变实际风险，不能把“上限不变”解释为“收益或回撤不变”。内置语义模型关闭，合法 passthrough 及原因进入证据和回执；外层宿主的模型不会自动接入内层模型。
+当前开放三个显式 profile。新的 AI 研究和官网更新的操作默认是必须明确选择 `us-public-model-required-paper-v1`，按下一节配置，无需用户再次强调真实模型。CLI 兼容函数默认仍为 `us-public-paper-v1`，仅保留旧调用/历史语义；操作默认与兼容函数默认不同。原 `us-public-paper-v1` 和 `us-public-active-paper-v1` 保留内层 disabled 与合法 passthrough 语义，用于其明确的历史/实验用途，不能作为新研究完成。所有配置仍为美股公开数据、USD 本地 paper 账户 `public-usd`、独立初始资金 100000 USD，不连接真实券商、不执行真实资金订单。外层宿主模型不会自动接入内层模型。
 
-新 profile 的回退板块是冻结的 NASDAQ 供应商分类代理，不是 GICS、真实 ETF 成分或历史时点分类。原 Tiger 产业链映射优先，未知分类仍不猜测。运行和评测边界见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。
+可选 active 实验的回退板块是冻结的 NASDAQ 供应商分类代理，不是 GICS、真实 ETF 成分或历史时点分类；第三条达标主线保留为次池。更高资金使用率会改变实际风险，不能把“上限不变”解释为“收益或回撤不变”。该实验不会随 model-required 配置启用。运行和评测边界见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。
+
+### 真实 DeepSeek 内层模型与原生搜索
+
+固定配置见根 `.env.example`，实际 key 存在仓库外受保护文件。运行器不自动寻找或加载 `.env`，也不读取 Codex/DSH 的登录缓存。可信启动器先将 `LLM_BACKEND=api`、`LLM_BASE_URL=https://api.deepseek.com`、`LLM_MODEL=deepseek-flash` 与非空 `LLM_API_KEY` 导出到进程环境，再执行 CLI/MCP。四项仅为 model-required 的业务子进程保留；PnL token、其他模型 key、任意 Python hook 不随之传入。请求 JSON 无权设置这些值。
+
+```bash
+# protected-deepseek.env 的实际内容由操作者在仓库外管理。
+set -a
+. /absolute/protected/path/deepseek.env
+set +a
+node scripts/tiger-agent.mjs run --python /absolute/path/to/python \
+  --mode paper --state-root /absolute/path/to/model-required-state \
+  --input-file model-required-request.json --wait
+```
+
+`model-required-request.json` 使用下文同一四字段结构，将 profile 设为 `us-public-model-required-paper-v1`。此配置沿用原策略和已通用的时序/预算正确性修复，activity 实验保持关闭。模型只能选择/否决数值风险闸门已批准的买入，不得新增、扩大或绕过任何风险限制；无合格买入也必须由实际模型生成等待理由。
+
+当前官方 API ID 为 `deepseek-flash`，2026-10-26 观察的 [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 映射是 `DeepSeek-V4.1-Flash-1017`。这是别名观察，不保证未来自动固定到同一发布；回执记录请求别名、实际 response.model、release 观察、response IDs 与 usage，不能虚构不可变日期 ID。
+
+应用调用同提供方 [Search & Fetch](https://api-docs.deepseek.com/guides/search/) 的原生 Search API，收集既有六条产业链与八类板块主题，将净化文档送入 Flash。适配器支持原生 Fetch，固定 collector 当前没有调用它。Flash 的 Responses `web_search` 在 [官方矩阵](https://api-docs.deepseek.com/guides/responses_api/) 中会被忽略，因此这里准确披露为 `provider_native_search`，不宣称 Flash 自带托管 web_search 已执行。来源 URL 中的凭据、token、签名等在持久化和送模型之前排除；原始响应只保留摘要，回执保留可重算的安全响应。
+
+五个语义阶段必须各有完整真实回复，清洗逐篇、舆情六链、叙事各 ETF 的覆盖均被验证；有效的无风险 `alerts=[]` 仍必须有真实风险评估。最终 `decision.debate` 始终调用模型，给出普通人能读懂的关注理由、时机、入场条件、失效条件、风险和来源。数值计划由原 TradePick 绑定，参考资金明确为纸面 100000 USD，`valid_for` 为下一交易日纽约 16:00 的 ISO 时刻。现有静态日历不含提前收市或临时特殊休市，日期限制随运行证据披露。
+
+每个语义请求都显式携带 admission 冻结的研究日期和纽约市场时区。最终判断另携带实际观察到的基准、候选股票及板块 ETF 末根日线日期；独立证明从 admission 和 `data.prepare` 快照重建这些值。来源发布时间未知或较旧时，模型必须披露时效不确定性，不能单独把它当作当前交易催化；日线日期不代表实时价格。
+
+最终每个 buy/watch 都必须引用该股票自己的真实行情快照：`market_evidence` 恰好一项，仅有 `id`、`symbol`、`as_of`、`close`、`series_sha256` 五个字段。日期和收盘价来自该股票实际末根日线；完整标准化日线表的规范 JSON 计算 SHA-256，标识为 `md_<symbol>_<YYYYMMDD>_<摘要前24位>`。独立证明从冻结的 `data.prepare` 重建该项并核对模型请求、引用和最终输出；日期不得晚于冻结研究日，允许与基准末根日期不同。这里的 close 是所标日期的行情参考，不是获准入场价或已成交价。
+
+模型 `source_ids` 必须恰好包含一次本股票的行情标识，不得借用其他股票快照。watch 允许不引用公司新闻，此时模型须明确说明新闻证据缺口和不确定性；不会强迫填入无关链接。buy 仍须另引用至少一篇、最多八篇原生搜索文档，行情不能代替买入新闻证据。发布计划的 `sources` 只放原生文章，`market_evidence` 单独保留行情事实；两类证据不互相冒充。空的候选集合仍须由模型给出顶层 WAIT/AVOID 解释。
+
+模型还须将同一原始报道的跨站转载视作一个来源，并明确区分 AI 评论、第三方断言与公司公告。该提示约束不会改变既有交叉验证阈值；按域名计数的规则本身不能证明不同网站一定具有独立报道来源，实际来源质量仍须随研究证据复核。Node 的返回 schema 校验字段形状，另由 enabled 模式的语义检查核对行情归属、有效日期、正价格及计划边界；JSON schema 单独通过不等于完整业务验证。
+
+任何模型/原生搜索不可用、401/配额错误、截断、错误模型、空输出、缺项、schema 不符、缺少真实调用或文档/阶段输出与调用不一致，均停止整个任务，不透传，不规则代答，不发布新账户或网站成功。成功只允许 `completed`；`completed_degraded` 不满足此配置。真实业务成功须通过 receipt/verify 独立重算全部阶段 I/O 和最终计划。所有自动测试里的模拟 HTTP 仅证明契约，不能算作真实模型使用。
 
 ## 2. CLI：提交一次，持续查询同一个身份
 
@@ -28,7 +61,7 @@ node scripts/tiger-agent.mjs describe --python /absolute/path/to/python
 ```json
 {
   "schema_version": "tiger.agent-request/v1",
-  "profile": "us-public-paper-v1",
+  "profile": "us-public-model-required-paper-v1",
   "paper_account": "public-usd",
   "idempotency_key": "operator-task-20261021-001"
 }
@@ -41,7 +74,7 @@ node scripts/tiger-agent.mjs run \
   --mode paper --input-file request.json
 ```
 
-选择新 profile 时，将请求中的 `profile` 明确改为 `us-public-active-paper-v1`，使用新的逻辑幂等键和独立 state-root；默认请求不会被升级。`describe` 可用 `--input-file` 读取 `{"profile":"us-public-active-paper-v1"}` 返回对应 policy。两个 profile 不应在同一个账户历史中混用；切换时应新建独立 state-root，不复制待成交/净值来冒充迁移。
+如需单独运行已授权的 active 实验，将请求中的 `profile` 明确改为 `us-public-active-paper-v1`，使用新的逻辑幂等键和独立 state-root；兼容旧调用须明确使用 `us-public-paper-v1`，不作为新 AI 研究完成。`describe` 可用 `--input-file` 读取对应 profile 的对象返回其 policy。三个 profile 不应在同一个账户历史中混用；切换时应新建独立 state-root，不复制待成交/净值来冒充迁移。
 
 成功提交返回 `run_id` 和 `status=accepted` 或 `running`。这只表示请求身份被接纳，不能报告分析或账户处理完成。将实际 `run_id` 写入查询文件：
 
@@ -150,6 +183,7 @@ printf '%s' '{}' | node scripts/workloom-agent.mjs invoke trading.repo.status --
 # 实际已安装 Python 路径只通过当前进程注入，不写入提交。
 TIGER_TEST_PYTHON=/absolute/path/to/python node --test \
   bundles/trading/capabilities/workflow-client.test.mjs \
+  bundles/trading/capabilities/workflow-model-required.test.mjs \
   bundles/trading/capabilities/repo.test.mjs \
   scripts/tiger-agent.test.mjs scripts/tiger-agent-mcp.test.mjs \
   scripts/tiger-agent-config.test.mjs \
@@ -163,6 +197,7 @@ TIGER_TEST_PYTHON=/absolute/path/to/python node --test \
 | doctor not_ready / Python 版本不符 | 指定已安装本仓依赖且满足 3.11+ 的实际 Python，再检查 doctor |
 | READ_ONLY | 由操作者在部署配置中选择 paper；请求字段不能升级权限 |
 | RESULT_INVALID / EVIDENCE_* | 保留原 run_id 和证据，调查格式/哈希/绑定；不得拼接成功摘要 |
+| MODEL_REQUIRED_FAILED | 保留原失败身份和证据。新模型 I/O 错误可附固定安全码、HTTP 状态或 schema 路径/关键字；不保存响应正文、推理内容或任意错误字符串。旧证据没有诊断字段时，不能事后断言原始原因。定位原因并完成修复或服务恢复验证后，为新的尝试分配独立身份；原失败不改，受控入口不内部重跑或自动换键重试 |
 | 配置锁存在 | 先确认写入进程是否仍活跃；不要绕过锁覆盖其他配置 |
 | MCP 菜单没有 run | readonly 的正常结果；配置改动须在实际宿主重新连接后验证 |
 | 公开源失败/访问挑战/数据不足 | 依据回执如实报告缺口；不注入演示行情，不绕过访问控制 |

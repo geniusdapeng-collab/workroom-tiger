@@ -19,6 +19,7 @@ import tempfile
 from typing import Any, Callable
 
 from .redline.execution import EvidenceWriteError
+from .redline.model_diagnostics import MODEL_IO_METHODS, validate_model_diagnostic
 
 MAX_FILE_BYTES = 256 * 1024 * 1024
 SNAPSHOT_SCHEMA = "tiger.snapshot.v1"
@@ -415,7 +416,8 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
         refs[begin["input_ref"]["path"]] = begin["input_ref"]
         state = end.get("status")
         if state == "passthrough":
-            if spec["driver"] != "llm" or not isinstance(end.get("reason"), str) or not end["reason"].strip():
+            if (spec["driver"] != "llm" or spec.get("allow_passthrough") is not True
+                    or not isinstance(end.get("reason"), str) or not end["reason"].strip()):
                 raise EvidenceInvalid("STEP_FAILED", "Illegal stage passthrough", stage=stage)
             degraded.append({"stage": stage, "reason": end["reason"]})
         elif state != "completed":
@@ -444,14 +446,24 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
                 if name in call:
                     value = read_snapshot(root, call[name], run_id=run_id, stage=stage,
                                           role="input" if name == "input_ref" else "output")
-                    if name == "error_ref" and (
-                            not isinstance(value, dict)
-                            or set(value) != {"error_type", "message", "outcome_observed"}
-                            or not isinstance(value["error_type"], str) or not value["error_type"]
-                            or value["message"] != "External call failed"
-                            or not isinstance(value["outcome_observed"], bool)):
-                        raise EvidenceInvalid("RESULT_INVALID", "I/O error payload differs",
-                                              stage=stage)
+                    if name == "error_ref":
+                        base_fields = {"error_type", "message", "outcome_observed"}
+                        if (not isinstance(value, dict)
+                                or set(value) not in (base_fields, base_fields | {"diagnostic"})
+                                or not isinstance(value["error_type"], str) or not value["error_type"]
+                                or value["message"] != "External call failed"
+                                or not isinstance(value["outcome_observed"], bool)):
+                            raise EvidenceInvalid("RESULT_INVALID", "I/O error payload differs",
+                                                  stage=stage)
+                        if "diagnostic" in value:
+                            try:
+                                if (call["method"] not in MODEL_IO_METHODS
+                                        or value["error_type"] != "RequiredModelUnavailable"):
+                                    raise ValueError("Untrusted model failure metadata")
+                                validate_model_diagnostic(value["diagnostic"])
+                            except ValueError as exc:
+                                raise EvidenceInvalid("RESULT_INVALID", "I/O error diagnostic differs",
+                                                      stage=stage) from exc
                     refs[call[name]["path"]] = call[name]
         previous_output = end["output_ref"]
     return {"event_count": len(events), "stage_count": len(specs),

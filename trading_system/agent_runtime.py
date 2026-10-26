@@ -26,11 +26,12 @@ from .agent_evidence import (
     json_bytes, read_bytes, read_json, safe_path, strict_json, verify_events,
     verify_ref,
 )
-from .redline.execution import ExecutionPolicy, daily_stage_contract
+from .redline.execution import (ExecutionPolicy, daily_stage_contract, REQUIRED_PROFILE,
+                                REQUIRED_POLICY_ID)
 
 PROFILE = "us-public-paper-v1"
 ACTIVE_PROFILE = "us-public-active-paper-v1"
-SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE})
+SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE, REQUIRED_PROFILE})
 ACCOUNT = "public-usd"
 POLICY_ID = "tiger.public-paper-policy.v1"
 RUN_RE = re.compile(r"run-[0-9a-f]{32}\Z")
@@ -47,22 +48,25 @@ DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 def policy_manifest(profile: str = PROFILE) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
+    required = profile == REQUIRED_PROFILE
     active = profile == ACTIVE_PROFILE
-    policy_id = "tiger.public-active-paper-policy.v1" if active else POLICY_ID
+    policy_id = REQUIRED_POLICY_ID if required else "tiger.public-active-paper-policy.v1" if active else POLICY_ID
+    execution = ExecutionPolicy(policy_id=policy_id, model_mode="enabled",
+                                search_source_names=("deepseek_search",)) if required else ExecutionPolicy(policy_id=policy_id)
     value = {
         "schema": "tiger.policy.v1", "profile": profile,
         "paper_account": ACCOUNT, "execution_mode": "paper",
         "initial_cash_usd": 100000.0, "market": "us",
         "universe": "extended", "strategy": "evidence-complete-active-v1" if active else "reviewed_source_defaults",
         "use_tuned": False, "real_broker": False,
-        "execution": asdict(ExecutionPolicy(policy_id=policy_id)),
+        "execution": asdict(execution),
         "market_timezone": "America/New_York",
         "date_basis": "admission instant in market timezone",
         "search_collection_budget_seconds": 45.0,
         "search_cleanup_budget_seconds": 15.0,
         "business_deadline_seconds": DEADLINE_SECONDS,
         "access_challenges": "refuse",
-        "stages": daily_stage_contract(),
+        "stages": daily_stage_contract(required),
         "limitations": [
             "Public market data with a local paper account; no broker orders.",
             "Inner semantic models are disabled; legal passthrough is disclosed.",
@@ -71,6 +75,22 @@ def policy_manifest(profile: str = PROFILE) -> dict:
             "Local cooperative processes; no hostile same-user or external rollback anchoring guarantee.",
         ],
     }
+    if required:
+        value["model_contract"] = {
+            "provider": "deepseek", "model": "deepseek-flash",
+            "release": "DeepSeek-V4.1-Flash-1017", "required": True,
+            "search_mode": "provider_native_search",
+            "release_binding": "official-current-alias-mapping",
+            "model_mapping_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "search_documentation_url": "https://api-docs.deepseek.com/guides/search/",
+            "model_mapping_observed_date": "2026-10-26",
+        }
+        value["limitations"][1] = "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
+        value["limitations"] += [
+            "deepseek-flash is a provider alias observed as V4.1-Flash-1017, not an immutable version ID.",
+            "Search uses DeepSeek native Search API collected by this application, not Flash server-hosted web_search.",
+            "Numeric portfolio constraints and accounting remain deterministic; model may veto approved entries, never bypass bounds.",
+        ]
     if active:
         from .sector_classification import OBSERVED_DATE, SOURCE_RESPONSE_SHA256, SOURCE_URL
         value["sector_proxy_snapshot"] = {"observed_date": OBSERVED_DATE,
@@ -203,7 +223,7 @@ def verify_source(run: Path) -> dict:
     return manifest
 
 
-def run_environment(work: Path) -> dict[str, str]:
+def run_environment(work: Path, *, model_required: bool = False) -> dict[str, str]:
     checked_root(work / "tmp", create=True)
     checked_root(work / "cache", create=True)
     env = {
@@ -218,6 +238,12 @@ def run_environment(work: Path) -> dict[str, str]:
     # directory. Application configuration comes only from the fixed policy.
     if "HOME" in os.environ:
         env["HOME"] = os.environ["HOME"]
+    # Trusted startup configuration only. Business requests cannot supply keys,
+    # provider URLs or model overrides. The selected required adapter validates
+    # the exact fixed backend/origin/model before using any credential.
+    for key in ("LLM_BACKEND", "LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY"):
+        if model_required and key in os.environ:
+            env[key] = os.environ[key]
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
         value = os.environ.get(key) or os.environ.get(key.lower())
         if value:
@@ -595,7 +621,7 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
             or not any("review.daily" in row and "已执行" in row for row in document.rows)
             or "</html>" not in markup.lower()):
         raise EvidenceInvalid("RESULT_INVALID", "Final report date or completed-review content is missing")
-    return {
+    summary = {
         "picks": picks, "positions": sim["positions"], "pending": sim["pending"],
         "cash_usd": sim["cash"], "market_value_usd": round(value, 2),
         "equity_usd": actual_equity, "action": result.get("action"),
@@ -614,6 +640,13 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
                         "redline": raw.get("redline", []),
                         "account_origin": "independent USD paper account, initially 100000"},
     }
+    if read_json(run, "request.json")["profile"] == REQUIRED_PROFILE:
+        from .llm.required_proof import verify_required_model
+        summary["model"] = verify_required_model(run, result, admission)
+        summary["action_summary"] = raw["action_summary"]
+        summary["execution_decisions"] = raw["execution_decisions"]
+        summary["disclosures"].update(model_mode="enabled", model_required=True)
+    return summary
 
 
 def verify_run(state: Path, run_id: str, *, require_committed: bool = True,
