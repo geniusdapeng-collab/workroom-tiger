@@ -1,11 +1,13 @@
 """Closed, value-free diagnostics for required model failures.
 
 This module has no transport or provider imports. Only controlled failure
-codes, HTTP status and schema locations may cross the error evidence boundary.
+codes, HTTP status, schema locations and whitelisted numeric budget accounting
+may cross the error evidence boundary.
 It never extracts data from exception messages or arbitrary exception fields.
 """
 from __future__ import annotations
 
+import math
 import re
 
 from . import LLMUnavailable
@@ -70,6 +72,58 @@ def validate_model_diagnostic(value: object) -> dict:
     return dict(value)
 
 
+def validate_model_failure_accounting(value: object) -> dict:
+    """Whitelist numbers and fixed labels, never failed response text or keys."""
+    fields = {"schema", "call_id", "request_sha256", "kind", "status", "usage",
+              "counts", "actual_tokens", "reserved_tokens", "estimated_charged_usd",
+              "estimated_reserved_usd", "frozen", "finish_reason"}
+    invalid = ValueError("Invalid model failure accounting")
+    if (type(value) is not dict or any(type(key) is not str for key in value)
+            or set(value) != fields
+            or type(value["schema"]) is not str or value["schema"] != "tiger.model-call-accounting.v2"
+            or type(value["call_id"]) is not str or re.fullmatch(r"[a-f0-9]{32}", value["call_id"]) is None
+            or type(value["request_sha256"]) is not str or re.fullmatch(r"[a-f0-9]{64}", value["request_sha256"]) is None
+            or type(value["kind"]) is not str or value["kind"] not in ("chat", "search", "fetch")
+            or type(value["status"]) is not str or value["status"] not in ("settled", "unknown")
+            or type(value["frozen"]) is not bool):
+        raise invalid
+    counts = value["counts"]
+    if (type(counts) is not dict or any(type(key) is not str for key in counts)
+            or set(counts) != {"chat", "search", "fetch"}
+            or any(type(counts[k]) is not int or not 0 <= counts[k] <= bound
+                   for k, bound in (("chat", 40), ("search", 60), ("fetch", 20)))
+            or sum(counts.values()) > 120 or counts[value["kind"]] < 1):
+        raise invalid
+    for key in ("actual_tokens", "reserved_tokens"):
+        if type(value[key]) is not int or not 0 <= value[key] <= 300000:
+            raise invalid
+    if value["actual_tokens"] + value["reserved_tokens"] > 300000:
+        raise invalid
+    for key in ("estimated_charged_usd", "estimated_reserved_usd"):
+        if (type(value[key]) not in (int, float) or not 0 <= value[key] <= 1 + 1e-12
+                or not math.isfinite(value[key])):
+            raise invalid
+    if value["estimated_charged_usd"] + value["estimated_reserved_usd"] > 1 + 1e-12:
+        raise invalid
+    usage = value["usage"]
+    if value["status"] == "settled" and value["kind"] == "chat":
+        if (type(usage) is not dict or any(type(key) is not str for key in usage)
+                or set(usage) != {"prompt_tokens", "completion_tokens", "total_tokens"}
+                or any(type(n) is not int or not 0 <= n <= 300000 for n in usage.values())
+                or usage["total_tokens"] != usage["prompt_tokens"] + usage["completion_tokens"]
+                or usage["total_tokens"] > value["actual_tokens"]):
+            raise invalid
+    elif usage is not None:
+        raise invalid
+    if value["status"] == "unknown" and value["frozen"] is not True:
+        raise invalid
+    if (value["finish_reason"] is not None and type(value["finish_reason"]) is not str
+            or value["finish_reason"] not in (None, "stop", "length", "tool_calls", "content_filter", "other", "unknown")
+            or value["kind"] != "chat" and value["finish_reason"] is not None):
+        raise invalid
+    return {**value, "counts": dict(counts), "usage": dict(usage) if usage is not None else None}
+
+
 class RequiredModelUnavailable(LLMUnavailable):
     """A transport-created failure carrying only prevalidated safe metadata."""
 
@@ -83,12 +137,24 @@ class RequiredModelUnavailable(LLMUnavailable):
         if schema_keyword is not None:
             diagnostic["schema_keyword"] = schema_keyword
         self._diagnostic = validate_model_diagnostic(diagnostic)
+        self._accounting = None
         label = f"HTTP_{http_status}" if code == "HTTP_ERROR" else code
         super().__init__(f"DeepSeek required: {label}")
 
     @property
     def diagnostic(self) -> dict:
         return validate_model_diagnostic(self._diagnostic)
+
+    def bind_accounting(self, value: dict) -> None:
+        safe = validate_model_failure_accounting(value)
+        if self._accounting is not None and self._accounting != safe:
+            raise ValueError("Conflicting model failure accounting")
+        self._accounting = safe
+
+    @property
+    def accounting(self) -> dict | None:
+        return (None if self._accounting is None else
+                validate_model_failure_accounting(self._accounting))
 
 
 def model_failure_diagnostic(error: BaseException) -> dict | None:
@@ -100,4 +166,14 @@ def model_failure_diagnostic(error: BaseException) -> dict | None:
     except ValueError:
         # The original failure remains the outcome; malformed extra metadata is
         # not evidence and cannot replace it or enter persisted output.
+        return None
+
+
+def model_failure_accounting(error: BaseException) -> dict | None:
+    """Only the exact trusted error can supply validated numeric accounting."""
+    if type(error) is not RequiredModelUnavailable:
+        return None
+    try:
+        return error.accounting
+    except ValueError:
         return None

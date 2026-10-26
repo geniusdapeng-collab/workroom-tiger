@@ -458,7 +458,11 @@ def clean_v2(llm, docs: list[RawDocument]):
     if len(ids) != len(set(ids)):
         _fail("V2 semantic cleaning requires unique source identities")
     result = []
-    batches = [docs[start:start + 8] for start in range(0, len(docs), 8)] or [[]]
+    # Each document can emit four attributed claims plus its full annotation.
+    # Bound that output obligation without shortening or omitting any body.
+    # Broad Search admits at most 56 sources: 14 clean calls + at most 14 issuer
+    # calls + four other semantic stages stay below the unchanged 40-call cap.
+    batches = [docs[start:start + 4] for start in range(0, len(docs), 4)] or [[]]
     for batch in batches:
         schema = clean_schema_v2([doc.doc_id for doc in batch], list(TECH_SUBCHAINS),
                                  config.SECTOR_ETFS, all_doc_ids=ids)

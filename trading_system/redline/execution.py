@@ -13,7 +13,8 @@ from threading import get_ident
 from time import perf_counter
 from typing import Any, Callable, Mapping, Protocol
 
-from .model_diagnostics import MODEL_IO_METHODS, model_failure_diagnostic
+from .model_diagnostics import (MODEL_IO_METHODS, model_failure_diagnostic,
+                                model_failure_accounting)
 
 
 class EvidenceWriteError(RuntimeError):
@@ -423,6 +424,10 @@ class ExecutionContext:
             diagnostic = model_failure_diagnostic(error)
             if diagnostic is not None:
                 value["diagnostic"] = diagnostic
+                if self.upgrade:
+                    accounting = model_failure_accounting(error)
+                    if accounting is not None:
+                        value["accounting"] = accounting
         ref = self._snapshot(scope.spec.name, "output", value)
         scope.io_calls.append({"index": handle.index, "method": handle.method,
                                "input_ref": handle.input_ref,

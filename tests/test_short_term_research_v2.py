@@ -759,3 +759,82 @@ def test_v2_no_risk_alert_or_numeric_coverage_cannot_create_maximum_prosperity_b
         RiskAssessment("SYNTHETIC_TEST risk is unknown or no alert was found; no numeric safety score supplied", [], overall_ids))
     assert all(row.prosperity is None and row.bonus_hint == 1 and "tech.risk" in row.degraded_components for row in result)
     assert all(row.to_dict()["semantic_evidence"]["risk"]["assessment"] for row in result)
+
+
+class BoundedCleanClient:
+    """Synthetic output-capacity boundary, not a diagnosis of a paid failure.
+
+    The real failure recorded INCOMPLETE_MODEL_RESPONSE without its precise
+    finish reason. This stub tests that a smaller per-call output obligation
+    still processes every complete input and preserves cross-batch origins.
+    """
+    def __init__(self, *, fail_call=None):
+        self.execution = SemanticStub({}).execution
+        self.requests = []
+        self.fail_call = fail_call
+
+    def complete_json(self, **kwargs):
+        payload = json.loads(kwargs["user"].split("\n", 1)[1])
+        self.requests.append(copy.deepcopy(kwargs))
+        if len(payload["documents"]) > 4 or len(self.requests) == self.fail_call:
+            raise LLMUnavailable("SYNTHETIC_TEST incomplete bounded semantic response")
+        return {"documents": [{
+            "id": row["id"], "tickers": ["AAA"], "sentiment": "mixed",
+            "sentiment_score": 0, "events": ["other"],
+            "summary_zh": "SYNTHETIC_TEST 保留本篇限定、反证和未知日期，未声称外部事实已核实。",
+            "relevance": .5, "chain_ids": [], "sector_etfs": [],
+            "provenance": {"evidence_kind": "media",
+                "origin_id": payload["all_source_index"][-1]["id"],
+                "origin_note": "SYNTHETIC_TEST 原始来源可以处于另一批，归属不能因减批丢失。",
+                "time_role": "unknown"},
+            "claims": [{"statement": f"SYNTHETIC_TEST 本篇绑定事实{number}。",
+                "quote": row["content"][number:number + 40],
+                "claim_key": f"SYNTHETIC_TEST {row['id']} fact {number}",
+                "time_role": "unknown"} for number in range(4)],
+        } for row in payload["documents"]]}
+
+
+@pytest.mark.parametrize("count", [0, 1, 4, 5, 8, 56])
+def test_v2_clean_smaller_output_batches_preserve_every_full_body_and_global_source(count):
+    documents = [RawDocument(f"synthetic-clean-{number}", "deepseek_search",
+        f"SYNTHETIC_TEST source {number}", f"https://issuer.example/{number}",
+        f"SYNTHETIC_TEST unique source {number}. " + "完整正文及反证。" * 1500,
+        "", 1793102400., {"native_content_characters": 20000})
+        for number in range(count)]
+    before = normalize(documents)
+    client = BoundedCleanClient()
+    cleaned = required.clean_v2(client, documents)
+    assert [row.raw.doc_id for row in cleaned] == [row.doc_id for row in documents]
+    assert len(client.requests) == max(1, (count + 3) // 4)
+    payloads = [json.loads(row["user"].split("\n", 1)[1]) for row in client.requests]
+    presented = [row for payload in payloads for row in payload["documents"]]
+    assert len(presented) == count and all(len(row["documents"]) <= 4 for row in payloads)
+    for actual, original, semantic in zip(presented, documents, cleaned):
+        assert actual["content"] == original.content
+        assert actual["presented_content_characters"] == len(original.content)
+        assert actual["content_complete"] is True
+        assert actual["provider_content_complete"] is False
+        assert semantic.raw is original and len(semantic.claims) == 4
+        assert semantic.provenance["origin_id"] == documents[-1].doc_id
+    expected_ids = [row.doc_id for row in documents]
+    assert all([row["id"] for row in payload["all_source_index"]] == expected_ids for payload in payloads)
+    assert all(row["max_tokens"] == 16384 for row in client.requests)
+    assert normalize(documents) == before
+    if count == 56:
+        from trading_system.llm.request_budget import LIMITS
+        budget = research_module().ResearchBudget()
+        # 14 cleaning + at most 14 issuer initial/followup + sentiment,
+        # risk, narrative and final decision. Token admission remains separate.
+        assert len(client.requests) + budget.max_model_calls + 4 == 32 <= LIMITS["max_chat_calls"]
+        assert LIMITS["max_tokens"] == 300000
+
+
+def test_v2_clean_failed_later_batch_is_not_retried_or_returned_as_partial_success():
+    documents = [public_document(f"synthetic-clean-{number}") for number in range(8)]
+    client = BoundedCleanClient(fail_call=2)
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(client, documents)
+    assert len(client.requests) == 2
+    assert [[row["id"] for row in json.loads(request["user"].split("\n", 1)[1])["documents"]]
+            for request in client.requests] == [
+                [row.doc_id for row in documents[:4]], [row.doc_id for row in documents[4:]]]

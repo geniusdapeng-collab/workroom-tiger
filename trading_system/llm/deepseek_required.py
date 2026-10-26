@@ -454,9 +454,29 @@ class DeepSeekRequiredClient:
                 "finished_at_utc": end.isoformat(),
                 "elapsed_ms": max(0.0, round((end - start).total_seconds() * 1000, 3))}
 
-    def _record_call(self, method: str, inputs: dict, invoke):
+    def _record_call(self, method: str, inputs: dict, invoke, *, observation=None):
+        def recorded_invoke():
+            try:
+                return invoke()
+            except BaseException as error:
+                if self.budget is not None:
+                    self.budget.mark_unknown(inputs["call_id"])
+                    if type(error) is RequiredModelUnavailable:
+                        budget = self.budget.snapshot()
+                        record = next(row for row in budget["records"]
+                                      if row["reservation"]["call_id"] == inputs["call_id"])
+                        error.bind_accounting({"schema": "tiger.model-call-accounting.v2",
+                            "call_id": inputs["call_id"], "request_sha256": inputs["request_sha256"],
+                            "kind": record["reservation"]["kind"], "status": record["status"],
+                            "usage": ({key: record["usage"][key] for key in
+                                ("prompt_tokens", "completion_tokens", "total_tokens")}
+                                if record["usage"] is not None else None),
+                            **{key: budget[key] for key in ("counts", "actual_tokens", "reserved_tokens",
+                                "estimated_charged_usd", "estimated_reserved_usd", "frozen")},
+                            "finish_reason": (observation or {}).get("finish_reason")})
+                raise
         try:
-            return self.execution.call_io(method, inputs, invoke)
+            return self.execution.call_io(method, inputs, recorded_invoke)
         except BaseException:
             if self.budget is not None:
                 self.budget.mark_unknown(inputs["call_id"])
@@ -621,9 +641,16 @@ class DeepSeekRequiredClient:
                   "request": request, "request_sha256": _hash(request), "output_schema": schema,
                   "schema_sha256": _hash(schema), "release": RELEASE}
         self._admit_call("chat", call_id, request, inputs)
+        observation = {}
 
         def invoke():
             response, body_hash = self._post_json("/chat/completions", request)
+            choices = response.get("choices")
+            observed_finish = (choices[0].get("finish_reason") if isinstance(choices, list)
+                               and len(choices) == 1 and isinstance(choices[0], dict) else None)
+            observation["finish_reason"] = (observed_finish if observed_finish in
+                ("stop", "length", "tool_calls", "content_filter") else
+                "unknown" if observed_finish is None else "other")
             # Charge actual usage even if a later schema/identity check rejects
             # the answer. A failed answer must never erase its paid usage.
             usage = self._usage(response.get("usage"))
@@ -673,7 +700,7 @@ class DeepSeekRequiredClient:
                     "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed,
                     **self._budget_proof(inputs)}
 
-        proof = self._record_call("model.deepseek.chat", inputs, invoke)
+        proof = self._record_call("model.deepseek.chat", inputs, invoke, observation=observation)
         self.receipts.append({k: v for k, v in proof.items() if k not in ("schema", "parsed", "response")})
         return proof["parsed"]
 
