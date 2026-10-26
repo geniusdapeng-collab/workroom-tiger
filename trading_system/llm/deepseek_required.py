@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +22,8 @@ from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 import requests
+from urllib3.exceptions import ProtocolError, ReadTimeoutError, SSLError
+from urllib3.util import Timeout
 
 from ..redline import LLMUnavailable
 from ..redline.model_diagnostics import RequiredModelUnavailable
@@ -407,6 +410,43 @@ def stage_reasoning_effort(stage: str, *, upgrade: bool = False) -> str:
     return "low" if upgrade and stage == "clean.llm_semantic" else "high"
 
 
+class _BodyDeadline:
+    """Interrupt the owned raw response at the remaining monotonic deadline.
+
+    urllib3 read/total timeouts measure socket idle intervals, so blank-line
+    keepalives alone cannot enforce a body deadline. Its public shutdown method
+    interrupts a blocked read. Cancel and join before closing this response;
+    never leave a callback that could act after cleanup. No exception text is
+    retained, including errors caused by an already released connection.
+    """
+
+    def __init__(self, raw, deadline: float):
+        self.expired = threading.Event()
+        self.shutdown_failed = threading.Event()
+        self._timer = None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _fail("RESPONSE_DEADLINE")
+        shutdown = getattr(raw, "shutdown", None)
+        if callable(shutdown):
+            def interrupt():
+                self.expired.set()
+                try:
+                    shutdown()
+                except Exception:
+                    # A released/closed connection has nothing left to read.
+                    # The main thread still rejects this expired response.
+                    self.shutdown_failed.set()
+            self._timer = threading.Timer(remaining, interrupt)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def close(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer.join()
+
+
 class DeepSeekRequiredClient:
     required = True
 
@@ -541,14 +581,25 @@ class DeepSeekRequiredClient:
         if len(_canonical(request)) > MAX_RESPONSE_BYTES:
             _fail("REQUEST_TOO_LARGE")
         response = None
+        body_deadline = None
         deadline = time.monotonic() + RESPONSE_DEADLINE
+
+        def deadline_expired() -> bool:
+            return (body_deadline is not None and body_deadline.expired.is_set()
+                    or time.monotonic() >= deadline)
+
         self._remote_requests += 1
         try:
             response = requests.post(
                 BASE_URL + path, json=request,
                 headers={"Content-Type": "application/json", "Accept": "application/json",
                          "Accept-Encoding": "identity", "Authorization": "Bearer " + self._api_key},
-                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), allow_redirects=False, verify=True, stream=True)
+                # A non-streaming Chat may legitimately wait beyond a native
+                # Search/Fetch idle timeout. The existing 180-second acceptance
+                # deadline remains; this does not grant another paid request.
+                timeout=Timeout(total=RESPONSE_DEADLINE, connect=CONNECT_TIMEOUT,
+                                read=RESPONSE_DEADLINE if path == "/chat/completions" else READ_TIMEOUT),
+                allow_redirects=False, verify=True, stream=True)
             status = response.status_code
             if type(status) is not int or status != 200:
                 _fail(f"HTTP_{status}" if type(status) is int and 100 <= status <= 599 else "HTTP_INVALID")
@@ -560,13 +611,14 @@ class DeepSeekRequiredClient:
             declared = response.headers.get("Content-Length")
             if declared is not None and (not declared.isdecimal() or int(declared) > MAX_RESPONSE_BYTES):
                 _fail("RESPONSE_TOO_LARGE")
+            body_deadline = _BodyDeadline(response.raw, deadline)
             chunks: list[bytes] = []
             size = 0
             while True:
-                if time.monotonic() > deadline:
+                if deadline_expired():
                     _fail("RESPONSE_DEADLINE")
                 chunk = response.raw.read1(16384)
-                if time.monotonic() > deadline:
+                if deadline_expired():
                     _fail("RESPONSE_DEADLINE")
                 if not chunk:
                     break
@@ -583,11 +635,17 @@ class DeepSeekRequiredClient:
             return obj, hashlib.sha256(raw).hexdigest()
         except LLMUnavailable:
             raise
-        except requests.Timeout:
-            _fail("NETWORK_TIMEOUT")
+        except (requests.Timeout, ReadTimeoutError):
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "NETWORK_TIMEOUT")
+        except (requests.exceptions.SSLError, SSLError):
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "NETWORK_TLS_ERROR")
+        except (requests.exceptions.ChunkedEncodingError, ProtocolError):
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "NETWORK_PROTOCOL_ERROR")
         except Exception:
-            _fail("TRANSPORT_FAILURE")
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "TRANSPORT_FAILURE")
         finally:
+            if body_deadline is not None:
+                body_deadline.close()
             if response is not None:
                 try:
                     response.close()
