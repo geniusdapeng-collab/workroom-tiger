@@ -18,9 +18,6 @@ jobs:
       NODE_ENV: test
       LLM_PROVIDER: mock
       TOOL_UNVERIFIED_RATE: "0"
-      DATABASE_URL: postgres://postgres:mock@127.0.0.1:55432/workloom_tiger_ci
-      DATABASE_APP_URL: postgres://workloom_app:mockapp@127.0.0.1:55432/workloom_tiger_ci
-      DATABASE_GATEWAY_URL: postgres://workloom_gateway:mockgw@127.0.0.1:55432/workloom_tiger_ci
       APP_DB_PASSWORD: mockapp
       GATEWAY_DB_PASSWORD: mockgw
       JWT_SECRET: ci-only-jwt-signing-key-not-for-deployment
@@ -38,13 +35,28 @@ jobs:
           POSTGRES_PASSWORD: mock
           POSTGRES_DB: workloom_tiger_ci
         ports:
-          - 55432:5432
+          # CI-2026-1027-TIGER-SERVICE-PORT: let Docker select an available host port.
+          - 5432
         options: >-
           --health-cmd "pg_isready -U postgres -d workloom_tiger_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     steps:
+      - name: 绑定 PostgreSQL 动态服务端口
+        env:
+          PGPORT: ${{ job.services.postgres.ports[5432] }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${PGPORT:-}" =~ ^[1-9][0-9]{0,4}$ ]] || (( PGPORT > 65535 )); then
+            echo "::error::PostgreSQL service port is missing or invalid"
+            exit 1
+          fi
+          {
+            printf 'DATABASE_URL=postgres://postgres:mock@127.0.0.1:%s/workloom_tiger_ci\n' "$PGPORT"
+            printf 'DATABASE_APP_URL=postgres://workloom_app:mockapp@127.0.0.1:%s/workloom_tiger_ci\n' "$PGPORT"
+            printf 'DATABASE_GATEWAY_URL=postgres://workloom_gateway:mockgw@127.0.0.1:%s/workloom_tiger_ci\n' "$PGPORT"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
