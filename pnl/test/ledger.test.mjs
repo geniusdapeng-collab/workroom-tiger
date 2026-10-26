@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Ledger, ResearchLedger } from '../lib/ledger.mjs';
 import { digest, validateRecord } from '../lib/schema.mjs';
 import { dashboard } from '../lib/projection.mjs';
-import { modelResearchFixture } from './model-fixture.mjs';
+import { researchV3Fixture as modelResearchFixture } from './short-term-fixture.mjs';
 
 // Deliberately synthetic unit-test fixture; never copied into runtime storage.
 export function fixture(overrides = {}) {

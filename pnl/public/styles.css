@@ -2458,3 +2458,390 @@ th.numeric {
     text-decoration:none
   }
 }
+.model-budget-note {
+  grid-column:1 / -1;
+  border-top:1px solid #4b5143;
+  padding-top:12px;
+  color:#b9c1ae;
+  font:10px/1.8 var(--sans);
+  overflow-wrap:anywhere
+}
+.thesis-badges {
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin:12px 0 16px
+}
+.strategy-badge,.research-status {
+  font-size:10px;
+  line-height:1.7;
+  padding:3px 8px;
+  background:#e8ebdf;
+  color:#546347
+}
+.research-status.status-insufficient,.research-status.status-contradictory {
+  background:#f3e8d8;
+  color:#895c35
+}
+.five-part-thesis {
+  border-top:1px solid var(--line);
+  padding-top:14px;
+  margin-top:18px
+}
+.five-part-thesis>summary,.research-deferred>summary,.research-source-coverage>summary,
+.opportunity-meta>summary,.evaluation-funnel>summary,.evaluation-rejections>summary {
+  cursor:pointer;
+  font-size:11px;
+  line-height:1.9;
+  color:#59694b;
+  overflow-wrap:anywhere
+}
+.five-part-thesis>summary:hover,.research-deferred>summary:hover,.research-source-coverage>summary:hover,
+.opportunity-meta>summary:hover,.evaluation-funnel>summary:hover,.evaluation-rejections>summary:hover {
+  color:var(--orange-dark)
+}
+.thesis-parts {
+  display:grid;
+  gap:15px;
+  margin-top:18px
+}
+.thesis-part h5,.event-risk h5,.thesis-list h5,.thesis-claims>h5 {
+  margin:0 0 5px;
+  font-size:11px;
+  font-weight:500;
+  color:var(--orange-dark)
+}
+.thesis-part p,.event-risk p,.thesis-list li,.thesis-claim p {
+  font-size:12px;
+  line-height:1.95;
+  color:#55604b;
+  overflow-wrap:anywhere
+}
+.thesis-reference {
+  display:block;
+  margin-top:6px;
+  font:8px/1.8 var(--mono);
+  color:#87907c;
+  overflow-wrap:anywhere
+}
+.event-risk {
+  border-left:2px solid #a9b799;
+  background:#eef1e6;
+  padding:13px 15px;
+  margin-top:18px
+}
+.event-risk.is-unknown {
+  border-left-color:#c59b65;
+  background:#f3edde
+}
+.thesis-list {
+  margin-top:17px
+}
+.thesis-list ul {
+  margin:7px 0 0;
+  padding-left:18px
+}
+.thesis-list li {
+  margin-top:6px
+}
+.thesis-falsification h5,.thesis-gaps h5 {
+  color:#935e41
+}
+.thesis-claims {
+  margin-top:20px
+}
+.thesis-claim {
+  padding:12px 0;
+  border-top:1px dashed var(--line)
+}
+.claim-attribution,.claim-time,.claim-source {
+  display:block;
+  margin-top:5px;
+  font-size:9px;
+  line-height:1.9;
+  color:#828974;
+  overflow-wrap:anywhere
+}
+.claim-source {
+  color:#5f7250;
+  text-decoration:underline;
+  text-underline-offset:3px
+}
+.claim-source:hover {
+  color:var(--orange-dark)
+}
+.research-v2-panels>section {
+  margin-top:37px;
+  border-top:1px solid var(--ink);
+  padding-top:27px
+}
+.research-panel-heading h3 {
+  font-size:23px;
+  font-weight:500;
+  letter-spacing:-.6px;
+  line-height:1.65
+}
+.research-panel-heading>p:last-child {
+  max-width:920px;
+  margin-top:10px;
+  font-size:12px;
+  line-height:1.95;
+  color:#727b66
+}
+.research-value-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:20px;
+  margin:23px 0;
+  padding:19px 0;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line)
+}
+.research-value-grid>div {
+  min-width:0
+}
+.research-value-grid dt {
+  font-size:10px;
+  color:#7c856f;
+  margin-bottom:8px;
+  line-height:1.8
+}
+.research-value-grid dd {
+  margin:0;
+  font:19px/1.6 var(--mono);
+  color:#3a4b30;
+  overflow-wrap:anywhere
+}
+.research-coverage-copy {
+  color:#4d5d40;
+  font-size:14px;
+  line-height:1.95;
+  overflow-wrap:anywhere
+}
+.research-input-scope,.research-scope-note,.research-source-note {
+  margin-top:12px;
+  font-size:10px;
+  line-height:1.95;
+  color:#858b79;
+  overflow-wrap:anywhere
+}
+.candidate-thesis-grid,.opportunity-cards {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:17px;
+  align-items:start;
+  margin-top:22px
+}
+.candidate-thesis-card,.opportunity-entry {
+  padding:21px 23px;
+  background:var(--white);
+  border:1px solid var(--line);
+  min-width:0
+}
+.candidate-thesis-head,.opportunity-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:10px
+}
+.candidate-thesis-head h4,.opportunity-head h4 {
+  margin:0;
+  font:18px/1.5 var(--mono);
+  color:#33472a;
+  overflow-wrap:anywhere
+}
+.candidate-thesis-head>span,.opportunity-head>span {
+  font-size:10px;
+  color:#8b795b
+}
+.candidate-issuer {
+  font-size:11px;
+  color:#858b79;
+  margin:5px 0 10px
+}
+.candidate-stock-thesis {
+  font-size:13px;
+  line-height:1.95;
+  color:#536248;
+  overflow-wrap:anywhere
+}
+.candidate-preview-note {
+  font-size:9px;
+  line-height:1.8;
+  color:#8d947f;
+  margin-bottom:6px
+}
+.candidate-visible-gap,.candidate-event-note,.opportunity-recheck,.opportunity-refusals {
+  margin-top:12px;
+  padding-left:10px;
+  border-left:2px solid #d3b48c;
+  font-size:10px;
+  line-height:1.95;
+  color:#8b6c43;
+  overflow-wrap:anywhere
+}
+.research-deferred,.research-source-coverage,.evaluation-funnel,.evaluation-rejections {
+  margin-top:21px;
+  padding:17px 19px;
+  background:#eceee3;
+  border:1px solid #dce1d1;
+  min-width:0
+}
+.research-deferred p,.evaluation-rejections p {
+  margin-top:10px;
+  font-size:11px;
+  line-height:1.9;
+  color:#7f785f;
+  overflow-wrap:anywhere
+}
+.source-coverage-entry {
+  border-top:1px solid #d3dcc7;
+  margin-top:16px;
+  padding-top:15px;
+  overflow-wrap:anywhere
+}
+.source-coverage-entry>a {
+  font-size:12px;
+  line-height:1.9;
+  color:#4e6740;
+  text-decoration:underline;
+  text-underline-offset:3px
+}
+.source-coverage-entry>a:hover {
+  color:var(--orange-dark)
+}
+.source-coverage-entry>p {
+  margin-top:7px;
+  color:#858d77;
+  font-size:9px;
+  line-height:1.9
+}
+.source-coverage-entry>.source-coverage-status {
+  color:#687858;
+  font-size:10px
+}
+.source-identity {
+  display:block;
+  margin-top:7px;
+  font:8px/1.8 var(--mono);
+  color:#8d947e
+}
+.opportunity-entry .research-value-grid {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;
+  margin:17px 0 13px;
+  padding:13px 0
+}
+.opportunity-entry .research-value-grid dd {
+  font-size:15px
+}
+.opportunity-entry .research-value-grid dt {
+  font-size:9px
+}
+.opportunity-account-fact,.evaluation-latency {
+  font-size:11px;
+  line-height:1.95;
+  color:#78846a;
+  overflow-wrap:anywhere
+}
+.opportunity-meta {
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px dashed var(--line)
+}
+.opportunity-meta p {
+  font:9px/1.9 var(--mono);
+  color:#8a927d;
+  overflow-wrap:anywhere;
+  margin-top:8px
+}
+.state-exit_pending,.state-invalidated,.state-expired {
+  border-top:2px solid #b88e62
+}
+.pending-intents-note,.evaluation-caveat {
+  background:#f0e9d9;
+  border-left:2px solid #c69b62;
+  padding:14px 16px;
+  margin-top:20px;
+  font-size:11px;
+  line-height:1.95;
+  color:#8a6e43;
+  overflow-wrap:anywhere
+}
+.research-panel-empty {
+  grid-column:1 / -1;
+  font-size:12px;
+  color:#818a73;
+  line-height:1.95;
+  padding:20px 0
+}
+@media(max-width:1000px) {
+  .candidate-thesis-grid,.opportunity-cards {
+    grid-template-columns:minmax(0,1fr)
+  }
+  .research-value-grid {
+    gap:15px
+  }
+  .research-value-grid dd {
+    font-size:17px
+  }
+}
+@media(max-width:740px) {
+  .model-budget-note {
+    font-size:9px
+  }
+  .research-v2-panels>section {
+    margin-top:29px;
+    padding-top:22px
+  }
+  .research-panel-heading h3 {
+    font-size:20px
+  }
+  .research-panel-heading>p:last-child {
+    font-size:11px
+  }
+  .research-value-grid {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:17px 14px;
+    padding:17px 0
+  }
+  .research-value-grid dt {
+    font-size:9px;
+    margin-bottom:5px
+  }
+  .research-value-grid dd {
+    font-size:17px
+  }
+  .research-coverage-copy {
+    font-size:12px
+  }
+  .candidate-thesis-card,.opportunity-entry {
+    padding:18px
+  }
+  .candidate-stock-thesis {
+    font-size:12px
+  }
+  .research-deferred,.research-source-coverage,.evaluation-funnel,.evaluation-rejections {
+    padding:15px
+  }
+  .opportunity-entry .research-value-grid {
+    gap:10px
+  }
+  .opportunity-entry .research-value-grid dd {
+    font-size:14px
+  }
+  .thesis-part p,.event-risk p,.thesis-list li,.thesis-claim p {
+    font-size:11px
+  }
+  .thesis-badges {
+    gap:6px
+  }
+  .strategy-badge,.research-status {
+    font-size:9px
+  }
+  .five-part-thesis>summary,.research-deferred>summary,.research-source-coverage>summary,
+  .opportunity-meta>summary,.evaluation-funnel>summary,.evaluation-rejections>summary {
+    font-size:10px
+  }
+}

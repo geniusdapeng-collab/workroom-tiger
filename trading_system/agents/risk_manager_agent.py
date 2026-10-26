@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
+from datetime import date
 
 from .. import config
 from ..chains import CHAINS, chain_name_zh
@@ -32,6 +34,8 @@ class RiskManagerAgent(BaseAgent):
         self.max_picks = max_picks
 
     def execute(self, context: dict) -> list[TradePick]:
+        if context.get("execution_policy") == "whitepaper-execution-v2":
+            return self._execute_v2(context)
         from ..gate import pass_gates
         from ..activity import (enabled, execution_budgeted, gate_reasons, portfolio_reservations,
                                 rejection_report, risk_group, sector_evidence)
@@ -398,6 +402,193 @@ class RiskManagerAgent(BaseAgent):
                 "risk_pct": config.RISK_R_PCT, "max_positions": self.max_picks,
                 "known_at": trade_date, "existing_gross_reserved": existing_gross}
         self.log.info("风控放行: action=%s picks=%s", action, [p.ticker for p in picks])
+        return picks
+
+    def _execute_v2(self, context: dict) -> list[TradePick]:
+        """Use current dated NAV and the canonical policy without a cash fallback."""
+        from ..activity import rejection_report, risk_group, sector_evidence
+        from ..execution_policy import (POLICY_ID, ExecutionPolicyError, allocate_entry,
+                                        entry_gate_reasons, portfolio_snapshot)
+        from ..gate import pass_gates
+        mrs, candidates = context["mrs"], context.get("watchlist", [])
+        sectors, chains = context.get("sectors", []), context.get("chain_map", {})
+        trade_date = date.fromisoformat(context["trade_date"]).isoformat()
+        spec = context.get("market_spec")
+        currency = usd_execution_policy(spec, tickers=(candidate.ticker for candidate in candidates))
+        context["currency_policy"] = currency
+        notes, compliance = [], []
+        calendar = context.get("event_calendar")
+        day_factor, event_notes = calendar.day_discount(trade_date) if calendar else (1., [])
+        if not isinstance(day_factor, (int, float)) or not math.isfinite(day_factor) or not 0 < day_factor <= 1:
+            raise ValueError("Invalid current event discount")
+        notes.extend(event_notes)
+        gross_cap = round(mrs.position_cap[1] * day_factor, 6)
+        state = context.get("portfolio_state")
+        supplied = context.get("portfolio_snapshot")
+        stock_data = context.get("market_data", {}).get("stock_ohlcv", {})
+        valuation = (supplied.get("known_at") if isinstance(supplied, dict) else None) or context.get("portfolio_valuation_date")
+        if not valuation:
+            spy = context.get("market_data", {}).get("spy")
+            if spy is not None and len(spy): valuation = spy.index[-1].date().isoformat()
+            elif stock_data:
+                dated = [frame.index[-1].date().isoformat() for frame in stock_data.values() if frame is not None and len(frame)]
+                valuation = max(dated) if dated else None
+        account_problem, snapshot = "", None
+        if valuation is None or valuation > trade_date:
+            account_problem = "portfolio_valuation_date_invalid"
+        marks = deepcopy(context.get("portfolio_marks", {}))
+        if state is None:
+            account_problem = "portfolio_state_missing"
+        elif not account_problem:
+            if "portfolio_marks" not in context:
+                symbols = {row["ticker"] for row in state.get("positions", []) + state.get("pending", [])}
+                symbols.update(row["ticker"] for row in state.get("entry_plans", {}).values() if row["status"] in {"pending", "partial"})
+                for ticker in symbols:
+                    frame = stock_data.get(ticker)
+                    if frame is not None and len(frame):
+                        marks[ticker] = {"date": frame.index[-1].date().isoformat(), "price": float(frame["Close"].iloc[-1])}
+            try:
+                snapshot = portfolio_snapshot(state, marks, valuation)
+                if supplied is not None and supplied != snapshot:
+                    account_problem = "portfolio_snapshot_conflict"
+                    snapshot = None
+            except ExecutionPolicyError as exc:
+                account_problem = exc.code
+        context["portfolio_snapshot"] = snapshot
+        context["portfolio_marks"] = marks
+        if account_problem: notes.append("账户净值未核实，停止新开仓：" + account_problem)
+        if valuation and valuation < trade_date:
+            notes.append(f"本轮研究日 {trade_date}；账户与价格估值日 {valuation}，实际入场仍须新报价重检")
+        budget = None if snapshot is None else {
+            "schema": "tiger.entry-budget.v2", "execution_policy": POLICY_ID,
+            "known_at": valuation, "snapshot_hash": snapshot["state_hash"],
+            "gross_cap": gross_cap, "single_cap": config.MAX_SINGLE_POSITION_PCT,
+            "risk_pct": config.RISK_R_PCT, "group_risk_pct": config.MAX_CHAIN_RISK_PCT,
+            "portfolio_risk_pct": config.MAX_PORTFOLIO_RISK_PCT_V2,
+            "max_positions": min(self.max_picks, config.MAX_POSITIONS_V2),
+            "source_snapshot": deepcopy(snapshot), "source_account_state": deepcopy(state)}
+        grad = context.get("market_grad") or {"graduated": True}
+        setups, diagnostics, metadata = {}, {}, {}
+        for candidate in candidates:
+            evidence = sector_evidence(candidate.ticker, candidate.chain_id, active=False)
+            etf = evidence["etf"]
+            candidate.sector_etf = etf
+            sector = next((row for row in sectors if row.etf == etf), None)
+            chain = chains.get(candidate.chain_id)
+            shs = sector.shs if sector is not None else config.NEUTRAL_SCORE
+            in_main = bool(sector is not None and sector.in_main_pool)
+            in_sub = bool(sector is not None and sector.in_sub_pool)
+            hot = bool(chain is not None and chain.hot)
+            decision = pass_gates(mrs.mrs_star, shs, candidate.tss_final, in_main, in_sub, hot)
+            ratio = 1. if decision.standard else sum(config.LIGHT_PROBE["size_ratio"]) / 2
+            if not grad.get("graduated", True): ratio = sum(config.MARKET_LIGHT_SIZE) / 2
+            factor, event_note = calendar.pick_adjustment(candidate.ticker, trade_date) if calendar else (1., "")
+            if not isinstance(factor, (int, float)) or not math.isfinite(factor) or not 0 < factor <= 1:
+                raise ValueError("Invalid current earnings discount")
+            ratio *= factor
+            breadth = sector.breadth if sector is not None and math.isfinite(sector.breadth) else None
+            setup = {"schema": "tiger.entry-setup.v2", "symbol": candidate.ticker,
+                "known_at": valuation, "entry_template": candidate.entry_template,
+                "entry_price": candidate.price, "stop_price": candidate.stop_price,
+                "key_level": candidate.key_level, "mrs_star": mrs.mrs_star,
+                "shs": shs, "tss_final": candidate.tss_final, "in_main": in_main,
+                "in_sub": in_sub, "chain_hot": hot, "breadth": breadth,
+                "allow_new_positions": mrs.allow_new_positions, "shock": mrs.shock,
+                "risk_group": risk_group(candidate.chain_id, etf), "sector": etf,
+                "size_ratio": ratio, "signal_adv_usd": candidate.adv_usd,
+                "execution_mode": "paper"}
+            setups[candidate.ticker] = setup
+            reasons = entry_gate_reasons(setup)
+            if sector is None: reasons.append("sector_evidence_missing")
+            frame = stock_data.get(candidate.ticker)
+            if (frame is None or not len(frame) or frame.index[-1].date().isoformat() != valuation
+                    or not math.isfinite(float(frame["Close"].iloc[-1]))
+                    or not math.isclose(float(frame["Close"].iloc[-1]), candidate.price, rel_tol=1e-8, abs_tol=1e-7)):
+                reasons.append("candidate_market_evidence_unavailable")
+            if currency["execution_blocked"]: reasons.append("currency_blocked")
+            if account_problem: reasons.append(account_problem)
+            if snapshot and candidate.ticker in snapshot["committed_symbols"]:
+                reasons.append("existing_or_pending_position")
+            if not math.isfinite(candidate.c_liq) or not 0 < candidate.c_liq <= 1:
+                reasons.append("liquidity_coefficient_invalid")
+            if not reasons and spec is not None:
+                prev = float(frame["Close"].iloc[-2]) if len(frame) >= 2 else candidate.price
+                verdict = spec.check_order("buy", candidate.ticker, candidate.price, prev, trade_date)
+                compliance.append({"ticker": candidate.ticker, "side": "buy", **verdict.to_dict()})
+                if not verdict.allowed: reasons.append("compliance_rejected")
+            tos = round(mrs.mrs_star * shs * candidate.tss_final * candidate.c_liq / 100, 8)
+            candidate.tos = tos if math.isfinite(tos) else 0.
+            diagnostics[candidate.ticker] = {"ticker": candidate.ticker,
+                "status": "rejected" if reasons else "provisional", "reasons": list(dict.fromkeys(reasons)),
+                "mrs_star": mrs.mrs_star, "shs": shs, "tss_final": candidate.tss_final,
+                "sector_evidence": evidence}
+            metadata[candidate.ticker] = {"standard": decision.standard, "event_note": event_note,
+                                         "sector_evidence": evidence, "decision": decision}
+        picks, rationale, allocations = [], {}, []
+        signal_state = deepcopy(state) if snapshot is not None else None
+        signal_marks = deepcopy(marks)
+        for candidate in sorted(candidates, key=lambda row: (-row.tos, row.ticker)):
+            row, setup = diagnostics[candidate.ticker], setups[candidate.ticker]
+            if row["reasons"]: continue
+            current = portfolio_snapshot(signal_state, signal_marks, valuation)
+            current_budget = {**budget, "snapshot_hash": current["state_hash"]}
+            allocation = allocate_entry(current, setup, current_budget)
+            allocations.append({"ticker": candidate.ticker, **allocation})
+            if not allocation["shares"]:
+                row.update(status="rejected", reasons=[allocation["reason"]])
+                continue
+            shares, detail = allocation["shares"], metadata[candidate.ticker]
+            mode = "标准做多" if detail["standard"] else "轻仓试错"
+            deadline = next((days for ceiling, days in config.TIME_STOP_BY_ATR
+                             if candidate.atr_pct <= ceiling), config.TIME_STOP_DAYS[1])
+            card = self._trade_card(candidate, mrs, setup["shs"], candidate.price,
+                candidate.stop_price, shares, setup["size_ratio"], mode)
+            card = card.replace("成本线/最近结构支撑", "成本线上方0.5R（下根有效行情生效）")
+            card += "\n  分段计划: 40% / 40% / 20%；仅前一完整行情确认且环境、主线未降级时加仓"
+            pick = TradePick(candidate.ticker, candidate.tss_final, candidate.tos, candidate.entry_template,
+                candidate.price, candidate.stop_price, shares, allocation["position_pct"],
+                allocation["risk_usd"], chain=candidate.chain_id, sector=setup["sector"],
+                card=card, time_stop_days=deadline, event_note=detail["event_note"])
+            picks.append(pick)
+            row.update(status="accepted", reasons=[])
+            rationale[candidate.ticker] = {"mode": mode, "standard": detail["standard"],
+                "in_main": setup["in_main"], "in_sub": setup["in_sub"], "chain_hot": setup["chain_hot"],
+                "shs": setup["shs"], "etf": setup["sector"], "mrs_star": mrs.mrs_star,
+                "mrs_light": config.LIGHT_PROBE["mrs_lo"] <= mrs.mrs_star < config.OPEN_LONG["mrs"],
+                "tss_final": candidate.tss_final, "size_ratio": setup["size_ratio"],
+                "event_note": detail["event_note"], "account": snapshot["nav"], "r_pct": config.RISK_R_PCT,
+                "r_usd": allocation["risk_usd"], "entry": candidate.price, "stop": candidate.stop_price,
+                "risk_per_share": candidate.price - candidate.stop_price, "shares": shares,
+                "position_pct": allocation["position_pct"], "position_capped": allocation["position_pct"] >= config.MAX_SINGLE_POSITION_PCT - 1e-8,
+                "max_single_pct": config.MAX_SINGLE_POSITION_PCT, "time_stop_days": deadline,
+                "tos": candidate.tos, "risk_group": setup["risk_group"], "sector_evidence": detail["sector_evidence"],
+                "signal_adv_usd": candidate.adv_usd, "execution_setup": deepcopy(setup),
+                "entry_setup": {"template": candidate.entry_template, "sector_breadth": setup["breadth"],
+                    "no_chase": setup["breadth"] is not None and setup["breadth"] < config.BREADTH_NO_CHASE,
+                    "entry_ceiling": candidate.key_level if setup["breadth"] is not None and setup["breadth"] < config.BREADTH_NO_CHASE else None},
+                "allocation": allocation, "valuation_date": valuation, "market_grad": dict(grad),
+                "gate": {"mrs": {"value": mrs.mrs_star, "threshold": config.OPEN_LONG["mrs"], "threshold_probe_light": config.LIGHT_PROBE["mrs_lo"], "ok": True},
+                    "shs": {"value": setup["shs"], "main_pool": setup["in_main"], "hot_channel": setup["chain_hot"], "threshold_main": config.SHS_MAIN_POOL, "threshold_hot": config.SHS_SUB_POOL, "ok": True},
+                    "tss": {"value": candidate.tss_final, "threshold": config.OPEN_LONG["tss"], "threshold_probe": config.LIGHT_PROBE["tss"], "ok": True}}}
+            signal_state.setdefault("pending", []).append({"ticker": candidate.ticker, "shares": shares,
+                "entry_ref": candidate.price, "stop_price": candidate.stop_price,
+                "risk_group": setup["risk_group"], "signal_date": trade_date})
+            signal_marks[candidate.ticker] = {"date": valuation, "price": candidate.price}
+        action = "AVOID" if mrs.shock or not mrs.allow_new_positions or mrs.mrs_star < config.MRS_GATE_BLOCK else "WAIT"
+        if picks: action = "HOLD" if mrs.mrs_star < config.MRS_GATE_LIGHT else "BUY"
+        view = (f"以 {valuation} 可核实净值配置{len(picks)}只，完整预留三段预算" if picks else
+                "停止新开仓，保留持仓退出与观察触发管理" if action == "AVOID" else
+                "本轮没有同时满足结构、证据和全账户预算的入场，保留重新开门条件")
+        context.update(action=action, market_view=view, picks=picks, notes=notes,
+            pick_rationale=rationale, gross_cap=gross_cap, compliance=compliance,
+            rejections=rejection_report(list(diagnostics.values())), entry_budget=budget,
+            execution_setups=setups, tranche_confirmations={ticker: deepcopy(setup) for ticker, setup in setups.items()
+                if not entry_gate_reasons(setup)}, ranked_allocations=allocations,
+            cohort_inputs={"schema": "tiger.cohort-inputs.v2", "signal_date": trade_date,
+                "valuation_date": valuation, "setups": deepcopy(setups), "budget": deepcopy(budget),
+                "portfolio_snapshot": deepcopy(snapshot), "portfolio_state": deepcopy(state)})
+        self.log.info("v2 risk: NAV=%s valuation=%s action=%s picks=%s",
+                      snapshot["nav"] if snapshot else None, valuation, action, [pick.ticker for pick in picks])
         return picks
 
     # ------------------------------------------------------------

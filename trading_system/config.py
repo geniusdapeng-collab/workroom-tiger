@@ -119,6 +119,10 @@ PROFIT_PROTECT_R = 2.0          # 浮盈 ≥ 2R 启动盈利保护
 TIME_STOP_DAYS = (5, 7)         # 时间止损窗口
 MAX_SINGLE_POSITION_PCT = 0.20  # 单票仓位上限（行为风控）
 MAX_PICKS_DEFAULT = 7
+# Explicit v2 policy: a ceiling, never a daily trade quota. Other hard limits stay.
+MAX_POSITIONS_V2 = 10
+MAX_PORTFOLIO_RISK_PCT_V2 = 0.030  # conservative aggregate held+reserved stop risk
+SECTOR_UNDERPERFORMANCE_V2 = 0.02  # engineering assumption: lag actual sector by 2pp
 
 # ============================================================
 # 全市场扫描器（Universe Scanner）硬过滤

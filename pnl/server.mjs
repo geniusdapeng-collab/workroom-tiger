@@ -10,6 +10,7 @@ import { dashboard, publicRecord } from './lib/projection.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY = 1_048_576;
+const MAX_V3_RESEARCH_BODY = 4 * MAX_BODY;
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json; charset=utf-8', '.pdf': 'application/pdf' };
 const TOKEN_HASH = token => createHash('sha256').update(token).digest();
 function headers(response) {
@@ -29,11 +30,11 @@ function parsePage(params) {
   if (params.getAll('limit').length > 1 || params.getAll('offset').length > 1 || !/^\d+$/.test(limit) || !/^\d+$/.test(offset) || +limit < 1 || +limit > 100 || !Number.isSafeInteger(+offset)) throw new PnlError(400, 'INVALID_PAGINATION', 'limit must be 1-100 and offset a nonnegative integer');
   return { limit: +limit, offset: +offset };
 }
-async function readJson(request) {
+async function readJson(request, maximum = MAX_BODY) {
   if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? '')) throw new PnlError(415, 'JSON_REQUIRED', 'Content-Type must be application/json');
   if (request.headers['content-encoding']) throw new PnlError(415, 'ENCODING_NOT_SUPPORTED', 'Compressed request bodies are not supported');
   const length = request.headers['content-length'];
-  if (length && (!/^\d+$/.test(length) || +length > MAX_BODY)) throw new PnlError(413, 'BODY_TOO_LARGE', 'Body limit is 1 MiB');
+  if (length && (!/^\d+$/.test(length) || +length > maximum)) throw new PnlError(413, 'BODY_TOO_LARGE', `Body limit is ${maximum / MAX_BODY} MiB`);
   const chunks = []; let size = 0;
   await new Promise((accept, reject) => {
     const cleanup = () => { request.off('data', onData); request.off('end', onEnd); request.off('error', onError); request.off('aborted', onAborted); };
@@ -42,7 +43,7 @@ async function readJson(request) {
     const onEnd = () => { cleanup(); accept(); };
     const onData = chunk => {
       size += chunk.length;
-      if (size > MAX_BODY) { cleanup(); request.resume(); reject(new PnlError(413, 'BODY_TOO_LARGE', 'Body limit is 1 MiB')); return; }
+      if (size > maximum) { cleanup(); request.resume(); reject(new PnlError(413, 'BODY_TOO_LARGE', `Body limit is ${maximum / MAX_BODY} MiB`)); return; }
       chunks.push(chunk);
     };
     request.on('data', onData); request.once('end', onEnd); request.once('error', onError); request.once('aborted', onAborted);
@@ -92,7 +93,9 @@ export async function createPnlServer({ dataDir = process.env.TIGER_PNL_DATA_DIR
       if (pathname === '/api/v1/records' || pathname === '/api/v1/research') {
         authorize(request, token);
         if (request.method !== 'POST') throw new PnlError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
-        const record = await readJson(request);
+        const researchInput = pathname === '/api/v1/research';
+        const record = await readJson(request, researchInput ? MAX_V3_RESEARCH_BODY : MAX_BODY);
+        if ((!researchInput || record?.schemaVersion !== 3) && Buffer.byteLength(JSON.stringify(record)) > MAX_BODY) throw new PnlError(413, 'BODY_TOO_LARGE', 'Legacy and real-account records retain the 1 MiB limit');
         if (request.headers['idempotency-key'] && request.headers['idempotency-key'] !== record?.idempotencyKey) throw new PnlError(400, 'IDEMPOTENCY_KEY_MISMATCH', 'Header and body idempotency keys must match');
         const target = pathname === '/api/v1/research' ? researchLedger : ledger;
         const accepted = await target.append(record);

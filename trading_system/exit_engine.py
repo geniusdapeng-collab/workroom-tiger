@@ -51,13 +51,20 @@ def cost_adj_sell(price: float, cost_bps: float | None = None) -> float:
 def simulate_trade(o, h, l, c, entry_i: int, stop0: float,
                    time_stop: int | None = None,
                    protect_r: float | None = None,
-                   cost_bps: float | None = None) -> ExitResult | None:
+                   cost_bps: float | None = None, *,
+                   policy_id: str = "legacy-execution-v1",
+                   sector_returns=None) -> ExitResult | None:
     """从 entry_i（开盘入场 bar）仿真到止损/保护/时间止损。
 
     o/h/l/c：等长数值序列（numpy 或 list），entry_i 起为持仓期。
     返回 ExitResult；开盘即破止损返回 void=True 的结果；无法入场返回 None。
     R 与价格均为【含交易成本净口径】（v6.0）。
     """
+    if policy_id == "whitepaper-execution-v2":
+        return _simulate_v2(o, h, l, c, entry_i, stop0, time_stop, protect_r,
+                            cost_bps, sector_returns)
+    if policy_id != "legacy-execution-v1":
+        raise ValueError("Unknown execution policy")
     time_stop = time_stop or config.TIME_STOP_DAYS[1]
     protect_r = protect_r if protect_r is not None else config.PROFIT_PROTECT_R
     n = len(c)
@@ -111,18 +118,29 @@ class DayAction:
     action: str                 # "hold" / "exit" / "protect"
     exit_price: float = 0.0
     reason: str = ""
+    next_stop: float | None = None
 
 
 def evaluate_day(bar_open: float, bar_high: float, bar_low: float, bar_close: float,
                  entry_price: float, stop: float, days_held: int,
                  time_stop: int | None = None,
-                 protect_r: float | None = None) -> DayAction:
+                 protect_r: float | None = None, *,
+                 policy_id: str = "legacy-execution-v1",
+                 initial_stop: float | None = None,
+                 protected: bool = False,
+                 sector_return: float | None = None) -> DayAction:
     """单根日 K 的出场纪律判定（与 simulate_trade 同一套规则语义）：
 
     1. 盘中触及止损（low ≤ stop）→ 跳空按开盘价，否则按止损价；
     2. 持仓满 time_stop 且未推进（收盘 < 成本×1.01）→ 收盘时间止损；
     3. 浮盈 ≥ protect_r × R → 返回 protect（调用方上移止损至成本线）。
     """
+    if policy_id == "whitepaper-execution-v2":
+        return _evaluate_v2(bar_open, bar_high, bar_low, bar_close, entry_price,
+                            stop, days_held, time_stop, protect_r,
+                            initial_stop, protected, sector_return)
+    if policy_id != "legacy-execution-v1":
+        raise ValueError("Unknown execution policy")
     time_stop = time_stop or config.TIME_STOP_DAYS[1]
     protect_r = protect_r if protect_r is not None else config.PROFIT_PROTECT_R
     if bar_low <= stop:
@@ -136,3 +154,74 @@ def evaluate_day(bar_open: float, bar_high: float, bar_low: float, bar_close: fl
             and stop < entry_price:
         return DayAction("protect")
     return DayAction("hold")
+
+
+
+def _evaluate_v2(o, h, l, c, entry, stop, days, time_stop, protect_r,
+                 initial_stop, protected, sector_return):
+    """Canonical v2 bar rule. A new protective stop applies on the next bar."""
+    values = (o, h, l, c, entry, stop, initial_stop)
+    if (any(isinstance(v, bool) or not isinstance(v, (int, float))
+            or not math.isfinite(v) or v <= 0 for v in values)
+            or h < max(o, l, c) or l > min(o, h, c)
+            or initial_stop >= entry or type(days) is not int or days < 1
+            or type(protected) is not bool):
+        raise ValueError("Invalid v2 OHLC or immutable entry risk")
+    deadline = config.TIME_STOP_DAYS[1] if time_stop in (None, 0) else time_stop
+    if type(deadline) is not int or not 5 <= deadline <= 7:
+        raise ValueError("V2 time stop must be 5..7 observed trading bars")
+    protect_r = config.PROFIT_PROTECT_R if protect_r is None else protect_r
+    if isinstance(protect_r, bool) or not isinstance(protect_r, (int, float)) or not math.isfinite(protect_r) or protect_r <= 0:
+        raise ValueError("Invalid v2 protection risk multiple")
+    if sector_return is not None and (isinstance(sector_return, bool)
+            or not isinstance(sector_return, (int, float)) or not math.isfinite(sector_return)):
+        raise ValueError("Invalid observed sector return")
+    if l <= stop:
+        return DayAction("exit", min(stop, o),
+                         "跳空低开触发止损" if o < stop else "保护性止盈" if protected else "触及止损离场")
+    if days >= deadline:
+        return DayAction("exit", c, f"时间止损到期平仓（{deadline} 日）")
+    if days >= config.TIME_STOP_DAYS[0]:
+        if c <= entry:
+            return DayAction("exit", c, "时间止损（5日未推进）")
+        if sector_return is not None and c / entry - 1 < sector_return - config.SECTOR_UNDERPERFORMANCE_V2:
+            return DayAction("exit", c, "时间止损（明显跑输实际所属板块）")
+    risk = entry - initial_stop
+    if not protected and h >= entry + protect_r * risk:
+        return DayAction("protect", next_stop=max(stop, entry + .5 * risk))
+    return DayAction("hold", next_stop=stop)
+
+
+def _simulate_v2(o, h, l, c, entry_i, stop0, time_stop, protect_r,
+                  cost_bps, sector_returns):
+    """Batch caller of evaluate_day; no second copy of the exit equations."""
+    n = len(c)
+    if any(len(values) != n for values in (o, h, l)) or type(entry_i) is not int or entry_i < 0:
+        raise ValueError("Invalid v2 bar arrays")
+    if entry_i >= n:
+        return None
+    raw = float(o[entry_i])
+    if not math.isfinite(raw) or raw <= 0:
+        return None
+    if raw <= stop0:
+        return ExitResult(entry_i, raw, 0., "开盘即破止损位，信号作废", False, True)
+    entry, stop, protected = cost_adj_buy(raw, cost_bps), stop0, False
+    days, last_close = 0, None
+    for j in range(entry_i, n):
+        row = tuple(float(values[j]) for values in (o, h, l, c))
+        if all(math.isnan(value) for value in row):
+            continue  # Explicit missing complete bar: no fabricated holding day.
+        days += 1
+        sector = sector_returns[j] if sector_returns is not None else None
+        action = evaluate_day(*row, entry, stop, days, time_stop, protect_r,
+                              policy_id="whitepaper-execution-v2", initial_stop=stop0,
+                              protected=protected, sector_return=sector)
+        last_close = row[-1]
+        if action.action == "exit":
+            net = cost_adj_sell(action.exit_price, cost_bps)
+            return ExitResult(j, net, (net - entry) / (entry - stop0), action.reason, protected)
+        if action.action == "protect":
+            stop, protected = action.next_stop, True
+    if last_close is None:
+        return None
+    return ExitResult(-1, last_close, (cost_adj_sell(last_close, cost_bps) - entry) / (entry - stop0), "", protected)

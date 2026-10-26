@@ -68,6 +68,10 @@ def _same_watch_facts(actual, observed) -> bool:
 
 def verify_required_model(run, result: dict, admission: dict) -> dict:
     """No saved success flag is authoritative: walk bound stage IO again."""
+    raw = result.get("raw") if isinstance(result, dict) else None
+    if isinstance(raw, dict) and raw.get("execution_policy") == "whitepaper-execution-v2":
+        from .required_proof_v2 import verify_required_model_v2
+        return verify_required_model_v2(run, result, admission)
     try:
         return _verify(run, result, admission)
     except EvidenceInvalid:

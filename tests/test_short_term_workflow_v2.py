@@ -7,6 +7,7 @@ from trading_system.llm.request_budget import BudgetGuard, BudgetRefused
 from trading_system.agent_runtime import policy_manifest
 from trading_system.redline.execution import (
     UPGRADE_PROFILE, PREMARKET_PROFILE, INTRADAY_PROFILE,
+    complete_daily_cutoff, ExecutionContractError,
 )
 
 
@@ -32,6 +33,16 @@ def test_old_profile_contract_remains_fixed_for_history():
     assert len(old["stages"]) == 39
     assert "workflow_phase" not in old
     assert "request_budget" not in old
+
+
+def test_new_node_validation_dependency_is_in_the_frozen_executable_closure():
+    from pathlib import Path
+    from trading_system.agent_runtime import executable_files
+    root = Path(__file__).resolve().parents[1]
+    files = executable_files(root)
+    assert "bundles/trading/capabilities/required-v2-contract.mjs" in files
+    assert "trading_system/publication_projection_v2.py" in files
+    assert "trading_system/workflow_runtime_v2.py" in files
 
 
 def test_budget_rejects_before_paid_call_and_never_forgets_unknown_usage():
@@ -87,3 +98,25 @@ def test_budget_refuses_nonfinite_and_usage_beyond_reserved_bound():
                                 "completion_tokens": 1,
                                 "total_tokens": reservation["token_upper_bound"] + 1})
     assert budget.snapshot()["frozen"] is True
+
+
+@pytest.mark.parametrize("instant,expected", [
+    ("2026-10-27T19:59:59+00:00", "2026-10-26"),
+    ("2026-10-27T20:00:00+00:00", "2026-10-27"),
+    ("2026-10-26T13:00:00+00:00", "2026-10-23"),
+    ("2026-11-27T18:30:00+00:00", "2026-11-25"),
+    ("2026-11-27T21:00:00+00:00", "2026-11-27"),
+    ("2026-10-25T20:00:00+00:00", "2026-10-23"),
+])
+def test_complete_candle_boundary_never_exposes_partial_or_weekend_bar(instant, expected):
+    from datetime import date
+    from zoneinfo import ZoneInfo
+    research_date = datetime.fromisoformat(instant).astimezone(ZoneInfo("America/New_York")).date()
+    assert complete_daily_cutoff(research_date, instant) == date.fromisoformat(expected)
+
+
+@pytest.mark.parametrize("instant", [None, "2026-10-27T14:00:00", "2026-10-28T14:00:00+00:00"])
+def test_complete_candle_boundary_requires_exact_aware_admission(instant):
+    from datetime import date
+    with pytest.raises(ExecutionContractError):
+        complete_daily_cutoff(date(2026, 10, 27), instant)

@@ -14,7 +14,11 @@
     reports/sim_portfolio.json
                              小G模拟盘台账——公开验证战绩的本质是跨轮累计
                              （T+1 成交、出场纪律、净值曲线）。决策链路不读取
-                             台账，仅报告层"小G模拟盘"页签展示。
+                             台账；v1 仅在报告层展示。显式 v2 还读取当前现金、
+                             持仓、待成交与未完成分笔，作为风险约束及执行连续性。
+    reports/opportunity_ledger.json
+                             v2 机会/触发/复核/会计事实与成熟候选评估；历史评估
+                             只进报告，不能回填本轮模型结论或放宽数字闸门。
     tuned_params.json        WFA 调优产物——保留落盘，但 pipeline 默认不加载
                              （use_tuned=False），仅显式 --use-tuned 才启用。
 
@@ -51,6 +55,7 @@ WHITELIST = (
     "tuned_params.json",
     "calibration_samples.json",   # v6.3：校准样本库（与 journal 同级会计账，不进决策输入）
     "governance_events.jsonl",    # S5：治理五元事件账（哈希链留痕旁路，跨轮累计，不进决策输入）
+    "opportunity_ledger.json",   # v2：机会与执行连续性会计账；历史结果仅用于评估
 )
 
 

@@ -1,6 +1,6 @@
 # Tiger 严格工作流实现与维护边界
 
-本文件说明 Tiger 专用 Agent 入口的实现约束。操作者命令、Codex/DeepSeek Harness 配置和错误码见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)；请求及返回结构见 `bundles/trading/agent-workflow.schema.json`。本轮研发任务为 [T-2026-1021-0902 / issue 26](https://github.com/geniusdapeng-collab/workroom-tiger/issues/26)。
+本文件说明 Tiger 专用 Agent 入口的实现约束。操作者命令、Codex/DeepSeek Harness 配置和错误码见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)；请求及返回结构见 `bundles/trading/agent-workflow.schema.json`。严格入口初始任务为 [issue 26](https://github.com/geniusdapeng-collab/workroom-tiger/issues/26)，短线 v2 升级任务为 [T-2026-1027-0001 / issue 39](https://github.com/geniusdapeng-collab/workroom-tiger/issues/39)。
 
 ## 使用者、场景和范围
 
@@ -27,40 +27,43 @@ P0 为完整阶段执行、固定请求边界、独立模拟账户、持久幂�
 
 ## 固定 profile 和版本
 
-新的 AI 研究和官网更新默认必须显式选择 `us-public-model-required-paper-v1`。CLI 兼容函数默认 profile `us-public-paper-v1` 仅保留旧调用/历史语义；`us-public-active-paper-v1` 为可选实验。操作默认与兼容函数默认不同。各配置账户名称均为 `public-usd`，初始资金为 100000 USD，股票池使用已有 `extended` 定义；应使用独立 state-root，避免在同一账户混用决策/待成交语义。另建 state-root 不会继承旧账户，更不表示导入了真实券商资产。model-required 基于 `reviewed_source_defaults`，不启用 active 的板块代理或主线溢出实验。
+新的 AI 研究和官网更新默认必须显式选择 `us-public-model-required-paper-v2`；盘前/盘中分别为 `us-public-model-required-premarket-paper-v2` / `us-public-model-required-intraday-paper-v2`。三个 v2 profile 共用独立连续 paper 账户 `public-usd`、完整股票池、`reviewed_source_defaults` 和 `whitepaper-execution-v2`，不启用 active 实验。首次 seed 为 100000 USD，后续使用当前有日期的实际 paper NAV，不以固定本金代替估值。最多 10 个持仓是扩展上限，允许 0 个新买入，不强迫每日交易。旧 v1 三配置保留旧政策和验证器；不能在旧身份下改写语义或自动迁移旧待成交。
 
-model-required 的纯固定 policy 声明 `deepseek-flash` / `DeepSeek-V4.1-Flash-1017` 观察映射及同提供方 `provider_native_search`，不读取 key 来生成 policy hash。实际配置仅从可信启动环境四变量取得，原两个 profile 继续剥离模型凭据。官方别名映射不是不可变模型快照；来源、观察日期及限制随 manifest 保存。Flash 不支持托管 Responses web_search，应用通过原生 Search 收集全部 14 个既有主题，并把安全资料传给 Flash；Fetch 接口支持留在适配器，固定 collector 不调用。官方能力和加载步骤见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)。
+固定内层模型 `deepseek-flash`，2026-10-27 官方映射观察为 `DeepSeek-V4.1-Flash-1017`，不是不可变快照。只从可信启动环境保留四项 LLM 配置；请求不能设置模型或 key。14 个广域 Search 主题后，发行人 research 研究最多 10 个候选及全部最多 10 个持仓的并集，每目标一次初搜、按真实缺口最多一次补搜和一次已观察 URL 的 Fetch。空搜索和未知发布日期保持未知。六阶段语义完整性与计费预算分别证明，不能以发出 HTTP 或阶段标签充当模型完成。
 
-各受控 profile 共用的运行正确性修复与可选实验见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。评分、数据、单笔风险、总敞口和集中度阈值不变。严格入口均要求真实 A/B/C 入场模板，在排序后预约完整持仓及待成交预算；下一开盘只消费昨日冻结预算、信号时 ADV 摩擦档及实际开盘估值。今日收盘结论不能回写昨日信号开盘准入。错过指定 T+1 后释放待成交预算，无新鲜日 K 时也不会永久占用名额。旧待成交若无原信号冻结预算则显式拒绝，不能用今天数据补造昨天的证据。
+v2 采用共享确定性执行策略：A/B/C 模板和全部数值闸门必须成立；单笔计划风险最多 NAV×0.008、单票最多 20%，在现有现金、持仓、整笔未完成计划和分组风险预约后再分配，总组合止损风险新增 3% 工程上限。40/40/20 按整数股切分；首次执行为信号后 T+1 开盘，后续分批必须有实际保存的先前完整日确认和下一开盘重查，不能用当前收盘回写当前开盘，也不摊低成本。结构止损优先于同根盈利目标；HIGH 达到 2R 后下一根生效 +0.5R 保护。第 5 日无进展或板块落后 2 个百分点退出，第 7 日硬退出；2pp 为显式工程假设，不冒充回测校准。paper、Journal 与数值回测消费同一 policy；无成交回执不生成真实交易。
 
-本次按产品所有者明确授权修复原有执行缺陷；`raw.paper_execution_version=signal-budgeted-open-v1` 与 `raw.paper_execution_budgeted=true` 区分新运行。保留原 policy manifest 精确字节用于旧回执验证，由每次冻结源码 hash、版本标记和执行快照说明修复前后代码身份。旧已封存回执不会改写成修复后的执行；原 profile 的分数阈值、主/次池与产业链优先规则保留。新增 activity profile 另启用板块代理及主线溢出实验；没有足够收益与活跃度改善证据，正式自动化仍选择默认 profile。
+当前完整账户与来源快照保留在私有 cohort 证据，用于独立重算。模型仅消费当前紧凑预算、当前选中持仓及 hash 引用，不声称读过历史账户操作。宏观/财报事实在生成 fx 哈希前移除私有覆盖文件路径，公私投影不在事后改变事实身份。公开 v3 只含白名单研究、当前运行及全部活跃机会、当前 paper 资金与成熟度测量；旧记录继续按原 schema 读取和哈希重试。
 
 市场日期在接纳时以 `America/New_York` 冻结，保存 UTC 时间、宿主偏移和市场日期。后续计算使用该日期，不能在运行跨日时重新读取“今天”来改变记账日期。外部数据自身的日期、缺失和来源另行披露。
 
 严格入口的 Yahoo 日线下载显式保留交易所时区（`ignore_tz=False`），先把供应商原始带时区索引和值写入证据，再由现有观察边界投影到冻结的纽约日期。韩、台与美股混合取数时不能先丢失时区，也不能事后把无时区日期统一猜成 UTC、纽约时间或直接放行次日；真正越过纽约日期的观测仍然拒绝。日线日期标签不是实时成交时间，也不证明该交易日已经收盘。普通 Yahoo 入口保留原来的默认行为。参数语义见 [yfinance 官方下载文档](https://ranaroussi.github.io/yfinance/reference/yfinance.functions.html)。
 
-profile 的字段、允许源、阶段注册表和策略语义必须视为版本化合同。当前验证器将保存的 policy 与其理解的 v1 定义精确比较。源码变化可以作为历史来源披露；这不表示任何未来 policy 都能验证旧回执。改变阶段或 policy 时必须采用新 profile，并保留匹配的历史验证器或设计明确的账户迁移；不能在原标识下悄悄改变定义，也不能承诺尚未实现的跨版本兼容。
+profile 的字段、允许源、阶段注册表和策略语义必须视为版本化合同。当前验证器按对应 v1/v2 policy 精确比较，并对 v2 重放全部语义请求和数值风险输入。源码变化可以作为历史来源披露；这不表示任何未来 policy 都能验证旧回执。改变阶段或 policy 时必须采用新 profile，并保留匹配的历史验证器或设计明确的账户迁移；不能在原标识下悄悄改变定义，也不能承诺尚未实现的跨版本兼容。
 
 ## 执行顺序和证据
 
-唯一阶段定义位于 `trading_system/redline/execution.py::daily_stage_specs`，由现有 pipeline 注册表与 daily 外层闭环组成。当前实际顺序为：
+唯一阶段定义位于 `trading_system/redline/execution.py::daily_stage_specs`，由现有 pipeline 注册表与 daily 外层闭环组成。v2 为 43 阶段，旧 v1 保留原 39 阶段；v2 实际顺序为：
 
 ```text
 daily.preflight → state.reset → pipeline.prepare
 → search.collect → clean.rule_base → clean.llm_semantic → clean.cross_validate
 → data.prepare → tech.monitor → tech.cycle_linkage → tech.sentiment → tech.risk
 → tech.fusion → sector.narrative → layer1.mrs → layer2.sector → layer2b.chain
-→ layer0.scan → layer3.tss → layer4.risk → decision.debate
+→ layer0.scan → layer3.tss → layer4.risk → research.candidates → decision.debate
 → iteration.calibration → report.emit
 → accounting.validate → report.initial → journal.log → journal.settle
-→ journal.stats → paper.step → paper.persist → governance.initialize
-→ review.daily → governance.emit → governance.verify → report.final_json
+→ journal.stats → paper.step → paper.persist → journal.execution_sync → governance.initialize
+→ review.daily → governance.emit → governance.verify
+→ opportunity.lifecycle → business.evaluate → report.final_json
 → report.plan → report.markdown → report.html → daily.result
 ```
 
-开始步骤时立即保存输入快照；结束前必须保存一次输出。重复、乱序、重叠、缺输出、跨线程写证据和未完成 I/O 均违反执行合同。异常结束记录 failed，并阻止成功推进。原两个 profile 的模型禁用，允许有明确证据的 passthrough；model-required 的五个 LLM 阶段全部 `allow_passthrough=false`，不可用、空结果或透传均为失败，不能把外层聊天模型当成内层成功。
+开始步骤时立即保存输入快照；结束前必须保存一次输出。重复、乱序、重叠、缺输出、跨线程写证据和未完成 I/O 均违反执行合同。异常结束记录 failed，并阻止成功推进。旧模型禁用 profile，允许有明确证据的 passthrough；v2 的六个 LLM 阶段全部 `allow_passthrough=false`，不可用、空结果或透传均为失败，不能把外层聊天模型当成内层成功。
 
-model-required 在 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sector.narrative`、`decision.debate` 实际调用固定 Flash，每个响应要求正确 model/id/usage/finish_reason、完整闭合 schema 与确切条目覆盖。无风险空 alerts 有真实 assessment 才是有效评估，无买入也必须执行最终模型判断。确定性规则只做格式去重、来源交叉验证、数值因子/风险/账务校验及原模型输出的字段映射，禁止规则替代语义。原生 Search 依据净化后的原始发布域名计数来源多样性，仍保持原 ≥2 来源且至少一个 ≤T2 的阈值；跨域转载未必是独立报道，模型须区分同一原始报道、AI 评论与公司公告，该规则计数本身不证明报道独立。
+v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正确 model/id/usage/finish_reason、完整闭合 schema 与确切条目覆盖。逐篇清洗保留来源归属及逐字引文，跨域转载不自动当独立报道；后续模型得到完整摘要/引文索引，不声称重读全文。research 每批最多 3 个发行人、正文总量 60000 字符、每源最多 24000 字符；优先本轮真实 Fetch/补搜并公平分配，保存每目标跨实际轮次累计见过的最长前缀字符数、完整性和 SHA。最终 decision 从该记录重建实际前缀，不能把 5000 字符读过的资料扩大成完整 20000 字符新闻证据。技术型充分假设可以没有公司利好，新闻事件型必须有 7 日内、发行人归属明确且完整展示的原始证据。五段理由、反证、缺口保留，无买入仍执行模型 WAIT/AVOID。
+
+所有远端 I/O 共用先预留后调用预算：chat≤40、tokens≤300000、Search≤60、Fetch≤20、总请求≤120、保守估算≤1 USD、业务期限 2400 秒。计费失败照实结算，结果未知时冻结；不自动重试或循环补证。每个成功模型阶段的实际 usage、唯一响应身份与全部预算记录必须一致且无未结算预留。
 
 独立验证器从事件和子 I/O 快照重算全部请求/schema/安全响应哈希、响应身份和 usage，重建完整模型输入文档及数值上下文，逐字段核对清洗/舆情/风险/叙事实际输出与 parsed 模型答案，并核对下游消费。最终模型选择只允许缩小原风险批准集合；人读计划中的价格/股数/止损/仓位/风险绑定原 TradePick。任何对应缺失或规则代写均为 `MODEL_REQUIRED_FAILED`，在账户指针提交之前失败。成功仅为 `completed`，不能发布 completed_degraded。原始远端响应不落盘，仅保存摘要；安全响应和模型 JSON 可重算，属于本地协作进程完整性证据，不是远端签名证明。
 
@@ -94,13 +97,13 @@ model-required 在 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sect
 
 状态查询先采样运行锁，再读取状态文件和账户提交链。写者完成最后的状态写入后才释放运行锁，同一个 run 不会重新启动。若采样时锁仍被持有，查询可以保守地多返回一次 running；不得把完成前的状态/指针快照与完成后的无锁状态拼成虚假的 interrupted。已发布的账户提交仍优先于可变状态文件。
 
-当前支持 macOS/Linux 所需的 POSIX 锁和目录写入语义，Python 最低 3.11。运行环境按允许列表构造，保留原 HOME；仅 model-required 的业务启动额外保留 LLM_BACKEND/LLM_BASE_URL/LLM_MODEL/LLM_API_KEY 四项，禁止通过请求覆写，其他 profile 不继承模型/provider 凭据；业务缓存和临时文件在 run 内。每次新业务进程在首次使用 yfinance 前设置实际缓存位置。第三方包身份记录解释器字节和安装元数据，未声称逐文件证明全部依赖供应链。
+当前支持 macOS/Linux 所需的 POSIX 锁和目录写入语义，Python 最低 3.11。运行环境按允许列表构造，保留原 HOME；仅 model-required v1/v2 的业务启动额外保留 LLM_BACKEND/LLM_BASE_URL/LLM_MODEL/LLM_API_KEY 四项，禁止通过请求覆写，其他 profile 不继承模型/provider 凭据；业务缓存和临时文件在 run 内。每次新业务进程在首次使用 yfinance 前设置实际缓存位置。第三方包身份记录解释器字节和安装元数据，未声称逐文件证明全部依赖供应链。
 
 ## 时间、并发和错误
 
 单个业务任务的总期限为 2400 秒。Node 单次提交/查询观察上限为 60 秒，CLI 默认等待窗口为 2460 秒；观察超时和业务超时是两个不同结果。
 
-原两个 profile 的公开搜索 45 秒收集预算适用于每一批查询；主题会展开为多批查询，不能把它描述为整个搜索阶段只花 45 秒。收集期限之后的数据不再参与决策，已启动线程另有最多 15 秒的收尾等待；未结束的线程阻止流程成功。model-required 使用同步、有界响应的原生 Search，每次请求连接/读取期限和 1 MiB 响应上限由适配器固定；无跨模型或来源回退，任一必需主题失败即停，最外层 2400 秒业务期限仍然生效。
+原两个 profile 的公开搜索 45 秒收集预算适用于每一批查询；主题会展开为多批查询，不能把它描述为整个搜索阶段只花 45 秒。收集期限之后的数据不再参与决策，已启动线程另有最多 15 秒的收尾等待；未结束的线程阻止流程成功。model-required 使用同步、有界响应的原生 Search/Fetch，每次请求连接/读取期限和 1 MiB 响应上限由适配器固定；无跨模型或来源回退，任一必需主题失败即停，最外层 2400 秒业务期限仍然生效。
 
 一个 state-root 的模拟账户同时只允许一个业务写者，短期提交锁负责键映射和锁交接。专用 MCP 最多允许四个在途请求；多数为只读观察，这不会放宽账户写互斥。
 

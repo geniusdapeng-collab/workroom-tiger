@@ -27,11 +27,11 @@ from .agent_evidence import (
     verify_ref,
 )
 from .redline.execution import (ExecutionPolicy, daily_stage_contract, REQUIRED_PROFILE,
-                                REQUIRED_POLICY_ID)
+                                REQUIRED_POLICY_ID, UPGRADE_PROFILE, UPGRADE_POLICIES)
 
 PROFILE = "us-public-paper-v1"
 ACTIVE_PROFILE = "us-public-active-paper-v1"
-SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE, REQUIRED_PROFILE})
+SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE, REQUIRED_PROFILE, *UPGRADE_POLICIES})
 ACCOUNT = "public-usd"
 POLICY_ID = "tiger.public-paper-policy.v1"
 RUN_RE = re.compile(r"run-[0-9a-f]{32}\Z")
@@ -48,9 +48,11 @@ DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 def policy_manifest(profile: str = PROFILE) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
-    required = profile == REQUIRED_PROFILE
+    upgrade = profile in UPGRADE_POLICIES
+    required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
-    policy_id = REQUIRED_POLICY_ID if required else "tiger.public-active-paper-policy.v1" if active else POLICY_ID
+    policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
+                 else "tiger.public-active-paper-policy.v1" if active else POLICY_ID)
     execution = ExecutionPolicy(policy_id=policy_id, model_mode="enabled",
                                 search_source_names=("deepseek_search",)) if required else ExecutionPolicy(policy_id=policy_id)
     value = {
@@ -66,7 +68,7 @@ def policy_manifest(profile: str = PROFILE) -> dict:
         "search_cleanup_budget_seconds": 15.0,
         "business_deadline_seconds": DEADLINE_SECONDS,
         "access_challenges": "refuse",
-        "stages": daily_stage_contract(required),
+        "stages": daily_stage_contract(required, upgrade),
         "limitations": [
             "Public market data with a local paper account; no broker orders.",
             "Inner semantic models are disabled; legal passthrough is disclosed.",
@@ -99,6 +101,22 @@ def policy_manifest(profile: str = PROFILE) -> dict:
         value["limitations"] += [
             "Activity repairs retain all score/data/risk thresholds; more utilization can still increase realized risk.",
             "Fallback sectors are frozen NASDAQ vendor proxies, not GICS membership or historical point-in-time classifications.",
+        ]
+    if upgrade:
+        from .llm.request_budget import LIMITS, PRICING
+        value.update(workflow_phase=UPGRADE_POLICIES[profile][1], universe="full",
+                     strategy="whitepaper-evidence-execution-v2",
+                     execution_policy="whitepaper-execution-v2", max_positions=10,
+                     request_budget=dict(LIMITS), request_pricing=dict(PRICING),
+                     accounting_state_usage="Risk constraints, execution continuity and report-only cohorts; never historical semantic scores.")
+        value["model_contract"].update(research_contract="tiger.candidate-research.v2",
+                                       model_mapping_observed_date="2026-10-27")
+        value["limitations"][1] = "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
+        value["limitations"] += [
+            "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
+            "The full exchange list is requested anew; actual listing, prefilter and price coverage are disclosed, never inferred from requested universe size.",
+            "Complete daily candles are conservatively available after 16:00 New York even on early close days; fresh quotes are separate observations.",
+            "Paper fills and cohort counterfactuals are distinct from the manually evidenced real account and do not prove realized profitability.",
         ]
     return value
 
@@ -160,6 +178,7 @@ def executable_files(root: Path) -> list[str]:
                      if not p.name.endswith((".test.mjs", "-test-support.mjs")))
     for optional in ("events_calendar.json",
                      "bundles/trading/capabilities/workflow-client.mjs",
+                     "bundles/trading/capabilities/required-v2-contract.mjs",
                      "bundles/trading/agent-workflow.schema.json"):
         if (root / optional).exists():
             paths.add(optional)
@@ -335,7 +354,7 @@ def committed_pointer(state: Path, target: str) -> dict | None:
 
 
 def allowed_account_path(name: str) -> bool:
-    return name in REQUIRED_ACCOUNT_FILES or (
+    return name in REQUIRED_ACCOUNT_FILES or name == "opportunity_ledger.json" or (
         isinstance(name, str)
         and name.startswith(("options_hist/", "review_proposals/"))
         and name.endswith(".json"))
@@ -384,6 +403,8 @@ def stage_account(state: Path, run: Path, parent: dict | None) -> dict:
 
 def account_files(reports: Path) -> list[dict]:
     names = set(REQUIRED_ACCOUNT_FILES)
+    if (reports / "opportunity_ledger.json").exists():
+        names.add("opportunity_ledger.json")
     for folder in ("options_hist", "review_proposals"):
         directory = reports / folder
         if directory.exists():
@@ -516,6 +537,8 @@ class _ReportStructure(HTMLParser):
 
 def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
     date = admission["clock"]["run_date"]
+    selected_profile = read_json(run, "request.json")["profile"]
+    upgrade = selected_profile in UPGRADE_POLICIES
     compact = date.replace("-", "")
     required = {
         f"work/reports/result_{compact}.json",
@@ -574,6 +597,13 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
         raise EvidenceInvalid("RESULT_INVALID", "Invalid benchmark date") from exc
     from .calendar import prev_trading_day
     expected_date = prev_trading_day(datetime.fromisoformat(date).date())
+    if upgrade:
+        from .redline.execution import complete_daily_cutoff
+        expected_date = complete_daily_cutoff(datetime.fromisoformat(date).date(),
+                                              admission["clock"]["admitted_at_utc"])
+        if (raw.get("daily_bars_cutoff") != expected_date.isoformat()
+                or raw.get("workflow_phase") != UPGRADE_POLICIES[selected_profile][1]):
+            raise EvidenceInvalid("RESULT_INVALID", "Upgrade market phase or complete-bar cutoff differs")
     if freshness["benchmark_lag_days"] != (expected_date - benchmark_date).days:
         raise EvidenceInvalid("RESULT_INVALID", "Benchmark lag and frozen market date disagree")
     from .currency import require_usd_sim_state
@@ -626,7 +656,7 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
         "cash_usd": sim["cash"], "market_value_usd": round(value, 2),
         "equity_usd": actual_equity, "action": result.get("action"),
         "market_view": result.get("market_view"),
-        "watchlist": result.get("watchlist", [])[:5],
+        "watchlist": result.get("watchlist", [])[:(10 if read_json(run, "request.json")["profile"] in UPGRADE_POLICIES else 5)],
         "as_of": {"market_date": date, "market_timezone": "America/New_York",
                   "admitted_at_utc": admission["clock"]["admitted_at_utc"],
                   "benchmark_last_bar": raw.get("freshness", {}).get("benchmark_last_bar"),
@@ -640,12 +670,28 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
                         "redline": raw.get("redline", []),
                         "account_origin": "independent USD paper account, initially 100000"},
     }
-    if read_json(run, "request.json")["profile"] == REQUIRED_PROFILE:
+    if selected_profile == REQUIRED_PROFILE or selected_profile in UPGRADE_POLICIES:
         from .llm.required_proof import verify_required_model
         summary["model"] = verify_required_model(run, result, admission)
         summary["action_summary"] = raw["action_summary"]
         summary["execution_decisions"] = raw["execution_decisions"]
         summary["disclosures"].update(model_mode="enabled", model_required=True)
+        if selected_profile in UPGRADE_POLICIES:
+            for key in ("candidate_research", "opportunity_lifecycle", "business_evaluation",
+                        "portfolio_snapshot", "entry_budget", "execution_policy", "cohort_inputs",
+                        "current_portfolio_snapshot", "universe_coverage", "workflow_phase",
+                        "lifecycle_observation", "numeric_approved_count", "policy_identity"):
+                if key not in raw:
+                    raise EvidenceInvalid("RESULT_INVALID", "Upgrade business artifacts are incomplete")
+            if (read_json(run, "work/reports/opportunity-lifecycle.json") != raw["opportunity_lifecycle"]
+                    or read_json(run, "work/reports/business-evaluation.json") != raw["business_evaluation"]
+                    or read_json(run, "work/reports/opportunity_ledger.json") != raw["opportunity_lifecycle"]):
+                raise EvidenceInvalid("RESULT_INVALID", "Upgrade lifecycle/evaluation artifact binding differs")
+            from .publication_projection_v2 import public_pending, public_upgrade_summary
+            summary["pending"] = public_pending(sim["pending"])
+            summary.update(public_upgrade_summary(raw, run.name))
+            summary["disclosures"].update(workflow_phase=policy_manifest(selected_profile)["workflow_phase"],
+                                          daily_bars_cutoff=raw.get("daily_bars_cutoff"))
     return summary
 
 

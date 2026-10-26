@@ -426,6 +426,7 @@ def run_pipeline(
     portfolio_state: dict | None = None,
     *, execution=None,
 ) -> PipelineResult:
+    upgrade = bool(execution is not None and getattr(execution, "upgrade", False))
     with optional_step(execution, "pipeline.prepare", {
         "provider": provider_name, "universe_mode": universe_mode,
         "universe_file": universe_file, "top_n": top_n, "max_picks": max_picks,
@@ -463,7 +464,9 @@ def run_pipeline(
         if spec.market_id == "us":
             if universe_mode == "full":
                 from .universe import load_full_universe
-                universe, universe_source = load_full_universe()   # nasdaqtrader/cache/fallback
+                universe, universe_source = (execution.call_io("universe.full.load",
+                    {"mode": "full", "market": "us"}, load_full_universe)
+                    if upgrade else load_full_universe())   # nasdaqtrader/cache/fallback
             else:
                 universe = load_universe(universe_mode, universe_file)
         else:
@@ -471,6 +474,11 @@ def run_pipeline(
             from .universe import load_market_universe
             universe, universe_source = load_market_universe(
                 spec.market_id, universe_mode, universe_file)
+        requested_universe = list(universe)
+        management_symbols = []
+        if upgrade:
+            from .workflow_v2 import account_symbols
+            management_symbols = account_symbols(portfolio_state)
         tracer = ExecutionTracer(run_id=trade_date, execution=execution)
         demo_mode = is_synthetic(provider)
 
@@ -481,7 +489,8 @@ def run_pipeline(
             from .llm import required as semantic
             try:
                 llm = DeepSeekRequiredClient(execution)
-                assessment = semantic.assessment_context(execution)
+                assessment = (semantic.assessment_context_v2(execution) if upgrade
+                              else semantic.assessment_context(execution))
             except Exception as exc:
                 from .redline import LLMUnavailable
                 from .redline.execution import RequiredModelFailed
@@ -511,7 +520,8 @@ def run_pipeline(
                      "deep": True, "source_allowlist": execution.policy.search_source_names if execution else None}) as stage:
         if required:
             all_topics = {**CHAIN_TOPICS, **SECTOR_TOPICS}
-            raw_docs = semantic.collect(llm, all_topics, trade_date)
+            raw_docs = (semantic.collect_v2(llm, all_topics, trade_date) if upgrade
+                        else semantic.collect(llm, all_topics, trade_date))
             search_cleanup, batches = {"native_calls_completed": len(llm.search_receipts)}, []
         else:
             hub = SearchHub(demo=demo_mode, execution=execution) if execution else SearchHub(demo=demo_mode)
@@ -543,7 +553,8 @@ def run_pipeline(
 
     with tracer.step("clean.llm_semantic", {"documents": base_docs,
                      **({"assessment": assessment} if required else {})}) as stage:
-        cleaned = semantic.clean(llm, base_docs) if required else unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer))
+        cleaned = ((semantic.clean_v2(llm, base_docs) if upgrade else semantic.clean(llm, base_docs))
+                   if required else unwrap_cleaned(llm_semantic_clean(base_docs, llm, tracer)))
         degraded_n = sum(1 for c in cleaned if c.degraded)
         logger.info("clean.llm_semantic: %d 篇（语义缺失 %d）", len(cleaned), degraded_n)
 
@@ -555,8 +566,9 @@ def run_pipeline(
     # 被降级文档在决策侧仅作背景参考（tech.risk / decision.debate 仍可见全集）。
     with tracer.step("clean.cross_validate", {"documents": cleaned}) as stage:
         from .search.credibility import CrossValidator, scoring_docs
-        cv_stats = CrossValidator().validate(cleaned)
-        score_docs = scoring_docs(cleaned)
+        cv_stats = (CrossValidator().validate(cleaned, contract_version=2) if upgrade
+                    else CrossValidator().validate(cleaned))
+        score_docs = scoring_docs(cleaned, contract_version=2) if upgrade else scoring_docs(cleaned)
         logger.info("clean.cross_validate: 总 %d 篇｜关键事件 %d｜通过 %d｜降级 %d"
                     "（LLM标注缺失 %d｜缺发布时间 %d）",
                     cv_stats["total"], cv_stats["key_event_docs"],
@@ -614,7 +626,7 @@ def run_pipeline(
                            if not ok]
             if missing_bmk:
                 report["benchmark_missing"] = missing_bmk   # 缺失维披露（再归一化）
-        expect = spec.prev_trading_day(trade_date)
+        expect = execution.daily_bars_cutoff if upgrade else spec.prev_trading_day(trade_date)
         spy_last = spy_df.index[-1].date()
         lag = (expect - spy_last).days
         report["benchmark_last_bar"] = str(spy_last)
@@ -741,7 +753,7 @@ def run_pipeline(
             for c in CHAINS.values():
                 for link in ("upstream", "midstream", "downstream"):
                     chain_tickers.update(c[link]["tickers"])
-        all_tickers = sorted(set(universe) | chain_tickers)
+        all_tickers = sorted(set(universe) | chain_tickers | set(management_symbols))
         stock_data = _batch_with_fallback(provider, all_tickers, days)
         market_data["stock_ohlcv"] = stock_data
         # v6.1：真实性/时效性闸门——充足性、新鲜度、陈旧标的剔除（诚实失败优于脏数据）
@@ -749,6 +761,18 @@ def run_pipeline(
                                     sector_etfs, stock_data)
         market_data["freshness"] = freshness
         market_data["universe_closes"] = {t: df["Close"] for t, df in stock_data.items()}
+        if upgrade:
+            market_data["universe_coverage"] = {
+                "mode": universe_mode, "source": universe_source,
+                "requested_listing_count": len(requested_universe),
+                "heavy_requested_count": len(universe), "heavy_cap": config.FULL_HEAVY_CAP,
+                "available_stock_series": len(stock_data),
+                "listing_is_full": universe_source == "nasdaqtrader",
+                "prefilter": prefilter_note,
+                "management_symbols": management_symbols,
+                "daily_bars_cutoff": execution.daily_bars_cutoff.isoformat(),
+                "boundary": "Requested listing, liquidity prefilter and heavy-history cap are distinct; missing or fallback listing is not whole-market coverage.",
+            }
         logger.info("数据准备完成: 股票 %d/%d, 板块ETF %d",
                     len(stock_data), len(all_tickers), len(sector_etfs))
 
@@ -765,11 +789,13 @@ def run_pipeline(
         stage.output(tech_linkage)
     with tracer.step("tech.sentiment", {"documents": score_docs,
                      **({"assessment": assessment} if required else {})}) as stage:
-        tech_sentiment = semantic.sentiment(llm, score_docs) if required else ChainSentimentAgent(llm).execute(score_docs, tracer)
+        tech_sentiment = ((semantic.sentiment_v2(llm, score_docs) if upgrade else semantic.sentiment(llm, score_docs))
+                          if required else ChainSentimentAgent(llm).execute(score_docs, tracer))
         stage.output(tech_sentiment)
     with tracer.step("tech.risk", {"documents": cleaned,
                      **({"assessment": assessment} if required else {})}) as stage:
-        tech_alerts = semantic.risk(llm, cleaned) if required else ChainRiskAgent(llm).execute(cleaned, tracer)
+        tech_alerts = ((semantic.risk_v2(llm, cleaned) if upgrade else semantic.risk(llm, cleaned))
+                       if required else ChainRiskAgent(llm).execute(cleaned, tracer))
         stage.output(tech_alerts)
     with tracer.step("tech.fusion", {"monitor": tech_monitor, "linkage": tech_linkage,
                      "sentiment": tech_sentiment, "alerts": tech_alerts}) as stage:
@@ -784,7 +810,9 @@ def run_pipeline(
     narrative_llm: dict = {}
     with tracer.step("sector.narrative", {"documents": score_docs, "sector_symbols": spec.sector_symbols,
                      **({"assessment": assessment} if required else {})}) as stage:
-        narr_res = semantic.narrative(llm, score_docs, spec.sector_symbols) if required else NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer)
+        narr_res = ((semantic.narrative_v2(llm, score_docs, spec.sector_symbols) if upgrade
+                     else semantic.narrative(llm, score_docs, spec.sector_symbols))
+                    if required else NarrativeAgent(llm).execute(score_docs, spec.sector_symbols, tracer))
         if not isinstance(narr_res, Passthrough):
             narrative_llm = narr_res
 
@@ -819,6 +847,18 @@ def run_pipeline(
     active = execution is not None and execution.policy.policy_id == ACTIVE_POLICY_ID
     if execution is not None:
         context.update(paper_execution_budgeted=True, portfolio_state=portfolio_state)
+    if upgrade:
+        from .workflow_v2 import portfolio_inputs
+        context.update(portfolio_inputs(portfolio_state, stock_data,
+                                       market_data["freshness"]["benchmark_last_bar"]))
+        context.update(execution_policy="whitepaper-execution-v2", research_contract_version=2,
+                       research_holdings=[{**row, "symbol": row["ticker"]}
+                                          for row in portfolio_state.get("positions", [])],
+                       semantic_evidence={"sentiment": tech_sentiment,
+                                          "risk": tech_alerts, "narrative": narrative_llm})
+        # All sizing and final model plans use the same dated account NAV. The
+        # initial seed remains accounting metadata, never current risk capital.
+        account_usd = context["portfolio_snapshot"]["nav"]
     if active:
         context.update(activity_profile=ACTIVE_PROFILE)
 
@@ -836,6 +876,10 @@ def run_pipeline(
                      "market_data": market_data, "scan_filters": scan_filt, "sectors": sectors}) as stage:
         scanner = UniverseScannerAgent(provider, universe, top_n=top_n)
         candidates = scanner.execute(context)
+        if upgrade:
+            from .workflow_v2 import include_management_candidates
+            candidates = include_management_candidates(candidates, portfolio_state, stock_data)
+            context["watchlist"] = candidates
         stage.output({"candidates": candidates, "scan_stats": context["scan_stats"]})
     with tracer.step("layer3.tss", {"watchlist": candidates, "market_data": market_data,
                      "chain_map": context.get("chain_map", {}), "sector_map": context.get("sector_map", {}),
@@ -847,18 +891,43 @@ def run_pipeline(
                      "chains": chains, "market_grad": market_grad, "market": spec.to_dict(),
                      "trade_date": trade_date, "account_usd": account_usd, "max_picks": max_picks,
                      "calendar": event_calendar.to_dict() if event_calendar else None,
-                     "tech_signal_map": context["tech_signal_map"]}) as stage:
+                     "tech_signal_map": context["tech_signal_map"],
+                     **({"portfolio_state": portfolio_state,
+                         "portfolio_snapshot": context["portfolio_snapshot"],
+                         "portfolio_marks": context["portfolio_marks"],
+                         "execution_policy": context["execution_policy"]} if upgrade else {})}) as stage:
         picks = RiskManagerAgent(provider, account_usd=account_usd,
                                  max_picks=max_picks).execute(context)
+        if upgrade:
+            from .workflow_v2 import execution_policy_identity
+            identity = execution.call_io("execution.policy.identity",
+                {"execution_policy": "whitepaper-execution-v2"}, execution_policy_identity)
+            context["policy_identity"] = identity
+            context["cohort_inputs"].update(policy_id="whitepaper-execution-v2",
+                                            policy_hash=identity["sha256"])
+            numeric_approved_picks = list(picks)
 
         stage.output({key: context.get(key) for key in
-                      ("picks", "pick_rationale", "action", "market_view", "notes", "currency_policy", "compliance", "rejections", "entry_budget")})
+                      (("picks", "pick_rationale", "action", "market_view", "notes", "currency_policy", "compliance", "rejections", "entry_budget")
+                       + (("execution_setups", "portfolio_snapshot", "portfolio_marks", "cohort_inputs",
+                           "gross_cap", "tranche_confirmations", "ranked_allocations",
+                           "policy_identity") if upgrade else ()))})
+
+    if upgrade:
+        from .llm.candidate_research import research_candidates
+        research_context = {key: value for key, value in context.items()
+                            if key not in {"market_spec", "options_store", "event_calendar"}}
+        research_context["event_calendar"] = event_calendar.to_dict() if event_calendar else {}
+        with tracer.step("research.candidates", {"context": research_context,
+                                                 "documents": cleaned}) as stage:
+            context["candidate_research"] = research_candidates(llm, context, cleaned)
+            stage.output(context["candidate_research"])
 
     # ================= 多空辩论证据层（v6.3 S2，桥水 AIA 辩论制） =================
     # 铁律：辩论在 L4 闸门产出【之后】执行，只读 picks/rationale/watchlist，
     # 绝不回写任何分数与闸门输出；产出仅作交易卡片"第六段"进报告层。
     # 回测路径不经过本 pipeline（无未来函数：历史回放禁止注入 LLM）。
-    if required:
+    if required and not upgrade:
         approved_symbols = [pick.ticker for pick in picks]
         decision_symbols = approved_symbols + [candidate.ticker for candidate in context.get("watchlist", [])
                                                if candidate.ticker not in approved_symbols][:5]
@@ -871,11 +940,14 @@ def run_pipeline(
                      **({"mrs": context.get("mrs"), "sectors": context.get("sectors"),
                          "rejections": context.get("rejections"), "account_usd": account_usd,
                          "assessment": assessment, "market_asof": decision_asof,
-                         "market_evidence": decision_market_evidence} if required else {})}) as stage:
+                         "market_evidence": decision_market_evidence} if required and not upgrade else {}),
+                     **({"context": {**research_context, "candidate_research": context["candidate_research"]},
+                         "account_usd": account_usd, "assessment": assessment} if upgrade else {})}) as stage:
         from .agents.debate_agent import DebateAgent, select_debate_targets
         debate_raw: dict = {"status": "disabled", "triggered": [], "evidence": {}}
         if required:
-            debate_raw = semantic.decision(llm, context, cleaned, account_usd)
+            debate_raw = (semantic.decision_v2(llm, context, cleaned, account_usd) if upgrade
+                          else semantic.decision(llm, context, cleaned, account_usd))
         elif config.DEBATE_ENABLED:
             targets = select_debate_targets(
                 context.get("picks", []), context.get("pick_rationale", {}),
@@ -969,7 +1041,8 @@ def run_pipeline(
                 "rejections": context.get("rejections", {}),
                 "activity_profile": ACTIVE_PROFILE if active else None,
                 "paper_execution_budgeted": execution is not None,
-                "paper_execution_version": "signal-budgeted-open-v1" if execution is not None else "legacy",
+                "paper_execution_version": ("whitepaper-execution-v2" if upgrade else
+                                             "signal-budgeted-open-v1" if execution is not None else "legacy"),
                 "entry_budget": context.get("entry_budget"),
                 "source_lineage": list(_LINEAGE),
                 "provider_health": ({name: dict(health) for name, health in _HEALTH.items()}
@@ -995,7 +1068,23 @@ def run_pipeline(
                 # v6.3 S2：辩论证据与校准摘要（只读证据/披露，不含决策输入）
                 "debate": context.get("debate", {}),
                 "calibration": context.get("calibration", {}),
-                **({"model": semantic.model_summary(llm),
+                **({"execution_policy": context["execution_policy"],
+                    "candidate_research": context["candidate_research"],
+                    "semantic_evidence": context["semantic_evidence"],
+                    "portfolio_snapshot": context["portfolio_snapshot"],
+                    "portfolio_marks": context["portfolio_marks"],
+                    "execution_setups": context["execution_setups"],
+                    "cohort_inputs": context["cohort_inputs"],
+                    "universe_coverage": market_data["universe_coverage"],
+                    "daily_bars_cutoff": execution.daily_bars_cutoff.isoformat(),
+                    "workflow_phase": execution.workflow_phase} if upgrade else {}),
+                **({"numeric_approved_count": len(numeric_approved_picks),
+                    "numeric_approved_picks": numeric_approved_picks,
+                    "policy_identity": context["policy_identity"],
+                    "tranche_confirmations": {ticker: setup for ticker, setup in context["tranche_confirmations"].items()
+                        if ticker in {thesis["symbol"] for thesis in context["candidate_research"]["theses"]
+                                      if thesis["status"] == "sufficient"}}} if upgrade else {}),
+                **({"model": semantic.model_summary_v2(llm) if upgrade else semantic.model_summary(llm),
                     "action_summary": context["action_summary"],
                     "execution_decisions": context["execution_decisions"]} if required else {}),
             },

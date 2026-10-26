@@ -84,6 +84,20 @@ LLM_STEPS = {s.name for s in STEP_REGISTRY if s.driver == "llm"}
 DEFERRED_STEPS = frozenset({"review.daily"})
 
 
+def pipeline_registry(upgrade: bool = False) -> tuple[StepSpec, ...]:
+    """Version the stage contract without changing historic v1 evidence."""
+    if not upgrade:
+        return STEP_REGISTRY
+    steps = []
+    for step in STEP_REGISTRY:
+        steps.append(step)
+        if step.name == "layer4.risk":
+            steps.append(StepSpec("research.candidates", "llm",
+                                 "（不可透传：候选定向证据必须真实完成）",
+                                 "llm.candidate_research"))
+    return tuple(steps)
+
+
 @dataclass
 class StepRecord:
     name: str
@@ -120,7 +134,8 @@ class ExecutionTracer:
 
     @contextmanager
     def step(self, name: str, inputs: Any = None):
-        spec = next((s for s in STEP_REGISTRY if s.name == name), None)
+        registry = pipeline_registry(bool(self.execution is not None and getattr(self.execution, "upgrade", False)))
+        spec = next((s for s in registry if s.name == name), None)
         if spec is None:
             raise RedlineViolation(f"未注册环节被调用: {name}（疑似擅自变更全链路）")
         if self.execution is not None:
@@ -167,7 +182,7 @@ class ExecutionTracer:
 
     def summary(self) -> list[dict]:
         if self.execution is not None:
-            names = {s.name for s in STEP_REGISTRY} - DEFERRED_STEPS
+            names = {s.name for s in pipeline_registry(getattr(self.execution, "upgrade", False))} - DEFERRED_STEPS
             actual = [{"step": r["stage"],
                        "status": "executed" if r["status"] == "completed" else r["status"],
                        "ms": r["ms"], "note": r["reason"]}

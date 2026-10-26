@@ -580,6 +580,7 @@ def engine(run: Path) -> int:
             run_id=run.name, run_date=date.fromisoformat(admission["clock"]["run_date"]),
             paths=paths, policy=ExecutionPolicy(**policy_args),
             store=EvidenceStore(run, run.name),
+            admitted_at_utc=admission["clock"]["admitted_at_utc"],
         )
         main_file = run / "source" / "main.py"
         spec = importlib.util.spec_from_file_location("tiger_frozen_main", main_file)
@@ -590,9 +591,10 @@ def engine(run: Path) -> int:
         spec.loader.exec_module(module)
         from trading_system import config
         args = argparse.Namespace(
-            mode="daily", market="us", universe="extended", universe_file=None,
-            top=config.SCAN_TOP_N, picks=config.MAX_PICKS_DEFAULT,
-            account=100000.0, use_tuned=False, html=True, quiet=True,
+            mode=policy.get("workflow_phase", "daily"), market="us",
+            universe=policy["universe"], universe_file=None,
+            top=config.SCAN_TOP_N, picks=policy.get("max_positions", config.MAX_PICKS_DEFAULT),
+            account=policy["initial_cash_usd"], use_tuned=False, html=True, quiet=True,
             demo=False, out=str(paths.reports_dir),
         )
         logging.basicConfig(level=logging.WARNING,

@@ -57,7 +57,8 @@ def ledger(tmp_path, *, approved=False):
 
 
 def row(book, ticker="AAA"):
-    return next(item for item in book.snapshot()["opportunities"] if item["ticker"] == ticker)
+    items = [item for item in book.snapshot()["opportunities"] if item["ticker"] == ticker]
+    return next((item for item in items if item["state"] in {"HELD", "EXIT_PENDING"}), items[-1])
 
 
 def evaluation(book, *, state=None, outcomes=None, as_of=LATER):
@@ -308,7 +309,7 @@ def test_explicit_held_trigger_never_emits_entry(monkeypatch):
     monkeypatch.setattr("trading_system.pipeline.quote_with_fallback", lambda provider, ticker:
         {"price": 100.0, "ts": NOW, "kind": "realtime", "stale": False})
     watch = [{"ticker": "AAA", "entry": 100., "stop": 95., "protect": 110., "role": "held"}]
-    assert monitor_once(watch, object()) == []
+    assert monitor_once(watch, object(), observed_at=LATER) == []
 
 
 def test_matured_independent_cohort_reports_capture_and_actual_missed_gate(tmp_path):
@@ -341,3 +342,333 @@ def test_valuation_date_can_precede_research_date_but_explicit_binding_must_matc
     intent = book.snapshot()["intents"][0]
     assert intent["valuation_date"] == "2026-10-26"
     assert intent["requires_execution_recheck"] is True
+
+
+def cohort_result():
+    """Freeze predecision portfolio and legal quantitative setup, no future bars."""
+    from trading_system.execution_policy import portfolio_snapshot
+    source = result(approved=True)
+    state = {"started": None, "initial_cash": 100000., "account_currency": "USD", "cash": 100000.,
+             "positions": [], "pending": [], "closed": [], "equity_curve": [], "ops_log": [], "entry_plans": {}}
+    snapshot = portfolio_snapshot(state, {}, "2026-10-27")
+    setup = {"schema": "tiger.entry-setup.v2", "symbol": "AAA", "known_at": "2026-10-27",
+        "entry_template": "A", "entry_price": 100., "stop_price": 95., "key_level": 100.,
+        "mrs_star": 7., "shs": 8., "tss_final": 8., "in_main": True, "in_sub": False,
+        "chain_hot": True, "breadth": 70., "allow_new_positions": True, "shock": False,
+        "risk_group": "ai_cloud", "sector": "XLK", "size_ratio": 1., "signal_adv_usd": 500000000.,
+        "execution_mode": "paper"}
+    budget = {"schema": "tiger.entry-budget.v2", "execution_policy": "whitepaper-execution-v2",
+        "known_at": "2026-10-27", "snapshot_hash": snapshot["state_hash"], "gross_cap": .7,
+        "single_cap": .2, "risk_pct": .008, "group_risk_pct": .03,
+        "portfolio_risk_pct": .03, "max_positions": 10}
+    source["raw"].update(execution_policy="whitepaper-execution-v2",
+        cohort_inputs={"schema": "tiger.cohort-inputs.v2", "setups": {"AAA": setup}, "budget": budget,
+                       "portfolio_snapshot": snapshot, "portfolio_state": state})
+    return source
+
+
+def test_unmatured_cohort_remains_persistent_pending_without_future_prices(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    from trading_system.business_evaluation import mature_cohorts
+    book = OpportunityLedger(tmp_path / "l.json")
+    book.record_research(cohort_result(), run_id="frozen-source", observed_at=NOW, expires_at=EXPIRES)
+    bars = {"AAA": [{"date": "2026-10-28", "open": 100., "high": 101., "low": 99., "close": 100., "adv": 500000000.}]}
+    before = deepcopy((book.snapshot(), bars))
+    outcomes = mature_cohorts(book.snapshot(), bars, "2026-10-28T21:00:00+00:00")
+    assert outcomes[0]["status"] == "continue_pending"
+    assert outcomes[0]["horizon_complete"] is False
+    assert outcomes[0]["net_return"] is None
+    assert (book.snapshot(), bars) == before
+    book.record_outcomes(outcomes, observed_at="2026-10-28T21:00:00+00:00")
+    book.save()
+    assert OpportunityLedger(tmp_path / "l.json").snapshot()["cohort_outcomes"][0]["status"] == "continue_pending"
+
+
+def test_cohort_matures_through_shared_next_open_stop_gap_and_costs(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    from trading_system.business_evaluation import mature_cohorts
+    book = OpportunityLedger(tmp_path / "l.json")
+    book.record_research(cohort_result(), run_id="frozen-source", observed_at=NOW, expires_at=EXPIRES)
+    bars = {"AAA": [
+        {"date": "2026-10-28", "open": 100., "high": 101., "low": 99., "close": 100., "adv": 500000000.},
+        {"date": "2026-10-29", "open": 94., "high": 95., "low": 93., "close": 94., "adv": 500000000.}]}
+    outcomes = mature_cohorts(book.snapshot(), bars, "2026-10-29T21:00:00+00:00")
+    assert outcomes[0]["horizon_complete"] is True
+    assert outcomes[0]["eligible_at_signal"] is True
+    assert outcomes[0]["entry_date"] == "2026-10-28"
+    assert outcomes[0]["exit_date"] == "2026-10-29"
+    assert outcomes[0]["net_return"] < 0
+    assert outcomes[0]["cost_usd"] > 0
+    assert outcomes[0]["scope"] == "per_candidate_numeric_policy_counterfactual"
+    assert outcomes[0]["policy_id"] == "whitepaper-execution-v2"
+    book.record_outcomes(outcomes, observed_at="2026-10-29T21:00:00+00:00")
+    repeated = mature_cohorts(book.snapshot(), {}, "2026-11-01T21:00:00+00:00")
+    assert repeated == outcomes
+
+
+def test_future_bars_do_not_mature_current_cohort_and_missing_frozen_inputs_are_explicit(tmp_path):
+    from trading_system.business_evaluation import mature_cohorts
+    book = ledger(tmp_path)
+    outcomes = mature_cohorts(book.snapshot(), {"AAA": [{"date": "2026-12-01", "open": 110.,
+        "high": 120., "low": 105., "close": 115., "adv": 500000000.}]}, LATER)
+    assert outcomes[0]["status"] == "unverifiable"
+    assert outcomes[0]["reason"] == "FROZEN_COHORT_INPUTS_MISSING"
+    assert outcomes[0]["net_return"] is None
+
+
+def test_plan_fields_cannot_override_account_identity_or_execution_recheck(tmp_path):
+    book = ledger(tmp_path)
+    proposed = {**plan(), "requires_execution_recheck": False, "account_kind": "broker",
+                "intent_id": "forged", "account_state_hash": "forged"}
+    book.requalify(row(book)["opportunity_id"], run_id="risk-1", observed_at=LATER,
+        accepted=True, reasons=[], risk_evidence_ids=["risk_evidence"], account_snapshot=account(), plan=proposed)
+    intent = book.snapshot()["intents"][0]
+    assert intent["requires_execution_recheck"] is True
+    assert intent["account_kind"] == "paper"
+    assert intent["account_state_hash"] == account()["state_hash"]
+    assert intent["intent_id"] != "forged"
+
+
+def test_account_sync_rejects_mixed_currency_and_rolls_back_all_partial_mutation(tmp_path):
+    book = ledger(tmp_path)
+    before = book.snapshot()
+    with pytest.raises(ValueError):
+        book.sync_account({"account_currency": "HKD", "positions": [{"ticker": "AAA", "shares": 40,
+            "entry_price": 100., "initial_stop": 95., "stop": 95.}], "pending": [], "closed": []},
+            snapshot_id="foreign", observed_at=NOW)
+    assert book.snapshot() == before
+
+
+def test_missing_first_execution_day_is_not_repaired_using_later_close(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    from trading_system.business_evaluation import mature_cohorts
+    book = OpportunityLedger(tmp_path / "l.json")
+    book.record_research(cohort_result(), run_id="frozen-source", observed_at=NOW, expires_at=EXPIRES)
+    bars = {"AAA": [{"date": "2026-10-29", "open": 100., "high": 150., "low": 99., "close": 140., "adv": 500000000.}]}
+    outcome = mature_cohorts(book.snapshot(), bars, "2026-10-29T21:00:00+00:00")[0]
+    assert outcome["status"] == "continue_pending"
+    assert outcome["reason"] == "MISSING_DAILY_MARKET_PATH"
+    assert outcome["net_return"] is None
+    assert outcome["last_observed_bar"] is None
+
+
+def test_completed_outcome_cannot_be_rewritten_after_new_price_information(tmp_path):
+    book = ledger(tmp_path)
+    outcome = {"opportunity_id": row(book)["opportunity_id"], "outcome_as_of": LATER,
+               "status": "policy_rejected", "horizon_complete": True, "reason": "market_block"}
+    book.record_outcomes([outcome], observed_at=LATER)
+    before = book.snapshot()
+    with pytest.raises(ValueError, match="immutable"):
+        book.record_outcomes([{**outcome, "reason": "later_winner"}], observed_at=LATER)
+    assert book.snapshot() == before
+
+
+def test_current_incomplete_session_bar_cannot_mature_a_cohort(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    from trading_system.business_evaluation import mature_cohorts
+    book = OpportunityLedger(tmp_path / "l.json")
+    book.record_research(cohort_result(), run_id="frozen-source", observed_at=NOW, expires_at=EXPIRES)
+    bars = {"AAA": [{"date": "2026-10-28", "open": 100., "high": 120., "low": 90., "close": 110., "adv": 500000000.}]}
+    outcome = mature_cohorts(book.snapshot(), bars, "2026-10-28T14:00:00+00:00")[0]
+    assert outcome["status"] == "continue_pending"
+    assert outcome["net_return"] is None
+    assert outcome["evidence_ids"] == []
+
+
+def test_old_closed_trade_does_not_close_new_pending_generation_of_same_ticker(tmp_path):
+    book = ledger(tmp_path)
+    book.sync_account({"positions": [], "pending": [{"ticker": "AAA", "shares": 100,
+        "signal_date": "2026-10-27", "plan_id": "new-plan", "entry_ref": 100., "stop_price": 95.}],
+        "closed": [{"ticker": "AAA", "shares": 40, "plan_id": "old-plan", "entry_date": "2026-10-20",
+                    "exit_date": "2026-10-21", "entry": 100., "exit": 99.}]},
+        snapshot_id="reopened-account", observed_at=NOW)
+    rows = book.snapshot()["opportunities"]
+    current = next(item for item in rows if item["source_run_id"] == "run-source-1")
+    assert current["state"] == "INTENT_PENDING"
+    assert current["account_plan_id"] == "new-plan"
+    assert any(item["state"] == "CLOSED" and item["account_plan_id"] == "old-plan" for item in rows)
+
+
+def test_projected_v2_execution_card_sources_are_preserved_in_opportunity_ledger(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    source = result()
+    decision = source["raw"]["execution_decisions"][0]
+    del decision["source_ids"]
+    decision.update(sources=[{"id": "ds_issuer_fixture", "title": "SYNTHETIC_TEST source"}],
+                    market_evidence=[{"id": "md_AAA_fixture", "symbol": "AAA"}])
+    book = OpportunityLedger(tmp_path / "l.json")
+    book.record_research(source, run_id="projected-card", observed_at=NOW, expires_at=EXPIRES)
+    assert row(book)["source_ids"] == ["ds_issuer_fixture", "md_AAA_fixture"]
+
+
+def test_numeric_approval_count_survives_final_model_veto(tmp_path):
+    from trading_system.business_evaluation import build_business_evaluation
+    source = result(approved=False)
+    source["raw"]["numeric_approved_count"] = 1
+    report = build_business_evaluation(source, lifecycle=ledger(tmp_path).snapshot(),
+        account_state={"cash": 100000., "initial_cash": 100000., "positions": [], "pending": [],
+                       "closed": [], "equity_curve": []}, as_of=LATER, run_id="model-veto")
+    assert report["funnel"]["numeric_approved"] == 1
+    assert report["funnel"]["final_buy"] == 0
+    assert report["funnel_evidence"]["numeric_approved"] == "explicit_pre_model_risk_count"
+
+
+def test_new_research_revokes_old_unexecuted_intent_without_losing_its_evidence(tmp_path):
+    book = ledger(tmp_path)
+    old_id = row(book)["opportunity_id"]
+    book.requalify(old_id, run_id="old-risk-approval", observed_at=LATER,
+        accepted=True, reasons=[], risk_evidence_ids=["risk_old"],
+        account_snapshot=account(), plan=plan())
+    old_intent = deepcopy(book.snapshot()["intents"][0])
+    book.record_research(result(approved=False), run_id="new-rejected-research",
+        observed_at="2026-10-27T14:02:00+00:00", expires_at=EXPIRES)
+    state = book.snapshot()
+    old = next(item for item in state["opportunities"] if item["opportunity_id"] == old_id)
+    assert old["state"] == "SUPERSEDED"
+    assert state["intents"][0]["status"] == "cancelled_by_new_research"
+    assert state["intents"][0]["intent_id"] == old_intent["intent_id"]
+    assert state["intents"][0]["risk_evidence_ids"] == ["risk_old"]
+    assert any(event["kind"] == "SUPERSEDED" and event["opportunity_id"] == old_id
+               and event["payload"]["by_run"] == "new-rejected-research" for event in state["events"])
+    alerts = book.observe_quotes(quote(ts="2026-10-27T14:03:00+00:00"),
+                                 observed_at="2026-10-27T14:03:00+00:00")
+    assert all(item["opportunity_id"] != old_id for item in alerts)
+
+
+@pytest.mark.parametrize("kind", ["pending_with_plan", "pending_without_plan", "held"])
+def test_new_research_preserves_real_account_commitment_of_older_generation(tmp_path, kind):
+    book = ledger(tmp_path)
+    old_id = row(book)["opportunity_id"]
+    pending = {"ticker": "AAA", "shares": 100, "signal_date": "2026-10-27",
+               "entry_ref": 100., "stop_price": 95.}
+    if kind == "pending_with_plan": pending["plan_id"] = "real-account-plan"
+    held = {"ticker": "AAA", "shares": 40, "entry_price": 100., "initial_stop": 95.,
+            "stop": 95., "entry_date": "2026-10-27", "signal_date": "2026-10-27"}
+    book.sync_account({"pending": [pending] if kind != "held" else [],
+        "positions": [held] if kind == "held" else [], "closed": []},
+        snapshot_id="trusted-account", observed_at=LATER)
+    before = next(item for item in book.snapshot()["opportunities"] if item["opportunity_id"] == old_id)
+    book.record_research(result(), run_id="new-watch", observed_at="2026-10-27T14:02:00+00:00", expires_at=EXPIRES)
+    after = next(item for item in book.snapshot()["opportunities"] if item["opportunity_id"] == old_id)
+    assert after == before
+    assert after["state"] == ("HELD" if kind == "held" else "INTENT_PENDING")
+    alerts = book.observe_quotes(quote(ts="2026-10-27T14:03:00+00:00"),
+                                 observed_at="2026-10-27T14:03:00+00:00")
+    if kind != "held":
+        assert [item["opportunity_id"] for item in alerts] == [old_id]
+        book.requalify(old_id, run_id="current-existing-position-rejection",
+            observed_at="2026-10-27T14:03:00+00:00", accepted=False,
+            reasons=["existing_or_pending_position"], risk_evidence_ids=["current-risk"],
+            account_snapshot=account())
+        assert next(item for item in book.snapshot()["opportunities"]
+                    if item["opportunity_id"] == old_id)["state"] == "INTENT_PENDING"
+
+
+@pytest.mark.parametrize("cause", ["expiry", "structure"])
+def test_unexecuted_intent_is_cancelled_when_its_research_permission_ends(tmp_path, cause):
+    book = ledger(tmp_path)
+    identity = row(book)["opportunity_id"]
+    book.requalify(identity, run_id="approved-before-invalidation", observed_at=LATER,
+        accepted=True, reasons=[], risk_evidence_ids=["risk_approval"], account_snapshot=account(), plan=plan())
+    timestamp = "2026-10-27T21:00:00+00:00" if cause == "expiry" else "2026-10-27T14:02:00+00:00"
+    book.observe_quotes(quote(price=94. if cause == "structure" else 100., ts=timestamp), observed_at=timestamp)
+    assert row(book)["state"] == ("EXPIRED" if cause == "expiry" else "INVALIDATED")
+    assert book.snapshot()["intents"][0]["status"] == "cancelled_by_" + cause
+
+
+def test_account_pending_fact_survives_expiry_and_stop_recheck_without_duplicate_entry(tmp_path):
+    book = ledger(tmp_path)
+    identity = row(book)["opportunity_id"]
+    book.sync_account({"positions": [], "closed": [], "pending": [{"ticker": "AAA", "shares": 100,
+        "signal_date": "2026-10-27", "plan_id": "committed", "entry_ref": 100., "stop_price": 95.}]},
+        snapshot_id="trusted-pending", observed_at=LATER)
+    timestamp = "2026-10-27T14:02:00+00:00"
+    alerts = book.observe_quotes(quote(price=94., ts=timestamp), observed_at=timestamp)
+    assert row(book)["state"] == "INTENT_PENDING"
+    assert alerts[0]["kind"] == "REQUALIFY"
+    assert alerts[0]["reason"] == "ACCOUNT_PENDING_STOP_BREACHED"
+    book.observe_quotes(quote(price=94., ts="2026-10-27T21:00:00+00:00"),
+                        observed_at="2026-10-27T21:00:00+00:00")
+    assert row(book)["state"] == "INTENT_PENDING"
+    with pytest.raises(ValueError):
+        book.requalify(identity, run_id="duplicate-open", observed_at=LATER, accepted=True, reasons=[],
+            risk_evidence_ids=["new-risk"], account_snapshot=account(), plan=plan())
+    assert book.snapshot()["intents"] == []
+
+
+@pytest.mark.parametrize("current_hash", [None, "c" * 64, "b" * 64])
+def test_cohort_does_not_claim_frozen_engine_identity_when_only_another_implementation_is_available(tmp_path, current_hash):
+    from trading_system.business_evaluation import mature_cohorts
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    source = cohort_result()
+    source["raw"]["cohort_inputs"].update(policy_hash="b" * 64, policy_id="whitepaper-execution-v2")
+    book = OpportunityLedger(tmp_path / "frozen.json")
+    book.record_research(source, run_id="frozen-engine-run", observed_at=NOW, expires_at=EXPIRES)
+    outcome = mature_cohorts(book.snapshot(), {}, LATER, current_policy_hash=current_hash)[0]
+    if current_hash == "b" * 64:
+        assert outcome["status"] == "continue_pending"
+    else:
+        assert outcome["status"] == "unverifiable"
+        assert outcome["reason"] == "FROZEN_POLICY_IMPLEMENTATION_UNAVAILABLE"
+        assert outcome["net_return"] is None
+    assert outcome["policy_hash"] == "b" * 64
+
+
+@pytest.mark.parametrize("has_holding", [False, True])
+def test_explicit_account_plan_cancellation_retires_only_unfilled_pending_generation(tmp_path, has_holding):
+    book = ledger(tmp_path)
+    old_id = row(book)["opportunity_id"]
+    book.sync_account({"positions": [], "closed": [], "pending": [{"ticker": "AAA", "shares": 100,
+        "signal_date": "2026-10-27", "plan_id": "paper-plan", "entry_ref": 100., "stop_price": 95.}]},
+        snapshot_id="accepted-account-plan", observed_at=LATER)
+    held = {"ticker": "AAA", "shares": 40, "entry_price": 100., "initial_stop": 95., "stop": 95.,
+            "entry_date": "2026-10-27", "signal_date": "2026-10-27", "plan_id": "paper-plan"}
+    book.sync_account({"positions": [held] if has_holding else [], "pending": [], "closed": [],
+        "entry_plans": {"paper-plan": {"ticker": "AAA", "status": "cancelled", "terminal_reason": "execution_window_missed"}}},
+        snapshot_id="cancelled-account-plan", observed_at="2026-10-27T14:02:00+00:00")
+    item = next(item for item in book.snapshot()["opportunities"] if item["opportunity_id"] == old_id)
+    assert item["state"] == ("HELD" if has_holding else "INVALIDATED")
+    cancellations = [event for event in book.snapshot()["events"] if event["kind"] == "ACCOUNT_CANCELLED"]
+    if has_holding:
+        assert cancellations == []
+        assert item["filled_shares"] == 40
+    else:
+        assert cancellations[-1]["payload"]["reason"] == "execution_window_missed"
+        assert item["account_plan_id"] == "paper-plan"
+
+
+@pytest.mark.parametrize("timestamp,expected", [
+    ("2026-10-27T13:29:59+00:00", "QUOTE_OUTSIDE_REGULAR_SESSION"),
+    ("2026-10-27T13:30:00+00:00", None),
+    ("2026-10-27T19:59:59+00:00", None),
+    ("2026-10-27T20:00:00+00:00", "QUOTE_OUTSIDE_REGULAR_SESSION"),
+    ("2026-10-31T14:00:00+00:00", "QUOTE_MARKET_CLOSED"),
+    ("2026-11-26T15:00:00+00:00", "QUOTE_MARKET_CLOSED"),
+    ("2026-11-27T17:59:59+00:00", None),
+    ("2026-11-27T18:00:00+00:00", "QUOTE_OUTSIDE_REGULAR_SESSION"),
+    ("2026-12-24T18:00:00+00:00", "QUOTE_OUTSIDE_REGULAR_SESSION"),
+    ("2027-11-26T18:00:00+00:00", "QUOTE_OUTSIDE_REGULAR_SESSION"),
+    ("2026-11-02T14:29:59+00:00", "QUOTE_OUTSIDE_REGULAR_SESSION"),
+    ("2026-11-02T14:30:00+00:00", None),
+    ("2028-01-03T15:00:00+00:00", "QUOTE_SESSION_CALENDAR_UNSUPPORTED"),
+])
+def test_quote_action_requires_actual_regular_market_session_with_dst_and_early_closes(timestamp, expected):
+    from trading_system.opportunity_lifecycle import quote_refusal_reason
+    assert quote_refusal_reason(quote(ts=timestamp)["AAA"], observed_at=timestamp) == expected
+
+
+def test_open_session_cannot_reuse_still_fresh_premarket_quote_for_action():
+    from trading_system.opportunity_lifecycle import quote_refusal_reason
+    assert quote_refusal_reason(quote(ts="2026-10-27T13:29:00+00:00")["AAA"],
+        observed_at="2026-10-27T13:31:00+00:00") == "QUOTE_TIME_OUTSIDE_REGULAR_SESSION"
+
+
+def test_held_stop_or_protect_is_not_promoted_to_an_extended_session_execution_signal(tmp_path):
+    book = ledger(tmp_path)
+    book.sync_account({"positions": [{"ticker": "AAA", "shares": 40, "entry_price": 100.,
+        "initial_stop": 95., "stop": 95., "entry_date": "2026-10-26"}], "pending": [], "closed": []},
+        snapshot_id="regular-session-position", observed_at=NOW)
+    timestamp = "2026-10-27T21:00:00+00:00"
+    assert book.observe_quotes(quote(price=94., ts=timestamp), observed_at=timestamp) == []
+    assert row(book)["state"] == "HELD"
+    assert book.snapshot()["observation_refusals"][-1]["reason"] == "QUOTE_OUTSIDE_REGULAR_SESSION"

@@ -464,3 +464,61 @@ SHS 叙事兑现维度（EPS 修正/指引语气）自 v5.0 由 NarrativeAgent L
 - 中文：财神爷AI炒股系统（财神爷）；英文：Caishen AI Trading System。
 - 落地：报告标题/页脚、README、main.py、GitHub 仓库 description、技能包
   caishen-trading-v1（全新包名）。
+
+---
+
+## 十一、短线 v2：研究、连续管理与统一执行合同（2026-10-27）
+
+任务：[T-2026-1027-0001 / issue 39](https://github.com/geniusdapeng-collab/workroom-tiger/issues/39)。本节记录当前代码合同；上文各日期的演示、测试数字与旧策略说明保留其历史身份。本节不以本机测试代替 main 集成、实际模型运行、生产部署或盈利证明，实际验收须关联每次源提交、run_id、receipt/verify 和公开读回。
+
+### 11.1 保留的交易理念与显式版本边界
+
+继续执行白皮书的市场许可→资金主线→产业链→个股结构→风险预算；不预测必涨、不追求每天凑足股票、不放松 MRS/SHS/TSS、流动性、A/B/C 模板、单笔 0.8% 风险或单票 20% 上限。模型负责语义研究和最终选择/否决，数值计划由共享确定性代码给出。足够的技术/资金结构不统一要求公司利好；真正新闻事件型仍需要及时、归属明确的原始证据。
+
+三项新增设计必须按工程假设披露：
+
+| 配置 | v2 取值与依据边界 |
+|---|---|
+| `MAX_POSITIONS_V2` | 10 个持仓/完整预约名额上限，是本次显式扩展；原 `MAX_PICKS_DEFAULT=7` 和旧 v1 回执语义保留。10 不是每天必须买入的数量。 |
+| `MAX_PORTFOLIO_RISK_PCT_V2` | 全账户已持仓加未完成整笔计划的止损风险最多 NAV×3%，为本次更严格的工程风险上限，不宣称由历史优化证明。 |
+| `SECTOR_UNDERPERFORMANCE_V2` | 第 5 日后相对实际所属板块落后 2 个百分点触发时间退出，是明确工程假设，不冒充白皮书精确原参数或收益校准。 |
+
+配置源为 `trading_system/config.py`。新 policy 为 `whitepaper-execution-v2`；旧 `legacy-execution-v1` 保留旧记录的读取及验证，不通过改名将旧成交解释成新版成交。盘前/盘中 v2 必须在同一独立 v2 paper 账户连续运行，不从旧 v1 账户复制状态冒充迁移。
+
+### 11.2 六项业务修复的落地位置
+
+| 问题 | 当前行为与实现位置 |
+|---|---|
+| 广域搜索与候选个股脱节、理由只复述行情 | `llm/candidate_research.py` 在广域 14 主题之后，对最多 10 个候选和全部最多 10 个持仓的去重并集定向研究；市场/板块/产业链/个股/计划五段假设与具体证据、反证、缺口一起保留。 |
+| 日报后无人继续跟踪、零买入时已有持仓被忽略 | `opportunity_lifecycle.py`、`workflow_runtime_v2.py` 持续记录 WATCH、重新评估、paper 待执行、持仓、退出与失效；报价触发只请求重新评估，不能替代完整当前模型和风险批准。 |
+| paper、Journal、回测的保护/时间退出漂移 | `exit_engine.py` 为唯一 v2 出场规则：结构止损优先，跳空按实际开盘，HIGH 达到 2R 后下一根生效 +0.5R 保护，5 日无进展或显著跑输实际板块退出，7 日硬退出。 |
+| 口头 40/40/20、实际一次买满 | `execution_policy.py` 保存整笔预约与整数股三段计划、唯一意向和 paper 成交回执；首次 T+1，后续加仓须有先前完整行情确认和当前开盘重查，不摊低成本，不用今天收盘回填今天开盘。 |
+| 反复按固定十万美元配仓 | `RiskManagerAgent._execute_v2`、`portfolio_snapshot` 按已知日期的真实 paper NAV、现金、持仓及全部未完成预约计算，缺少估值失败关闭；首次 seed 不等于后续参考本金。 |
+| 跑完程序被当成有效投资、漏失机会无法归因 | `business_evaluation.py` 保存漏斗、占资、成本、成熟队列与逐候选数值反事实；未成熟的捕获率/召回率保持未知，不能把多个候选的假想盈亏相加成组合收益。 |
+
+### 11.3 三阶段研究、预算与证据
+
+新任务默认 `us-public-model-required-paper-v2`；盘前与盘中分别为 `us-public-model-required-premarket-paper-v2`、`us-public-model-required-intraday-paper-v2`。三者均执行 43 个有序阶段，六个语义阶段为清洗、链舆情、链风险、板块叙事、发行人研究、最终判断。37 岗角色目录不等于每轮执行了 37 次独立模型。
+
+固定 `deepseek-flash`，2026-10-27 官方映射观察为 `DeepSeek-V4.1-Flash-1017`，属于可变别名。原生 Search/Fetch 由真实 I/O 回执证明；不是给 Responses 参数就算搜索成功。来源时间未知保持未知，Fetch 抓取时间不作为发布日期，不同主机也不作为独立原始报道证明。依据：[官方定价与模型](https://api-docs.deepseek.com/quick_start/pricing/)、[Search & Fetch](https://api-docs.deepseek.com/guides/search/)。
+
+每个目标一次初搜，模型提出真实缺口时至多一次补搜和一次已观察 URL 的 Fetch。正文每源最多 24000 字符、每三目标批次最多 60000 字符，公平分配并优先本轮补证；覆盖索引保留每个目标跨实际轮次见过的最长前缀。补证后不遗忘初评已经核实的引用/反证，也不能把没展示过的尾部说成通读全文。最终模型只能保留真实已读范围和原 claim，不以默认长度扩大证据。
+
+统一 `request_budget.py` 在付费 I/O 前预留，单任务最多 40 chat、300000 实际加预留 tokens、60 Search、20 Fetch、120 远端请求、保守估算 1 USD、2400 秒。未知付费结果冻结；不自动补跑、切提供方、降模型或规则代写语义。成功要求真实模型身份、schema、六阶段、实际 usage、所有预留和预算结算一致。`required_proof_v2.py` 只读取冻结证据重放，不能为了验证而重新调用网络或模型。
+
+### 11.4 回测、发布与复核
+
+普通数值回测 CLI 默认使用共享 v2 policy，显式选择方式如下；命令来自当前 `main.py` 参数定义：
+
+```bash
+python3 main.py --backtest --bt-days 260 --account 100000 --picks 10 --bt-execution-policy whitepaper-execution-v2
+python3 main.py --backtest --bt-days 260 --bt-execution-policy legacy-execution-v1
+```
+
+新版结果披露 `execution_policy` 和 `numeric-paper-replay-not-historical-required-model-alpha`；它没有重建当时未知的完整模型/发行人新闻，不得当成新版模型策略的历史超额收益。WFA/`--tune` 仍使用显式旧 policy，不自动推广新版调参。既有无未来函数、成本、风险与共享执行测试仍是回归要求。
+
+官网新研究为 schemaVersion 3，仅发布白名单五段理由、来源覆盖、当前运行及所有活跃机会、当前 paper 资金和成熟度测量；文章全文、私有路径、完整账户回放和模型调用正文不公开。研究 v3 最大 4 MiB，真实账户和旧研究仍为 1 MiB，Nginx 仅精确 `/api/v1/research` 有 4 MiB 例外。旧 v1/v2 记录保留原字节、摘要与精确重试身份，不追加新旧版研究来绕过要求。
+
+sync 的 `--slot HHmm` 仅是实际纽约调度标签；同日期/profile/slot 严格恢复原请求/run，不能换 slot 隐藏失败。实际接纳 UTC、日线已完成边界和来源日期独立留证。说明与操作命令分别见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)、[TIGER-STRICT-WORKFLOW.md](TIGER-STRICT-WORKFLOW.md)、[PnL 合同](../pnl/README.md)。
+
+验收必须分别提供有限夹具回归、真实完整任务、独立业务目标审核、发现问题后的再升级及真实重跑、准确候选 CI/main SHA 和生产读回。几轮同日任务可检验可靠性、覆盖与延迟，不能产生几天独立收益；没有成熟样本就如实保持盈利能力未建立。真实账户业绩只来自单独账户证据和真实人工成交回报。

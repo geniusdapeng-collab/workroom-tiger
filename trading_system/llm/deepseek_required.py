@@ -383,6 +383,20 @@ def _json_loads(value: bytes | str) -> object:
         _fail("INVALID_RESPONSE_JSON")
 
 
+def build_chat_request(*, system: str, user: str, schema_hint: dict,
+                       schema: dict, max_tokens: int = 16384,
+                       temperature: float = 0.2) -> dict:
+    """Pure exact request framing, also used by the read-only proof replay."""
+    return {"model": MODEL, "messages": [
+        {"role": "system", "content": system + "\nReturn exactly one JSON object. JSON only."},
+        {"role": "user", "content": user + "\nJSON schema:\n" +
+         _canonical(schema).decode() + "\nJSON field guidance:\n" +
+         _canonical(schema_hint).decode()}],
+        "max_tokens": max_tokens, "temperature": temperature, "stream": False,
+        "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"},
+        "reasoning_effort": "high"}
+
+
 class DeepSeekRequiredClient:
     required = True
 
@@ -403,14 +417,61 @@ class DeepSeekRequiredClient:
         self.search_receipts: list[dict] = []
         self.fetch_receipts: list[dict] = []
         self._remote_requests = 0
+        self._used_call_ids: set[str] = set()
+        self.budget = None
+        if getattr(execution, "upgrade", False):
+            from .request_budget import BudgetGuard, LIMITS
+            self.budget = BudgetGuard(**LIMITS)
+
+    def _admit_call(self, kind: str, call_id: str, request: dict, inputs: dict) -> None:
+        if call_id in self._used_call_ids:
+            _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+        self._used_call_ids.add(call_id)
+        if self.budget is not None:
+            from .request_budget import BudgetRefused
+            try:
+                inputs["budget_reservation"] = self.budget.reserve(kind, call_id, request)
+            except BudgetRefused:
+                _fail("REQUEST_BUDGET_REFUSED")
+            inputs["started_at_utc"] = datetime.now(timezone.utc).isoformat()
+
+    def _settle_budget(self, call_id: str, usage: dict | None) -> None:
+        if self.budget is not None:
+            from .request_budget import BudgetRefused
+            try:
+                self.budget.settle(call_id, usage)
+            except BudgetRefused:
+                _fail("REQUEST_BUDGET_REFUSED")
+
+    def _budget_proof(self, inputs: dict) -> dict:
+        if self.budget is None:
+            return {}
+        end = datetime.now(timezone.utc)
+        start = datetime.fromisoformat(inputs["started_at_utc"])
+        return {"budget_reservation": inputs["budget_reservation"],
+                "budget_after": self.budget.snapshot(),
+                "started_at_utc": inputs["started_at_utc"],
+                "finished_at_utc": end.isoformat(),
+                "elapsed_ms": max(0.0, round((end - start).total_seconds() * 1000, 3))}
+
+    def _record_call(self, method: str, inputs: dict, invoke):
+        try:
+            return self.execution.call_io(method, inputs, invoke)
+        except BaseException:
+            if self.budget is not None:
+                self.budget.mark_unknown(inputs["call_id"])
+            raise
 
     def describe(self) -> dict:
-        return {"mode": "required", "enabled": True, "provider": "deepseek",
+        value = {"mode": "required", "enabled": True, "provider": "deepseek",
                 "model": MODEL, "version": RELEASE, "release": RELEASE,
                 "version_binding": "official-current-alias-mapping",
                 "search": SEARCH_MODE, "remote_requests": self._remote_requests,
                 "chat_calls": len(self.receipts), "search_calls": len(self.search_receipts),
                 "fetch_calls": len(self.fetch_receipts)}
+        if self.budget is not None:
+            value["request_budget"] = self.budget.snapshot()
+        return value
 
     def _stage(self) -> str:
         scope = getattr(self.execution, "_active", None)
@@ -551,22 +612,22 @@ class DeepSeekRequiredClient:
                 or not 1 <= max_tokens <= 393216 or not _finite_number(temperature)
                 or not 0 <= temperature <= 2):
             _fail("INVALID_CHAT_REQUEST")
-        request = {"model": MODEL, "messages": [
-            {"role": "system", "content": self._text(system) + "\nReturn exactly one JSON object. JSON only."},
-            {"role": "user", "content": self._text(user) + "\nJSON schema:\n" +
-             _canonical(schema).decode() + "\nJSON field guidance:\n" +
-             _canonical(self._clean(schema_hint)).decode()}],
-            "max_tokens": max_tokens, "temperature": temperature, "stream": False,
-            "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"},
-            "reasoning_effort": "high"}
+        request = build_chat_request(system=self._text(system), user=self._text(user),
+            schema_hint=self._clean(schema_hint), schema=schema,
+            max_tokens=max_tokens, temperature=temperature)
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/chat/completions",
                   "request": request, "request_sha256": _hash(request), "output_schema": schema,
                   "schema_sha256": _hash(schema), "release": RELEASE}
+        self._admit_call("chat", call_id, request, inputs)
 
         def invoke():
             response, body_hash = self._post_json("/chat/completions", request)
+            # Charge actual usage even if a later schema/identity check rejects
+            # the answer. A failed answer must never erase its paid usage.
+            usage = self._usage(response.get("usage"))
+            self._settle_budget(call_id, usage)
             if response.get("model") != MODEL:
                 _fail("RESPONSE_MODEL_MISMATCH")
             if response.get("object") != "chat.completion":
@@ -597,7 +658,6 @@ class DeepSeekRequiredClient:
                 fingerprint = self._identifier(fingerprint)
                 if self._api_key in fingerprint:
                     _fail("UNSAFE_RESPONSE_FINGERPRINT")
-            usage = self._usage(response.get("usage"))
             safe_response = {
                 "id": response_id, "model": MODEL, "system_fingerprint": fingerprint,
                 "choices": [{"index": 0, "finish_reason": "stop", "message": {
@@ -610,9 +670,10 @@ class DeepSeekRequiredClient:
                     "finish_reason": "stop", "request_sha256": inputs["request_sha256"],
                     "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
                     "schema_sha256": inputs["schema_sha256"], "response": safe_response,
-                    "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed}
+                    "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed,
+                    **self._budget_proof(inputs)}
 
-        proof = self.execution.call_io("model.deepseek.chat", inputs, invoke)
+        proof = self._record_call("model.deepseek.chat", inputs, invoke)
         self.receipts.append({k: v for k, v in proof.items() if k not in ("schema", "parsed", "response")})
         return proof["parsed"]
 
@@ -657,9 +718,11 @@ class DeepSeekRequiredClient:
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/v1/tools/search",
                   "request": request, "request_sha256": _hash(request),
                   "query_sha256": hashlib.sha256(query.encode()).hexdigest(), "search_mode": SEARCH_MODE}
+        self._admit_call("search", call_id, request, inputs)
 
         def invoke():
             response, body_hash = self._post_json("/v1/tools/search", request)
+            self._settle_budget(call_id, None)
             original = response.get("results")
             if not isinstance(original, list) or len(original) > count:
                 _fail("INVALID_SEARCH_RESPONSE")
@@ -676,18 +739,24 @@ class DeepSeekRequiredClient:
                 if (not title or len(title) > 500
                         or not isinstance(content, str) or not content.strip()):
                     continue
-                results.append(self._document(url=url, title=title, content=content,
-                               published=item.get("date"), source="deepseek_search"))
-            if not results:
+                document = self._document(url=url, title=title, content=content,
+                               published=item.get("date"), source="deepseek_search")
+                if self.budget is not None:
+                    metadata = {key: item[key] for key in ("authority", "rerank_score", "site_name")
+                                if key in item and (item[key] is None or type(item[key]) in (str, int, float))}
+                    document["retrieval"] = self._clean(metadata)
+                results.append(document)
+            if not results and self.budget is None:
                 _fail("NO_USABLE_SEARCH_RESULTS")
             return {"schema": "tiger.deepseek-search.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "method": "POST", "search_mode": SEARCH_MODE,
                     "query_sha256": inputs["query_sha256"], "request_sha256": inputs["request_sha256"],
                     "result_count": len(original), "usable_result_count": len(results),
                     "response_sha256": _hash({"results": results}),
-                    "transport_response_sha256": body_hash, "results": results}
+                    "transport_response_sha256": body_hash, "results": results,
+                    **self._budget_proof(inputs)}
 
-        proof = self.execution.call_io("model.deepseek.search", inputs, invoke)
+        proof = self._record_call("model.deepseek.search", inputs, invoke)
         self.search_receipts.append({k: v for k, v in proof.items() if k not in ("schema", "results")})
         return proof["results"]
 
@@ -701,9 +770,11 @@ class DeepSeekRequiredClient:
         inputs = {"schema": "tiger.deepseek-fetch-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/v1/tools/fetch",
                   "request": request, "request_sha256": _hash(request), "search_mode": SEARCH_MODE}
+        self._admit_call("fetch", call_id, request, inputs)
 
         def invoke():
             response, body_hash = self._post_json("/v1/tools/fetch", request)
+            self._settle_budget(call_id, None)
             if not isinstance(response.get("title"), str) or not isinstance(response.get("content"), str):
                 _fail("INVALID_FETCH_RESPONSE")
             page = self._document(url=safe_url, title=response["title"], content=response["content"],
@@ -711,8 +782,9 @@ class DeepSeekRequiredClient:
             return {"schema": "tiger.deepseek-fetch.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "method": "POST", "search_mode": SEARCH_MODE,
                     "request_sha256": inputs["request_sha256"], "response_sha256": _hash({"page": page}),
-                    "transport_response_sha256": body_hash, "page": page}
+                    "transport_response_sha256": body_hash, "page": page,
+                    **self._budget_proof(inputs)}
 
-        proof = self.execution.call_io("model.deepseek.fetch", inputs, invoke)
+        proof = self._record_call("model.deepseek.fetch", inputs, invoke)
         self.fetch_receipts.append({k: v for k, v in proof.items() if k not in ("schema", "page")})
         return proof["page"]

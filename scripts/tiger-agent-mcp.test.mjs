@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { LIMITS } from "../bundles/trading/capabilities/workflow-client.mjs";
-import { toolDefinitions, validateToolDefinitions } from "./tiger-agent-mcp.mjs";
+import { toolDefinitions, validateToolDefinitions, serve, INSTRUCTIONS, MCP_OUTPUT_BUFFER_BYTES } from "./tiger-agent-mcp.mjs";
 import { REQUEST, RUN_ID, eventually, mcpProcess, runnerFixture } from "./tiger-agent-test-support.mjs";
 
 function launch(t, fixture, mode = "paper") {
@@ -226,4 +227,45 @@ test("NP003/B02: malformed metadata and business fields remain rejected without 
   const rejected = toolEnvelope(await call(proc, "business-meta", "tiger_doctor", { _meta: {} }), true);
   assert.equal(rejected.error.code, "INVALID_REQUEST");
   await proc.stop(); assert.deepEqual(await fixture.calls(), []);
+});
+
+
+test("v2 MCP instructions expose the six-stage phases, actual NAV and complete opportunity loop", () => {
+  for (const text of ["us-public-model-required-paper-v2", "us-public-model-required-premarket-paper-v2", "us-public-model-required-intraday-paper-v2", "six semantic stages", "targeted Fetch", "NAV", "40/40/20", "requalification", "business evaluation", "execution recheck"]) assert.ok(INSTRUCTIONS.includes(text), text);
+});
+
+function memoryServer(invoke, { stalled = false } = {}) {
+  const stdin = new PassThrough(); const stderr = new PassThrough(); const chunks = []; const diagnostics = [];
+  const stdout = new Writable({ write(chunk, _encoding, done) { chunks.push(Buffer.from(chunk)); if (!stalled) done(); } });
+  stderr.on("data", chunk => diagnostics.push(chunk.toString()));
+  const server = serve({ mode: "paper", python: process.execPath, stateRoot: "/SYNTHETIC/mcp-test" }, { stdin, stdout, stderr, invoke });
+  const send = value => stdin.write(JSON.stringify(value) + "\n");
+  send({ jsonrpc: "2.0", id: "init", method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "SYNTHETIC", version: "1" } } });
+  send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  return { server, stdin, stdout, chunks, diagnostics, send };
+}
+
+test("v2 MCP transports a near-4MiB envelope in equal text and structured copies without truncation", async () => {
+  const envelope = { operation_ok: true, status: "completed", summary: { execution_policy: "whitepaper-execution-v2", data: '"'.repeat(1_900_000) } };
+  assert.ok(Buffer.byteLength(JSON.stringify(envelope)) < LIMITS.v2OutputBytes);
+  const f = memoryServer(async () => envelope);
+  f.send({ jsonrpc: "2.0", id: "large", method: "tools/call", params: { name: "tiger_workflow_receipt", arguments: { run_id: RUN_ID } } });
+  await eventually(() => f.chunks.length >= 2);
+  f.stdin.end(); assert.equal(await f.server.closed, 0);
+  const response = JSON.parse(f.chunks[1].toString());
+  assert.ok(f.chunks[1].length > 4 * LIMITS.outputBytes);
+  assert.ok(f.chunks[1].length < MCP_OUTPUT_BUFFER_BYTES);
+  assert.deepEqual(JSON.parse(response.result.content[0].text), response.result.structuredContent);
+  assert.equal(response.result.structuredContent.summary.data.length, 1_900_000);
+  assert.deepEqual(f.diagnostics, []);
+});
+
+test("v2 MCP slow-reader output still has a finite backpressure ceiling", async () => {
+  const envelope = { operation_ok: true, status: "completed", summary: { execution_policy: "whitepaper-execution-v2", data: "x".repeat(3_200_000) } };
+  const f = memoryServer(async () => envelope, { stalled: true });
+  for (const id of [1, 2, 3]) f.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "tiger_workflow_receipt", arguments: { run_id: RUN_ID } } });
+  await eventually(() => f.diagnostics.some(line => /backpressure limit/u.test(line)));
+  f.stdout.destroy();
+  assert.equal(await f.server.closed, 7);
+  assert.ok(f.chunks.reduce((sum, part) => sum + part.length, 0) <= MCP_OUTPUT_BUFFER_BYTES);
 });

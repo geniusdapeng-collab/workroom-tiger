@@ -313,3 +313,373 @@ def model_summary(llm) -> dict:
             "call_count": len(llm.receipts), "required_stages": list(REQUIRED_MODEL_STAGES),
             "stage_counts": counts, "search_count": len(llm.search_receipts),
             "search_mode": SEARCH_MODE, "all_required_completed": True}
+
+
+# v2 entry points are intentionally separate. The v1 schemas, prompts and typed
+# projections above remain reconstructible for immutable historical receipts.
+SYSTEM_V2 = SYSTEM + (
+    "本轮采用可追溯研究v2。只引用真正展示的资料及完整摘要/提取引文索引，"
+    "不得把索引摘要声称为重新通读全文；原始资料已由清洗模型逐篇解释，"
+    "来源归属、时间、相反观点与证据缺口不能在下游压缩掉。"
+    "primary/media/commentary是模型识别的材料性质，不是外部真实性担保。"
+)
+TASKS_V2 = {
+    "clean.llm_semantic": (
+        "逐篇处理全部给定content，完成实体消歧、情感、事件、产业链/板块标签和完整中文摘要。"
+        "每个id恰好一次。给出最多四个重要事实及其本篇逐字quote、明确claim_key，"
+        "不能把邻篇事实归给本篇。来源primary/media/commentary/unknown；"
+        "仅能识别原始报道时origin_id引用给定源ID，未知用null。"
+        "claim_key表达同一实体同一事件同一事实，转载不制造独立事实；"
+        "旧/未知日期、AI评论、未具名消息、反证等限定必须进入摘要与origin_note。"
+        "没有依据可不提取claims，不能补造。"
+    ),
+    "tech.sentiment": (
+        "对六链逐一判断，使用完整摘要和已绑定引文索引，保留所有限定与来源ID。"
+        "没有足够证据时heat和sentiment_score为null、narrative_change为unknown，"
+        "理由说明缺什么，不能填中性默认分。"
+    ),
+    "tech.risk": (
+        "逐链评估有证据的供应/政策/专利/产能风险。assessment完整说明覆盖、"
+        "时效、共同原始来源及观点性质，即使alerts为空也保留，顶层evidence_ids列出整体评估的实际依据。每项预警绑定来源ID；"
+        "没有证据不能造预警，不能用摘要以外未展示原文细节。"
+    ),
+    "sector.narrative": (
+        "每个ETF恰好一次，根据完整摘要与已绑定引文推理盈利修正和指引，保留完整依据及ID。"
+        "不足以评分时narrative_score=null，其余unknown，说明缺口；不要用默认5分。"
+    ),
+    "decision.debate": (
+        "你作最终选择或否决。只有approved_picks可buy；watch_candidates只能watch。"
+        "每个给定symbol恰好一条，数值计划不得更改。参考本轮完整candidate_research、"
+        "市场/板块/产业链/科技信号与事件/风险计划，给出普通执行团队读得懂的说明及thesis。"
+        "technical_flow_v2用真实结构、量价、主线和数值闸门判断，不统一要求公司利好新闻；"
+        "news_event_v2必须有及时且可归属本公司的原始证据，未知日期不能当当前催化。"
+        "任何必要证据未解决、deferred、contradictory或insufficient只能watch并显式说明，"
+        "不能说没有新闻就没有机会，也不能说日期未知就无事件。"
+        "thesis五段依据、事实quote、来源/时间/观点限定和反证必须完整，不只复述分数。"
+        "每条source_ids必须引用自己的唯一md_行情，最多八篇真实文档；"
+        "无公司新闻的技术型说明不造新闻，但仍需解释事件排雷的已知与未知。"
+        "最终BUY当且仅当至少一项buy，原数值AVOID则保持AVOID且无buy，其他无buy用WAIT/AVOID。"
+        "最终thesis的followup必须needed=false，仍需未来资料的条件写入gaps和entry_triggers。"
+    ),
+}
+
+BROAD_QUERIES_V2 = {
+    "memory": "DRAM NAND HBM prices inventory Samsung SK Hynix Micron",
+    "logic": "GPU AI chip design Nvidia AMD Broadcom",
+    "foundry": "TSMC foundry wafer utilization CoWoS capacity",
+    "equipment": "ASML Applied Materials semiconductor equipment orders",
+    "ai_model": "Microsoft Google Meta Amazon AI capex data center",
+    "ai_app": "AI software enterprise monetization Palantir ARR",
+    "energy": "OPEC oil gas energy Chevron ExxonMobil",
+    "financials": "banks credit JPMorgan Visa Mastercard earnings",
+    "healthcare": "FDA pharma biotech Lilly Novo drug earnings",
+    "consumer": "consumer spending Walmart Costco retail earnings",
+    "industrials": "PMI industrial Boeing Caterpillar defense logistics",
+    "utilities": "utilities electricity grid nuclear power prices",
+    "reits": "REIT property office occupancy dividends rates",
+    "macro": "Federal Reserve FOMC CPI jobs Treasury S&P 500",
+}
+
+
+def assessment_context_v2(execution) -> dict:
+    from .candidate_research import assessment_from_execution
+    return assessment_from_execution(execution)
+
+
+def collect_queries_v2(topics, trade_date: str) -> dict[str, str]:
+    from datetime import timedelta
+    if set(topics) != set(BROAD_QUERIES_V2):
+        _fail("V2 broad research topics differ from its frozen complete topic set")
+    day = date.fromisoformat(trade_date)
+    if day.isoformat() != trade_date:
+        _fail("V2 broad research date is invalid")
+    lower, upper = (day - timedelta(days=30)).isoformat(), (day + timedelta(days=1)).isoformat()
+    return {topic: f"{text} after:{lower} before:{upper}" for topic, text in BROAD_QUERIES_V2.items()}
+
+
+def collect_v2(llm, topics: dict[str, str], trade_date: str) -> list[RawDocument]:
+    from .candidate_research import _native_document, merge_documents
+    queries, documents = collect_queries_v2(topics, trade_date), []
+    for topic, query in queries.items():
+        if len(query) > 128:
+            _fail("V2 broad native query exceeds the provider limit")
+        try:
+            rows = llm.search(query, count=4, need_content=True)
+        except LLMUnavailable:
+            _fail("Mandatory v2 broad search failed")
+        if type(rows) is not list or len(rows) > 4:
+            _fail("Mandatory v2 broad search result count is invalid")
+        additions = []
+        for row in rows:
+            native = _native_document(row, symbol="")
+            meta = {**native.meta, "target_symbols": [], "topic": topic,
+                    "native_title": row["title"], "native_content_characters": len(row["content"])}
+            additions.append(RawDocument(native.doc_id, native.source, native.title, native.url,
+                native.content, native.published, native.fetched_at, meta))
+        documents = merge_documents(documents, additions)
+    return documents
+
+
+def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
+    from .candidate_research import canonical
+    if "assessment" in payload:
+        _fail("V2 assessment must come from frozen execution")
+    inputs = {"assessment": assessment_context_v2(llm.execution), **payload}
+    try:
+        out = llm.complete_json(system=SYSTEM_V2, user=TASKS_V2[stage] + "\n" + canonical(inputs),
+                                schema_hint={}, schema=schema, max_tokens=max_tokens)
+        validate_schema(out, schema)
+        return out
+    except LLMUnavailable:
+        _fail("Mandatory v2 semantic answer failed transport or validation")
+
+
+def clean_payload_v2(docs, *, all_docs=None) -> dict:
+    from .candidate_research import source_view
+    originals = all_docs if all_docs is not None else docs
+    # The complete rule-cleaned body is consumed once, not another shorter
+    # prefix. Original-provider coverage remains explicit in the metadata.
+    values = []
+    for raw in docs:
+        view = source_view(raw, characters=len(raw.content))
+        view["native_content_characters"] = raw.meta.get("native_content_characters", len(raw.content))
+        view["provider_content_complete"] = view["native_content_characters"] == len(raw.content)
+        values.append(view)
+    return {"documents": values, "all_source_index": [{"id": raw.doc_id, "title": raw.title,
+        "url": raw.url, "published_at": raw.published or None} for raw in originals]}
+
+
+def clean_v2(llm, docs: list[RawDocument]):
+    from .. import config
+    from ..search.models import CleanDocumentV2
+    from .required_schemas import clean_schema_v2
+    from .candidate_research import source_view
+    ids = [doc.doc_id for doc in docs]
+    if len(ids) != len(set(ids)):
+        _fail("V2 semantic cleaning requires unique source identities")
+    result = []
+    batches = [docs[start:start + 8] for start in range(0, len(docs), 8)] or [[]]
+    for batch in batches:
+        schema = clean_schema_v2([doc.doc_id for doc in batch], list(TECH_SUBCHAINS),
+                                 config.SECTOR_ETFS, all_doc_ids=ids)
+        out = _call_v2(llm, "clean.llm_semantic", clean_payload_v2(batch, all_docs=docs), schema)
+        _coverage(out["documents"], "id", [doc.doc_id for doc in batch])
+        by_id = {row["id"]: row for row in out["documents"]}
+        for raw in batch:
+            row = by_id[raw.doc_id]
+            shown = source_view(raw, characters=len(raw.content))["content"]
+            if any(claim["quote"] not in shown for claim in row["claims"]):
+                _fail("V2 cleaned fact quote belongs to another or unseen source")
+            result.append(CleanDocumentV2(raw=raw, **{key: value for key, value in row.items() if key != "id"},
+                                         degraded=False, evidence=evidence_for(raw), corroborated=False))
+    return result
+
+
+def semantic_payload_v2(docs) -> dict:
+    """Retain the complete semantic index and all extracted source-bound claims.
+
+    Bodies were consumed in clean_v2. Later semantic stages receive the whole
+    summary/claim index, explicit provenance, and no false full-text claim.
+    """
+    from .candidate_research import plain
+    values = []
+    for doc in docs:
+        raw = doc.raw
+        values.append({"id": raw.doc_id, "title": raw.title, "url": raw.url,
+            "published_at": raw.published or None, "source": raw.source,
+            "summary_zh": doc.summary_zh, "tickers": doc.tickers, "events": doc.events,
+            "chain_ids": list(getattr(doc, "chain_ids", [])),
+            "sector_etfs": list(getattr(doc, "sector_etfs", [])),
+            "provenance": plain(getattr(doc, "provenance", {})),
+            "claims": plain(getattr(doc, "claims", [])), "corroborated": doc.corroborated,
+            "body_delivery": "semantic cleaning consumed the rule-cleaned body once; this call receives its full summary and exact extracted claims, not the full body"})
+    return {"document_index": values}
+
+
+def sentiment_v2(llm, docs):
+    from ..tech_chain.agents import SentimentEvidenceRow
+    from .required_schemas import sentiment_schema_v2
+    chains, ids = list(TECH_SUBCHAINS), [doc.raw.doc_id for doc in docs]
+    out = _call_v2(llm, "tech.sentiment", {"chains": chains, **semantic_payload_v2(docs)},
+                   sentiment_schema_v2(chains, ids), max_tokens=8192)
+    _coverage(out["chains"], "chain_id", chains)
+    return {row["chain_id"]: SentimentEvidenceRow(**row, degraded=False) for row in out["chains"]}
+
+
+def risk_v2(llm, docs):
+    from ..tech_chain.agents import RiskAssessment
+    from .required_schemas import risk_schema_v2
+    out = _call_v2(llm, "tech.risk", {"chains": list(TECH_SUBCHAINS), **semantic_payload_v2(docs)},
+                   risk_schema_v2(list(TECH_SUBCHAINS), [doc.raw.doc_id for doc in docs]), max_tokens=12288)
+    return RiskAssessment(out["assessment"], [RiskAlert(**row) for row in out["alerts"]],
+                          list(out["evidence_ids"]))
+
+
+def narrative_v2(llm, docs, etfs):
+    from .required_schemas import narrative_schema_v2
+    out = _call_v2(llm, "sector.narrative", {"etfs": etfs, **semantic_payload_v2(docs)},
+                   narrative_schema_v2(etfs, [doc.raw.doc_id for doc in docs]), max_tokens=12288)
+    _coverage(out["sectors"], "etf", etfs)
+    return {row["etf"]: {"score": row["narrative_score"], "bias": row["eps_revision_bias"],
+        "tone": row["guidance_tone"], "evidence": "; ".join(row["evidence"]),
+        "evidence_items": list(row["evidence"]), "evidence_ids": list(row["evidence_ids"]),
+        "research_contract": "tiger.short-term-research.v2"} for row in out["sectors"]}
+
+
+def build_decision_payload_v2(context: dict, docs, account_usd: float) -> dict:
+    from .candidate_research import plain, RESULT_SCHEMA
+    research = context.get("candidate_research")
+    if type(research) is not dict or research.get("schema") != RESULT_SCHEMA:
+        _fail("Final v2 decision requires its own completed issuer research")
+    approved = {row.ticker: row for row in context.get("picks", [])}
+    selected = {row["symbol"] for row in research["plan"]["targets"]}
+    watches = [row for row in context.get("watchlist", [])
+               if row.ticker not in approved and row.ticker in selected]
+    symbols = list(approved) + [row.ticker for row in watches]
+    market = market_snapshots(context["market_data"], symbols,
+        {key: research["assessment"][key] for key in ("run_date", "market_timezone")})
+    return {"approved_picks": [asdict(row) for row in approved.values()],
+        "watch_candidates": [asdict(row) for row in watches],
+        "numeric_action": context.get("action"), "mrs": plain(context.get("mrs")),
+        "sectors": plain(context.get("sectors")), "chains": plain(context.get("chains")),
+        "tech_signals": plain(context.get("tech_signals")),
+        "narrative_llm": plain(context.get("narrative_llm")),
+        "semantic_evidence": plain(context.get("semantic_evidence")),
+        "rejections": plain(context.get("rejections")),
+        "risk_rationale": plain(context.get("pick_rationale")),
+        "candidate_research": {"schema": research["schema"], "assessment": research["assessment"],
+            "theses": research["theses"], "coverage": research["coverage"],
+            "coverage_summary": research["coverage_summary"]},
+        "fact_evidence": research["fact_evidence"], "market_evidence": market,
+        "document_index": semantic_payload_v2(docs)["document_index"],
+        "research_source_index": research["source_index"],
+        "reference_capital_usd": account_usd}
+
+
+def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
+    from .candidate_research import (_raw, evidence_allows_buy, plain, validate_thesis,
+                                     presented_views_for_symbol)
+    from .required_schemas import decision_schema_v2
+    research = context.get("candidate_research")
+    payload = build_decision_payload_v2(context, docs, account_usd)
+    approved = {row.ticker: row for row in context.get("picks", [])}
+    symbols = [row["ticker"] for row in payload["approved_picks"] + payload["watch_candidates"]]
+    research_docs = [_raw(row) for row in research["documents"]]
+    by_id = {row.doc_id: row for row in research_docs}
+    market_by_symbol = {row["symbol"]: row for row in payload["market_evidence"]}
+    schema = decision_schema_v2(symbols, list(by_id), [row["id"] for row in payload["market_evidence"]],
+                                [row["id"] for row in research["fact_evidence"]])
+    out = _call_v2(llm, "decision.debate", payload, schema, max_tokens=16384)
+    _coverage(out["decisions"], "symbol", symbols)
+    buys = {row["symbol"] for row in out["decisions"] if row["action"] == "buy"}
+    if (not buys.issubset(approved) or (out["action"] == "BUY") != bool(buys)
+            or context.get("action") == "AVOID" and (buys or out["action"] != "AVOID")):
+        _fail("Final model v2 attempted to bypass numeric risk authority")
+    initial_by_symbol = {row["symbol"]: row for row in research["theses"]}
+    expiry = datetime.combine(next_trading_day(context["trade_date"]), time(16), ZoneInfo("America/New_York")).isoformat()
+    instructions = []
+    for row in out["decisions"]:
+        symbol, own_market = row["symbol"], market_by_symbol[row["symbol"]]
+        thesis = row["thesis"]
+        validate_thesis(thesis, symbol=symbol, documents=research_docs, market_snapshot=own_market,
+            fact_evidence=research["fact_evidence"], assessment=research["assessment"],
+            presented_documents=presented_views_for_symbol(research, symbol))
+        if thesis["followup"]["needed"]:
+            _fail("Final decision requested unexecuted issuer research")
+        if row["action"] == "buy" and (
+                symbol not in initial_by_symbol
+                or not evidence_allows_buy(initial_by_symbol[symbol], numeric_approved=True)
+                or not evidence_allows_buy(thesis, numeric_approved=True)):
+            _fail("Uncovered or insufficient research cannot authorize a new buy")
+        researched_claims = {json.dumps({key: value for key, value in claim.items() if key != "statement"},
+            ensure_ascii=False, sort_keys=True) for claim in initial_by_symbol.get(symbol, {}).get("claims", [])}
+        if any(json.dumps({key: value for key, value in claim.items() if key != "statement"},
+                ensure_ascii=False, sort_keys=True) not in researched_claims for claim in thesis["claims"]):
+            _fail("Final model cannot invent company evidence beyond its completed issuer research")
+        md_refs = [value for value in row["source_ids"] if value.startswith("md_")]
+        if md_refs != [own_market["id"]] or any(value != own_market["id"] and value not in by_id for value in row["source_ids"]):
+            _fail("Final v2 citations must bind their own market snapshot and actual sources")
+        referenced = list(dict.fromkeys([value for value in row["source_ids"] if value in by_id]
+            + [identity for claim in thesis["claims"] for identity in
+               (claim["source_id"], claim["origin_id"], claim.get("date_source_id")) if identity is not None]
+            + [value for part in thesis["five_part"].values() for value in part["evidence_ids"] if value in by_id]
+            + thesis["issuer_identity_evidence_ids"] + thesis["event_risk"]["source_ids"]))
+        if len(referenced) > 16:
+            _fail("Final v2 source registry exceeds its declared bound")
+        pick = approved.get(symbol) if row["action"] == "buy" else None
+        sources = [{"id": identity, "title": by_id[identity].title, "url": by_id[identity].url,
+                    "published_at": by_id[identity].published or None,
+                    "fetched_at": by_id[identity].fetched_at,
+                    "method": by_id[identity].source,
+                    "content_sha256": hashlib.sha256(by_id[identity].content.encode()).hexdigest()}
+                   for identity in referenced]
+        instructions.append({key: value for key, value in row.items() if key != "source_ids"} | {
+            "target_weight": pick.position_pct if pick else 0, "sources": sources,
+            "market_evidence": [own_market],
+            "entry_price": pick.entry_price if pick else None, "stop_price": pick.stop_price if pick else None,
+            "shares": pick.shares if pick else None, "risk_usd": pick.risk_usd if pick else None,
+            "time_stop_days": pick.time_stop_days if pick and pick.time_stop_days > 0 else None,
+            "valid_for": expiry, "reference_capital_usd": account_usd})
+    context["picks"] = [pick for symbol, pick in approved.items() if symbol in buys]
+    context["pick_rationale"] = {symbol: value for symbol, value in context.get("pick_rationale", {}).items() if symbol in buys}
+    context["action"], context["market_view"] = out["action"], out["action_summary"]
+    context["action_summary"], context["execution_decisions"] = out["action_summary"], instructions
+    return {"status": "model_required_v2", "triggered": symbols, "evidence": {},
+            "model_output": out, "execution_decisions": instructions, "action_summary": out["action_summary"]}
+
+
+def model_summary_v2(llm) -> dict:
+    """Reconcile completed six-stage calls against every settled reservation."""
+    from .request_budget import LIMITS, PRICING
+    from ..redline.execution import UPGRADE_MODEL_STAGES
+    try:
+        chats, searches, fetches = llm.receipts, llm.search_receipts, llm.fetch_receipts
+        budget = llm.budget.snapshot()
+        counts = {stage: sum(row["stage"] == stage for row in chats)
+                  for stage in UPGRADE_MODEL_STAGES}
+        expected_counts = {"chat": len(chats), "search": len(searches), "fetch": len(fetches)}
+        ids = [row["response_id"] for row in chats]
+        all_receipts = [(kind, row) for kind, rows in (("chat", chats), ("search", searches), ("fetch", fetches))
+                        for row in rows]
+        call_ids = [row["call_id"] for _, row in all_receipts]
+        records = {row["reservation"]["call_id"]: row for row in budget["records"]}
+        if (not all(counts.values()) or sum(counts.values()) != len(chats)
+                or len(set(ids)) != len(ids) or any(type(identity) is not str or not identity for identity in ids)
+                or len(set(call_ids)) != len(call_ids) or set(records) != set(call_ids)
+                or len(records) != len(budget["records"])
+                or budget["schema"] != "tiger.request-budget.v2"
+                or budget["frozen"] is not False or budget["reserved_tokens"] != 0
+                or budget["estimated_reserved_usd"] != 0 or budget["counts"] != expected_counts
+                or budget["limits"] != LIMITS or budget["pricing"] != PRICING
+                or len(searches) < 14 or len(searches) > LIMITS["max_search_calls"]
+                or len(fetches) > LIMITS["max_fetch_calls"]
+                or len(chats) > LIMITS["max_chat_calls"]
+                or len(all_receipts) > LIMITS["max_remote_requests"]
+                or any(row["status"] != "settled" for row in records.values())):
+            raise ValueError
+        for kind, receipt in all_receipts:
+            record = records[receipt["call_id"]]
+            reservation = record["reservation"]
+            if reservation["kind"] != kind or reservation["request_sha256"] != receipt["request_sha256"]:
+                raise ValueError
+            if kind == "chat" and (
+                    receipt["provider"] != "deepseek" or receipt["model"] != MODEL
+                    or receipt["release"] != RELEASE or receipt["finish_reason"] != "stop"
+                    or record["usage"] != receipt["usage"]):
+                raise ValueError
+        actual = sum(row["usage"]["total_tokens"] for row in chats)
+        charged = (actual * PRICING["token_upper_usd_per_million"] / 1000000
+                   + len(searches) * PRICING["search_upper_usd_per_request"]
+                   + len(fetches) * PRICING["fetch_upper_usd_per_request"])
+        if (budget["actual_tokens"] != actual or actual > LIMITS["max_tokens"]
+                or abs(budget["estimated_charged_usd"] - charged) > 1e-12
+                or charged > LIMITS["max_cost_usd"]):
+            raise ValueError
+    except (KeyError, AttributeError, TypeError, ValueError, OverflowError):
+        _fail("Required v2 model, native search/fetch or settled budget coverage is incomplete")
+    return {"provider": "deepseek", "model": MODEL, "release": RELEASE,
+            "required": True, "research_contract": "tiger.short-term-research.v2",
+            "response_ids": ids, "call_count": len(chats),
+            "required_stages": list(UPGRADE_MODEL_STAGES), "stage_counts": counts,
+            "search_count": len(searches), "fetch_count": len(fetches),
+            "search_mode": SEARCH_MODE, "all_required_completed": True, "budget": budget}

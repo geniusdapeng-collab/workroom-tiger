@@ -494,3 +494,477 @@ def test_legacy_exit_semantics_remain_explicitly_readable():
     legacy = evaluate_day(102., 103., 101., 102., 100., 95., 7,
                           policy_id="legacy-execution-v1")
     assert legacy.action == "hold"
+
+
+def test_research_date_and_prior_close_valuation_are_not_backdated_signals():
+    policy = _policy()
+    setup = _setup(known_at="2026-10-23")
+    snapshot = policy.portfolio_snapshot(_state(), {}, "2026-10-23")
+    budget = _budget(snapshot) | {"known_at": "2026-10-23"}
+    pick = {"ticker": "TEST", "entry_template": "A", "entry_price": 100.,
+            "stop_price": 95., "shares": 100, "risk_usd": 500.,
+            "chain": "ai_compute", "sector": "XLK", "time_stop_days": 7}
+    plan = policy.create_tranche_plan(pick, budget, "2026-10-26", setup=setup)
+    assert plan["signal_date"] == "2026-10-26"
+    assert plan["valuation_date"] == "2026-10-23"
+    assert plan["first_execution_date"] == "2026-10-27"
+    with pytest.raises(policy.ExecutionPolicyError):
+        policy.create_tranche_plan(pick, budget, "2026-10-22", setup=setup)
+
+
+def test_three_actual_tranches_use_prior_confirmation_and_keep_original_clock(tmp_path):
+    engine = SimEngine(str(tmp_path / "paper.json"))
+    engine.step(DAY, _result(), lambda ticker: None)
+    for day, price, expected in [("2026-10-27", 100., 40),
+                                 ("2026-10-28", 101., 80),
+                                 ("2026-10-29", 102., 100)]:
+        result = _result(day, picks=False)
+        result.raw["execution_setups"] = {"TEST": _fresh(day, entry_price=price)}
+        engine.step(day, result, lambda ticker: Bar(price, price + 1, price - 1, price,
+                                                   200_000_000., day))
+        pos = engine.state["positions"][0]
+        assert pos["shares"] == expected
+        assert pos["entry_date"] == "2026-10-27"
+        assert pos["initial_stop"] == 95.
+        assert pos["initial_risk_usd"] == pytest.approx(pos["shares"] * (pos["entry_price"] - 95.))
+    plan = next(iter(engine.state["entry_plans"].values()))
+    assert [receipt["shares"] for receipt in plan["fill_receipts"]] == [40, 40, 20]
+    assert plan["status"] == "filled"
+    assert pos["bars_held"] == 3
+    assert engine.state["pending"] == []
+
+
+def test_daily_high_cannot_invent_a_second_tranche_without_prior_confirmation(tmp_path):
+    engine = SimEngine(str(tmp_path / "paper.json"))
+    engine.step(DAY, _result(), lambda ticker: None)
+    for day, price in [("2026-10-27", 100.), ("2026-10-28", 105.)]:
+        engine.step(day, _result(day, picks=False),
+                    lambda ticker: Bar(price, 112., price - 1, price + 1, 200_000_000., day))
+    assert engine.state["positions"][0]["shares"] == 40
+    assert len(next(iter(engine.state["entry_plans"].values()))["fill_receipts"]) == 1
+
+
+def test_paper_storage_failure_leaves_memory_and_published_account_intact(tmp_path, monkeypatch):
+    import trading_system.simulator as module
+    engine = SimEngine(str(tmp_path / "paper.json"))
+    engine.step(DAY, _result(), lambda ticker: None)
+    before, stored = deepcopy(engine.state), (tmp_path / "paper.json").read_bytes()
+    def fail(*args, **kwargs): raise OSError("disk failure")
+    monkeypatch.setattr(module, "write_json_atomic", fail)
+    with pytest.raises(OSError):
+        engine.step("2026-10-27", _result("2026-10-27", picks=False),
+            lambda ticker: Bar(100., 101., 99., 100., 200_000_000., "2026-10-27"))
+    assert engine.state == before
+    assert (tmp_path / "paper.json").read_bytes() == stored
+
+
+def test_numeric_backtest_and_paper_use_same_integer_fill_exit_and_net_costs(tmp_path):
+    from types import SimpleNamespace
+    from trading_system.backtest import run_backtest
+    days = pd.to_datetime([DAY, "2026-10-27", "2026-10-28"])
+    data = {"open": [100., 100., 94.], "high": [101., 101., 96.],
+            "low": [99., 99., 93.], "close": [100., 100., 95.]}
+    panel = SimpleNamespace(dates=days, tickers=["TEST"], sector_data={})
+    for key, values in data.items(): setattr(panel, key, pd.DataFrame({"TEST": values}, index=days))
+    panel.vol = pd.DataFrame({"TEST": [2_000_000.] * 3}, index=days)
+    frame = DayFrame(days[0], 8., "黄金共振", [SectorSnap("XLK", 8., 80.)],
+        [CandidateSnap("TEST", 8., 1., 1., "XLK", "ai_compute", True, "A", 100., 95.,
+                       key_level=100., adv_usd=200_000_000.)])
+    backtest = run_backtest([frame], panel, GateParams(execution_policy=POLICY))
+    engine = SimEngine(str(tmp_path / "paper.json"))
+    signal = _result()
+    signal.picks[0].shares = 160
+    signal.picks[0].risk_usd = 800.
+    signal.picks[0].position_pct = .16
+    signal.raw["entry_budget"]["gross_cap"] = .9
+    engine.step(DAY, signal, lambda ticker: Bar(100., 101., 99., 100., 200_000_000., DAY))
+    for index in (1, 2):
+        day = str(days[index].date())
+        engine.step(day, _result(day, picks=False), lambda ticker: Bar(
+            data["open"][index], data["high"][index], data["low"][index], data["close"][index],
+            float((panel.vol["TEST"] * panel.close["TEST"]).iloc[:index+1].mean()), day))
+    assert backtest["n_trades"] == 1
+    actual, replay = engine.state["closed"][0], backtest["paper_state"]["closed"][0]
+    for key in ("shares", "entry_date", "exit_date", "entry", "exit", "pnl_usd", "gross_pnl", "friction_cost"):
+        assert actual[key] == replay[key]
+    assert backtest["paper_state"]["cash"] == engine.state["cash"]
+    assert backtest["evidence_scope"] == "numeric-paper-replay-not-historical-required-model-alpha"
+
+
+@pytest.mark.parametrize("change", [{"max_positions": 100}, {"portfolio_risk_pct": .5}, {"snapshot_hash": "bad"}])
+def test_frozen_plan_cannot_bypass_the_budget_validation(change):
+    policy = _policy()
+    snap = policy.portfolio_snapshot(_state(), {}, DAY)
+    pick = {"ticker": "TEST", "entry_template": "A", "entry_price": 100.,
+            "stop_price": 95., "shares": 100, "risk_usd": 500.}
+    with pytest.raises(policy.ExecutionPolicyError):
+        policy.create_tranche_plan(pick, _budget(snap) | change, DAY, setup=_setup())
+
+
+def test_tampered_plan_quantity_cannot_hide_unfilled_reservations():
+    policy, plan = _policy(), _plan()
+    plan["status"] = "filled"  # No receipts: this is an inconsistent ledger.
+    with pytest.raises(policy.ExecutionPolicyError): _plan_snapshot(plan)
+
+
+def test_market_state_caps_gross_budget_even_if_client_requests_the_global_maximum():
+    policy = _policy()
+    snap = policy.portfolio_snapshot(_state(), {}, DAY)
+    setup = _setup(mrs_star=5.8, in_main=False, in_sub=True, size_ratio=.35)
+    denied = policy.allocate_entry(snap, setup, _budget(snap) | {"gross_cap": .9})
+    assert denied["shares"] == 0
+
+
+def test_foreign_currency_symbol_cannot_enter_pure_usd_allocation():
+    policy = _policy()
+    snap = policy.portfolio_snapshot(_state(), {}, DAY)
+    assert policy.allocate_entry(snap, _setup("0700.HK"), _budget(snap))["shares"] == 0
+
+
+def _risk_context(cash=100_000., *, research_day=DAY, valuation_day=DAY, held=False):
+    from trading_system.data_models import SectorScore, StockCandidate
+    state = _state(cash)
+    candidates = [StockCandidate("TEST", sector_etf="XLK", chain_id="ai_compute",
+        price=100., stop_price=95., key_level=100., entry_template="A", tss_final=8.,
+        adv_usd=200_000_000., atr_pct=.03, c_liq=1.)]
+    if held:
+        state["positions"] = [{"ticker": "HELD", "shares": 100, "entry_price": 100.,
+            "initial_stop": 95., "stop": 95., "risk_group": "energy", "sector": "XLE",
+            "entry_date": "2026-10-23"}]
+        candidates.append(StockCandidate("HELD", sector_etf="XLE", chain_id="energy",
+            price=100., stop_price=95., key_level=100., entry_template="C", tss_final=8.,
+            adv_usd=200_000_000., atr_pct=.03, c_liq=1.))
+    frames = {c.ticker: pd.DataFrame({"Close": [100.], "Open": [100.], "High": [101.],
+        "Low": [99.], "Volume": [2_000_000.]}, index=pd.to_datetime([valuation_day])) for c in candidates}
+    return {"execution_policy": POLICY, "trade_date": research_day, "portfolio_state": state,
+        "portfolio_valuation_date": valuation_day, "market_data": {"stock_ohlcv": frames},
+        "mrs": MRSResult(8., 0., 1., 8., position_cap=(.7, .9)),
+        "sectors": [SectorScore("XLK", 8., breadth=80., in_main_pool=True)], "chain_map": {}, "watchlist": candidates}
+
+
+@pytest.mark.parametrize("cash, shares", [(50_000., 80), (100_000., 160), (200_000., 320)])
+def test_production_risk_v2_uses_canonical_current_nav(cash, shares):
+    from trading_system.agents.risk_manager_agent import RiskManagerAgent
+    context = _risk_context(cash)
+    picks = RiskManagerAgent(None, account_usd=100_000., max_picks=10).execute(context)
+    assert [pick.shares for pick in picks] == [shares]
+    assert context["entry_budget"]["schema"] == "tiger.entry-budget.v2"
+    assert context["portfolio_snapshot"]["nav"] == cash
+    assert context["cohort_inputs"]["portfolio_state"] == context["portfolio_state"]
+    assert context["cohort_inputs"]["portfolio_snapshot"]["state_hash"] == context["entry_budget"]["snapshot_hash"]
+
+
+def test_production_risk_preserves_held_setup_and_all_overlapping_reasons():
+    from trading_system.agents.risk_manager_agent import RiskManagerAgent
+    context = _risk_context(90_000., held=True)
+    context["watchlist"][0].entry_template = ""
+    context["mrs"].mrs_star = 5.17
+    RiskManagerAgent(None, max_picks=10).execute(context)
+    assert set(context["execution_setups"]) == {"TEST", "HELD"}
+    row = next(row for row in context["rejections"]["candidates"] if row["ticker"] == "TEST")
+    assert "entry_template_missing" in row["reasons"]
+    assert "numeric_gates_failed" in row["reasons"]
+    assert "no_legal_probe_channel" in row["reasons"]
+    assert context["picks"] == []
+
+
+def test_production_risk_has_no_fixed_cash_fallback_for_unknown_account():
+    from trading_system.agents.risk_manager_agent import RiskManagerAgent
+    context = _risk_context()
+    context.pop("portfolio_state")
+    assert RiskManagerAgent(None, max_picks=10).execute(context) == []
+    assert context["action"] == "WAIT"
+    assert "portfolio_state_missing" in context["rejections"]["candidates"][0]["reasons"]
+
+
+def test_production_risk_prior_close_is_disclosed_without_backdating_signal():
+    from trading_system.agents.risk_manager_agent import RiskManagerAgent
+    context = _risk_context(research_day="2026-10-26", valuation_day="2026-10-23")
+    assert RiskManagerAgent(None, max_picks=10).execute(context)
+    assert context["entry_budget"]["known_at"] == "2026-10-23"
+    assert context["cohort_inputs"]["signal_date"] == "2026-10-26"
+    assert context["execution_setups"]["TEST"]["known_at"] == "2026-10-23"
+
+
+def test_missing_template_does_not_hide_invalid_stop_in_multilabel_gates():
+    reasons = _policy().entry_gate_reasons(_setup(entry_template="", stop_price=101.))
+    assert "entry_template_missing" in reasons
+    assert "invalid_entry_or_stop" in reasons
+
+
+def test_nonnumeric_setup_fields_return_reasons_without_type_errors():
+    for changes in [{"size_ratio": None}, {"entry_price": None, "breadth": 20.}]:
+        assert _policy().entry_gate_reasons(_setup(**changes))
+
+
+def test_v2_does_not_implicitly_promote_active_sector_proxy_experiment():
+    from trading_system.agents.risk_manager_agent import RiskManagerAgent
+    context = _risk_context()
+    candidate = context["watchlist"][0]
+    context["market_data"]["stock_ohlcv"]["CDW"] = context["market_data"]["stock_ohlcv"].pop("TEST")
+    candidate.ticker, candidate.chain_id, candidate.sector_etf = "CDW", "", "XLY"
+    assert RiskManagerAgent(None, max_picks=10).execute(context) == []
+    row = context["rejections"]["candidates"][0]
+    assert row["sector_evidence"]["source"] == "unmapped"
+    assert "sector_evidence_missing" in row["reasons"]
+
+
+def test_required_model_explicit_empty_confirmations_cannot_fall_back_to_numeric_setup(tmp_path):
+    engine = SimEngine(str(tmp_path / "paper.json"))
+    engine.step(DAY, _result(), lambda ticker: None)
+    for day, price in [("2026-10-27", 100.), ("2026-10-28", 101.)]:
+        result = _result(day, picks=False)
+        result.raw["execution_setups"] = {"TEST": _fresh(day, entry_price=price)}
+        result.raw["tranche_confirmations"] = {}
+        engine.step(day, result, lambda ticker: Bar(price, price + 1, price - 1, price,
+                                                   200_000_000., day))
+    assert engine.state["positions"][0]["shares"] == 40
+    assert "confirmation" not in next(iter(engine.state["entry_plans"].values()))
+
+
+@pytest.mark.parametrize('policy', ['legacy-execution-v1', POLICY])
+def test_backtest_result_explicitly_identifies_version_and_numeric_scope_without_signals(policy):
+    from types import SimpleNamespace
+    from trading_system.backtest import run_backtest
+    panel = SimpleNamespace(dates=pd.DatetimeIndex([]), tickers=[])
+    params = GateParams(execution_policy=policy, initial_cash=90000., max_positions=3)
+    result = run_backtest([], panel, params)
+    assert result['execution_policy'] == policy
+    assert result['params'] is params and result['n_trades'] == 0
+    assert 'numeric' in result['evidence_scope']
+    if policy == POLICY:
+        assert result['paper_state']['initial_cash'] == 90000.
+        assert result['paper_state']['cash'] == 90000.
+        assert result['evidence_scope'] == 'numeric-paper-replay-not-historical-required-model-alpha'
+
+
+def test_long_lived_plans_bind_source_account_by_hash_without_recursive_history_growth():
+    import json
+    p = _policy()
+    state = _state()
+    sizes = []
+    for number in range(6):
+        setup = _setup(f'TEST{number}')
+        snapshot = p.portfolio_snapshot(state, {}, DAY)
+        budget = _budget(snapshot) | {'source_snapshot': deepcopy(snapshot), 'source_account_state': deepcopy(state)}
+        original = deepcopy(budget)
+        pick = {'ticker': setup['symbol'], 'entry_template': 'A', 'entry_price': 100., 'stop_price': 95., 'shares': 1}
+        plan = p.create_tranche_plan(pick, budget, DAY, setup=setup)
+        assert budget == original
+        assert 'source_account_state' not in plan['budget']
+        assert 'source_account_state' not in plan['frozen_contract']['budget']
+        assert plan['budget']['source_account_state_sha256'] == p._hash(state)
+        assert plan['budget']['source_budget_sha256'] == p._hash(original)
+        assert p.create_tranche_plan(pick, plan['budget'], DAY, setup=setup)['plan_id'] == plan['plan_id']
+        p._cancel(plan, 'SYNTHETIC_ONLY_frozen_plan_not_executed')
+        state['entry_plans'][plan['plan_id']] = plan
+        sizes.append(len(json.dumps(state)))
+    assert sizes[-1] < sizes[0] * 8, sizes
+    assert sizes[-1] < 100000
+    assert p.portfolio_snapshot(state, {}, DAY)['nav'] == 100000.
+
+
+def test_compact_plan_source_hash_tampering_is_not_a_new_admitted_contract():
+    p = _policy()
+    state = _state()
+    snapshot = p.portfolio_snapshot(state, {}, DAY)
+    budget = _budget(snapshot) | {'source_account_state': deepcopy(state), 'source_snapshot': snapshot}
+    pick = {'ticker': 'TEST', 'entry_template': 'A', 'entry_price': 100., 'stop_price': 95., 'shares': 100}
+    plan = p.create_tranche_plan(pick, budget, DAY, setup=_setup())
+    assert 'source_budget_sha256' in plan['budget']
+    for change_frozen in (False, True):
+        changed = deepcopy(plan)
+        changed['budget']['source_budget_sha256'] = 'd' * 64
+        if change_frozen:
+            changed['frozen_contract']['budget']['source_budget_sha256'] = 'd' * 64
+        with pytest.raises(p.ExecutionPolicyError):
+            p._validate_plan(changed)
+
+
+def test_existing_legal_full_source_plan_remains_readable_after_compaction():
+    p = _policy()
+    state = _state()
+    snapshot = p.portfolio_snapshot(state, {}, DAY)
+    full = _budget(snapshot) | {'source_account_state': deepcopy(state), 'source_snapshot': snapshot}
+    pick = {'ticker': 'TEST', 'entry_template': 'A', 'entry_price': 100., 'stop_price': 95., 'shares': 100}
+    plan = p.create_tranche_plan(pick, full, DAY, setup=_setup())
+    # Reconstruct the actual pre-compaction contract, with its original full
+    # immutable budget. No receipt or historical record is rewritten.
+    plan['budget'] = deepcopy(full)
+    plan['frozen_contract']['budget'] = deepcopy(full)
+    plan['plan_id'] = p._hash(plan['frozen_contract'])
+    p._validate_plan(plan)
+    state['entry_plans'][plan['plan_id']] = plan
+    valued = p.portfolio_snapshot(state, {'TEST': {'date': DAY, 'price': 100.}}, DAY)
+    assert valued['reserved_cash'] == 10000.
+    assert valued['committed_symbols'] == ['TEST']
+
+
+@pytest.mark.parametrize('opening', [102., 102.8])
+def test_current_protection_stop_at_open_blocks_add_before_exiting_original_shares(tmp_path, opening):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step(DAY, _result(), lambda ticker: None)
+    confirmed = _result('2026-10-27', picks=False)
+    confirmed.raw['execution_setups'] = {'TEST': _fresh('2026-10-27', entry_price=105.)}
+    engine.step('2026-10-27', confirmed,
+        lambda ticker: Bar(100., 111., 99., 105., 200_000_000., '2026-10-27'))
+    position = engine.state['positions'][0]
+    assert position['shares'] == 40 and position['stop'] == pytest.approx(102.8)
+    report = engine.step('2026-10-28', _result('2026-10-28', picks=False),
+        lambda ticker: Bar(opening, 104., 101., 103., 200_000_000., '2026-10-28'))
+    plan = next(iter(engine.state['entry_plans'].values()))
+    assert report['fills'] == []
+    assert len(plan['fill_receipts']) == 1 and plan['status'] == 'closed'
+    assert engine.state['positions'] == [] and engine.state['pending'] == []
+    assert engine.state['closed'][0]['shares'] == 40
+    assert engine.state['closed'][0]['exit_raw'] == opening
+    assert plan['cancelled_shares'] == 60
+
+
+@pytest.mark.parametrize('opening', [94.9, 95.])
+def test_first_open_at_or_below_structural_stop_is_not_repaired_by_added_friction(tmp_path, opening):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step(DAY, _result(), lambda ticker: None)
+    report = engine.step('2026-10-27', _result('2026-10-27', picks=False),
+        lambda ticker: Bar(opening, 97., 94., 96., 200_000_000., '2026-10-27'))
+    assert report['fills'] == [] and engine.state['closed'] == []
+    assert engine.state['positions'] == [] and engine.state['pending'] == []
+    plan = next(iter(engine.state['entry_plans'].values()))
+    assert plan['status'] == 'cancelled' and plan['fill_receipts'] == []
+    assert engine.state['cash'] == 100000.
+
+
+def test_consumed_confirmation_cannot_fund_a_third_tranche_after_a_later_empty_research(tmp_path):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step(DAY, _result(), lambda ticker: None)
+    for day, price, confirmations, expected_shares in [
+        ('2026-10-27', 100., {'TEST': _fresh('2026-10-27', entry_price=100.)}, 40),
+        ('2026-10-28', 101., {}, 80),
+        ('2026-10-29', 102., {}, 80),
+    ]:
+        result = _result(day, picks=False)
+        result.raw['tranche_confirmations'] = confirmations
+        engine.step(day, result, lambda ticker: Bar(price, price + 1, price - 1, price,
+                                                    200_000_000., day))
+        assert engine.state['positions'][0]['shares'] == expected_shares
+    plan = next(iter(engine.state['entry_plans'].values()))
+    assert len(plan['fill_receipts']) == 2 and 'confirmation' not in plan
+
+
+def test_later_add_cannot_consume_a_confirmation_older_than_the_previous_complete_trading_day(tmp_path):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step(DAY, _result(), lambda ticker: None)
+    result = _result('2026-10-27', picks=False)
+    result.raw['tranche_confirmations'] = {'TEST': _fresh('2026-10-27', entry_price=100.)}
+    engine.step('2026-10-27', result,
+        lambda ticker: Bar(100., 101., 99., 100., 200_000_000., '2026-10-27'))
+    # There is no new complete day / qualification. A missing bar cannot turn
+    # Tuesday's old model confirmation into a fresh Thursday opening intent.
+    before = deepcopy(engine.state)
+    with pytest.raises(_policy().ExecutionPolicyError):
+        engine.step('2026-10-28', _result('2026-10-28', picks=False), lambda ticker: None)
+    assert engine.state == before
+    report = engine.step('2026-10-29', _result('2026-10-29', picks=False),
+        lambda ticker: Bar(102., 103., 101., 102., 200_000_000., '2026-10-29'))
+    assert report['fills'] == [] and engine.state['positions'][0]['shares'] == 40
+
+
+def test_same_complete_bar_retry_preserves_the_previously_frozen_model_confirmation(tmp_path):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step(DAY, _result(), lambda ticker: None)
+    result = _result('2026-10-27', picks=False)
+    result.raw['tranche_confirmations'] = {'TEST': _fresh('2026-10-27', entry_price=100.)}
+    bar = Bar(100., 101., 99., 100., 200_000_000., '2026-10-27')
+    engine.step('2026-10-27', result, lambda ticker: bar)
+    before = deepcopy(engine.state)
+    engine.step('2026-10-27', result, lambda ticker: bar)
+    assert engine.state == before
+    engine.step('2026-10-28', _result('2026-10-28', picks=False),
+        lambda ticker: Bar(101., 102., 100., 101., 200_000_000., '2026-10-28'))
+    assert engine.state['positions'][0]['shares'] == 80
+
+
+def test_v2_journal_does_not_duplicate_full_account_history_inside_every_signal(tmp_path):
+    book = Journal(tmp_path / 'journal.json')
+    result = _result()
+    source = _state()
+    source['closed'] = [{'synthetic_account_history': 'TEST ONLY'}] * 20
+    result.raw['entry_budget']['source_account_state'] = deepcopy(source)
+    full_budget = deepcopy(result.raw['entry_budget'])
+    book.log_picks(result)
+    stored = book.records[0]['entry_budget']
+    assert 'source_account_state' not in stored
+    assert stored['source_account_state_sha256'] == _policy()._hash(source)
+    assert stored['source_budget_sha256'] == _policy()._hash(full_budget)
+    assert stored['risk_pct'] == full_budget['risk_pct']
+    assert result.raw['entry_budget'] == full_budget
+    assert book.records[0]['entry'] is None
+
+
+def test_prior_close_valued_research_cannot_backdate_a_new_model_confirmation(tmp_path):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step(DAY, _result(), lambda ticker: None)
+    first = _result('2026-10-27', picks=False)
+    first.raw['tranche_confirmations'] = {'TEST': _fresh('2026-10-27', entry_price=100.)}
+    engine.step('2026-10-27', first,
+        lambda ticker: Bar(100., 101., 99., 100., 200_000_000., '2026-10-27'))
+    later_research = _result('2026-10-29', picks=False)
+    later_research.raw['tranche_confirmations'] = {'TEST': _fresh('2026-10-28', entry_price=101.)}
+    engine.step('2026-10-29', later_research,
+        lambda ticker: Bar(101., 102., 100., 101., 200_000_000., '2026-10-28'))
+    assert engine.state['positions'][0]['shares'] == 80
+    assert 'confirmation' not in next(iter(engine.state['entry_plans'].values()))
+    report = engine.step('2026-10-29', _result('2026-10-29', picks=False),
+        lambda ticker: Bar(102., 103., 101., 102., 200_000_000., '2026-10-29'))
+    assert report['fills'] == [] and engine.state['positions'][0]['shares'] == 80
+
+
+def test_previous_complete_trading_day_confirmation_survives_the_weekend(tmp_path):
+    engine = SimEngine(str(tmp_path / 'paper.json'))
+    engine.step('2026-10-22', _result('2026-10-22'), lambda ticker: None)
+    first = _result('2026-10-23', picks=False)
+    first.raw['tranche_confirmations'] = {'TEST': _fresh('2026-10-23', entry_price=100.)}
+    engine.step('2026-10-23', first,
+        lambda ticker: Bar(100., 101., 99., 100., 200_000_000., '2026-10-23'))
+    report = engine.step('2026-10-26', _result('2026-10-26', picks=False),
+        lambda ticker: Bar(101., 102., 100., 101., 200_000_000., '2026-10-26'))
+    assert len(report['fills']) == 1 and report['fills'][0]['shares'] == 40
+    assert engine.state['positions'][0]['shares'] == 80
+
+
+@pytest.mark.parametrize('change', [
+    {'first_execution_date': DAY}, {'valuation_date': '2026-10-23'},
+    {'entry_template': 'B'}, {'risk_group': 'foreign-group'}, {'sector': 'XLF'},
+    {'chain': 'foreign-chain'}, {'time_stop_days': 8}, {'status': 'partial'},
+    {'tranche_field': 'index', 'value': 2}, {'tranche_field': 'shares', 'value': 90},
+    {'tranche_field': 'weight', 'value': .8}, {'tranche_field': 'filled_shares', 'value': 1},
+    {'tranche_field': 'status', 'value': 'filled'},
+])
+def test_mutable_plan_projection_cannot_change_its_frozen_execution_window_or_tranches(change):
+    p, plan = _policy(), _plan()
+    if 'tranche_field' in change:
+        plan['tranches'][0][change['tranche_field']] = change['value']
+    else:
+        plan.update(change)
+    with pytest.raises(p.ExecutionPolicyError):
+        p._validate_plan(plan)
+
+
+def test_persisted_plan_receipts_must_still_be_paper_and_bound_to_the_same_plan():
+    p, plan = _policy(), _plan()
+    intent = _first_intent(plan)
+    filled = p.apply_paper_fill(plan, intent, _receipt(intent))
+    for changes in [{'execution_mode': 'live'}, {'plan_id': 'foreign'}, {'shares': 0}, {'price': float('nan')}]:
+        changed = deepcopy(filled)
+        changed['fill_receipts'][0].update(changes)
+        with pytest.raises(p.ExecutionPolicyError):
+            p._validate_plan(changed)
+
+
+@pytest.mark.parametrize('changes', [{'entry_price': 101.}, {'time_stop_days': 8}, {'time_stop_days': True}])
+def test_new_plan_cannot_freeze_a_different_entry_or_an_invalid_time_deadline(changes):
+    p = _policy()
+    snap = p.portfolio_snapshot(_state(), {}, DAY)
+    pick = {'ticker': 'TEST', 'entry_template': 'A', 'entry_price': 100., 'stop_price': 95., 'shares': 100} | changes
+    with pytest.raises(p.ExecutionPolicyError):
+        p.create_tranche_plan(pick, _budget(snap), DAY, setup=_setup())

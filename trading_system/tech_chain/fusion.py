@@ -15,10 +15,11 @@ fusion 是确定性合成（规则保留区：权重固定、无歧义）。
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from ..redline import ExecutionTracer, Passthrough
-from .agents import (ChainMonitorRow, GlobalLinkageRow, RiskAlert, SentimentRow)
+from .agents import (ChainMonitorRow, GlobalLinkageRow, RiskAlert, RiskAssessment,
+                     SentimentEvidenceRow, SentimentRow)
 from .universe import SUBCHAIN_TO_MAIN, TECH_SUBCHAINS
 
 log = logging.getLogger("tech_chain.fusion")
@@ -52,6 +53,16 @@ class TechChainSignal:
         }
 
 
+@dataclass
+class TechChainEvidenceSignal(TechChainSignal):
+    """v2 projection carries full semantic provenance; numeric fusion is shared."""
+    semantic_evidence: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {**super().to_dict(), "evidence": list(self.evidence),
+                "semantic_evidence": self.semantic_evidence}
+
+
 def _score_momentum(row: ChainMonitorRow) -> float | None:
     """链 20 日动量 → 0..10。-10%→0 分，0→5 分，+10%→10 分（线性截断）。"""
     if row.chain_mom20 is None:
@@ -71,6 +82,8 @@ def _score_global(cid: str, linkage: list[GlobalLinkageRow]) -> float | None:
 
 def _score_sentiment(row: SentimentRow | None) -> float | None:
     if row is None or row.degraded or row.sentiment_score is None:
+        return None
+    if isinstance(row, SentimentEvidenceRow) and row.heat is None:
         return None
     heat = row.heat if row.heat is not None else 5.0
     # 情感方向 × 热度加权：强情感+高热度=极值，高热度+中性=中性
@@ -106,7 +119,7 @@ class TechChainFusionAgent:
                 monitor: list[ChainMonitorRow],
                 linkage: list[GlobalLinkageRow],
                 sentiment: dict[str, SentimentRow] | Passthrough,
-                alerts: list[RiskAlert] | Passthrough,
+                alerts: list[RiskAlert] | RiskAssessment | Passthrough,
                 tracer: ExecutionTracer | None = None) -> list[TechChainSignal]:
         sent_map: dict[str, SentimentRow] = {}
         sent_degraded = isinstance(sentiment, Passthrough)
@@ -115,7 +128,9 @@ class TechChainFusionAgent:
         alert_list: list[RiskAlert] = []
         risk_degraded = isinstance(alerts, Passthrough)
         if not risk_degraded:
-            alert_list = alerts
+            alert_list = alerts.alerts if isinstance(alerts, RiskAssessment) else alerts
+        version2 = isinstance(alerts, RiskAssessment) or any(
+            isinstance(row, SentimentEvidenceRow) for row in sent_map.values())
 
         mon_map = {r.chain_id: r for r in monitor}
         signals: list[TechChainSignal] = []
@@ -150,7 +165,10 @@ class TechChainFusionAgent:
                 degraded.append("tech.sentiment")
 
             s_risk, risk_level = _risk_penalty(cid, alert_list)
-            if risk_degraded:
+            # The v2 model supplies alerts and qualitative coverage, not a
+            # per-chain numeric safety score. No alert cannot create a 10/10
+            # dimension or a maximum prosperity bonus from absent evidence.
+            if risk_degraded or version2 and not any(a.chain_id in (cid, "unknown") for a in alert_list):
                 degraded.append("tech.risk")
             else:
                 parts["risk"] = (s_risk, W_RISK)
@@ -171,7 +189,20 @@ class TechChainFusionAgent:
             if risk_level >= 8.0:
                 bonus = min(bonus, 1.00)
 
-            signals.append(TechChainSignal(
+            signal_type = TechChainEvidenceSignal if version2 else TechChainSignal
+            semantic_evidence = {}
+            if version2:
+                sr = sent_map.get(cid)
+                semantic_evidence = {
+                    "sentiment": asdict(sr) if sr is not None else None,
+                    "risk": {
+                        "assessment": alerts.assessment if isinstance(alerts, RiskAssessment) else None,
+                        "evidence_ids": list(alerts.evidence_ids) if isinstance(alerts, RiskAssessment) else [],
+                        "alerts": [asdict(alert) for alert in alert_list
+                                   if alert.chain_id in (cid, "unknown")],
+                    },
+                }
+            signals.append(signal_type(
                 chain_id=cid,
                 main_chain=SUBCHAIN_TO_MAIN.get(cid, "semis"),
                 prosperity=prosperity,
@@ -185,6 +216,7 @@ class TechChainFusionAgent:
                 leading_link=row.leading_link if row else None,
                 degraded_components=degraded,
                 evidence=evidence,
+                **({"semantic_evidence": semantic_evidence} if version2 else {}),
             ))
         return signals
 

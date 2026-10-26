@@ -186,11 +186,19 @@ class CrossValidator:
     """
 
     def __init__(self, min_sources: int | None = None,
-                 max_tier: "SourceTier | str | None" = None):
+                 max_tier: "SourceTier | str | None" = None, *, contract_version=1):
+        if type(contract_version) is not int or contract_version not in (1, 2):
+            raise ValueError("Unsupported evidence contract")
+        self.contract_version = contract_version
         self.min_sources = min_sources or config.CORROBORATION_MIN_SOURCES
         self.max_tier = SourceTier.of(max_tier or config.CORROBORATION_MAX_TIER)
 
-    def validate(self, docs: list[CleanDocument]) -> dict:
+    def validate(self, docs: list[CleanDocument], *, contract_version=None) -> dict:
+        version = self.contract_version if contract_version is None else contract_version
+        if type(version) is not int or version not in (1, 2):
+            raise ValueError("Unsupported evidence contract")
+        if version == 2:
+            return self._validate_v2(docs)
         stats = CrossValidationStats(total=len(docs))
         groups: dict[tuple[str, str], list[CleanDocument]] = {}
         for d in docs:
@@ -224,8 +232,69 @@ class CrossValidator:
                          len(members), entity[:24], canon, sorted(sources), best_tier.name)
         return stats.to_dict()
 
+    def _validate_v2(self, docs: list[CleanDocument]) -> dict:
+        """Count source-bound original claims, never different publisher hosts.
 
-def scoring_docs(docs: list[CleanDocument]) -> list[CleanDocument]:
+        The model labels claim identity and attribution. This layer only checks
+        literal source binding and counts distinct observed original IDs for
+        that same claim. Unattributed/commentary records remain available to
+        semantic stages, explicitly uncorroborated.
+        """
+        by_id = {doc.raw.doc_id: doc for doc in docs}
+        if len(by_id) != len(docs):
+            raise ValueError("Duplicate semantic evidence identity")
+        for doc in docs:
+            if doc.evidence is None:
+                doc.evidence = evidence_for(doc.raw)
+        stats = CrossValidationStats(total=len(docs))
+        groups, membership, unknown = {}, {}, 0
+        for doc in docs:
+            if doc.evidence is None:
+                doc.evidence = evidence_for(doc.raw)
+            stats.missing_published_at += doc.evidence.published_at is None
+            doc.corroborated = False
+            if doc.degraded:
+                stats.llm_missing += 1
+                continue
+            provenance = getattr(doc, "provenance", {})
+            origin = provenance.get("origin_id")
+            if origin is None:
+                unknown += 1
+            if origin not in by_id or provenance.get("evidence_kind") not in {"primary", "media"}:
+                continue
+            own_claims = getattr(doc, "claims", [])
+            origin_doc = by_id[origin]
+            origin_meta = getattr(origin_doc, "provenance", {})
+            # A claimed origin must itself be an observed original, rather
+            # than another ungrounded link in a syndication chain.
+            if (origin_meta.get("origin_id") != origin
+                    or origin_meta.get("evidence_kind") not in {"primary", "media"}):
+                continue
+            original_keys = {_normalize(row["claim_key"]) for row in getattr(origin_doc, "claims", [])
+                             if row.get("quote") and _normalize(row["quote"]) in _normalize(origin_doc.raw.content)}
+            for claim in own_claims:
+                key, quote = _normalize(claim.get("claim_key", "")), claim.get("quote", "")
+                if not key or key not in original_keys or not quote or _normalize(quote) not in _normalize(doc.raw.content):
+                    continue
+                groups.setdefault(key, {})[origin] = SourceTier.of(origin_doc.evidence.tier)
+                membership.setdefault(doc.raw.doc_id, set()).add(key)
+        passed = {key for key, origins in groups.items()
+                  if len(origins) >= self.min_sources and min(origins.values()) <= self.max_tier}
+        for doc in docs:
+            doc.corroborated = bool(membership.get(doc.raw.doc_id, set()) & passed)
+            stats.corroborated += doc.corroborated
+        stats.key_event_docs = len(membership)
+        stats.downgraded = len(docs) - stats.corroborated
+        return {**stats.to_dict(), "contract_version": 2, "claim_groups": len(groups),
+                "corroborated_claim_groups": len(passed), "unknown_origin_docs": unknown,
+                "independence_basis": "observed_original_id_for_same_model_claim"}
+
+
+def scoring_docs(docs: list[CleanDocument], *, contract_version=1) -> list[CleanDocument]:
     """叙事/舆情打分输入集合：只用 corroborated=True 的文档；
     被降级文档不删除（透传纪律），决策侧仅作背景参考。"""
+    if type(contract_version) is not int or contract_version not in (1, 2):
+        raise ValueError("Unsupported evidence contract")
+    if contract_version == 2:
+        return [doc for doc in docs if not doc.degraded]
     return [d for d in docs if d.corroborated]

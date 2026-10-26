@@ -41,10 +41,11 @@ export class Ledger {
       if (/^\.pending-[a-f0-9-]+$/.test(file)) { await unlink(join(this.recordPath, file)); continue; }
       if (!/^\d{12}\.json$/.test(file)) throw new Error('Unexpected ledger file; integrity check failed');
       const path = join(this.recordPath, file); const stat = await lstat(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1_100_000) throw new Error('Ledger file is invalid');
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1_048_576 + 65536) throw new Error('Ledger file is invalid');
       const entry = JSON.parse(await readFile(path, 'utf8'));
       const keys = ['sequence', 'acceptedAt', 'previousHash', 'payloadHash', 'record', 'hash'];
       if (!entry || Object.keys(entry).length !== keys.length || keys.some(key => !Object.hasOwn(entry, key))) throw new Error('Ledger entry shape is invalid');
+      if (entry.record?.schemaVersion !== 3 && stat.size > 1_100_000) throw new Error('Legacy ledger file exceeds its immutable size contract');
       this.validate(entry.record);
       const { hash, ...body } = entry;
       if (file !== filename(this.entries.length + 1) || entry.sequence !== this.entries.length + 1 || entry.previousHash !== (this.entries.at(-1)?.hash ?? ZERO) || entry.payloadHash !== digest(entry.record) || hash !== digest(body) || !Number.isFinite(Date.parse(entry.acceptedAt))) throw new Error('Ledger hash chain integrity check failed');
@@ -111,7 +112,7 @@ export class ResearchLedger extends Ledger {
   constructor(path) { super(path); this.validate = validateResearch; }
   append(input) {
     // Old immutable records remain readable. A historical retry cannot create a new entry.
-    if (!this.keys.has(input?.idempotencyKey) && (input?.schemaVersion !== 2 || input?.modelMode !== 'enabled')) return Promise.reject(new PnlError(422, 'MODEL_REQUIRED', 'New execution decisions require the verified DeepSeek model contract'));
+    if (!this.keys.has(input?.idempotencyKey) && (input?.schemaVersion !== 3 || input?.modelMode !== 'enabled')) return Promise.reject(new PnlError(422, 'MODEL_REQUIRED', 'New research requires the verified whitepaper v2 model and business contract'));
     return super.append(input);
   }
   checkOrder(record) {

@@ -127,3 +127,142 @@ def decision_schema(symbols, doc_ids, market_ids) -> dict:
     ]}]
     return _object(action=_enum(["BUY", "WAIT", "AVOID"]), action_summary=_text(1200),
                    decisions=_array(decision, 0, len(candidates), unique=True))
+
+
+# The v1 builders above are deliberately immutable: archived parent receipts
+# reconstruct those exact schemas. New research uses these separate builders.
+def _allowed(values) -> dict:
+    values = list(values)
+    return _enum(values) if values else {"type": "string", "pattern": r"(?!)"}
+
+
+def _nullable(schema: dict) -> dict:
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _references(values, high=8, low=0) -> dict:
+    return _array(_allowed(values), low, high, unique=True)
+
+
+def clean_schema_v2(doc_ids, chain_ids, sector_symbols, *, all_doc_ids=None) -> dict:
+    docs = _ids(doc_ids, allow_empty=True)
+    origins = _ids(all_doc_ids if all_doc_ids is not None else docs, allow_empty=True)
+    chains = _ids(chain_ids, chains=True)
+    sectors = _ids(sector_symbols, symbols=True)
+    claim = _object(statement=_text(600), quote=_text(800),
+                    claim_key=_text(160),
+                    time_role=_enum(["current", "background", "unknown"]))
+    provenance = _object(
+        evidence_kind=_enum(["primary", "media", "commentary", "unknown"]),
+        origin_id=_nullable(_allowed(origins)), origin_note=_text(600),
+        time_role=_enum(["current", "background", "unknown"]),
+    )
+    document = _object(
+        id=_allowed(docs),
+        tickers=_array({"type": "string", "pattern": TICKER_PATTERN}, 0, 8, unique=True),
+        sentiment=_enum(["bullish", "bearish", "neutral", "mixed"]),
+        sentiment_score=_number(-1, 1), events=_array(_enum(_EVENTS), 0, 6, unique=True),
+        summary_zh=_text(800), relevance=_number(0, 1),
+        chain_ids=_references(chains, len(chains)),
+        sector_etfs=_references(sectors, len(sectors)),
+        provenance=provenance, claims=_array(claim, 0, 4, unique=True),
+    )
+    return _object(documents=_array(document, len(docs), len(docs), unique=True))
+
+
+def sentiment_schema_v2(chain_ids, doc_ids) -> dict:
+    chains, docs = _ids(chain_ids, chains=True), _ids(doc_ids, allow_empty=True)
+    row = _object(
+        chain_id=_enum(chains), heat=_nullable(_number(0, 10)),
+        sentiment_score=_nullable(_number(-1, 1)),
+        narrative_change=_enum(["improving", "stable", "deteriorating", "unknown"]),
+        key_drivers=_array(_text(800), 1, 5, unique=True),
+        evidence_ids=_references(docs),
+    )
+    return _object(chains=_array(row, len(chains), len(chains), unique=True))
+
+
+def risk_schema_v2(chain_ids, doc_ids) -> dict:
+    chains, docs = _ids(chain_ids, chains=True), _ids(doc_ids, allow_empty=True)
+    allowed = chains if "unknown" in chains else [*chains, "unknown"]
+    alert = _object(
+        severity=_number(1, 10), chain_id=_enum(allowed),
+        link=_enum(["upstream", "midstream", "downstream", "unknown"]),
+        type=_enum(["supply_chain", "policy", "patent", "capacity", "other"]),
+        headline_zh=_text(500), transmission=_array(_text(500), 1, 6, unique=True),
+        evidence_ids=_references(docs, low=1),
+    )
+    return _object(assessment=_text(2400), evidence_ids=_references(docs),
+                   alerts=_array(alert, 0, 20, unique=True))
+
+
+def narrative_schema_v2(etfs, doc_ids) -> dict:
+    sectors, docs = _ids(etfs, symbols=True), _ids(doc_ids, allow_empty=True)
+    row = _object(
+        etf=_enum(sectors), narrative_score=_nullable(_number(0, 10)),
+        eps_revision_bias=_enum(["up", "flat", "down", "unknown"]),
+        guidance_tone=_enum(["positive", "neutral", "negative", "unknown"]),
+        evidence=_array(_text(1000), 1, 5, unique=True), evidence_ids=_references(docs),
+    )
+    return _object(sectors=_array(row, len(sectors), len(sectors), unique=True))
+
+
+def thesis_schema_v2(symbols, doc_ids, fact_ids, market_ids) -> dict:
+    candidates = _ids(symbols, allow_empty=True, symbols=True)
+    docs = _ids(doc_ids, allow_empty=True)
+    facts = _ids(fact_ids, allow_empty=True)
+    markets = _ids(market_ids, allow_empty=True)
+    paragraph = _object(text=_text(1000),
+                        evidence_ids=_references([*docs, *facts, *markets], high=12, low=1))
+    claim = _object(
+        claim_id={"type": "string", "pattern": _ID_PATTERN}, statement=_text(700),
+        source_id=_allowed(docs), quote=_text(1000),
+        origin_id=_nullable(_allowed(docs)),
+        evidence_kind=_enum(["primary", "media", "commentary", "unknown"]),
+        time_role=_enum(["current", "background", "unknown"]),
+    )
+    # A Fetch page has no observed publication date. An optional reference may
+    # explicitly bind its date to an observed Search result for that same URL.
+    claim["properties"]["date_source_id"] = _nullable(_allowed(docs))
+    return _object(
+        schema_version={"const": 2}, symbol=_allowed(candidates),
+        strategy=_enum(["technical_flow_v2", "news_event_v2"]),
+        status=_enum(["sufficient", "insufficient", "contradictory"]),
+        issuer_name=_nullable(_text(200)), issuer_identity_evidence_ids=_references(docs),
+        five_part=_object(**{scope: paragraph for scope in ("market", "sector", "chain", "stock", "plan")}),
+        claims=_array(claim, 0, 8, unique=True),
+        event_risk=_object(status=_enum(["checked", "unknown"]), text=_text(1000),
+                           source_ids=_references(docs)),
+        entry_triggers=_array(_text(600), 1, 5, unique=True),
+        falsification=_array(_text(600), 1, 5, unique=True),
+        risk_notes=_array(_text(800), 1, 5, unique=True),
+        gaps=_array(_text(600), 0, 8, unique=True),
+        followup=_object(needed={"type": "boolean"}, question=_nullable(_text(40)),
+                         fetch_source_id=_nullable(_allowed(docs))),
+    )
+
+
+def research_schema_v2(symbols, doc_ids, fact_ids, market_ids) -> dict:
+    candidates = _ids(symbols, allow_empty=True, symbols=True)
+    return _object(
+        coverage_summary=_text(1600),
+        theses=_array(thesis_schema_v2(candidates, doc_ids, fact_ids, market_ids),
+                      len(candidates), len(candidates), unique=True),
+    )
+
+
+def decision_schema_v2(symbols, doc_ids, market_ids, fact_ids=()) -> dict:
+    candidates = _ids(symbols, allow_empty=True, symbols=True)
+    docs, markets = _ids(doc_ids, allow_empty=True), _ids(market_ids, allow_empty=True)
+    facts = _ids(fact_ids, allow_empty=True)
+    if len(markets) != len(candidates) or len(set([*docs, *markets, *facts])) != len(docs) + len(markets) + len(facts):
+        raise ValueError("MODEL_SCHEMA_MARKET_EVIDENCE_REQUIRED")
+    row = _object(
+        symbol=_allowed(candidates), action=_enum(["buy", "watch"]), action_summary=_text(500),
+        why_this=_text(1600), why_now=_text(1600), entry_condition=_text(1600),
+        invalidation=_text(1600), risk_note=_text(1600),
+        source_ids=_references([*docs, *markets], high=9, low=1),
+        thesis=thesis_schema_v2(candidates, docs, facts, markets),
+    )
+    return _object(action=_enum(["BUY", "WAIT", "AVOID"]), action_summary=_text(2400),
+                   decisions=_array(row, len(candidates), len(candidates), unique=True))

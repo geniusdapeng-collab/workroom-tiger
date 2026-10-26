@@ -8,7 +8,12 @@ import {
 
 const VERSIONS = new Set(["2025-03-26", "2025-06-18", "2025-11-25"]);
 const SERVER_VERSION = "1.0.0";
-export const INSTRUCTIONS = "Tiger runs the fixed public US paper workflow only. Call doctor and describe first. Run is hidden and rejected in readonly deployment. A returned accepted/running status is not completion: use the same run_id with status, then receipt and verify. Only a verified receipt may supply a completion summary; model-required accepts completed only. For every new AI research task or website research update explicitly select us-public-model-required-paper-v1 with trusted DeepSeek environment configuration and a separate state root. That profile requires real deepseek-flash responses for all five semantic stages plus provider-native Search; disabled, passthrough, rules replacement or missing evidence is failure, never completion. Legacy profiles retain historical disabled semantics. Paper signals and fills are not real broker execution. On connection loss, recover using the identical request and idempotency key; never generate a replacement key automatically. Tool cancellation stops observation, not an accepted worker. No live, skip, tuning, score or approval controls exist.";
+// An envelope is serialized once in structuredContent and again inside text. JSON
+// string escaping can double that text copy. Reserve that finite worst case plus
+// framing; each underlying envelope still has its version-specific 1/4 MiB cap.
+export const MCP_OUTPUT_BUFFER_BYTES = 3 * LIMITS.v2OutputBytes + LIMITS.frameBytes;
+export const INSTRUCTIONS = "Tiger runs the fixed public US paper workflow only. Call doctor and describe first. Run is hidden and rejected in readonly deployment. A returned accepted/running status is not completion: use the same run_id with status, then receipt and verify. Only a verified receipt may supply a completion summary; model-required accepts completed only. For every new AI research task or website research update select us-public-model-required-paper-v2, us-public-model-required-premarket-paper-v2 or us-public-model-required-intraday-paper-v2 for the requested daily, premarket or intraday phase, with trusted DeepSeek configuration and a separate versioned state root. These profiles require real deepseek-flash responses for all six semantic stages, provider-native Search and targeted Fetch when the source plan requests it, plus a settled bounded request budget; disabled, passthrough, rules replacement or missing evidence is failure. The five-part thesis must expose its actual sources and missing evidence. New sizing uses current paper-account NAV with held, pending and unfilled tranche commitments; eligible entries reserve an integer 40/40/20 plan, and later additions require a later complete requalification. Zero eligible buys is valid. WATCH and held opportunities continue through fresh quote observation, requalification, execution recheck, shared exits and forward business evaluation. Lifecycle pending intents require a fresh execution recheck and do not authorize broker orders. Unmatured outcomes cannot establish profits or strategy quality. Legacy profiles and receipts retain their historical semantics and verification but are not new research defaults. Paper signals and fills are not real broker execution. On connection loss recover using the identical request and idempotency key; never generate a replacement key automatically. Tool cancellation stops observation, not an accepted worker. No live, skip, tuning, score or approval controls exist.";
+
 const DESCRIPTIONS = {
   doctor: "Check the fixed public-paper runner and dependencies. No market/model calls or account writes.",
   describe: "Describe the fixed ordered workflow, public-data policy, output evidence and completion requirements.",
@@ -69,7 +74,7 @@ export function serve(options, { stdin = process.stdin, stdout = process.stdout,
     if (outputClosed) return;
     const line = JSON.stringify(message) + "\n";
     const bytes = Buffer.byteLength(line);
-    if (outputBytes + bytes > 4 * LIMITS.outputBytes) { shutdown(7, "MCP output backpressure limit exceeded."); return; }
+    if (outputBytes + bytes > MCP_OUTPUT_BUFFER_BYTES) { shutdown(7, "MCP output backpressure limit exceeded."); return; }
     outputBytes += bytes;
     try {
       stdout.write(line, (error) => {
