@@ -509,14 +509,20 @@ class RiskManagerAgent(BaseAgent):
             if account_problem: reasons.append(account_problem)
             if snapshot and candidate.ticker in snapshot["committed_symbols"]:
                 reasons.append("existing_or_pending_position")
-            if not math.isfinite(candidate.c_liq) or not 0 < candidate.c_liq <= 1:
+            # TSS._c_liq emits 0.5..1.1; high liquidity is a ranking
+            # multiplier, independent of the unchanged sizing/risk limits.
+            liquidity_valid = (not isinstance(candidate.c_liq, bool)
+                and isinstance(candidate.c_liq, (int, float))
+                and 0.5 <= candidate.c_liq <= 1.1 and math.isfinite(candidate.c_liq))
+            if not liquidity_valid:
                 reasons.append("liquidity_coefficient_invalid")
             if not reasons and spec is not None:
                 prev = float(frame["Close"].iloc[-2]) if len(frame) >= 2 else candidate.price
                 verdict = spec.check_order("buy", candidate.ticker, candidate.price, prev, trade_date)
                 compliance.append({"ticker": candidate.ticker, "side": "buy", **verdict.to_dict()})
                 if not verdict.allowed: reasons.append("compliance_rejected")
-            tos = round(mrs.mrs_star * shs * candidate.tss_final * candidate.c_liq / 100, 8)
+            tos = (round(mrs.mrs_star * shs * candidate.tss_final * candidate.c_liq / 100, 8)
+                   if liquidity_valid else 0.)
             candidate.tos = tos if math.isfinite(tos) else 0.
             diagnostics[candidate.ticker] = {"ticker": candidate.ticker,
                 "status": "rejected" if reasons else "provisional", "reasons": list(dict.fromkeys(reasons)),

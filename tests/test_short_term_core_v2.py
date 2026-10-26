@@ -49,12 +49,18 @@ def _thesis(symbol, payload, *, followup=False):
 def _answer(stage, payload, schema, *, followup=True):
     props = schema["properties"]
     if stage == "clean.llm_semantic":
-        return {"documents": [{"id": row["id"], "tickers": [], "sentiment": "neutral",
-            "sentiment_score": 0., "events": [], "summary_zh": "SYNTHETIC_TEST 完整摘要；来源归属与当前含义尚不能核实。",
-            "relevance": .5, "chain_ids": [], "sector_etfs": [], "claims": [],
-            "provenance": {"evidence_kind": "unknown", "origin_id": None,
-                           "origin_note": "SYNTHETIC_TEST 不编造独立原始来源。", "time_role": "unknown"}}
-            for row in payload["documents"]]}
+        documents = []
+        for row in payload["documents"]:
+            parts = [part for part in row["content_parts"]["rows"] if part[2] is True]
+            claims = [{"statement": "SYNTHETIC_TEST 已展示合成来源段落，真实业务含义仍未知。",
+                       "quote_part_id": parts[0][0], "claim_key": "synthetic_test_source_observation",
+                       "time_role": "unknown"}] if parts else []
+            documents.append({"id": row["id"], "tickers": [], "sentiment": "neutral",
+                "sentiment_score": 0., "events": [], "summary_zh": "SYNTHETIC_TEST 完整摘要；来源归属与当前含义尚不能核实。",
+                "relevance": .5, "chain_ids": [], "sector_etfs": [], "claims": claims,
+                "provenance": {"evidence_kind": "unknown", "origin_id": None,
+                               "origin_note": "SYNTHETIC_TEST 不编造独立原始来源。", "time_role": "unknown"}})
+        return {"documents": documents}
     if stage == "tech.sentiment":
         return {"chains": [{"chain_id": chain, "heat": None, "sentiment_score": None,
             "narrative_change": "unknown", "key_drivers": ["SYNTHETIC_TEST 未核实，不补中性分。"],

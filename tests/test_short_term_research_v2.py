@@ -762,11 +762,11 @@ def test_v2_no_risk_alert_or_numeric_coverage_cannot_create_maximum_prosperity_b
 
 
 class BoundedCleanClient:
-    """Synthetic output-capacity boundary, not a diagnosis of a paid failure.
+    """Select source-local parts without copying or rewriting their text.
 
-    The real failure recorded INCOMPLETE_MODEL_RESPONSE without its precise
-    finish reason. This stub tests that a smaller per-call output obligation
-    still processes every complete input and preserves cross-batch origins.
+    The actual third failed run had a schema-valid quote with one changed
+    Unicode character. These synthetic answers exercise the replacement wire
+    contract; they are not model, news-truth or future token-cost evidence.
     """
     def __init__(self, *, fail_call=None):
         self.execution = SemanticStub({}).execution
@@ -776,7 +776,7 @@ class BoundedCleanClient:
     def complete_json(self, **kwargs):
         payload = json.loads(kwargs["user"].split("\n", 1)[1])
         self.requests.append(copy.deepcopy(kwargs))
-        if len(payload["documents"]) > 4 or len(self.requests) == self.fail_call:
+        if len(payload["documents"]) > 8 or len(self.requests) == self.fail_call:
             raise LLMUnavailable("SYNTHETIC_TEST incomplete bounded semantic response")
         return {"documents": [{
             "id": row["id"], "tickers": ["AAA"], "sentiment": "mixed",
@@ -784,18 +784,18 @@ class BoundedCleanClient:
             "summary_zh": "SYNTHETIC_TEST 保留本篇限定、反证和未知日期，未声称外部事实已核实。",
             "relevance": .5, "chain_ids": [], "sector_etfs": [],
             "provenance": {"evidence_kind": "media",
-                "origin_id": payload["all_source_index"][-1]["id"],
+                "origin_id": payload["all_source_index"]["rows"][-1][0],
                 "origin_note": "SYNTHETIC_TEST 原始来源可以处于另一批，归属不能因减批丢失。",
                 "time_role": "unknown"},
             "claims": [{"statement": f"SYNTHETIC_TEST 本篇绑定事实{number}。",
-                "quote": row["content"][number:number + 40],
+                "quote_part_id": next(part[0] for part in row["content_parts"]["rows"] if part[2] is True),
                 "claim_key": f"synthetic_test_{row['id'].replace('-', '_')}_fact_{number}",
                 "time_role": "unknown"} for number in range(4)],
         } for row in payload["documents"]]}
 
 
-@pytest.mark.parametrize("count", [0, 1, 4, 5, 8, 56])
-def test_v2_clean_smaller_output_batches_preserve_every_full_body_and_global_source(count):
+@pytest.mark.parametrize("count", [0, 1, 8, 9, 16, 56])
+def test_v2_clean_part_selection_batches_preserve_every_full_body_and_global_source(count):
     documents = [RawDocument(f"synthetic-clean-{number}", "deepseek_search",
         f"SYNTHETIC_TEST source {number}", f"https://issuer.example/{number}",
         f"SYNTHETIC_TEST unique source {number}. " + "完整正文及反证。" * 1500,
@@ -805,39 +805,44 @@ def test_v2_clean_smaller_output_batches_preserve_every_full_body_and_global_sou
     client = BoundedCleanClient()
     cleaned = required.clean_v2(client, documents)
     assert [row.raw.doc_id for row in cleaned] == [row.doc_id for row in documents]
-    assert len(client.requests) == max(1, (count + 3) // 4)
+    assert len(client.requests) == max(1, (count + 7) // 8)
     payloads = [json.loads(row["user"].split("\n", 1)[1]) for row in client.requests]
     presented = [row for payload in payloads for row in payload["documents"]]
-    assert len(presented) == count and all(len(row["documents"]) <= 4 for row in payloads)
+    assert len(presented) == count and all(len(row["documents"]) <= 8 for row in payloads)
     for actual, original, semantic in zip(presented, documents, cleaned):
-        assert actual["content"] == original.content
+        assert "content" not in actual  # full body appears exactly once, in its ordered parts
+        assert actual["content_parts"]["columns"] == ["part_id", "text", "is_quoteable"]
+        assert "".join(part[1] for part in actual["content_parts"]["rows"]) == original.content
         assert actual["presented_content_characters"] == len(original.content)
         assert actual["content_complete"] is True
         assert actual["provider_content_complete"] is False
         assert semantic.raw is original and len(semantic.claims) == 4
         assert semantic.provenance["origin_id"] == documents[-1].doc_id
-    expected_ids = [row.doc_id for row in documents]
-    assert all([row["id"] for row in payload["all_source_index"]] == expected_ids for payload in payloads)
+        assert all(claim["quote"] in original.content and "quote_part_id" not in claim
+                   for claim in semantic.claims)
+    expected_sources = [[row.doc_id, row.title, row.url, row.published or None] for row in documents]
+    assert all(payload["all_source_index"] == {
+        "columns": ["id", "title", "url", "published_at"], "rows": expected_sources} for payload in payloads)
     assert all(row["max_tokens"] == 16384 for row in client.requests)
     assert normalize(documents) == before
     if count == 56:
         from trading_system.llm.request_budget import LIMITS
         budget = research_module().ResearchBudget()
-        # 14 cleaning + at most 14 issuer initial/followup + sentiment,
+        # Seven cleaning + at most 14 issuer initial/followup + sentiment,
         # risk, narrative and final decision. Token admission remains separate.
-        assert len(client.requests) + budget.max_model_calls + 4 == 32 <= LIMITS["max_chat_calls"]
-        assert LIMITS["max_tokens"] == 300000
+        assert len(client.requests) + budget.max_model_calls + 4 == 25 <= LIMITS["max_chat_calls"]
+        assert LIMITS["max_tokens"] == 300000 and LIMITS["max_cost_usd"] == 1.0
 
 
 def test_v2_clean_failed_later_batch_is_not_retried_or_returned_as_partial_success():
-    documents = [public_document(f"synthetic-clean-{number}") for number in range(8)]
+    documents = [public_document(f"synthetic-clean-{number}") for number in range(16)]
     client = BoundedCleanClient(fail_call=2)
     with pytest.raises(RequiredModelFailed):
         required.clean_v2(client, documents)
     assert len(client.requests) == 2
     assert [[row["id"] for row in json.loads(request["user"].split("\n", 1)[1])["documents"]]
             for request in client.requests] == [
-                [row.doc_id for row in documents[:4]], [row.doc_id for row in documents[4:]]]
+                [row.doc_id for row in documents[:8]], [row.doc_id for row in documents[8:]]]
 
 
 @pytest.mark.parametrize("key", ["contains space", "公司_订单", "bad<key>", "bad\nkey",
@@ -854,7 +859,7 @@ def test_v2_clean_machine_claim_identity_rejects_ambiguous_or_multiline_keys(key
     assert len(client.requests) == 1  # no silent repair or paid retry
 
 
-@pytest.mark.parametrize("field", ["summary_zh", "origin_note", "statement", "quote"])
+@pytest.mark.parametrize("field", ["summary_zh", "origin_note", "statement"])
 @pytest.mark.parametrize("unsafe", ["\n", "\r", "\t", "<", ">", "\u200b", "\u202e", "\x7f", "\u2060", "\ufeff", "\u2028", "\u2029"])
 def test_v2_clean_all_free_text_rejects_unsafe_trailing_characters_without_repair(field, unsafe):
     class UnsafeTextClient(BoundedCleanClient):
@@ -865,9 +870,8 @@ def test_v2_clean_all_free_text_rejects_unsafe_trailing_characters_without_repai
             target[field] += unsafe
             return out
     prefix = ("SYNTHETIC_TEST " + "x" * 50)[:40]
-    # For quote, the unsafe character is actually in the source; rejection must
-    # come from the text contract, not an unrelated source-substring mismatch.
-    doc = public_document(content=prefix + unsafe + " SYNTHETIC_TEST continuation")
+    # Plain prose remains checked even though quotes now use selected IDs.
+    doc = public_document(content=prefix + " SYNTHETIC_TEST continuation")
     with pytest.raises(RequiredModelFailed):
         required.clean_v2(UnsafeTextClient(), [doc])
 
@@ -904,6 +908,291 @@ def test_v2_clean_same_fact_key_can_cross_documents_and_is_not_regenerated_by_pr
             return out
     result = required.clean_v2(SameFactClient(), [public_document("synthetic-one"), public_document("synthetic-two")])
     assert [row.claims[0]["claim_key"] for row in result] == ["aaa_fy2026_orders_increased"] * 2
+
+
+@pytest.mark.parametrize("characters", [0, 1, 599, 600, 601, 1201, 24000])
+def test_v2_clean_part_table_preserves_the_exact_complete_normalized_source(characters):
+    m = research_module()
+    text = ("SYNTHETIC_TEST Zażółć gęślą jaźń — 分段只是索引，不替模型解释。 " * 1000)[:characters]
+    original = public_document(content=" \n\t" + text + " \r\n")
+    before = normalize(original)
+    view = required.clean_payload_v2([original])["documents"][0]
+    expected = m.source_view(original, characters=len(original.content))
+    parts = view["content_parts"]
+    assert parts["columns"] == ["part_id", "text", "is_quoteable"]
+    assert [part[0] for part in parts["rows"]] == [f"p{index}" for index in range(len(parts["rows"]))]
+    assert all(1 <= len(part[1]) <= 600 and type(part[2]) is bool for part in parts["rows"])
+    assert "".join(part[1] for part in parts["rows"]) == expected["content"]
+    assert view["presented_content_characters"] == len(expected["content"])
+    assert view["presented_content_sha256"] == hashlib.sha256(expected["content"].encode()).hexdigest()
+    assert view["content_complete"] is True and "content" not in view
+    assert {key: value for key, value in view.items() if key != "content_parts"} == {
+        key: value for key, value in expected.items() if key != "content"} | {
+        "native_content_characters": len(original.content), "provider_content_complete": True}
+    assert normalize(original) == before
+
+
+def test_v2_clean_resolves_original_unicode_from_the_selected_part_without_model_copy():
+    original = public_document(content="SYNTHETIC_TEST Zażółć gęślą jaźń. 原始 Unicode 不得被抄写改字。")
+    client = BoundedCleanClient()
+    result = required.clean_v2(client, [original])
+    request = client.requests[0]
+    payload = json.loads(request["user"].split("\n", 1)[1])
+    selected = payload["documents"][0]["content_parts"]["rows"][0]
+    assert selected[1] == original.content
+    for number, claim in enumerate(result[0].claims):
+        assert claim == {"statement": f"SYNTHETIC_TEST 本篇绑定事实{number}。",
+            "quote": original.content, "claim_key": f"synthetic_test_{original.doc_id}_fact_{number}",
+            "time_role": "unknown"}
+    wire = client.complete_json(**request)["documents"][0]
+    assert all("quote" not in claim and claim["quote_part_id"] == selected[0] for claim in wire["claims"])
+    assert "quote_part_id" in request["user"] and "is_quoteable" in request["user"]
+    assert "含义" in request["user"] and "不代表" in request["user"]
+
+
+@pytest.mark.parametrize("unsafe", ["<", ">", "\u200b", "\u202e", "\x7f", "\u2060", "\ufeff"])
+def test_v2_clean_unsafe_source_part_is_still_displayed_but_cannot_be_selected(unsafe):
+    original = public_document(content="SYNTHETIC_TEST " + "x" * 586 + unsafe + "hidden unsafe fragment")
+    payload = required.clean_payload_v2([original])
+    row = payload["documents"][0]
+    parts = row["content_parts"]["rows"]
+    assert len(parts) == 2 and parts[0][2] is True and parts[1][2] is False
+    assert "".join(part[1] for part in parts) == original.content and unsafe in parts[1][1]
+    class UnsafePartClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            out["documents"][0]["claims"][0]["quote_part_id"] = parts[1][0]
+            return out
+    client = UnsafePartClient()
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(client, [original])
+    assert len(client.requests) == 1
+    assert original.content == "".join(part[1] for part in parts)
+
+
+def test_v2_clean_all_unquoteable_or_empty_sources_remain_analyzed_without_fabricated_claims():
+    class NoQuoteClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            # The synthetic model explicitly chooses no facts. The program must
+            # not silently discard claims from an otherwise invalid answer.
+            payload = json.loads(kwargs["user"].split("\n", 1)[1])
+            self.requests.append(copy.deepcopy(kwargs))
+            return {"documents": [{"id": row["id"], "tickers": [], "sentiment": "mixed",
+                "sentiment_score": 0, "events": [], "summary_zh": "SYNTHETIC_TEST 已阅读，无法提取合规逐字引文，事实仍未核实。",
+                "relevance": .1, "chain_ids": [], "sector_etfs": [], "claims": [],
+                "provenance": {"evidence_kind": "unknown", "origin_id": None,
+                    "origin_note": "SYNTHETIC_TEST 无可引用原文不等于没有信息。", "time_role": "unknown"}}
+                for row in payload["documents"]]}
+    docs = [public_document("synthetic-unsafe", content="<SYNTHETIC_TEST unsafe source>"),
+            public_document("synthetic-empty", content=" \n\t")]
+    client = NoQuoteClient()
+    result = required.clean_v2(client, docs)
+    assert len(client.requests) == 1 and len(result) == 2
+    assert all(row.claims == [] and row.summary_zh for row in result)
+    assert [row.raw for row in result] == docs
+    shown = json.loads(client.requests[0]["user"].split("\n", 1)[1])["documents"]
+    assert shown[0]["content_parts"]["rows"][0][1] == docs[0].content
+    assert shown[0]["content_parts"]["rows"][0][2] is False
+    assert shown[1]["content_parts"]["rows"] == []
+
+
+@pytest.mark.parametrize("bad_id", ["p1", "p999", "p0\n", "p0:p1", "synthetic-long:p1"])
+def test_v2_clean_quote_part_identity_must_exist_in_its_own_source(bad_id):
+    docs = [public_document("synthetic-short", content="SYNTHETIC_TEST this source has p0 only."),
+            public_document("synthetic-long", content="SYNTHETIC_TEST " + "y" * 1200)]
+    class ForeignPartClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            out["documents"][0]["claims"][0]["quote_part_id"] = bad_id
+            return out
+    client = ForeignPartClient()
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(client, docs)
+    assert len(client.requests) == 1  # no repair, claim deletion or retry
+
+
+@pytest.mark.parametrize("mutation", ["extra_quote", "replace_part_with_quote", "missing_part"])
+def test_v2_clean_never_accepts_a_model_copied_quote_or_defaults_a_missing_part(mutation):
+    class CopiedQuoteClient(BoundedCleanClient):
+        def complete_json(self, **kwargs):
+            out = super().complete_json(**kwargs)
+            claim = out["documents"][0]["claims"][0]
+            if mutation != "extra_quote":
+                del claim["quote_part_id"]
+            if mutation != "missing_part":
+                claim["quote"] = "SYNTHETIC_TEST a copied quote is outside this wire contract"
+            return out
+    client = CopiedQuoteClient()
+    with pytest.raises(RequiredModelFailed):
+        required.clean_v2(client, [public_document()])
+    assert len(client.requests) == 1
+
+
+def test_v2_clean_global_source_table_is_lossless_and_reduces_repeated_key_framing():
+    docs = [public_document(f"synthetic-{index}", published="" if index % 2 else public_document().published)
+            for index in range(55)]
+    table = required.clean_payload_v2(docs[:8], all_docs=docs)["all_source_index"]
+    reconstructed = [dict(zip(table["columns"], row)) for row in table["rows"]]
+    expected = [{"id": doc.doc_id, "title": doc.title, "url": doc.url,
+                 "published_at": doc.published or None} for doc in docs]
+    assert reconstructed == expected
+    assert len(research_module().canonical(table).encode()) < len(research_module().canonical(expected).encode())
+
+
+def semantic_capacity_documents(claim_count=4):
+    """55 realistic-size SYNTHETIC annotations, never real model judgments.
+
+    The independent failure probe observed about 390 summary characters and
+    48 statement characters. Those lengths exercise full semantic framing;
+    all text here is an explicit placeholder, not a claim about those sources.
+    """
+    from trading_system.search.models import CleanDocumentV2
+    def text(length, label):
+        return (label + " 合成长度占位，保留日期未知、同源转载、反证和事件缺口。" * length)[:length]
+    docs = []
+    for index in range(55):
+        quote = text(600, f"SYNTHETIC_TEST source {index:02d} exact quote")
+        raw = public_document(f"synthetic-capacity-{index}",
+            content=quote + f" SYNTHETIC_TEST body-only-tail-{index}")
+        docs.append(CleanDocumentV2(raw, tickers=["AAA"], sentiment="mixed", sentiment_score=0,
+            events=["earnings"], summary_zh=text(390, f"SYNTHETIC_TEST 摘要{index}"), relevance=.5,
+            degraded=False, corroborated=index % 2 == 0, chain_ids=["memory"], sector_etfs=["SMH"],
+            provenance={"evidence_kind": "media", "origin_id": f"synthetic-capacity-{index % 3}",
+                "origin_note": text(180, f"SYNTHETIC_TEST 来源限定{index}"), "time_role": "unknown"},
+            claims=[{"statement": text(48, f"SYNTHETIC_TEST 事实{index}:{number}"),
+                "quote": quote, "claim_key": f"synthetic_issuer_{index}_fact_{number}",
+                "time_role": "unknown"} for number in range(claim_count)]))
+    return docs
+
+
+def decode_semantic_index(payload):
+    """A test-side mechanical decoder; it supplies no semantic defaults."""
+    table = payload["document_index"]
+    assert set(table) == {"columns", "rows"}
+    assert len(table["columns"]) == len(set(table["columns"]))
+    result = []
+    for values in table["rows"]:
+        assert len(values) == len(table["columns"])
+        row = dict(zip(table["columns"], values))
+        provenance, claims = row["provenance"], row["claims"]
+        assert set(provenance) == set(claims) == {"columns", "rows"}
+        assert len(provenance["rows"]) == 1
+        assert len(provenance["rows"][0]) == len(provenance["columns"])
+        assert all(len(claim) == len(claims["columns"]) for claim in claims["rows"])
+        row["provenance"] = dict(zip(provenance["columns"], provenance["rows"][0]))
+        row["claims"] = [dict(zip(claims["columns"], claim)) for claim in claims["rows"]]
+        result.append(row)
+    return result
+
+
+@pytest.mark.parametrize("claim_count", [3, 4])
+def test_v2_semantic_column_table_preserves_all_facts_and_caveats_with_exact_quote_refs(claim_count):
+    docs = semantic_capacity_documents(claim_count)
+    before = normalize(docs)
+    payload = required.semantic_payload_v2(docs)
+    rows = decode_semantic_index(payload)
+    assert len(rows) == len(docs) == 55
+    assert [row["id"] for row in rows] == [doc.raw.doc_id for doc in docs]
+    for row, doc in zip(rows, docs):
+        expected_claims = [{key: value for key, value in claim.items() if key != "quote"} | {
+            "quote_ref": {"sha256": hashlib.sha256(claim["quote"].encode()).hexdigest(),
+                          "characters": len(claim["quote"])}} for claim in doc.claims]
+        assert row == {"id": doc.raw.doc_id, "title": doc.raw.title, "url": doc.raw.url,
+            "published_at": doc.raw.published or None, "source": doc.raw.source,
+            "summary_zh": doc.summary_zh, "tickers": doc.tickers, "events": doc.events,
+            "chain_ids": doc.chain_ids, "sector_etfs": doc.sector_etfs,
+            "provenance": doc.provenance, "claims": expected_claims, "corroborated": doc.corroborated}
+        assert len(row["claims"]) == claim_count
+        assert all(set(claim["quote_ref"]) == {"sha256", "characters"} for claim in row["claims"])
+    serialized = research_module().canonical(payload)
+    assert all(doc.claims[0]["quote"] not in serialized and doc.raw.content not in serialized for doc in docs)
+    assert '"quote":' not in serialized and '"body_delivery":' not in research_module().canonical(payload["document_index"])
+    delivery = payload["document_delivery"]
+    assert set(delivery) == {"body_delivery", "quote_delivery", "quote_source_scope", "table_encoding"}
+    assert all(type(value) is str and value for value in delivery.values())
+    assert "not" in delivery["quote_delivery"].lower() and "id" in delivery["quote_source_scope"]
+    assert normalize(docs) == before
+
+
+def test_v2_semantic_table_empty_and_unannotated_sources_are_lossless():
+    empty = required.semantic_payload_v2([])
+    assert decode_semantic_index(empty) == [] and empty["document_delivery"]
+    doc = CleanDocument(public_document(), summary_zh=None)
+    row = decode_semantic_index(required.semantic_payload_v2([doc]))[0]
+    assert row["provenance"] == {} and row["claims"] == [] and row["summary_zh"] is None
+    assert row["chain_ids"] == [] and row["sector_etfs"] == []
+    assert doc.summary_zh is None
+
+
+def test_v2_semantic_table_framing_is_independent_of_mapping_order_in_sealed_replay():
+    docs = semantic_capacity_documents(3)[:2]
+    restored = copy.deepcopy(docs)
+    for doc in restored:
+        doc.provenance = dict(reversed(list(doc.provenance.items())))
+        doc.claims = [dict(reversed(list(claim.items()))) for claim in doc.claims]
+    # Sealed evidence serializes object keys canonically. Columns themselves
+    # are an ordered array, so deriving them from insertion order would change
+    # a reconstructed model request even though every semantic value is equal.
+    assert research_module().canonical(normalize(docs)) == research_module().canonical(normalize(restored))
+    assert required.semantic_payload_v2(docs) == required.semantic_payload_v2(restored)
+
+
+def test_v2_final_decision_receives_the_same_complete_semantic_table_and_delivery_scope():
+    ctx, _ = partial_news_context()
+    docs = semantic_capacity_documents()
+    before = normalize(docs)
+    semantic = required.semantic_payload_v2(docs)
+    payload = required.build_decision_payload_v2(ctx, docs, 100000.)
+    assert payload["document_index"] == semantic["document_index"]
+    assert payload["document_delivery"] == semantic["document_delivery"]
+    assert len(decode_semantic_index(payload)) == 55
+    # Directed issuer evidence retains its prior real presentation boundary;
+    # the broad source reference table cannot create a new issuer quote.
+    assert payload["candidate_research"]["theses"] == ctx["candidate_research"]["theses"]
+    assert payload["research_source_index"] == ctx["candidate_research"]["source_index"]
+    assert normalize(docs) == before
+
+
+@pytest.mark.parametrize("stage", ["tech.sentiment", "tech.risk", "sector.narrative"])
+@pytest.mark.parametrize("claim_count", [3, 4])
+def test_v2_full_55_source_semantic_requests_fit_the_unchanged_guard_with_a_declared_prefix(stage, claim_count):
+    from trading_system import config
+    from trading_system.llm.deepseek_required import build_chat_request
+    from trading_system.llm.request_budget import BudgetGuard, LIMITS
+    from trading_system.tech_chain.universe import TECH_SUBCHAINS
+    docs = semantic_capacity_documents(claim_count)
+    if stage == "tech.sentiment":
+        answer = {"chains": [{"chain_id": chain, "heat": None, "sentiment_score": None,
+            "narrative_change": "unknown", "key_drivers": ["SYNTHETIC_TEST 仅合成容量检查。"],
+            "evidence_ids": []} for chain in TECH_SUBCHAINS]}
+        client = SemanticStub(answer)
+        required.sentiment_v2(client, docs)
+    elif stage == "tech.risk":
+        client = SemanticStub({"assessment": "SYNTHETIC_TEST 风险未知，不能把容量测试当真实研究。",
+                               "evidence_ids": [], "alerts": []})
+        required.risk_v2(client, docs)
+    else:
+        client = SemanticStub({"sectors": [{"etf": etf, "narrative_score": None,
+            "eps_revision_bias": "unknown", "guidance_tone": "unknown",
+            "evidence": ["SYNTHETIC_TEST 只测完整输入，没有真实语义结论。"], "evidence_ids": []}
+            for etf in config.SECTOR_ETFS]})
+        required.narrative_v2(client, docs, config.SECTOR_ETFS)
+    kwargs = client.requests[0]
+    request = build_chat_request(**{key: kwargs[key] for key in (
+        "system", "user", "schema_hint", "schema", "max_tokens")})
+    guard = BudgetGuard(clock=lambda: 0.)
+    # This is an explicitly hypothetical legal prefix, not a forecast of the
+    # new real clean calls or an assertion about the complete future run.
+    prior = 100000
+    guard.reserve("chat", "1" * 32, {"messages": [{"role": "user", "content": "x" * prior}], "max_tokens": 1})
+    guard.settle("1" * 32, {"prompt_tokens": prior, "completion_tokens": 0, "total_tokens": prior})
+    reservation = guard.reserve("chat", "2" * 32, request)
+    assert reservation["token_upper_bound"] + prior <= LIMITS["max_tokens"] == 300000
+    assert LIMITS["max_chat_calls"] == 40 and LIMITS["max_cost_usd"] == 1.0
+    payload = json.loads(kwargs["user"].split("\n", 1)[1])
+    assert len(decode_semantic_index(payload)) == 55
+    assert kwargs["max_tokens"] == (8192 if stage == "tech.sentiment" else 12288)
+    assert "quote_ref" in kwargs["user"] and "未重读" in kwargs["system"]
 
 
 def test_v2_other_semantic_stages_do_not_receive_a_low_effort_override():

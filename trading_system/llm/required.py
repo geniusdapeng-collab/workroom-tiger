@@ -318,8 +318,10 @@ def model_summary(llm) -> dict:
 # v2 entry points are intentionally separate. The v1 schemas, prompts and typed
 # projections above remain reconstructible for immutable historical receipts.
 SYSTEM_V2 = SYSTEM + (
-    "本轮采用可追溯研究v2。只引用真正展示的资料及完整摘要/提取引文索引，"
-    "不得把索引摘要声称为重新通读全文；原始资料已由清洗模型逐篇解释，"
+    "本轮采用可追溯研究v2。只引用真正展示的资料及完整摘要/事实索引，"
+    "document_index是columns命名的完整列式语义表，含全部模型事实、来源与限定；"
+    "quote_ref仅是父来源行id绑定的引文SHA256及字符数，本次未重读其中的引文或正文。"
+    "不得把哈希引用或索引摘要声称为重新通读引文或全文；原始资料已由清洗模型逐篇解释，"
     "来源归属、时间、相反观点与证据缺口不能在下游压缩掉。"
     "primary/media/commentary是模型识别的材料性质，不是外部真实性担保。"
     "输出JSON每个字符串值必须单行，禁止换行、回车、制表符、控制字符、零宽或双向格式字符以及小于号和大于号。"
@@ -327,31 +329,39 @@ SYSTEM_V2 = SYSTEM + (
 )
 TASKS_V2 = {
     "clean.llm_semantic": (
-        "逐篇处理全部给定content，完成实体消歧、情感、事件、产业链/板块标签和完整中文摘要。"
-        "每个id恰好一次。给出最多四个重要事实及其本篇逐字quote、明确claim_key，"
+        "逐篇处理documents中的完整正文，完成实体消歧、情感、事件、产业链/板块标签和完整中文摘要。"
+        "正文完整且仅按顺序展示在content_parts.rows的text列；各列含义见columns，按原顺序阅读全部片段。"
+        "仅对documents中的每个id恰好返回一次；all_source_index是全体来源的归属索引，列含义见columns，不代表其他篇正文也已展示。"
+        "给出最多四个重要事实及其本篇quote_part_id、明确claim_key。"
+        "quote_part_id只能选本篇is_quoteable=true的一个part_id，例如p0；不要重抄quote文字，不得合并编号或借用别篇编号。"
+        "程序将逐字原样取回该片段作为quote，不作改写或近似匹配；事实含义、是否有依据、重要性和所有语义仍由你判断。"
+        "is_quoteable只代表片段满足引文格式，不代表可信、独立、相关或当前。"
         "不能把邻篇事实归给本篇。来源primary/media/commentary/unknown；"
         "仅能识别原始报道时origin_id引用给定源ID，未知用null。"
         "claim_key表达同一实体同一事件同一事实，转载不制造独立事实；"
         "claim_key是最长160字符的机器ASCII标识：首字符为小写英文字母或数字，其余仅[a-z0-9_.:-]，"
         "例如nvda_fy2026_q3_hbm_supply。不能有空格、中文或换行，也不能按文档ID生成不同的key；"
         "同实体同事件同事实在不同文档中复用同一个key，不同事实分开，未知日期不编造日期。"
-        "quote必须是本篇content中的逐字连续片段；若片段含禁止字符，另选安全的逐字片段或不提取该claim，"
-        "不能通过删除或改写引文字符来满足格式。"
+        "is_quoteable=false的片段仍须完整阅读和解释，但不能选择为引文；"
+        "没有支持该事实的可引用片段时不提取该claim，不能靠删字、改字或编造编号满足格式。"
         "旧/未知日期、AI评论、未具名消息、反证等限定必须进入摘要与origin_note。"
         "没有依据可不提取claims，不能补造。"
     ),
     "tech.sentiment": (
-        "对六链逐一判断，使用完整摘要和已绑定引文索引，保留所有限定与来源ID。"
+        "对六链逐一判断，读取document_index全部完整摘要、事实statement和来源限定，保留所有限定与来源ID。"
+        "quote_ref只有引文身份元数据，不含引文正文，不能声称本次重新读了引文。"
         "没有足够证据时heat和sentiment_score为null、narrative_change为unknown，"
         "理由说明缺什么，不能填中性默认分。"
     ),
     "tech.risk": (
         "逐链评估有证据的供应/政策/专利/产能风险。assessment完整说明覆盖、"
         "时效、共同原始来源及观点性质，即使alerts为空也保留，顶层evidence_ids列出整体评估的实际依据。每项预警绑定来源ID；"
-        "没有证据不能造预警，不能用摘要以外未展示原文细节。"
+        "读取document_index全部摘要、事实statement及来源限定；quote_ref只绑定原清洗引文，未在本次展示引文正文。"
+        "没有证据不能造预警，不能用摘要/事实以外未展示的原文细节。"
     ),
     "sector.narrative": (
-        "每个ETF恰好一次，根据完整摘要与已绑定引文推理盈利修正和指引，保留完整依据及ID。"
+        "每个ETF恰好一次，根据document_index全部完整摘要、事实statement和来源限定推理盈利修正和指引，保留完整依据及ID。"
+        "quote_ref是原引文身份引用，本次未重新展示引文正文，不能把引用当作重读。"
         "不足以评分时narrative_score=null，其余unknown，说明缺口；不要用默认5分。"
     ),
     "decision.debate": (
@@ -362,6 +372,8 @@ TASKS_V2 = {
         "news_event_v2必须有及时且可归属本公司的原始证据，未知日期不能当当前催化。"
         "任何必要证据未解决、deferred、contradictory或insufficient只能watch并显式说明，"
         "不能说没有新闻就没有机会，也不能说日期未知就无事件。"
+        "广域document_index保留全部摘要、事实与限定，quote_ref只绑定原清洗引文，不能据此新增公司原文quote；"
+        "公司事实quote只能保留已完成candidate_research中绑定并实际展示过的引文，不能声称本次重读了未展示正文。"
         "thesis五段依据、事实quote、来源/时间/观点限定和反证必须完整，不只复述分数。"
         "每条source_ids必须引用自己的唯一md_行情，最多八篇真实文档；"
         "无公司新闻的技术型说明不造新闻，但仍需解释事件排雷的已知与未知。"
@@ -442,6 +454,22 @@ def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
         _fail("Mandatory v2 semantic answer failed transport or validation")
 
 
+def clean_content_parts_v2(content: str) -> dict:
+    """Index every shown character; quoteability is format-only, not semantics.
+
+    Fixed character slices keep their exact concatenation, including unsafe
+    text. A model selects one safe source-local ID instead of retranscribing
+    Unicode; neither this function nor the lookup decides what a fact means.
+    """
+    import re
+    from .required_schemas import _text_v2
+    pattern = _text_v2(600)["pattern"]
+    return {"columns": ["part_id", "text", "is_quoteable"],
+            "rows": [[f"p{index}", content[start:start + 600],
+                      re.fullmatch(pattern, content[start:start + 600]) is not None]
+                     for index, start in enumerate(range(0, len(content), 600))]}
+
+
 def clean_payload_v2(docs, *, all_docs=None) -> dict:
     from .candidate_research import source_view
     originals = all_docs if all_docs is not None else docs
@@ -452,9 +480,13 @@ def clean_payload_v2(docs, *, all_docs=None) -> dict:
         view = source_view(raw, characters=len(raw.content))
         view["native_content_characters"] = raw.meta.get("native_content_characters", len(raw.content))
         view["provider_content_complete"] = view["native_content_characters"] == len(raw.content)
+        # Display the body once. Joining these ordered slices exactly restores
+        # the previous source_view content and its existing coverage/hash.
+        view["content_parts"] = clean_content_parts_v2(view.pop("content"))
         values.append(view)
-    return {"documents": values, "all_source_index": [{"id": raw.doc_id, "title": raw.title,
-        "url": raw.url, "published_at": raw.published or None} for raw in originals]}
+    return {"documents": values, "all_source_index": {
+        "columns": ["id", "title", "url", "published_at"],
+        "rows": [[raw.doc_id, raw.title, raw.url, raw.published or None] for raw in originals]}}
 
 
 def clean_v2(llm, docs: list[RawDocument]):
@@ -466,46 +498,86 @@ def clean_v2(llm, docs: list[RawDocument]):
     if len(ids) != len(set(ids)):
         _fail("V2 semantic cleaning requires unique source identities")
     result = []
-    # Each document can emit four attributed claims plus its full annotation.
-    # Bound that output obligation without shortening or omitting any body.
-    # Broad Search admits at most 56 sources: 14 clean calls + at most 14 issuer
-    # calls + four other semantic stages stay below the unchanged 40-call cap.
-    batches = [docs[start:start + 4] for start in range(0, len(docs), 4)] or [[]]
+    # Four attributed facts use short part IDs instead of recopied quotes. No
+    # source/body is omitted: up to 56 broad sources use seven clean calls;
+    # seven + at most 14 issuer calls + four other stages = 25 < the 40 cap.
+    # Actual token/cost admission remains the unchanged prepaid budget's job.
+    batches = [docs[start:start + 8] for start in range(0, len(docs), 8)] or [[]]
     for batch in batches:
+        payload = clean_payload_v2(batch, all_docs=docs)
+        quote_parts = {row["id"]: {part[0]: part[1] for part in row["content_parts"]["rows"]
+                                  if part[2] is True} for row in payload["documents"]}
         schema = clean_schema_v2([doc.doc_id for doc in batch], list(TECH_SUBCHAINS),
-                                 config.SECTOR_ETFS, all_doc_ids=ids)
-        out = _call_v2(llm, "clean.llm_semantic", clean_payload_v2(batch, all_docs=docs), schema)
+            config.SECTOR_ETFS, quote_part_ids={key: list(parts) for key, parts in quote_parts.items()},
+            all_doc_ids=ids)
+        out = _call_v2(llm, "clean.llm_semantic", payload, schema)
         _coverage(out["documents"], "id", [doc.doc_id for doc in batch])
         by_id = {row["id"]: row for row in out["documents"]}
         for raw in batch:
             row = by_id[raw.doc_id]
+            # Resolve only IDs admitted for this exact source and presentation.
+            # Every semantic field remains the model's unchanged judgment.
+            claims = [{key: value for key, value in claim.items() if key != "quote_part_id"}
+                      | {"quote": quote_parts[raw.doc_id][claim["quote_part_id"]]}
+                      for claim in row["claims"]]
             shown = source_view(raw, characters=len(raw.content))["content"]
-            if any(claim["quote"] not in shown for claim in row["claims"]):
+            if any(claim["quote"] not in shown for claim in claims):
                 _fail("V2 cleaned fact quote belongs to another or unseen source")
-            result.append(CleanDocumentV2(raw=raw, **{key: value for key, value in row.items() if key != "id"},
-                                         degraded=False, evidence=evidence_for(raw), corroborated=False))
+            result.append(CleanDocumentV2(raw=raw,
+                **{key: value for key, value in row.items() if key not in {"id", "claims"}}, claims=claims,
+                degraded=False, evidence=evidence_for(raw), corroborated=False))
     return result
 
 
-def semantic_payload_v2(docs) -> dict:
-    """Retain the complete semantic index and all extracted source-bound claims.
+def _column_table_v2(records, *, columns=None) -> dict:
+    """Remove repeated field names, preserving every value and row order."""
+    # Object key order is not semantic and sealed JSON sorts it. Canonical
+    # column names keep the ordered table arrays identical during proof replay.
+    keys = sorted(records[0]) if records else []
+    if columns is not None:
+        keys = list(columns)
+    if any(type(row) is not dict or set(row) != set(keys) for row in records):
+        _fail("V2 semantic table rows differ from their explicit columns")
+    return {"columns": keys, "rows": [[row[key] for key in keys] for row in records]}
 
-    Bodies were consumed in clean_v2. Later semantic stages receive the whole
-    summary/claim index, explicit provenance, and no false full-text claim.
+
+def semantic_payload_v2(docs) -> dict:
+    """Deliver every semantic fact and caveat without retransmitting quotes.
+
+    The exact quotes stay in CleanDocumentV2 and sealed cleaning evidence.
+    Later calls get source-bound hashes/lengths, explicitly not a rereading of
+    quotes or bodies. Mechanical tables preserve all prior semantic fields.
     """
     from .candidate_research import plain
     values = []
     for doc in docs:
         raw = doc.raw
+        claims = []
+        for claim in plain(getattr(doc, "claims", [])):
+            if (type(claim) is not dict or type(claim.get("quote")) is not str
+                    or "quote_ref" in claim):
+                _fail("V2 semantic claim requires its unchanged source quote")
+            quote = claim["quote"]
+            claims.append({key: value for key, value in claim.items() if key != "quote"} | {
+                "quote_ref": {"sha256": hashlib.sha256(quote.encode("utf-8")).hexdigest(),
+                              "characters": len(quote)}})
+        provenance = plain(getattr(doc, "provenance", {}))
         values.append({"id": raw.doc_id, "title": raw.title, "url": raw.url,
             "published_at": raw.published or None, "source": raw.source,
             "summary_zh": doc.summary_zh, "tickers": doc.tickers, "events": doc.events,
             "chain_ids": list(getattr(doc, "chain_ids", [])),
             "sector_etfs": list(getattr(doc, "sector_etfs", [])),
-            "provenance": plain(getattr(doc, "provenance", {})),
-            "claims": plain(getattr(doc, "claims", [])), "corroborated": doc.corroborated,
-            "body_delivery": "semantic cleaning consumed the rule-cleaned body once; this call receives its full summary and exact extracted claims, not the full body"})
-    return {"document_index": values}
+            "provenance": _column_table_v2([provenance]),
+            "claims": _column_table_v2(claims), "corroborated": doc.corroborated})
+    return {"document_index": _column_table_v2(values, columns=(
+        "id", "title", "url", "published_at", "source", "summary_zh", "tickers", "events",
+        "chain_ids", "sector_etfs", "provenance", "claims", "corroborated")),
+        "document_delivery": {
+            "body_delivery": "Semantic cleaning consumed each rule-cleaned body once. This document_index delivers every complete summary, model fact statement and source caveat, not the body.",
+            "quote_delivery": "This document_index supplies source-bound quote hashes and character lengths, not quote text. It does not represent this call rereading quotes or bodies.",
+            "quote_source_scope": "Each quote_ref belongs to its enclosing document_index row id. Its sha256 and characters identify the exact quote retained in private cleaning evidence, not a neighboring source or independently read text.",
+            "table_encoding": "Every columns array names the positions in its rows. Nested provenance is one mapping row; nested claims contains every fact in original order. Empty columns preserve an empty mapping and empty rows mean no facts.",
+        }}
 
 
 def sentiment_v2(llm, docs):
@@ -563,7 +635,7 @@ def build_decision_payload_v2(context: dict, docs, account_usd: float) -> dict:
             "theses": research["theses"], "coverage": research["coverage"],
             "coverage_summary": research["coverage_summary"]},
         "fact_evidence": research["fact_evidence"], "market_evidence": market,
-        "document_index": semantic_payload_v2(docs)["document_index"],
+        **semantic_payload_v2(docs),
         "research_source_index": research["source_index"],
         "reference_capital_usd": account_usd}
 

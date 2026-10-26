@@ -154,12 +154,19 @@ def _references(values, high=8, low=0) -> dict:
     return _array(_allowed(values), low, high, unique=True)
 
 
-def clean_schema_v2(doc_ids, chain_ids, sector_symbols, *, all_doc_ids=None) -> dict:
+def clean_schema_v2(doc_ids, chain_ids, sector_symbols, *, quote_part_ids, all_doc_ids=None) -> dict:
     docs = _ids(doc_ids, allow_empty=True)
     origins = _ids(all_doc_ids if all_doc_ids is not None else docs, allow_empty=True)
     chains = _ids(chain_ids, chains=True)
     sectors = _ids(sector_symbols, symbols=True)
-    claim = _object(statement=_text_v2(600), quote=_text_v2(800),
+    if not isinstance(quote_part_ids, dict) or set(quote_part_ids) != set(docs):
+        raise ValueError("MODEL_SCHEMA_SOURCE_QUOTE_PARTS_REQUIRED")
+    parts = {identity: _ids(quote_part_ids[identity], allow_empty=True) for identity in docs}
+    if any(re.fullmatch(r"p(?:0|[1-9][0-9]*)", part) is None
+           for values in parts.values() for part in values):
+        raise ValueError("MODEL_SCHEMA_INVALID_QUOTE_PART_ID")
+    allowed_parts = list(dict.fromkeys(part for values in parts.values() for part in values))
+    claim = _object(statement=_text_v2(600), quote_part_id=_allowed(allowed_parts),
                     claim_key={"type": "string", "minLength": 1, "maxLength": 160,
                                "pattern": r"^[a-z0-9][a-z0-9_.:-]{0,159}(?![\s\S])"},
                     time_role=_enum(["current", "background", "unknown"]))
@@ -178,6 +185,15 @@ def clean_schema_v2(doc_ids, chain_ids, sector_symbols, *, all_doc_ids=None) -> 
         sector_etfs=_references(sectors, len(sectors)),
         provenance=provenance, claims=_array(claim, 0, 4, unique=True),
     )
+    if docs:
+        # One shared annotation schema plus a small identity-dependent binding.
+        # Source-local p0/p1 IDs cannot select a part found only in a neighbor.
+        # The supported validator's oneOf avoids unsupported if/then keywords.
+        document["allOf"] = [{"oneOf": [{"properties": {
+            "id": {"const": identity},
+            "claims": {"items": {"properties": {
+                "quote_part_id": _allowed(parts[identity])}}},
+        }} for identity in docs]}]
     return _object(documents=_array(document, len(docs), len(docs), unique=True))
 
 
