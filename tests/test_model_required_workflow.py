@@ -63,7 +63,8 @@ def _answer(stage, schema):
         "decisions": [{"symbol": symbol, "action": "watch", "action_summary": "继续观察",
             "why_this": "测试候选", "why_now": "当前缺少批准买入条件", "entry_condition": "全部风控和证据通过后重新研究",
             "invalidation": "证据或价格失效即放弃", "risk_note": "测试结果没有实际交易含义",
-            "source_ids": props["source_ids"]["items"]["enum"][:1]}
+            "source_ids": [item for item in props["source_ids"]["items"]["enum"]
+                           if item.startswith("md_" + symbol + "_")]}
             for symbol in props["symbol"].get("enum", [])]}
 
 

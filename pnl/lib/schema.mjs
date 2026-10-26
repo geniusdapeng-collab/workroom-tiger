@@ -55,10 +55,11 @@ export function validateModelEvidence(model) {
   return model;
 }
 function validateSources(sources) {
-  list(sources, 'instruction.sources', 20);
+  list(sources, 'instruction.sources', 8);
   for (const source of sources) {
     shape(source, ['id', 'title', 'url', 'published_at'], 'instruction.source');
     text(source.id, 'instruction.source.id', 100); text(source.title, 'instruction.source.title', 500); text(source.url, 'instruction.source.url', 2048);
+    if (source.id.startsWith('md_')) fail('Market evidence cannot be presented as a news article');
     let url;
     try { url = new URL(source.url); } catch { fail('Source URL is invalid'); }
     if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.hash || [...url.searchParams.keys()].some(key => /token|key|signature|authorization|credential|secret|password/i.test(key.replace(/[_-]/g, '')))) fail('Source URLs must be public links without credentials');
@@ -69,23 +70,44 @@ function validateSources(sources) {
   }
   unique(sources, 'id', 'instruction.sources');
 }
-function validateExecutionDecisions(instructions, decisions) {
+function validateMarketEvidence(evidence, ownSymbol, assessmentDate) {
+  list(evidence, 'instruction.market_evidence', 1);
+  if (evidence.length !== 1) fail('Every instruction requires its own frozen stock market snapshot');
+  const snapshot = evidence[0];
+  shape(snapshot, ['id', 'symbol', 'as_of', 'close', 'series_sha256'], 'instruction.market_evidence');
+  symbol(snapshot.symbol, 'instruction.market_evidence.symbol');
+  if (snapshot.symbol !== ownSymbol) fail('Market snapshot must match the instruction symbol');
+  text(snapshot.as_of, 'instruction.market_evidence.as_of', 10, /^\d{4}-\d{2}-\d{2}$/);
+  if (snapshot.as_of.startsWith('0000-')) fail('Market snapshot requires a valid calendar year');
+  time(`${snapshot.as_of}T00:00:00Z`, 'instruction.market_evidence.as_of');
+  if (snapshot.as_of > assessmentDate) fail('Market snapshot cannot be after the New York assessment date');
+  number(snapshot.close, 'instruction.market_evidence.close', Number.MIN_VALUE, Number.MAX_VALUE);
+  text(snapshot.series_sha256, 'instruction.market_evidence.series_sha256', 64, /^[a-f0-9]{64}$/);
+  if (/^0+$/.test(snapshot.series_sha256)) fail('Market series hash cannot be a placeholder');
+  const expectedId = `md_${snapshot.symbol}_${snapshot.as_of.replaceAll('-', '')}_${snapshot.series_sha256.slice(0, 24)}`;
+  if (snapshot.id !== expectedId) fail('Market evidence ID must bind its symbol, date and frozen series hash');
+}
+function validateExecutionDecisions(instructions, decisions, asOf) {
   list(instructions, 'executionDecisions', 500);
   if (instructions.length !== decisions.length) fail('Model instructions must match the published decision set');
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(asOf)).map(({ type, value }) => [type, value]));
+  const assessmentDate = `${parts.year}-${parts.month}-${parts.day}`;
   for (const item of instructions) {
-    shape(item, ['symbol', 'action', 'target_weight', 'action_summary', 'why_this', 'why_now', 'entry_condition', 'invalidation', 'risk_note', 'sources', 'entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days', 'valid_for', 'reference_capital_usd'], 'executionDecision');
+    shape(item, ['symbol', 'action', 'target_weight', 'action_summary', 'why_this', 'why_now', 'entry_condition', 'invalidation', 'risk_note', 'sources', 'market_evidence', 'entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days', 'valid_for', 'reference_capital_usd'], 'executionDecision');
     symbol(item.symbol, 'executionDecision.symbol');
+    if (!['buy', 'watch'].includes(item.action)) fail('Required-model instructions support buy or watch only');
     const decision = decisions.find(row => row.symbol === item.symbol);
     if (!decision || decision.action !== item.action || decision.targetWeight !== item.target_weight) fail('Execution instruction differs from the published action or allocation');
     for (const key of ['action_summary', 'why_this', 'why_now', 'entry_condition', 'invalidation', 'risk_note']) text(item[key], `executionDecision.${key}`, 2000);
     time(item.valid_for, 'executionDecision.valid_for');
     validateSources(item.sources);
+    validateMarketEvidence(item.market_evidence, item.symbol, assessmentDate);
     for (const key of ['entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days', 'reference_capital_usd']) {
       if (item[key] !== null) number(item[key], `executionDecision.${key}`, Number.MIN_VALUE);
     }
     if ((item.shares !== null && !Number.isSafeInteger(item.shares)) || (item.time_stop_days !== null && !Number.isSafeInteger(item.time_stop_days))) fail('Shares and time stop must be whole numbers');
-    if (item.action === 'buy' && (item.target_weight <= 0 || item.entry_price === null || item.stop_price === null || item.shares === null || item.risk_usd === null || item.reference_capital_usd === null || item.stop_price >= item.entry_price)) fail('Buy instructions need the verified entry, stop, size and risk facts');
-    if (item.action === 'watch' && item.target_weight !== 0) fail('Watch instructions cannot claim an executed allocation');
+    if (item.action === 'buy' && (!item.sources.length || item.target_weight <= 0 || item.entry_price === null || item.stop_price === null || item.shares === null || item.risk_usd === null || item.reference_capital_usd === null || item.stop_price >= item.entry_price)) fail('Buy instructions need news evidence and verified entry, stop, size and risk facts');
+    if (item.action === 'watch' && (item.target_weight !== 0 || ['entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days'].some(key => item[key] !== null))) fail('Watch instructions require a zero target and no executable numeric plan');
   }
   unique(instructions, 'symbol', 'executionDecisions');
 }
@@ -168,7 +190,7 @@ export function validateResearch(record, now = Date.now()) {
   if (record.schemaVersion === 2) {
     if (record.modelMode !== 'enabled' || record.status !== 'completed') fail('Only fully completed required models can produce execution instructions', 'MODEL_REQUIRED');
     validateModelEvidence(record.model);
-    validateExecutionDecisions(record.executionDecisions, record.decisions);
+    validateExecutionDecisions(record.executionDecisions, record.decisions, record.asOf);
   }
   return record;
 }

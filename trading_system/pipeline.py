@@ -863,12 +863,15 @@ def run_pipeline(
         decision_symbols = approved_symbols + [candidate.ticker for candidate in context.get("watchlist", [])
                                                if candidate.ticker not in approved_symbols][:5]
         decision_asof = semantic.market_asof(market_data, decision_symbols, assessment)
+        decision_market_evidence = semantic.market_snapshots(market_data, decision_symbols, assessment)
     with tracer.step("decision.debate", {"enabled": config.DEBATE_ENABLED, "picks": picks,
-                     "rationale": context.get("pick_rationale", {}), "watchlist": context.get("watchlist", []),
+                     "rationale": context.get("pick_rationale") if required else context.get("pick_rationale", {}),
+                     "watchlist": context.get("watchlist", []),
                      "action": context.get("action", "HOLD"), "documents": cleaned,
                      **({"mrs": context.get("mrs"), "sectors": context.get("sectors"),
                          "rejections": context.get("rejections"), "account_usd": account_usd,
-                         "assessment": assessment, "market_asof": decision_asof} if required else {})}) as stage:
+                         "assessment": assessment, "market_asof": decision_asof,
+                         "market_evidence": decision_market_evidence} if required else {})}) as stage:
         from .agents.debate_agent import DebateAgent, select_debate_targets
         debate_raw: dict = {"status": "disabled", "triggered": [], "evidence": {}}
         if required:

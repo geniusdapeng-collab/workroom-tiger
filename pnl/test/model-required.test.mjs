@@ -65,6 +65,63 @@ test('execution cards bind numeric instructions to the compatibility decision an
   assert.doesNotThrow(() => validateResearch(watch));
 });
 
+function marketSnapshot(changes = {}) {
+  const snapshot = { symbol: 'AAPL', as_of: '2026-01-02', close: 100, series_sha256: digest('SYNTHETIC UNIT TEST BAR SERIES ONLY'), ...changes };
+  return { id: `md_${snapshot.symbol}_${snapshot.as_of.replaceAll('-', '')}_${snapshot.series_sha256.slice(0, 24)}`, ...snapshot };
+}
+function marketResearch(instruction = {}, record = {}) {
+  return modelResearchFixture({ executionDecisions: [instructionFixture({ market_evidence: [marketSnapshot()], ...instruction })], ...record });
+}
+
+test('watch can cite only its frozen own-stock market snapshot while a buy must also cite news', () => {
+  const watch = marketResearch({ sources: [] });
+  assert.doesNotThrow(() => validateResearch(watch));
+  assert.doesNotThrow(() => validateResearch(marketResearch({ action: 'buy' })));
+  assert.throws(() => validateResearch(marketResearch({ action: 'buy', sources: [] })), { status: 422 });
+  // Stock bars can be newer than the benchmark, provided they are not after assessment.
+  assert.doesNotThrow(() => validateResearch(marketResearch({ market_evidence: [marketSnapshot({ as_of: '2026-01-03' })] })));
+  const fresh = marketResearch({ market_evidence: [marketSnapshot({ as_of: '2026-01-03' })] }, { asOf: '2026-01-03T02:00:00Z' });
+  fresh.decisions[0].decidedAt = fresh.asOf;
+  assert.throws(() => validateResearch(fresh), { status: 422 }); // New York is still January 2.
+});
+
+test('market evidence rejects wrong identity, missing or extra snapshots, impossible dates and invented fields', () => {
+  const badSnapshots = [
+    null, [], {}, { ...marketSnapshot(), id: 'md_invented' }, marketSnapshot({ symbol: 'MSFT' }),
+    marketSnapshot({ as_of: '2026-01-04' }), marketSnapshot({ as_of: '2026-02-31' }),
+    marketSnapshot({ as_of: '0000-01-02' }),
+    marketSnapshot({ as_of: '2026-1-2' }), marketSnapshot({ as_of: '2026-01-02T00:00:00Z' }),
+    ...[0, -1, NaN, Infinity, '100', null].map(close => marketSnapshot({ close })),
+    marketSnapshot({ series_sha256: '0'.repeat(64) }), marketSnapshot({ series_sha256: 'A'.repeat(64) }),
+    marketSnapshot({ series_sha256: 'a'.repeat(63) }),
+    { ...marketSnapshot(), url: 'https://example.com/not-a-market-provider' },
+  ];
+  for (const snapshot of badSnapshots) assert.throws(() => validateResearch(marketResearch({ market_evidence: [snapshot] })), { status: 422 });
+  for (const evidence of [null, {}, [], [marketSnapshot(), marketSnapshot()]]) assert.throws(() => validateResearch(marketResearch({ market_evidence: evidence })), { status: 422 });
+  const missing = marketResearch(); delete missing.executionDecisions[0].market_evidence;
+  assert.throws(() => validateResearch(missing), { status: 422 });
+});
+
+test('v2 instructions admit buy or watch only and keep market references separate from at most eight news sources', () => {
+  for (const action of ['sell', 'hold']) assert.throws(() => validateResearch(marketResearch({ action })), { status: 422 });
+  const articles = Array.from({ length: 8 }, (_, index) => ({ id: `test-news-${index}`, title: 'SYNTHETIC NEWS ONLY', url: `https://example.com/test/${index}`, published_at: null }));
+  assert.doesNotThrow(() => validateResearch(marketResearch({ action: 'buy', sources: articles })));
+  assert.throws(() => validateResearch(marketResearch({ sources: [...articles, { ...articles[0], id: 'ninth-news' }] })), { status: 422 });
+  assert.throws(() => validateResearch(marketResearch({ sources: [{ ...articles[0], id: marketSnapshot().id }] })), { status: 422 });
+  assert.throws(() => validateResearch(marketResearch({ sources: [articles[0], articles[0]] })), { status: 422 });
+});
+
+for (const key of ['entry_price', 'stop_price', 'shares', 'risk_usd', 'time_stop_days']) {
+  test(`watch cannot include an executable ${key} while its real closing reference remains visible`, () => {
+    const watch = marketResearch({ sources: [] });
+    assert.equal(watch.executionDecisions[0].market_evidence[0].close, 100);
+    assert.equal(watch.executionDecisions[0][key], null);
+    assert.doesNotThrow(() => validateResearch(watch));
+    watch.executionDecisions[0][key] = 1;
+    assert.throws(() => validateResearch(watch), { status: 422 });
+  });
+}
+
 test('historical disabled chains still load unchanged while every new disabled append is refused', async t => {
   const path = await directory(t); const old = legacyFixture(); const entry = await writeHistoricalEntry(path, old);
   const store = await ResearchLedger.open(path);
@@ -93,7 +150,10 @@ test('HTTP publishes model execution instructions without inventing account fill
   const post = value => fetch(`${base}/api/v1/research`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   try {
     const denied = await post(legacyFixture()); assert.equal(denied.status, 422); assert.equal((await denied.json()).error.code, 'MODEL_REQUIRED');
-    const input = modelResearchFixture(); const accepted = await post(input); assert.equal(accepted.status, 201);
+    const invalid = marketResearch({ market_evidence: [marketSnapshot({ symbol: 'MSFT' })], sources: [] });
+    assert.equal((await post(invalid)).status, 422);
+    assert.equal((await (await fetch(`${base}/healthz`)).json()).research, 0);
+    const input = marketResearch({ sources: [] }); const accepted = await post(input); assert.equal(accepted.status, 201);
     const output = await (await fetch(`${base}/api/public/dashboard`)).json();
     assert.equal(output.latest, null); assert.deepEqual(output.records, []);
     assert.deepEqual(output.research.latest.model, input.model);

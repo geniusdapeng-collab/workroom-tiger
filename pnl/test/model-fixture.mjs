@@ -13,6 +13,7 @@ export function modelFixture() {
   };
 }
 export function instructionFixture({ symbol = 'AAPL', action = 'watch', ...overrides } = {}) {
+  const seriesHash = digest(`SYNTHETIC UNIT TEST SERIES ONLY ${symbol}`);
   return {
     symbol, action, target_weight: action === 'buy' ? 0.1 : 0,
     action_summary: '测试夹具：先等待，不构成真实交易指令。',
@@ -21,7 +22,8 @@ export function instructionFixture({ symbol = 'AAPL', action = 'watch', ...overr
     entry_condition: '测试夹具：只有新模型决策和风险校验同时通过后才执行。',
     invalidation: '测试夹具：条件未成立则不执行；过期后重新评估。',
     risk_note: '测试夹具：新闻可能变化，止损成交价无法保证。',
-    sources: [{ id: 'test-source-1', title: 'TEST SOURCE ONLY', url: 'https://example.com/test-source', published_at: '2026-01-02T12:00:00Z' }],
+    sources: [{ id: `ds_${digest('SYNTHETIC UNIT TEST SOURCE ONLY').slice(0, 24)}`, title: 'TEST SOURCE ONLY', url: 'https://example.com/test-source', published_at: '2026-01-02T12:00:00Z' }],
+    market_evidence: [{ id: `md_${symbol}_20260102_${seriesHash.slice(0, 24)}`, symbol, as_of: '2026-01-02', close: 100, series_sha256: seriesHash }],
     entry_price: action === 'buy' ? 100 : null, stop_price: action === 'buy' ? 95 : null,
     shares: action === 'buy' ? 100 : null, risk_usd: action === 'buy' ? 500 : null,
     time_stop_days: action === 'buy' ? 10 : null,

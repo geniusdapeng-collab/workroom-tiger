@@ -103,13 +103,27 @@ def narrative_schema(etfs, doc_ids) -> dict:
     return _object(sectors=_array(sector, len(sectors), len(sectors), unique=True))
 
 
-def decision_schema(symbols, doc_ids) -> dict:
+def decision_schema(symbols, doc_ids, market_ids) -> dict:
     candidates, docs = _ids(symbols, allow_empty=True, symbols=True), _ids(doc_ids)
+    markets = _ids(market_ids, allow_empty=True)
+    if (set(markets) & set(docs) or len(markets) != len(candidates)
+            or any(re.fullmatch(r"md_[A-Z][A-Z0-9.\-]{0,14}_[0-9]{8}_[0-9a-f]{24}", item) is None
+                   for item in markets)
+            or any(sum(item.startswith("md_" + symbol + "_") for item in markets) != 1
+                   for symbol in candidates)):
+        raise ValueError("MODEL_SCHEMA_MARKET_EVIDENCE_REQUIRED")
     symbol = _enum(candidates) if candidates else {"type": "string", "pattern": r"(?!)"}
     decision = _object(
         symbol=symbol, action=_enum(["buy", "watch"]), action_summary=_text(300),
         why_this=_text(1200), why_now=_text(1200), entry_condition=_text(1200),
-        invalidation=_text(1200), risk_note=_text(1200), source_ids=_evidence(docs),
+        invalidation=_text(1200), risk_note=_text(1200),
+        source_ids=_array(_enum([*docs, *markets]), 1, 9, unique=True),
     )
+    # A buy must carry at least its own market snapshot and one article. The
+    # execution owner additionally verifies the exact citation types and owner.
+    decision["allOf"] = [{"oneOf": [
+        {"properties": {"action": {"const": "buy"}, "source_ids": {"minItems": 2}}},
+        {"properties": {"action": {"const": "watch"}}},
+    ]}]
     return _object(action=_enum(["BUY", "WAIT", "AVOID"]), action_summary=_text(1200),
                    decisions=_array(decision, 0, len(candidates), unique=True))

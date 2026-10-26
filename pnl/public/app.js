@@ -2,10 +2,12 @@
 
 (() => {
   const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const MARKET_PRICE = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
   const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 });
   const PERCENT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const DATE_TIME = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
+  const NEW_YORK_DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
   const SVG_NS = "http://www.w3.org/2000/svg";
   const ACTION_NAMES = { buy: "买入指令", sell: "卖出指令", hold: "继续持有", watch: "暂不买入" };
   const REQUIRED_MODEL_STAGES = ["clean.llm_semantic", "tech.sentiment", "tech.risk", "sector.narrative", "decision.debate"];
@@ -92,6 +94,27 @@
     } catch { return null; }
   }
 
+  function calendarDate(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return false;
+    const stamp = Date.parse(`${value}T00:00:00Z`);
+    return Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === value;
+  }
+
+  function marketEvidenceValid(record, decision) {
+    if (!validDate(record.asOf) || !Array.isArray(decision.market_evidence) || decision.market_evidence.length !== 1) return false;
+    const snapshot = decision.market_evidence[0];
+    const fields = ["id", "symbol", "as_of", "close", "series_sha256"];
+    if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== "object"
+      || Object.keys(snapshot).length !== fields.length || !fields.every((key) => Object.hasOwn(snapshot, key))
+      || snapshot.symbol !== decision.symbol || !calendarDate(snapshot.as_of)
+      || !finite(snapshot.close) || snapshot.close <= 0
+      || typeof snapshot.series_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(snapshot.series_sha256) || /^0+$/.test(snapshot.series_sha256)) return false;
+    const parts = Object.fromEntries(NEW_YORK_DATE.formatToParts(new Date(record.asOf)).map(({ type, value }) => [type, value]));
+    const assessmentDate = `${parts.year}-${parts.month}-${parts.day}`;
+    const expectedId = `md_${snapshot.symbol}_${snapshot.as_of.replaceAll("-", "")}_${snapshot.series_sha256.slice(0, 24)}`;
+    return snapshot.as_of <= assessmentDate && snapshot.id === expectedId;
+  }
+
   function modelQualified(record) {
     const model = record?.model;
     return record?.modelMode === "enabled" && record.status === "completed"
@@ -113,13 +136,17 @@
     let totalWeight = 0;
     for (const decision of record.executionDecisions) {
       if (!decision || typeof decision.symbol !== "string" || !/^[A-Z0-9][A-Z0-9.^=-]{0,19}$/.test(decision.symbol)
-        || seen.has(decision.symbol) || !Object.hasOwn(ACTION_NAMES, decision.action)
+        || seen.has(decision.symbol) || !["buy", "watch"].includes(decision.action)
         || !finite(decision.target_weight) || decision.target_weight < 0 || decision.target_weight > 1
         || !["action_summary", "why_this", "why_now", "entry_condition", "invalidation", "risk_note", "valid_for"].every((key) => plainText(decision[key]))
         || !["entry_price", "stop_price", "shares", "risk_usd", "time_stop_days", "reference_capital_usd"].every((key) => decision[key] === null || (finite(decision[key]) && decision[key] >= 0))
-        || !Array.isArray(decision.sources) || decision.sources.some((source) => !source || !plainText(source.id) || !plainText(source.title) || !sourceUrl(source.url))) return false;
-      if (decision.action === "watch" && decision.target_weight !== 0) return false;
-      if (decision.action === "buy" && (!(decision.target_weight > 0) || !(decision.entry_price > 0)
+        || !marketEvidenceValid(record, decision)
+        || !Array.isArray(decision.sources) || decision.sources.length > 8
+        || new Set(decision.sources.map((source) => source?.id)).size !== decision.sources.length
+        || decision.sources.some((source) => !source || !plainText(source.id) || source.id.startsWith("md_") || !plainText(source.title) || !sourceUrl(source.url))) return false;
+      if (decision.action === "watch" && (decision.target_weight !== 0
+        || ["entry_price", "stop_price", "shares", "risk_usd", "time_stop_days"].some((key) => decision[key] !== null))) return false;
+      if (decision.action === "buy" && (!decision.sources.length || !(decision.target_weight > 0) || !(decision.entry_price > 0)
         || !(decision.stop_price > 0) || !(decision.stop_price < decision.entry_price)
         || !positiveInteger(decision.shares) || !(decision.risk_usd > 0) || !(decision.reference_capital_usd > 0))) return false;
       seen.add(decision.symbol);
@@ -354,6 +381,13 @@
       addInstructionReason(reasons, "为什么现在", item.why_now);
       article.append(reasons);
 
+      const market = item.market_evidence[0];
+      const provenance = element("div", "instruction-market-evidence");
+      provenance.append(element("h5", "", "行情依据"), element("p", "instruction-market-facts", `${market.symbol} · ${market.as_of} 交易日 · 收盘 ${MARKET_PRICE.format(market.close)}`));
+      provenance.append(element("p", "instruction-market-note", "模型本轮引用的已冻结行情快照，非实时价格。"));
+      provenance.append(element("p", "instruction-news-note", item.sources.length ? `公司新闻引用 ${item.sources.length} 篇 · 可展开下方来源查看` : "本条未引用公司新闻"));
+      article.append(provenance);
+
       const metrics = element("dl", `instruction-metrics${item.action === "watch" ? " is-observation" : ""}`);
       for (const [label, value] of [["入场参考", money(item.entry_price)], ["认错线 / 止损", money(item.stop_price)], ["计划股数", item.shares === null ? "—" : `${number(item.shares)} 股`]]) {
         const metric = element("div");
@@ -385,9 +419,9 @@
           sources.append(row);
         }
         evidence.append(sources);
-      } else evidence.append(element("p", "instruction-numeric-note", "本项没有独立公开来源链接；不补造引用。"));
+      }
       const meta = element("div", "instruction-identifiers");
-      meta.append(element("span", "", `运行 ${research.runId}`), element("span", "", `原始有效范围 ${item.valid_for}`), element("span", "", `原始回执 SHA256 ${research.receiptHash}`));
+      meta.append(element("span", "", `行情快照 ${market.id}`), element("span", "", `完整行情序列 SHA256 ${market.series_sha256}`), element("span", "", `运行 ${research.runId}`), element("span", "", `原始有效范围 ${item.valid_for}`), element("span", "", `原始回执 SHA256 ${research.receiptHash}`));
       evidence.append(meta);
       article.append(evidence);
       fragment.append(article);

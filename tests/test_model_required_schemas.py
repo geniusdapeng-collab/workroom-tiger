@@ -16,6 +16,7 @@ DOCS = ["doc-1", "doc-2"]
 CHAINS = ["memory", "logic"]
 ETFS = ["XLK", "SMH"]
 SYMBOLS = ["AAPL", "MSFT"]
+MARKET_IDS = ["md_" + symbol + "_20261023_" + "a" * 24 for symbol in SYMBOLS]
 
 
 def examples():
@@ -38,12 +39,12 @@ def examples():
                                "why_this": "Issuer evidence", "why_now": "Recent release",
                                "entry_condition": "Wait for the approved setup",
                                "invalidation": "Issuer retracts guidance",
-                               "risk_note": "Liquidity and gap risk", "source_ids": [DOCS[0]]}]}
+                               "risk_note": "Liquidity and gap risk", "source_ids": [MARKET_IDS[0], DOCS[0]]}]}
     return {"clean": (clean_schema(DOCS), clean),
             "sentiment": (sentiment_schema(CHAINS, DOCS), sentiment),
             "risk": (risk_schema(CHAINS, DOCS), risk),
             "narrative": (narrative_schema(ETFS, DOCS), narrative),
-            "decision": (decision_schema(SYMBOLS, DOCS), decision)}
+            "decision": (decision_schema(SYMBOLS, DOCS, MARKET_IDS), decision)}
 
 
 ROWS = {"clean": "documents", "sentiment": "chains", "risk": "alerts",
@@ -161,11 +162,11 @@ def test_global_chain_tickers_are_annotations_without_expanding_us_trade_authori
     value["documents"][0]["tickers"] = ["005930.KS", "000660.KS", "2330.TW", "TSM"]
     validate_schema(value, schema)
     with pytest.raises(ValueError):
-        decision_schema(["005930.KS"], DOCS)
+        decision_schema(["005930.KS"], DOCS, MARKET_IDS[:1])
 
 
 def test_no_candidates_allows_only_empty_decisions_with_real_explanation():
-    schema = decision_schema([], DOCS)
+    schema = decision_schema([], DOCS, [])
     validate_schema({"action": "WAIT", "action_summary": "No supported candidate in this evidence set.",
                      "decisions": []}, schema)
     value = examples()["decision"][1]
@@ -183,10 +184,16 @@ def test_top_action_has_no_legacy_or_publisher_alias(action):
 
 @pytest.mark.parametrize("factory,args", [
     (clean_schema, ([],)), (sentiment_schema, (CHAINS, [])), (risk_schema, (CHAINS, [])),
-    (narrative_schema, (ETFS, [])), (decision_schema, (SYMBOLS, [])),
+    (narrative_schema, (ETFS, [])), (decision_schema, (SYMBOLS, [], MARKET_IDS)),
     (clean_schema, (["doc-1", "doc-1"],)), (clean_schema, (["<unsafe>"],)),
     (sentiment_schema, ([], DOCS)), (risk_schema, ([], DOCS)),
-    (narrative_schema, ([], DOCS)), (decision_schema, (["<unsafe>"], DOCS)),
+    (narrative_schema, ([], DOCS)), (decision_schema, (["<unsafe>"], DOCS, MARKET_IDS)),
+    (decision_schema, (SYMBOLS, DOCS, [])),
+    (decision_schema, (SYMBOLS, DOCS, MARKET_IDS[:1])),
+    (decision_schema, (SYMBOLS, DOCS, [MARKET_IDS[0], MARKET_IDS[0]])),
+    (decision_schema, (SYMBOLS, DOCS, [MARKET_IDS[0], MARKET_IDS[1].replace("MSFT", "QQQ")])),
+    (decision_schema, (SYMBOLS, DOCS, [MARKET_IDS[0], "invented-market-id"])),
+    (decision_schema, (SYMBOLS, DOCS + MARKET_IDS[:1], MARKET_IDS)),
 ])
 def test_invalid_input_identity_sets_do_not_create_fake_schema(factory, args):
     with pytest.raises(ValueError):
@@ -194,9 +201,29 @@ def test_invalid_input_identity_sets_do_not_create_fake_schema(factory, args):
 
 
 def test_builders_are_pure_and_do_not_mutate_input_sets():
-    arguments = [DOCS[:], CHAINS[:], ETFS[:], SYMBOLS[:]]
+    arguments = [DOCS[:], CHAINS[:], ETFS[:], SYMBOLS[:], MARKET_IDS[:]]
     before = copy.deepcopy(arguments)
     clean_schema(arguments[0]); sentiment_schema(arguments[1], arguments[0])
     risk_schema(arguments[1], arguments[0]); narrative_schema(arguments[2], arguments[0])
-    decision_schema(arguments[3], arguments[0])
+    decision_schema(arguments[3], arguments[0], arguments[4])
     assert arguments == before
+
+
+def test_market_only_watch_is_valid_but_buy_needs_at_least_two_citations():
+    schema, value = examples()["decision"]
+    row = value["decisions"][0]
+    row["action"], row["source_ids"] = "watch", MARKET_IDS[:1]
+    value["action"] = "WAIT"
+    validate_schema(value, schema)
+    row["action"] = "buy"
+    value["action"] = "BUY"
+    with pytest.raises(LLMUnavailable):
+        validate_schema(value, schema)
+
+
+@pytest.mark.parametrize("references", [[], [MARKET_IDS[0]] * 2, [MARKET_IDS[0]] + DOCS * 5])
+def test_decision_citation_array_is_nonempty_unique_and_bounded(references):
+    schema, value = examples()["decision"]
+    value["decisions"][0]["source_ids"] = references
+    with pytest.raises(LLMUnavailable):
+        validate_schema(value, schema)

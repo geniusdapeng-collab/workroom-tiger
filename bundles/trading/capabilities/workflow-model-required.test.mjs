@@ -17,6 +17,24 @@ function modelReceipt() {
   return receipt;
 }
 
+function marketReceipt(action = "watch") {
+  const receipt = modelReceipt();
+  receipt.summary.as_of.market_date = "2026-10-26";
+  receipt.summary.as_of.benchmark_last_bar = "2026-10-22";
+  receipt.summary.execution_decisions = [{ symbol: "AAA", action,
+    action_summary: "测试夹具：等待条件满足", why_this: "已观察行情", why_now: "公司新闻不足，仍须观察",
+    entry_condition: "全部条件通过后重新研究", invalidation: "价格结构失效时取消", risk_note: "公司新闻缺失且存在价格风险",
+    market_evidence: [{ id: "md_AAA_20261023_" + "a".repeat(24), symbol: "AAA", as_of: "2026-10-23",
+      close: 123.45, series_sha256: "a".repeat(64) }],
+    target_weight: action === "buy" ? .12 : 0, entry_price: action === "buy" ? 120 : null,
+    stop_price: action === "buy" ? 115 : null, shares: action === "buy" ? 100 : null,
+    risk_usd: action === "buy" ? 500 : null, time_stop_days: action === "buy" ? 5 : null,
+    valid_for: "2026-10-27T16:00:00-04:00", reference_capital_usd: 100000,
+    sources: action === "buy" ? [{ id: "ds_" + "b".repeat(24), title: "TEST_FIXTURE 原生文章",
+      url: "https://www.reuters.com/fixture", published_at: null }] : [] }];
+  return receipt;
+}
+
 test("required profile is explicit and cannot take provider, credential or model overrides", () => {
   assert.equal(validateRequest("run", { ...REQUEST, profile: REQUIRED_PROFILE }).profile, REQUIRED_PROFILE);
   assert.equal(validateRequest("describe", { profile: REQUIRED_PROFILE }).profile, REQUIRED_PROFILE);
@@ -76,4 +94,81 @@ test("required receipt accepts only completed, exact fixed model and complete un
 test("legacy disabled receipts keep their historical completed_degraded contract", () => {
   const legacy = result("receipt", { status: "completed_degraded" });
   assert.equal(validateEnvelope(legacy, "receipt", { run_id: RUN_ID }), legacy);
+});
+
+test("market-only WATCH and market-plus-article BUY preserve distinct observed dates", () => {
+  for (const action of ["watch", "buy"]) {
+    const receipt = marketReceipt(action);
+    assert.equal(validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), receipt);
+    assert.equal(receipt.summary.execution_decisions[0].market_evidence[0].as_of, "2026-10-23");
+  }
+});
+
+for (const [name, mutate] of [
+  ["missing market", row => { delete row.market_evidence; }],
+  ["empty market", row => { row.market_evidence = []; }],
+  ["duplicate market", row => { row.market_evidence.push(structuredClone(row.market_evidence[0])); }],
+  ["unknown market key", row => { row.market_evidence[0].provider = "invented"; }],
+  ["missing series hash", row => { delete row.market_evidence[0].series_sha256; }],
+  ["other stock snapshot", row => { row.market_evidence[0].symbol = "BBB"; }],
+  ["arbitrary market id", row => { row.market_evidence[0].id = "md_AAA_20261023_" + "b".repeat(24); }],
+  ["id date mismatch", row => { row.market_evidence[0].as_of = "2026-10-22"; }],
+  ["future market date", row => { row.market_evidence[0].as_of = "2026-10-27"; row.market_evidence[0].id = "md_AAA_20261027_" + "a".repeat(24); }],
+  ["impossible market date", row => { row.market_evidence[0].as_of = "2026-02-30"; row.market_evidence[0].id = "md_AAA_20260230_" + "a".repeat(24); }],
+  ["year-zero market date", row => { row.market_evidence[0].as_of = "0000-10-23"; row.market_evidence[0].id = "md_AAA_00001023_" + "a".repeat(24); }],
+  ["zero market price", row => { row.market_evidence[0].close = 0; }],
+  ["negative market price", row => { row.market_evidence[0].close = -1; }],
+  ["nonfinite market price", row => { row.market_evidence[0].close = Infinity; }],
+  ["boolean market price", row => { row.market_evidence[0].close = true; }],
+  ["string market price", row => { row.market_evidence[0].close = "123.45"; }],
+  ["zero series hash", row => { row.market_evidence[0].series_sha256 = "0".repeat(64); }],
+  ["uppercase series hash", row => { row.market_evidence[0].series_sha256 = "A".repeat(64); }],
+  ["market pretending article", row => { row.sources = [{ id: row.market_evidence[0].id, title: "fake", url: "https://www.reuters.com/fixture", published_at: null }]; }],
+  ["buy lacks article", row => { row.action = "buy"; }],
+  ["unknown instruction key", row => { row.provider = "invented"; }],
+  ["missing qualitative reason", row => { delete row.why_this; }],
+  ["html qualitative reason", row => { row.why_this = "<p>unsafe</p>"; }],
+  ["blank qualitative reason", row => { row.why_now = " "; }],
+  ["watch allocation", row => { row.target_weight = .1; }],
+  ["watch numeric entry", row => { row.entry_price = 123; }],
+  ["watch time stop", row => { row.time_stop_days = 5; }],
+  ["zero reference capital", row => { row.reference_capital_usd = 0; }],
+  ["invalid plan expiry", row => { row.valid_for = "not-a-date"; }],
+  ["permissive date plan expiry", row => { row.valid_for = "42"; }],
+  ["impossible plan expiry", row => { row.valid_for = "2027-02-30T16:00:00-05:00"; }],
+  ["nonfuture plan expiry", row => { row.valid_for = "2026-10-26T16:00:00-04:00"; }],
+  ["sell extension", row => { row.action = "sell"; }],
+  ["hold extension", row => { row.action = "hold"; }],
+]) {
+  test(`required receipt rejects ${name}`, () => {
+    const receipt = marketReceipt(); mutate(receipt.summary.execution_decisions[0]);
+    assert.throws(() => validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+  });
+}
+
+test("duplicate decisions or native article IDs and over-eight articles are rejected", () => {
+  const duplicateDecision = marketReceipt();
+  duplicateDecision.summary.execution_decisions.push(structuredClone(duplicateDecision.summary.execution_decisions[0]));
+  assert.throws(() => validateEnvelope(duplicateDecision, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+  const duplicateArticle = marketReceipt("buy");
+  duplicateArticle.summary.execution_decisions[0].sources.push(structuredClone(duplicateArticle.summary.execution_decisions[0].sources[0]));
+  assert.throws(() => validateEnvelope(duplicateArticle, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+  const overLimit = marketReceipt("buy");
+  overLimit.summary.execution_decisions[0].sources = Array.from({ length: 9 }, (_, index) => ({
+    ...overLimit.summary.execution_decisions[0].sources[0], id: "ds_" + index.toString(16).padStart(24, "0") }));
+  assert.throws(() => validateEnvelope(overLimit, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+});
+
+test("required assessment date rejects year zero even when no candidates exist", () => {
+  const receipt = modelReceipt();
+  receipt.summary.as_of.market_date = "0000-10-26";
+  assert.throws(() => validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+});
+
+test("buy instructions require positive bounded facts from the approved plan", () => {
+  for (const [key, value] of [["target_weight", 0], ["entry_price", null], ["stop_price", 0],
+    ["stop_price", 121], ["shares", 1.5], ["shares", 0], ["risk_usd", 0], ["time_stop_days", 1.5]]) {
+    const receipt = marketReceipt("buy"); receipt.summary.execution_decisions[0][key] = value;
+    assert.throws(() => validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+  }
 });

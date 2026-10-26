@@ -19,6 +19,7 @@ from ..tech_chain.universe import CHAIN_TOPICS, SECTOR_TOPICS, TECH_SUBCHAINS
 from .deepseek_required import MODEL, RELEASE, SEARCH_MODE, sanitize_url, validate_schema, DeepSeekRequiredClient
 from .required_schemas import clean_schema, sentiment_schema, risk_schema, narrative_schema, decision_schema
 from .required import SYSTEM, TASKS, _docs, market_asof
+from .market_evidence import market_snapshots
 
 
 def _fail():
@@ -38,6 +39,31 @@ def _plain(value):
             return _plain(value["fields"])
         return {key: _plain(item) for key, item in value.items()}
     return value
+
+
+def _same_watch_facts(actual, observed) -> bool:
+    """RiskManager changes only these two candidate values before decision.
+
+    Every candidate, field name and other value remains bound to layer3.tss;
+    the exception does not permit omitting or inventing even a mutable field.
+    """
+    if type(actual) is not list or type(observed) is not list or len(actual) != len(observed):
+        return False
+    for current, original in zip(actual, observed):
+        if (type(current) is not dict or type(original) is not dict
+                or set(current) != set(original)
+                or type(current.get("fields")) is not dict
+                or type(original.get("fields")) is not dict
+                or set(current["fields"]) != set(original["fields"])):
+            return False
+        if (_hash({key: value for key, value in current.items() if key != "fields"})
+                != _hash({key: value for key, value in original.items() if key != "fields"})
+                or _hash({key: value for key, value in current["fields"].items()
+                          if key not in {"sector_etf", "tos"}})
+                != _hash({key: value for key, value in original["fields"].items()
+                          if key not in {"sector_etf", "tos"}})):
+            return False
+    return True
 
 
 def verify_required_model(run, result: dict, admission: dict) -> dict:
@@ -158,13 +184,27 @@ def _verify(run, result, admission):
                 expected_payload = {"etfs": inputs["sector_symbols"], "documents": _docs(docs)}
             else:
                 selected_ids = ids
+                risk_value = snapshot(by_stage["layer4.risk"], "output")["value"]
+                observed_watch = snapshot(by_stage["layer3.tss"], "output")["value"]["watchlist"]
+                frozen_facts = ((bound_inputs["picks"], risk_value["picks"]),
+                    (bound_inputs["mrs"], snapshot(by_stage["layer1.mrs"], "output")["value"]),
+                    (bound_inputs["sectors"], snapshot(by_stage["layer2.sector"], "output")["value"]["sectors"]),
+                    *((bound_inputs[key], risk_value[source]) for key, source in (
+                        ("action", "action"), ("rationale", "pick_rationale"), ("rejections", "rejections"))))
+                if (not _same_watch_facts(bound_inputs["watchlist"], observed_watch)
+                        or any(_hash(actual) != _hash(observed) for actual, observed in frozen_facts)):
+                    _fail()
                 approved = [pick["ticker"] for pick in inputs["picks"]]
                 watch = [row["ticker"] for row in inputs["watchlist"] if row["ticker"] not in approved][:5]
-                expected_schema = decision_schema(approved + watch, ids)
                 decision_inputs, decision_value = inputs, output["value"]
                 prepared_market_data = snapshot(by_stage["data.prepare"], "output")["value"]["market_data"]
                 expected_market_asof = market_asof(prepared_market_data, approved + watch, assessment)
-                if inputs.get("market_asof") != expected_market_asof:
+                expected_market_evidence = market_snapshots(prepared_market_data, approved + watch, assessment)
+                market_by_symbol = {row["symbol"]: row for row in expected_market_evidence}
+                market_by_id = {row["id"]: row for row in expected_market_evidence}
+                expected_schema = decision_schema(approved + watch, ids, list(market_by_id))
+                if (inputs.get("market_asof") != expected_market_asof
+                        or inputs.get("market_evidence") != expected_market_evidence):
                     _fail()
                 expected_payload = {
                     "approved_picks": inputs["picks"],
@@ -172,7 +212,8 @@ def _verify(run, result, admission):
                     "numeric_action": inputs["action"], "mrs": bound_inputs["mrs"],
                     "sectors": bound_inputs["sectors"], "rejections": inputs["rejections"],
                     "risk_rationale": inputs["rationale"], "documents": _docs(docs),
-                    "market_asof": expected_market_asof}
+                    "market_asof": expected_market_asof,
+                    "market_evidence": expected_market_evidence}
             expected_payload["assessment"] = assessment
             body = request["request"]
             expected_messages = [
@@ -308,11 +349,19 @@ def _verify(run, result, admission):
     decision_docs = {doc["raw"]["doc_id"]: doc["raw"] for doc in decision_inputs["documents"]}
     for row in decision_output["decisions"]:
         pick = picks[row["symbol"]] if row["action"] == "buy" else None
+        own_market = market_by_symbol[row["symbol"]]
+        market_refs = [source_id for source_id in row["source_ids"] if source_id in market_by_id]
+        news_refs = [source_id for source_id in row["source_ids"] if source_id in decision_docs]
+        if (market_refs != [own_market["id"]]
+                or len(market_refs) + len(news_refs) != len(row["source_ids"])
+                or len(news_refs) > 8 or row["action"] == "buy" and not news_refs):
+            _fail()
         sources = [{"id": source_id, "title": decision_docs[source_id]["title"],
             "url": decision_docs[source_id]["url"], "published_at": decision_docs[source_id]["published"] or None}
-            for source_id in row["source_ids"]]
+            for source_id in news_refs]
         expected.append({key: value for key, value in row.items() if key != "source_ids"} | {
             "target_weight": pick["position_pct"] if pick else 0, "sources": sources,
+            "market_evidence": [own_market],
             **{key: pick[key] if pick else None for key in ("entry_price", "stop_price", "shares", "risk_usd")},
             "time_stop_days": pick["time_stop_days"] if pick and pick["time_stop_days"] > 0 else None,
             "valid_for": valid_for, "reference_capital_usd": 100000.0})

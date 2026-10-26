@@ -22,6 +22,7 @@ from ..tech_chain.universe import TECH_SUBCHAINS
 from .deepseek_required import MODEL, RELEASE, SEARCH_MODE, sanitize_url, validate_schema
 from .required_schemas import (clean_schema, sentiment_schema, risk_schema,
                                narrative_schema, decision_schema)
+from .market_evidence import market_snapshots
 
 SYSTEM = (
     "你是严格按证据判断的美股交易研究员。所有语义判断、新闻解释、产业链与板块推理、"
@@ -30,7 +31,9 @@ SYSTEM = (
     "不得编造行情、财报、来源、日期、成交或模型调用。不得把无证据解释为确定事实。"
     "输入assessment字典给出本次冻结研究日期与市场时区，必须以此判断资料时效，不能把资料中的日期当作当前日期。"
     "published_at为空代表发布时间未知；旧资料或时间未知的资料可作背景，但不能单独证明当前催化或why_now，须明确时效不确定性。"
+    "同一原始报道的转载即使位于不同网站也只算一个原始来源，不能当成独立佐证；自称AI生成的评论或第三方断言须明确标注性质，不能冒充公司公告、已核实事实或独立确认。"
     "最终market_asof给出已观察到的基准、所选股票和板块末根日线日期，不代表实时价格；不能把不同日期的数据说成同一时点。"
+    "market_evidence是受控真实行情快照，不是公司新闻；close只是所标日期的收盘参考，不能当作获准入场价或已成交价。"
     "证据不足须在中文理由里明确说明；可以决定等待，但不能省略分析。"
     "所有输出文字为可直接读的中文纯文本，单段不换行，不写HTML，JSON严格匹配给定schema。"
 )
@@ -45,7 +48,11 @@ TASKS = {
         "每个给定symbol必须恰好返回一条中文人工执行说明，列清为什么关注、为什么现在、何时可进、何时失效与风险。"
         "读者是真人执行团队和普通投资者，使用通俗自然中文，先讲已经看到的数据事实，再讲交易含义和具体等待或取消条件。"
         "不得把未解释的MRS、SHS、TSS、ICS、A/B/C模板、评分数字或公式串当成理由；必要术语须当句用日常语言解释。"
-        "buy须满足全部既有条件；watch必须明确等待条件，不能描述已经成交。source_ids仅用提供文档。"
+        "buy须满足全部既有条件；watch必须明确等待条件，不能描述已经成交。"
+        "每条source_ids必须包含该symbol自己的唯一md_行情快照id，不能引用其他股票快照。"
+        "buy还必须引用至少一篇相关原生新闻文档，最多八篇；不能用行情快照替代买入所需新闻证据。"
+        "watch可仅引用自己的行情快照；未引用公司新闻时，必须在why_now和risk_note明确说明新闻证据缺口及不确定性，观察只能依据给定行情与结构事实。"
+        "没有相关文档就不要伪造或强行引用无关新闻，source_ids总数一至九，只用提供的真实文档与行情快照id。"
         "顶层BUY当且仅当至少一项buy；原数值action=AVOID时必须AVOID且没有buy；没有buy时WAIT或AVOID。"
         "不输出或改写任何数值计划，执行价格、止损、股数和风险由系统原样绑定。"),
 }
@@ -246,6 +253,9 @@ def decision(llm, context: dict, docs: list[CleanDocument], account_usd: float) 
     watch = [candidate for candidate in context.get("watchlist", [])
              if candidate.ticker not in approved][:5]
     symbols = list(approved) + [candidate.ticker for candidate in watch]
+    market = market_snapshots(context["market_data"], symbols, assessment_context(llm.execution))
+    market_by_symbol = {snapshot["symbol"]: snapshot for snapshot in market}
+    market_by_id = {snapshot["id"]: snapshot for snapshot in market}
     original_action = context.get("action")
     out = _call(llm, TASKS["decision.debate"],
         {"approved_picks": [asdict(pick) for pick in approved.values()],
@@ -253,8 +263,9 @@ def decision(llm, context: dict, docs: list[CleanDocument], account_usd: float) 
          "numeric_action": original_action, "mrs": context.get("mrs"),
          "sectors": context.get("sectors"), "rejections": context.get("rejections"),
          "risk_rationale": context.get("pick_rationale"), "documents": _docs(docs),
+         "market_evidence": market,
          "market_asof": market_asof(context["market_data"], symbols, assessment_context(llm.execution))},
-        decision_schema(symbols, _ids(docs)))
+        decision_schema(symbols, _ids(docs), list(market_by_id)))
     _coverage(out["decisions"], "symbol", symbols)
     buys = {row["symbol"] for row in out["decisions"] if row["action"] == "buy"}
     if (not buys.issubset(approved) or (out["action"] == "BUY") != bool(buys)
@@ -266,12 +277,20 @@ def decision(llm, context: dict, docs: list[CleanDocument], account_usd: float) 
     instructions = []
     for row in out["decisions"]:
         pick = approved.get(row["symbol"]) if row["action"] == "buy" else None
+        own_market = market_by_symbol[row["symbol"]]
+        market_refs = [source_id for source_id in row["source_ids"] if source_id in market_by_id]
+        news_refs = [source_id for source_id in row["source_ids"] if source_id in by_id]
+        if (market_refs != [own_market["id"]]
+                or len(market_refs) + len(news_refs) != len(row["source_ids"])
+                or len(news_refs) > 8 or row["action"] == "buy" and not news_refs):
+            _fail("Model decision citations require its own market snapshot and evidenced buy news")
         sources = [{"id": source_id, "title": by_id[source_id].title,
                     "url": by_id[source_id].url, "published_at": by_id[source_id].published or None}
-                   for source_id in row["source_ids"]]
+                   for source_id in news_refs]
         instructions.append({key: value for key, value in row.items() if key != "source_ids"} | {
             "target_weight": pick.position_pct if pick else 0,
-            "sources": sources, "entry_price": pick.entry_price if pick else None,
+            "sources": sources, "market_evidence": [own_market],
+            "entry_price": pick.entry_price if pick else None,
             "stop_price": pick.stop_price if pick else None, "shares": pick.shares if pick else None,
             "risk_usd": pick.risk_usd if pick else None,
             "time_stop_days": pick.time_stop_days if pick and pick.time_stop_days > 0 else None,

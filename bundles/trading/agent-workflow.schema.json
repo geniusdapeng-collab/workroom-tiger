@@ -61,7 +61,52 @@
           }
         },
         "action_summary": {"type": "string", "minLength": 1, "maxLength": 2000},
-        "execution_decisions": {"type": "array", "maxItems": 500}
+        "execution_decisions": {"type": "array", "maxItems": 500,
+          "items": {"type": "object", "additionalProperties": false,
+            "required": ["symbol", "action", "action_summary", "why_this", "why_now", "entry_condition", "invalidation", "risk_note", "target_weight", "sources", "market_evidence", "entry_price", "stop_price", "shares", "risk_usd", "time_stop_days", "valid_for", "reference_capital_usd"],
+            "properties": {
+              "symbol": {"type": "string", "pattern": "^[A-Z][A-Z0-9.\\-]{0,14}$"},
+              "action": {"type": "string", "enum": ["buy", "watch"]},
+              "action_summary": {"type": "string", "minLength": 1, "maxLength": 300},
+              "why_this": {"type": "string", "minLength": 1, "maxLength": 1200},
+              "why_now": {"type": "string", "minLength": 1, "maxLength": 1200},
+              "entry_condition": {"type": "string", "minLength": 1, "maxLength": 1200},
+              "invalidation": {"type": "string", "minLength": 1, "maxLength": 1200},
+              "risk_note": {"type": "string", "minLength": 1, "maxLength": 1200},
+              "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
+              "entry_price": {"type": ["number", "null"], "minimum": 0},
+              "stop_price": {"type": ["number", "null"], "minimum": 0},
+              "shares": {"type": ["integer", "null"], "minimum": 1},
+              "risk_usd": {"type": ["number", "null"], "minimum": 0},
+              "time_stop_days": {"type": ["integer", "null"], "minimum": 1},
+              "valid_for": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T16:00:00-(04|05):00$"},
+              "reference_capital_usd": {"type": "number", "minimum": 0},
+              "sources": {"type": "array", "maxItems": 8,
+                "items": {"type": "object", "additionalProperties": false,
+                  "required": ["id", "title", "url", "published_at"],
+                  "properties": {
+                    "id": {"type": "string", "pattern": "^ds_[0-9a-f]{24}$"},
+                    "title": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "url": {"type": "string", "minLength": 1, "maxLength": 2048},
+                    "published_at": {"type": ["string", "null"], "maxLength": 80}
+                  }
+                }
+              },
+              "market_evidence": {"type": "array", "minItems": 1, "maxItems": 1,
+                "items": {"type": "object", "additionalProperties": false,
+                  "required": ["id", "symbol", "as_of", "close", "series_sha256"],
+                  "properties": {
+                    "id": {"type": "string", "pattern": "^md_[A-Z][A-Z0-9.\\-]{0,14}_[0-9]{8}_[0-9a-f]{24}$"},
+                    "symbol": {"type": "string", "pattern": "^[A-Z][A-Z0-9.\\-]{0,14}$"},
+                    "as_of": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                    "close": {"type": "number", "minimum": 0},
+                    "series_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"}
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "verification": {

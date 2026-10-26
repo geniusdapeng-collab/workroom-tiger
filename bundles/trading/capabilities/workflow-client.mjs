@@ -213,6 +213,35 @@ export function safeEvidencePath(value) {
     && value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }
 
+function validMarketDate(value) {
+  if (typeof value !== "string" || value.startsWith("0000-") || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(value)) return false;
+  const milliseconds = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString().slice(0, 10) === value;
+}
+
+function validateModelInstructions(summary) {
+  const researchDate = summary.as_of.market_date;
+  if (!validMarketDate(researchDate)) throw invalid();
+  const symbols = new Set();
+  for (const row of summary.execution_decisions) {
+    const market = row.market_evidence[0];
+    const plan = ["entry_price", "stop_price", "shares", "risk_usd"];
+    if (symbols.has(row.symbol) || market.symbol !== row.symbol || market.close <= 0
+      || !validMarketDate(market.as_of) || market.as_of > researchDate
+      || market.id !== `md_${row.symbol}_${market.as_of.replaceAll("-", "")}_${market.series_sha256.slice(0, 24)}`
+      || row.reference_capital_usd <= 0 || !validMarketDate(row.valid_for.slice(0, 10))
+      || row.valid_for.slice(0, 10) <= researchDate || !Number.isFinite(Date.parse(row.valid_for))
+      || row.action === "buy" && (row.sources.length === 0 || row.target_weight <= 0
+        || plan.some(key => row[key] === null || row[key] <= 0) || row.stop_price >= row.entry_price)
+      || row.action === "watch" && (row.target_weight !== 0
+        || [...plan, "time_stop_days"].some(key => row[key] !== null))
+      || ["action_summary", "why_this", "why_now", "entry_condition", "invalidation", "risk_note"].some(
+        key => !row[key].trim() || /[<>\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(row[key]))
+      || new Set(row.sources.map(source => source.id)).size !== row.sources.length) throw invalid();
+    symbols.add(row.symbol);
+  }
+}
+
 export function validateEnvelope(envelope, operation, input = {}) {
   try {
     validateValue(envelope, RESULT_SCHEMA);
@@ -246,6 +275,7 @@ export function validateEnvelope(envelope, operation, input = {}) {
         || Object.values(model.stage_counts).reduce((sum, count) => sum + count, 0) !== model.call_count
         || typeof envelope.summary.action_summary !== "string" || !envelope.summary.action_summary.trim()
         || !Array.isArray(envelope.summary.execution_decisions)) throw invalid();
+      validateModelInstructions(envelope.summary);
     }
   } catch (cause) { throw new WorkflowError("RESULT_INVALID", "Python returned an invalid or unverified result envelope.", { runId: input.run_id, cause }); }
   return envelope;

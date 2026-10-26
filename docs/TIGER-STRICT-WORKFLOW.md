@@ -60,7 +60,7 @@ daily.preflight → state.reset → pipeline.prepare
 
 开始步骤时立即保存输入快照；结束前必须保存一次输出。重复、乱序、重叠、缺输出、跨线程写证据和未完成 I/O 均违反执行合同。异常结束记录 failed，并阻止成功推进。原两个 profile 的模型禁用，允许有明确证据的 passthrough；model-required 的五个 LLM 阶段全部 `allow_passthrough=false`，不可用、空结果或透传均为失败，不能把外层聊天模型当成内层成功。
 
-model-required 在 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sector.narrative`、`decision.debate` 实际调用固定 Flash，每个响应要求正确 model/id/usage/finish_reason、完整闭合 schema 与确切条目覆盖。无风险空 alerts 有真实 assessment 才是有效评估，无买入也必须执行最终模型判断。确定性规则只做格式去重、来源交叉验证、数值因子/风险/账务校验及原模型输出的字段映射，禁止规则替代语义。原生 Search 依据净化后的原始发布域名计数独立来源，仍保持原 ≥2 来源且至少一个 ≤T2 的阈值。
+model-required 在 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sector.narrative`、`decision.debate` 实际调用固定 Flash，每个响应要求正确 model/id/usage/finish_reason、完整闭合 schema 与确切条目覆盖。无风险空 alerts 有真实 assessment 才是有效评估，无买入也必须执行最终模型判断。确定性规则只做格式去重、来源交叉验证、数值因子/风险/账务校验及原模型输出的字段映射，禁止规则替代语义。原生 Search 依据净化后的原始发布域名计数来源多样性，仍保持原 ≥2 来源且至少一个 ≤T2 的阈值；跨域转载未必是独立报道，模型须区分同一原始报道、AI 评论与公司公告，该规则计数本身不证明报道独立。
 
 独立验证器从事件和子 I/O 快照重算全部请求/schema/安全响应哈希、响应身份和 usage，重建完整模型输入文档及数值上下文，逐字段核对清洗/舆情/风险/叙事实际输出与 parsed 模型答案，并核对下游消费。最终模型选择只允许缩小原风险批准集合；人读计划中的价格/股数/止损/仓位/风险绑定原 TradePick。任何对应缺失或规则代写均为 `MODEL_REQUIRED_FAILED`，在账户指针提交之前失败。成功仅为 `completed`，不能发布 completed_degraded。原始远端响应不落盘，仅保存摘要；安全响应和模型 JSON 可重算，属于本地协作进程完整性证据，不是远端签名证明。
 
@@ -70,7 +70,7 @@ model-required 在 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sect
 
 `events.jsonl` 为顺序追加记录，每条绑定 run_id、序号、步骤编号、输入/输出引用、前一事件摘要和前一步输出。验证器重新计算哈希、顺序、状态与引用，并检查完整业务结果和报告。保存的 `verified=true` 标记或文件存在均不能替代这些检查。
 
-子 I/O 还必须符合写入端的语义合同：方法名非空且不含换行；错误快照只有 error_type、固定脱敏 message 和布尔 outcome_observed 三个字段。未及时观察到结果的 false 标志可以合法记录，不能被当成字符串或数字。即使重新计算所有文件摘要和事件链，错误字段类型、额外字段或非法方法名仍会被拒绝。
+子 I/O 还必须符合写入端的语义合同：方法名非空且不含换行；原错误快照保留 error_type、固定脱敏 message 和布尔 outcome_observed 三个字段。新的 model-required 模型 I/O 可另附闭合的安全 diagnostic，内容限固定错误码、HTTP 状态或受控 schema 路径/关键字；不保存原响应、推理内容、凭据或任意异常正文。未及时观察到结果的 false 标志可以合法记录，不能被当成字符串或数字。即使重新计算所有文件摘要和事件链，错误字段类型、未知或不合法的诊断字段及非法方法名仍会被拒绝；原有无诊断证据不追补原因。
 
 事件日历覆盖文件是可选输入。运行接纳时将冻结源码中的覆盖文件原样复制；未提供时显式生成空覆盖层并记录 `source=builtin_only`。内置日历规则仍由冻结源码执行。`calendar-input.json` 与实际输入字节均受核验；已有文件的格式错误不能被当成“没有覆盖文件”静默忽略。当前没有自动财报日期数据源。
 

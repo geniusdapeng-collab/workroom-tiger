@@ -1010,6 +1010,32 @@ th.numeric {
   white-space:pre-line;
   overflow-wrap:anywhere
 }
+.instruction-market-evidence {
+  margin-top:18px;
+  padding:13px 15px;
+  border-left:2px solid #aebba0;
+  background:#f0f2e8;
+  overflow-wrap:anywhere
+}
+.instruction-market-evidence h5 {
+  margin:0 0 5px;
+  font-size:10px;
+  font-weight:500;
+  color:#677458
+}
+.instruction-market-facts {
+  font:11px/1.9 var(--mono);
+  color:#44523b
+}
+.instruction-market-note,.instruction-news-note {
+  font-size:10px;
+  line-height:1.9;
+  color:#6e7861;
+  margin-top:4px
+}
+.instruction-news-note {
+  color:#7b6c50
+}
 .instruction-metrics {
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
@@ -2120,6 +2146,16 @@ th.numeric {
   }
   .instruction-risk p {
     font-size:11px
+  }
+  .instruction-market-evidence {
+    padding:11px 12px;
+    margin-top:15px
+  }
+  .instruction-market-facts {
+    font-size:10px
+  }
+  .instruction-market-note,.instruction-news-note {
+    font-size:9px
   }
   .instruction-metrics {
     gap:10px;

@@ -119,6 +119,8 @@ def test_every_actual_stage_request_has_frozen_assessment_and_final_observed_aso
                 symbols = [row["ticker"] for row in payload["approved_picks"] + payload["watch_candidates"]]
                 actual = required.market_asof(prepared["value"]["market_data"], symbols, expected)
                 assert payload["market_asof"] == inputs["market_asof"] == actual
+                actual_market = required.market_snapshots(prepared["value"]["market_data"], symbols, expected)
+                assert payload["market_evidence"] == inputs["market_evidence"] == actual_market
     assert verify_required_model(root, result, _admission(execution)) == result["raw"]["model"]
 
 
@@ -138,6 +140,8 @@ def test_research_date_is_never_inferred_from_latest_or_unknown_document(publish
         "run_date": "2026-10-26", "market_timezone": "America/New_York"}
     assert "不能把资料中的日期当作当前日期" in calls[0]["system"]
     assert "published_at为空代表发布时间未知" in calls[0]["system"]
+    assert "转载即使位于不同网站也只算一个原始来源" in calls[0]["system"]
+    assert "AI生成的评论或第三方断言须明确标注性质" in calls[0]["system"]
     assert "不代表实时价格" in calls[0]["system"]
 
 
