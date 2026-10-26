@@ -2,15 +2,15 @@ const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 
-// Tiger's existing immutable UI release is no longer publicly downloadable at
-// its canonical URL. This transport mirror is byte-identical to the approved
+// Tiger's canonical UI URL now uses the verified GitHub release mirror.
+// This existing local transport mirror remains byte-identical to the approved
 // archive; package versions, resolution URLs and integrity gates stay intact.
 // See vendor/ui-artifacts/README.md for recovery provenance and maintenance.
 const MIRROR = Object.freeze({
   package: "@workloom/ui",
   version: "0.1.17",
   assetName: "workloom-ui-0.1.17.tgz",
-  url: "https://cnb.cool/workloom-ai/workloom-im/-/releases/download/ui-v0.1.17/workloom-ui-0.1.17.tgz",
+  url: "https://github.com/geniusdapeng-collab/workloom-im/releases/download/ui-v0.1.17/workloom-ui-0.1.17.tgz",
   integrity: "sha512-iJolO8NyIDoEZlMsX3BPJba9/6LbAhjhCgW7Kw5W/dRkW3MOsZ14Odlm6azcSnnpY9HhqAtea1YiYLZi4utLsw==",
 });
 

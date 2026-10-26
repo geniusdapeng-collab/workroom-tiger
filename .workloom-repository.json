@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "workloom.repository/v1",
+  "logicalId": "workroom-tiger",
+  "productId": "workroom-tiger",
+  "lane": "industry",
+  "primaryPlatform": "github",
+  "github": {
+    "repository": "geniusdapeng-collab/workroom-tiger",
+    "url": "https://github.com/geniusdapeng-collab/workroom-tiger",
+    "branch": "main"
+  },
+  "cnb": {
+    "repository": "workloom-ai/workroom-tiger",
+    "url": "https://cnb.cool/workloom-ai/workroom-tiger",
+    "branch": "main"
+  },
+  "mirrorPolicy": {
+    "platform": "cnb",
+    "mode": "deferred",
+    "automaticProductSync": false,
+    "configBackupBranchPrefix": "workloom/config-backup/"
+  },
+  "baseSync": {
+    "receive": "subscribed",
+    "reflux": "proposal-only",
+    "pathPrefix": "governance/",
+    "extraExclude": [
+      "apps/server/src/service/contract.test.ts",
+      "apps/server/src/service/dialog.test.ts",
+      "apps/server/src/service/e2e.test.ts"
+    ],
+    "uiRolloutWave": "W5"
+  },
+  "registry": {
+    "repository": "geniusdapeng-collab/workloom-im",
+    "path": "sync/repository-registry.json"
+  }
+}

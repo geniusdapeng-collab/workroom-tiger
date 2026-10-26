@@ -80,7 +80,7 @@
   "description": "WorkLoom IM · 企业级 Agent IM 底座（智能班组 + 围栏 + 人审 + 夜班）",
   "pnpm": {
     "overrides": {
-      "@workloom/ui@0.1.17": "https://cnb.cool/workloom-ai/workloom-im/-/releases/download/ui-v0.1.17/workloom-ui-0.1.17.tgz"
+      "@workloom/ui@0.1.17": "https://github.com/geniusdapeng-collab/workloom-im/releases/download/ui-v0.1.17/workloom-ui-0.1.17.tgz"
     }
   }
 }
