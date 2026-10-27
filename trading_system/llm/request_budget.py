@@ -1,6 +1,7 @@
 """Prepaid, bounded I/O for the versioned whitepaper research workflow.
 
-Only text Chat Completions, native Search and native Fetch are admitted. The
+Only text Chat Completions, an explicitly selected closed clean Responses
+request, native Search and native Fetch are admitted. The
 entire serialized text request is counted in UTF-8 bytes (a conservative token
 bound), with an additional framing allowance and the full output limit. Actual
 usage releases unused reservation; unknown usage freezes further paid calls.
@@ -58,10 +59,18 @@ def _canonical(value):
         raise BudgetRefused("INVALID_BUDGET_REQUEST") from exc
 
 
-def token_upper_bound(request: dict, *, allow_clean_function: bool = False) -> tuple[int, int]:
-    """Text plus one opted-in fixed output function; no image/file/tool loops."""
-    if not isinstance(request, dict) or type(allow_clean_function) is not bool:
+def token_upper_bound(request: dict, *, allow_clean_function: bool = False,
+                      allow_clean_responses: bool = False) -> tuple[int, int]:
+    """Text and opted-in fixed clean protocols; no image/file/tool loops."""
+    if (not isinstance(request, dict) or type(allow_clean_function) is not bool
+            or type(allow_clean_responses) is not bool):
         raise BudgetRefused("INVALID_BUDGET_REQUEST")
+    if allow_clean_responses:
+        from .clean_output import clean_responses_request_valid
+        if clean_responses_request_valid(request):
+            return len(_canonical(request)) + 4096 + 128, request["max_output_tokens"]
+        if any(key in request for key in ("input", "instructions", "max_output_tokens", "text")):
+            raise BudgetRefused("UNBOUNDED_CHAT_REQUEST")
     messages, output = request.get("messages"), request.get("max_tokens")
     bounded_function = False
     if allow_clean_function:
@@ -95,8 +104,9 @@ class BudgetGuard:
                  deadline_seconds=2400, clock=time.monotonic, _policy_id=None,
                  _clean_output_policy_id=None):
         if _clean_output_policy_id is not None:
-            from .clean_output import CLEAN_OUTPUT_POLICY_V1
-            if (type(_clean_output_policy_id) is not str or _clean_output_policy_id != CLEAN_OUTPUT_POLICY_V1
+            from .clean_output import CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1
+            if (type(_clean_output_policy_id) is not str or _clean_output_policy_id not in
+                    (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
                     or _policy_id != BUDGET_POLICY_V3):
                 raise BudgetRefused("INVALID_BUDGET_POLICY")
         configured = dict(max_chat_calls=max_chat_calls, max_tokens=max_tokens,
@@ -136,8 +146,13 @@ class BudgetGuard:
         if (sum(snapshot["counts"].values()) >= self.limits["max_remote_requests"]
                 or snapshot["counts"][kind] >= self.limits[f"max_{kind}_calls"]):
             raise BudgetRefused("REQUEST_COUNT_LIMIT")
-        input_bound, output_bound = token_upper_bound(request,
-            allow_clean_function=self.clean_output_policy_id is not None) if kind == "chat" else (0, 0)
+        if self.clean_output_policy_id is None:
+            input_bound, output_bound = token_upper_bound(request) if kind == "chat" else (0, 0)
+        else:
+            from .clean_output import CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1
+            input_bound, output_bound = token_upper_bound(request,
+                allow_clean_function=self.clean_output_policy_id == CLEAN_OUTPUT_POLICY_V1,
+                allow_clean_responses=self.clean_output_policy_id == CLEAN_OUTPUT_RESPONSES_POLICY_V1) if kind == "chat" else (0, 0)
         total = input_bound + output_bound
         cost = total * PRICING["token_upper_usd_per_million"] / 1000000 if kind == "chat" else PRICING[f"{kind}_upper_usd_per_request"]
         if snapshot["actual_tokens"] + snapshot["reserved_tokens"] + total > self.limits["max_tokens"]:

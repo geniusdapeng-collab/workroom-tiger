@@ -13,7 +13,7 @@ from trading_system.redline.execution import ExecutionContractError, ExecutionPo
 
 @pytest.mark.parametrize("profile", list(UPGRADE_POLICIES))
 def test_new_admission_selects_closed_strict_clean_policy(profile):
-    value = policy_manifest(profile)
+    value = policy_manifest(profile, clean_output_policy_id=CLEAN_OUTPUT_POLICY_V1)
     assert value["execution"]["clean_output_policy_id"] == CLEAN_OUTPUT_POLICY_V1
     assert value["execution"]["budget_policy_id"] == BUDGET_POLICY_V3
     assert value["clean_output_policy_id"] == CLEAN_OUTPUT_POLICY_V1
@@ -116,7 +116,7 @@ def strict_fixture(tmp_path, monkeypatch, *, phase="daily"):
     monkeypatch.setattr(core, "upgrade_fixture", upgrade)
     execution, root, result, admission, denied, attempts = complete_fixture(tmp_path, monkeypatch, phase=phase)
     profile = next(key for key, value in UPGRADE_POLICIES.items() if value[1] == phase)
-    policy = policy_manifest(profile)
+    policy = policy_manifest(profile, clean_output_policy_id=CLEAN_OUTPUT_POLICY_V1)
     atomic_json(root, "policy.json", policy)
     admission["policy_sha256"] = digest(json_bytes(policy))
     # This new protocol requires the complete executable frozen source manifest,

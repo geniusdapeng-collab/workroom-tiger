@@ -6,12 +6,13 @@
 
 ## thinking 策略
 
-| 范围 | thinking.type | reasoning_effort | 模型是否仍须真实回答 |
+| 范围 | 原生 API / 输出 | 思考控制字段 | 模型是否仍须真实回答 |
 |---|---|---|---|
-| 新显式 strict policy 的 v2 `clean.llm_semantic` | `disabled` | `none` | 是，单次固定函数输出 |
-| 未声明 strict policy 的历史 v2 `clean.llm_semantic` | `disabled` | `low`，保留原请求 | 是，原 JSON 输出 |
-| v2 舆情、风险、板块、公司研究、最终判断 | `enabled` | `high` | 是 |
-| v1 默认请求 | `enabled` | `high` | 按原 v1 契约 |
+| 当前显式 Responses policy 的 v2 `clean.llm_semantic` | `/responses` / `text.format.json_schema` | `reasoning.effort=none` | 是，单次完整 JSON |
+| 历史 `strict-function.v1` 的 v2 `clean.llm_semantic` | Beta Chat / 固定函数 | `thinking.type=disabled`、`reasoning_effort=none` | 是，原单次函数输出 |
+| 未声明输出 policy 的历史 v2 `clean.llm_semantic` | Chat / JSON | `thinking.type=disabled`、`reasoning_effort=low`，保留原请求 | 是 |
+| v2 舆情、风险、板块、公司研究、最终判断 | Chat / JSON | `thinking.type=enabled`、`reasoning_effort=high` | 是 |
+| v1 默认请求 | 原 Chat | `thinking.type=enabled`、`reasoning_effort=high` | 按原 v1 契约 |
 
 上表记录准确发送的请求字段。clean 仍由同一个 Flash 模型解释每篇资料并输出全部语义标注；`disabled` 不是关闭模型能力、必需阶段或调用。新通道由可信 execution 的显式 `clean_output_policy_id` 及活动阶段共同派生，调用者不能借请求参数改变其他阶段。请求仍预留原来的 clean `max_tokens=16384`；此阶段策略不增加重试或输出额度，整轮额度由后文明确的预算版本选择。
 
@@ -19,7 +20,7 @@
 
 2026-10-27 已检索并打开官方依据：[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)、[JSON Output](https://api-docs.deepseek.com/guides/json_mode/)、[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)。官方支持显式 `thinking.type=disabled`，JSON Output 仍要求提示中明确 JSON，并设置合适输出上限；`finish_reason=length` 不能当作完整回答。
 
-同日新读的 Chat Completions API 将 `reasoning_effort=none` 描述为关闭 thinking，`low/high/max` 描述为开启；Thinking Mode guide 未说明与 toggle 冲突时的优先级。历史 `disabled/low` 字节保留，不能据此证明提供方内部最终模式，也不把该歧义当作历史 schema 失败的已知原因。新显式 strict 通道一致使用 `disabled/none`；其他阶段和 v1 默认策略不变。
+同日新读的 Chat Completions API 将 `reasoning_effort=none` 描述为关闭 thinking，`low/high/max` 描述为开启；Thinking Mode guide 未说明与 toggle 冲突时的优先级。历史 `disabled/low` 字节保留，不能据此证明提供方内部最终模式，也不把该歧义当作历史 schema 失败的已知原因。历史 strict-function 通道一致使用 `disabled/none`；当前 Responses 通道只使用其原生 `reasoning.effort=none`。其他阶段和 v1 默认策略不变。
 
 ## 保留的原 clean codec：`tiger.clean-wire.v1`
 
@@ -57,11 +58,11 @@
 
 安全诊断只在一个 `allOf` 子分支明确失败时向下定位，且共享 additionalProperties 只能使用兄弟 schema 明确声明的可信键。多个失败分支或未解决的 `oneOf` 保持父位置；未知模型键、无效值、原始回答和推理内容均不进入诊断。接受/拒绝校验器保持原样，诊断没有补值、修复或重试能力。
 
-## 新清洗输出通道：`tiger.clean-output.strict-function.v1`
+## 保留的清洗输出通道：`tiger.clean-output.strict-function.v1`
 
 普通 `response_format=json_object` 只保证 JSON 语法，不能保证来源局部枚举。第七次真实运行的第一批八篇清洗回答通过，第二批在 `/d/d11/c/1/q` 的枚举校验失败；两次调用共 43480 tokens，均已结算，账户未提交。该篇输入和 schema 的允许编号一致，违规编号未保留，仍未知。不能把其他片段中一个不可引用编号当作已观察的实际错误答案。
 
-新的 v2 准入显式冻结 `clean_output_policy_id=tiger.clean-output.strict-function.v1`，并要求对应的 600k budget v3。缺省字段继续走原 JSON 通道，包括历史 300k 与历史 600k。准入、preflight、pipeline.prepare、完整源码清单与独立重放共同绑定这个选择；不能靠模型自报或数值上限选择新通道。
+这个历史版本的 v2 准入显式冻结 `clean_output_policy_id=tiger.clean-output.strict-function.v1`，并要求对应的 600k budget v3。当前新准入选择后文独立的 Responses policy；历史 strict-function 的请求、响应和验证分支保留。缺省字段继续走原 JSON 通道，包括历史 300k 与历史 600k。准入、preflight、pipeline.prepare、完整源码清单与独立重放共同绑定这个选择；不能靠模型自报或数值上限选择新通道。
 
 源码闭包由可信的 `trading_system/source_contract_v1.py` 静态注册表 `tiger.strict-source-inventory.v1` 规定；它不从运行者声明的 manifest 或裁剪后的冻结目录推导预期集合。当前注册的全部必需执行路径必须存在，唯一可选路径为 `events_calendar.json`，其内容另由原日历输入合同绑定。严格策略在复制源码、启动 worker 和付费前先验清单；事后准入与独立回放再次要求同一固定合同和逐文件字节绑定。同步删减源码及 manifest、再重算所有摘要，仍须拒绝。历史未声明 strict 的策略继续原合同；此闭包不保护任意改写可信验证器的主体，也不是远端签名。
 
@@ -72,6 +73,22 @@
 原 `token_upper_bound()` 和旧策略仍拒绝 tools；只有新冻结选择允许这个单次、闭合、固定的输出函数。完整工具定义、每篇 schema、全部 messages 和最大输出均计入 UTF-8 保守预留，原 token/费用/次数/期限继续分别执行。新 I/O 使用 `tiger.deepseek-request.v2` / `tiger.deepseek-call.v2`，保留真实 `finish_reason=tool_calls`、唯一工具调用身份、完整参数及安全响应摘要；不改写成 stop，不保留隐藏推理。失败调用照实结算；独立重放重新构建原工具定义、端点、schema、参数、响应和预算后核对。旧请求、codec 和证据不改写。
 
 依据为 2026-10-27 实际读取的 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 和 [Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。严格函数输出属于 Beta 能力；本地测试和供应商文档不能替代一次完整真实任务及独立 receipt/verify，未来仍可能因服务、输出长度或语义约束失败。
+
+## 当前清洗输出通道：`tiger.clean-output.responses-schema.v1`
+
+第八次真实任务 `run-4b2c28ca6e5b4165b8cfb2867e942fb9` 使用来源 `1ba9cbbfb7e9e8b6a38e84a36ef6ed6ac6ff4a09`，在 14 次原生 Search 之后，首个 Beta strict 清洗请求收到 HTTP 400。没有取得成功模型响应，也没有进入本地答案校验；提供方错误正文未保留，具体拒绝原因未知。用量未知的 106849 tokens 预留仍在原任务冻结，不能写成零真实费用或被新策略释放。原身份及失败链保留，receipt/verify 均为 `RUN_INCOMPLETE`，账户未提交。
+
+2026-10-27 已读取官方 [Responses API](https://api-docs.deepseek.com/api/create-response/) 和 [Responses guide](https://api-docs.deepseek.com/guides/responses_api/)。该 API 明确列出 `text.format.json_schema`；没有给出 Responses 专属的 schema 关键字子集、大小或深度限制，也没有证据表明它降为 Chat 的 `json_object`。本协议采用这条原生结构化输出通道，不把第八次 400 归因于未经证实的字段。
+
+新的可信准入冻结 `tiger.clean-output.responses-schema.v1`，仍要求 budget v3 和 `tiger.strict-source-inventory.v1` 的完整执行路径闭包。只有清洗阶段向固定 `https://api.deepseek.com/responses` 发起一次请求：原完整 system 使用 `instructions`，原完整 user 使用单 user `input`，`reasoning={effort:"none"}`、`max_output_tokens=16384`、`temperature=0.2`、`stream=false`，`text.format` 为 `type=json_schema`、固定 schema 名和本次完整 keyed wire schema。请求不添加未列出的 `strict`，不携带 tools、tool_choice 或续轮参数。
+
+这里传入的是现有 `clean_v2` 的完整本地 keyed output_schema，保留公共 `allOf`、精确来源键、各篇 q 枚举、全部字符串/数组上限和唯一性约束；不是上一节删去部分 bounds 的 Beta provider projection。正文、来源表、语义职责和确定性 codec 不改。服务端接受这个具体完整 schema 的能力仍须正式真实运行验证；无论提供方如何约束，返回后仍逐项执行原完整 keyed schema、解码语义 schema、覆盖和本篇逐字引文校验。程序不修补回答、代写语义、截断事实或重试。
+
+原生 Responses 的成功终态为 `object=response`、`status=completed`，不是 Chat 的 `finish_reason`。本地接受契约要求一个 completed assistant message 和一个非空 `output_text`；incomplete、failed、in_progress、推理或工具条目、空/重复键/非有限或带尾随文字的 JSON 均不能成为成功。新私有 I/O/proof 保留原生 response status、created_at、message 身份和 native usage；不制造 `stop` 或工具调用身份，重放从同一 builder 重建端点、完整正文/schema、解析结果及安全响应。
+
+原生 usage 的 `input_tokens/output_tokens/total_tokens` 保留；为既有预算显式映射为 prompt/completion/total。reasoning tokens 是 output 子集，不能再加一次。合法已知用量在内容/schema 拒绝前结算；缺失、矛盾或超出预留仍冻结。每个请求按包括 schema 的完整 canonical UTF-8 body、framing 和最大输出先预留，同一完整 run 仍受 600k、1 USD、次数和期限约束。旧任务的未知预留留在原任务，不迁入或释放；新源码修正任务有明确新逻辑身份和同样的 per-run 硬限，累计未知费用不能冒称免费。
+
+新的 `/responses` 400/422 诊断只允许有界读取后得到的固定提供方声称类别及固定 body 状态，不保留原 message、任意 type/code/param、正文或秘密。这种分类不是独立证实的根因；未知保持未知。原 JSON 和 strict-function 历史证据不追补新字段。Responses 的无状态会话也不等于供应商完全不缓存输入，官方仍说明有自动 context cache；本协议不发送无效的 `store:false` 来冒充缓存控制。[Context Caching](https://api-docs.deepseek.com/guides/kv_cache/)
 
 ## 最终输入：`tiger.final-identity-wire.v1`
 
@@ -144,8 +161,8 @@ UTF-8 字节是输入的保守预留，不是实际 tokenizer 计数。必须按
 
 无效回答缺失，无法从安全摘要恢复逐文档completion tokens或给出它们的实际上界；不得用平均数冒充上界。未来真实语义、行情、补证与用量仍未知，必须由新的完整真实任务、独立receipt/verify及原始账户提交证明成功，不能用这些纯探针替代，也不能靠修改失败历史、截断语义、放宽原校验、静默改变版本或自动重试获得成功标签。
 
-strict 通道另有独立容量证据。只读重建第七次真实运行的两份原输入时，完整新请求为 81461 / 73667 bytes，连同全部输出与 framing 的预留为 102069 / 94275 tokens；两者的原正文、本地完整约束和每来源 q 枚举保留，提供方 schema 自身增加约 17.3k bytes。这些是新请求重建与 guard 准入，没有新模型用量。
+历史 strict-function.v1 通道另有独立容量证据。只读重建第七次真实运行的两份原输入时，完整新请求为 81461 / 73667 bytes，连同全部输出与 framing 的预留为 102069 / 94275 tokens；两者的原正文、本地完整约束和每来源 q 枚举保留，提供方 schema 自身增加约 17.3k bytes。这些是新请求重建与 guard 准入，没有新模型用量。
 
-再以第六次的55篇原来源和同八组显式合成下游条件，顺序执行新 strict guard 的24个整链条件。只把首批旧观测24595与后续每chat3000结合，或七个clean均假设旧观测24595时，两个条件各8/8准入；最大目标并集仍为25 chat、54 Search、20 Fetch。它们没有测得新 strict 模型的实际 token 用量。每次都按完整输入上界和输出上限结算的更强压力则8/8拒绝：第六个clean前，先前actual515898加新预留101995超过600000。旧300k与未声明strict的600k守卫仍拒绝该工具形状。新工具定义的额外容量必须据实计算，不能沿用上表旧JSON请求字节或把声明usage当成未来预测。
+再以第六次的55篇原来源和同八组显式合成下游条件，顺序执行该 strict-function guard 的24个整链条件。只把首批旧观测24595与后续每chat3000结合，或七个clean均假设旧观测24595时，两个条件各8/8准入；最大目标并集仍为25 chat、54 Search、20 Fetch。它们没有测得新 strict 模型的实际 token 用量。每次都按完整输入上界和输出上限结算的更强压力则8/8拒绝：第六个clean前，先前actual515898加新预留101995超过600000。旧300k与未声明strict的600k守卫仍拒绝该工具形状。新工具定义的额外容量必须据实计算，不能沿用上表旧JSON请求字节或把声明usage当成未来预测。
 
-验证入口包括新 `tests/test_clean_strict_output_v2.py`、`tests/test_clean_strict_policy_replay_v2.py`，以及 `tests/test_clean_keyed_wire_v2.py`、`tests/test_clean_keyed_diagnostics_v2.py`、`tests/test_clean_capacity_wire_v2.py`、`tests/test_final_capacity_wire_v2.py`、`tests/test_model_reasoning_policy_v2.py`、`tests/test_short_term_core_v2.py`、`tests/test_required_proof_v2.py` 与既有语义、预算、传输和完整工作流回归。它们使用明确的合成模型答案，不能替代真实模型验收。
+验证入口包括 `tests/test_clean_responses_output_v1.py`、`tests/test_clean_responses_policy_replay_v1.py` 及历史 `tests/test_clean_strict_output_v2.py`、`tests/test_clean_strict_policy_replay_v2.py`，以及 `tests/test_clean_keyed_wire_v2.py`、`tests/test_clean_keyed_diagnostics_v2.py`、`tests/test_clean_capacity_wire_v2.py`、`tests/test_final_capacity_wire_v2.py`、`tests/test_model_reasoning_policy_v2.py`、`tests/test_short_term_core_v2.py`、`tests/test_required_proof_v2.py` 与既有语义、预算、传输和完整工作流回归。它们使用明确的合成模型答案，不能替代真实模型验收。

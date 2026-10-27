@@ -61,9 +61,9 @@ daily.preflight → state.reset → pipeline.prepare
 
 开始步骤时立即保存输入快照；结束前必须保存一次输出。重复、乱序、重叠、缺输出、跨线程写证据和未完成 I/O 均违反执行合同。异常结束记录 failed，并阻止成功推进。旧模型禁用 profile，允许有明确证据的 passthrough；v2 的六个 LLM 阶段全部 `allow_passthrough=false`，不可用、空结果或透传均为失败，不能把外层聊天模型当成内层成功。
 
-v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正确 model/id/usage/finish_reason、完整闭合 schema 与确切条目覆盖。当前清洗每批最多 8 篇，逐篇展示完整规则清洗正文：按原顺序切为最多 600 字符的 `content_parts`，拼接后与原 `source_view` 完全一致；规则清洗正文完整不等于供应商原生文章完整，原生字符数与覆盖标记另行保留。模型决定事实含义、来源归属与时效，返回本篇可引用的 `quote_part_id`；程序只按该来源的编号取回逐字引文，不模糊匹配、删改事实或自动重试。格式不允许引用的片段仍展示给模型，不能把可引用标记当成可信度判断。每批还包含全部来源的归属索引，索引不能冒充别篇正文已展示。
+v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正确 model/id/usage，并按对应协议核对完成状态（Chat 的 finish_reason / Responses 的 completed）、完整闭合 schema 与确切条目覆盖。当前清洗每批最多 8 篇，逐篇展示完整规则清洗正文：按原顺序切为最多 600 字符的 `content_parts`，拼接后与原 `source_view` 完全一致；规则清洗正文完整不等于供应商原生文章完整，原生字符数与覆盖标记另行保留。模型决定事实含义、来源归属与时效，返回本篇可引用的 `quote_part_id`；程序只按该来源的编号取回逐字引文，不模糊匹配、删改事实或自动重试。格式不允许引用的片段仍展示给模型，不能把可引用标记当成可信度判断。每批还包含全部来源的归属索引，索引不能冒充别篇正文已展示。
 
-当前清洗输入和语义答案采用 `tiger.clean-keyed-wire.v1`：完整索引保留真实 id、标题、URL、日期，以 `dN` 引用连接本批正文表；回答的 `d` 为按本批来源键闭合的对象，每篇恰好一次，各篇引文编号只取自自己的允许列表。格式示例只说明键和编号形状，不含语义答案。新准入另显式冻结 `tiger.clean-output.strict-function.v1`，仅此阶段以 `disabled/none` 在固定 Beta 端点强制一次 `emit_tiger_clean_v2` strict 函数输出；它只承载答案，不执行函数、不发送工具结果、不续接模型或重试。提供方 schema 展开精确来源键和各篇 q 枚举；提供方不支持的长度、数量和唯一性约束继续由原完整本地 schema 检查，语义接受条件不放松。新 I/O 如实保留 tool_calls 结束原因及唯一工具身份，独立重放重建完整工具定义、端点、答案和预算。未声明新字段的历史 v2 仍保留原 JSON `disabled/low`；旧 v1 和其他五个语义阶段继续原 enabled/high，旧 codec 字节不改。关闭 thinking 和提供方严格格式均不证明研究质量或真实任务必定成功。完整约定见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)；官方依据为 [Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。
+当前清洗输入和语义答案采用 `tiger.clean-keyed-wire.v1`：完整索引保留真实 id、标题、URL、日期，以 `dN` 引用连接本批正文表；回答的 `d` 为按本批来源键闭合的对象，每篇恰好一次，各篇引文编号只取自自己的允许列表。格式示例只说明键和编号形状，不含语义答案。当前新准入显式冻结 `tiger.clean-output.responses-schema.v1`，仅此阶段在固定 `/responses` 用原完整 keyed schema 的 `text.format.json_schema` 和原生 `reasoning.effort=none` 单次生成完整 JSON；原生成功状态为 completed，usage 的 input/output/total 与预算显式映射，不捏造 finish_reason。完整本地 keyed/语义/来源校验继续强制，失败不修补、不重试。历史 `tiger.clean-output.strict-function.v1` 仍以 `disabled/none` 在固定 Beta 端点强制一次 `emit_tiger_clean_v2` strict 函数输出；它只承载答案，不执行函数、不发送工具结果、不续接模型或重试。提供方 schema 展开精确来源键和各篇 q 枚举；提供方不支持的长度、数量和唯一性约束继续由原完整本地 schema 检查，语义接受条件不放松。历史 strict-function I/O 如实保留 tool_calls 结束原因及唯一工具身份，独立重放重建完整工具定义、端点、答案和预算。未声明新字段的历史 v2 仍保留原 JSON `disabled/low`；旧 v1 和其他五个语义阶段继续原 enabled/high，旧 codec 字节不改。关闭 thinking 和提供方严格格式均不证明研究质量或真实任务必定成功。完整约定见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)；官方依据为 [Responses API](https://api-docs.deepseek.com/guides/responses_api/) 和 [Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。
 
 清洗结果及其私有证据保留完整逐字引文。后续舆情、风险、叙事与最终判断收到全部来源的完整摘要、事实 statement、来源及时间限定，采用显式 `columns`/`rows` 机械编码；嵌套列名使用稳定字典序，使封存 JSON 重放得到相同请求。引文文本以父文档 id 绑定的 `quote_ref`（SHA256、字符数）代替，交付说明明确本次未重读引文或正文。任何来源、事实、限定或反证都不能因改用引用而省略；跨域转载不自动当独立报道。单次请求的容量检查不能证明整轮实际用量会通过预算，完整成功仍须实际调用及结算回执。
 
@@ -75,7 +75,7 @@ v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正�
 
 独立验证器从事件和子 I/O 快照重算全部请求/schema/安全响应哈希、响应身份和 usage，重建完整模型输入文档及数值上下文，逐字段核对清洗/舆情/风险/叙事实际输出与 parsed 模型答案，并核对下游消费。最终模型选择只允许缩小原风险批准集合；人读计划中的价格/股数/止损/仓位/风险绑定原 TradePick。任何对应缺失或规则代写均为 `MODEL_REQUIRED_FAILED`，在账户指针提交之前失败。成功仅为 `completed`，不能发布 completed_degraded。原始远端响应不落盘，仅保存摘要；安全响应和模型 JSON 可重算，属于本地协作进程完整性证据，不是远端签名证明。
 
-新 strict 清洗策略还要求 `tiger.strict-source-inventory.v1`：可信源码中的静态注册表固定全部必需执行路径，只有 `events_calendar.json` 为显式可选。`freeze_source` 在复制和 worker/付费前比较真实库存；准入和独立回放再按同一可信合同核对清单、逐文件内容及 admission 摘要。验证器不能从运行者自报的 manifest 或已删减目录生成预期集合，因此即使同步删去文件并重算摘要也会拒绝。旧无 strict 字段的历史策略保留原验证，新增或移除执行路径须有意更新/版本化注册表及库存回归。
+Responses 与历史 strict-function 两个显式清洗策略都要求 `tiger.strict-source-inventory.v1`：可信源码中的静态注册表固定全部必需执行路径，只有 `events_calendar.json` 为显式可选。`freeze_source` 在复制和 worker/付费前比较真实库存；准入和独立回放再按同一可信合同核对清单、逐文件内容及 admission 摘要。验证器不能从运行者自报的 manifest 或已删减目录生成预期集合，因此即使同步删去文件并重算摘要也会拒绝。旧无 strict 字段的历史策略保留原验证，新增或移除执行路径须有意更新/版本化注册表及库存回归。
 
 快照保留实际已知类型的数据，包括表格索引、列和值；非有限值用明确缺失表示，未知对象和循环引用拒绝序列化。输出不能只用数量代替内容，也不能用无约束的字符串转换掩盖类型。阶段输出包含实际子 I/O 的输入、输出或错误引用。
 
@@ -114,6 +114,8 @@ v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正�
 单个业务任务的总期限为 2400 秒。Node 单次提交/查询观察上限为 60 秒，CLI 默认等待窗口为 2460 秒；观察超时和业务超时是两个不同结果。
 
 原两个 profile 的公开搜索 45 秒收集预算适用于每一批查询；主题会展开为多批查询，不能把它描述为整个搜索阶段只花 45 秒。收集期限之后的数据不再参与决策，已启动线程另有最多 15 秒的收尾等待；未结束的线程阻止流程成功。model-required 使用同步、有界响应的原生 Search/Fetch，每次请求连接/读取期限和 1 MiB 响应上限由适配器固定；无跨模型或来源回退，任一必需主题失败即停，最外层 2400 秒业务期限仍然生效。
+
+Responses 只使用官方原生请求/响应字段；其 stateless 不表示供应商完全不缓存输入。第八次历史 Beta 请求的 HTTP400 具体原因未知、预留继续冻结；新的有界错误诊断只保留提供方声称的固定类别，不落原 message 或任意错误文本。完整协议与历史边界见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)。
 
 模型传输连接期限为 10 秒，原生 Search/Fetch 的读取空闲期限为 60 秒；非流式 Chat 允许在原有 180 秒响应接纳窗口内等待。响应正文的空行保活不会延长这个窗口：适配器使用单调时钟检查，并在剩余期限到点时中断已持有响应的阻塞读取；清理时取消并等待该中断器退出，再关闭响应。底层 urllib3 超时、协议中断及 TLS 错误分别映射为固定安全错误码，不保留原始异常文本，不自动重试；用量未知仍冻结原预留。该正文期限不等于 DNS 解析或慢速响应头的全局硬墙钟保证，外层业务进程期限继续约束整个任务。依据：[DeepSeek 保活说明](https://api-docs.deepseek.com/quick_start/rate_limit/)、[urllib3 Timeout 语义](https://urllib3.readthedocs.io/en/stable/reference/urllib3.util.html#urllib3.util.Timeout)。
 

@@ -22,10 +22,12 @@ from ..redline.execution import (ExecutionPolicy, ExecutionContractError, Requir
                                  daily_stage_contract)
 from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
     DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
-    stage_thinking_mode, validate_schema)
+    stage_thinking_mode, validate_schema, responses_usage)
 from .request_budget import BudgetGuard, BudgetRefused, LIMITS
 from .clean_output import (CLEAN_OUTPUT_PATH, clean_output_policy,
-                           build_clean_request, build_clean_safe_response)
+                           build_clean_request, build_clean_safe_response,
+                           CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_PATH,
+                           build_clean_responses_request, build_clean_responses_safe_response)
 
 _MODEL_METHODS = {"model.deepseek.search", "model.deepseek.fetch", "model.deepseek.chat"}
 _COLLECTION_AND_MODEL = ("search.collect", *UPGRADE_MODEL_STAGES)
@@ -66,6 +68,7 @@ class ReplayClient:
         self._calls = deepcopy(stage_calls)
         self._stage_name, self._cursor = None, 0
         self._visited, self._used_ids, self._response_ids, self._tool_call_ids = set(), set(), set(), set()
+        self._output_message_ids = set()
         self._first_started, self._last_finished, self._clock = None, None, 0.
         self.receipts, self.search_receipts, self.fetch_receipts = [], [], []
         self.budget = BudgetGuard.for_policy(getattr(execution.policy, "budget_policy_id", None),
@@ -236,6 +239,8 @@ class ReplayClient:
         arguments = dict(system=self._sanitizer._text(system), user=self._sanitizer._text(user),
             schema_hint=self._sanitizer._clean(schema_hint), schema=schema, max_tokens=max_tokens,
             temperature=temperature)
+        if output_policy == CLEAN_OUTPUT_RESPONSES_POLICY_V1:
+            return self._complete_clean_responses(arguments, schema)
         body = (build_clean_request(**arguments) if strict_clean else
                 build_chat_request(**arguments, reasoning_effort=reasoning_effort,
                     thinking_mode=stage_thinking_mode(self._stage_name, upgrade=True)))
@@ -282,6 +287,56 @@ class ReplayClient:
         self._response_ids.add(response_id)
         if strict_clean:
             self._tool_call_ids.add(tool_call_id)
+        self._settle("chat", request, proof, usage)
+        return deepcopy(proof["parsed"])
+
+    def _complete_clean_responses(self, arguments, schema):
+        """Rebuild only the fixed native Responses contract, never a tool turn.
+
+        Original native usage and explicit budget-normalized usage must agree.
+        Responses completion is proved by its native response/message statuses;
+        no Chat Completions finish reason is synthesized for this protocol.
+        """
+        stage = self._stage_name
+        if stage != "clean.llm_semantic":
+            _bad("responses_outside_clean_stage", stage=stage)
+        body = build_clean_responses_request(**arguments)
+        request, proof = self._consume("model.deepseek.chat", body,
+            "tiger.deepseek-request.v3", "tiger.deepseek-call.v3",
+            {"output_schema", "schema_sha256", "release", "output_policy_id"},
+            {"requested_model", "response_id", "model", "release", "usage", "native_usage",
+             "response_status", "created_at", "output_message_id", "response_sha256",
+             "schema_sha256", "response", "search_mode", "parsed", "output_policy_id"},
+            endpoint_path=CLEAN_OUTPUT_RESPONSES_PATH)
+        if (request["release"] != RELEASE or proof["release"] != RELEASE
+                or proof["requested_model"] != MODEL or proof["model"] != MODEL
+                or request["output_policy_id"] != CLEAN_OUTPUT_RESPONSES_POLICY_V1
+                or proof["output_policy_id"] != CLEAN_OUTPUT_RESPONSES_POLICY_V1
+                or proof["search_mode"] != SEARCH_MODE
+                or proof["response_status"] != "completed"
+                or type(proof["created_at"]) is not int or proof["created_at"] <= 0
+                or not _same(request["output_schema"], schema)
+                or request["schema_sha256"] != _hash(schema)
+                or proof["schema_sha256"] != request["schema_sha256"]):
+            _bad("responses_contract", stage=stage)
+        validate_schema(proof["parsed"], schema)
+        if not _same(self._sanitizer._clean(proof["parsed"]), proof["parsed"]):
+            _bad("unclean_responses_output", stage=stage)
+        response_id = DeepSeekRequiredClient._identifier(proof["response_id"])
+        message_id = DeepSeekRequiredClient._identifier(proof["output_message_id"])
+        if response_id in self._response_ids or message_id in self._output_message_ids:
+            _bad("duplicate_responses_identity", stage=stage)
+        native_usage, usage = responses_usage(proof["native_usage"])
+        response = build_clean_responses_safe_response(response_id=response_id,
+            created_at=proof["created_at"], usage=native_usage,
+            parsed=proof["parsed"], message_id=message_id)
+        if (not _same(native_usage, proof["native_usage"])
+                or not _same(usage, proof["usage"])
+                or not _same(response, proof["response"])
+                or proof["response_sha256"] != _hash(response)):
+            _bad("responses_identity_or_native_usage", stage=stage)
+        self._response_ids.add(response_id)
+        self._output_message_ids.add(message_id)
         self._settle("chat", request, proof, usage)
         return deepcopy(proof["parsed"])
 

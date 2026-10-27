@@ -1193,7 +1193,8 @@ def model_summary_v2(llm) -> dict:
     from ..redline.execution import UPGRADE_MODEL_STAGES
     try:
         policy_id = getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None)
-        from .clean_output import clean_output_policy, CLEAN_OUTPUT_POLICY_V1
+        from .clean_output import (clean_output_policy, CLEAN_OUTPUT_POLICY_V1,
+                                   CLEAN_OUTPUT_RESPONSES_POLICY_V1)
         output_policy = clean_output_policy(getattr(llm, "execution", None))
         expected_budget = BudgetGuard.for_policy(policy_id, clean_output_policy_id=output_policy).snapshot()
         limits = expected_budget["limits"]
@@ -1236,6 +1237,21 @@ def model_summary_v2(llm) -> dict:
                     or receipt["release"] != RELEASE or record["usage"] != receipt["usage"]):
                 raise ValueError
             if kind == "chat":
+                responses = output_policy == CLEAN_OUTPUT_RESPONSES_POLICY_V1 and receipt["stage"] == "clean.llm_semantic"
+                native_fields = {"response_status", "created_at", "output_message_id", "native_usage"}
+                if responses:
+                    from .deepseek_required import responses_usage, DeepSeekRequiredClient
+                    native, mapped = responses_usage(receipt.get("native_usage"))
+                    if (receipt.get("output_policy_id") != output_policy
+                            or receipt.get("response_status") != "completed"
+                            or any(key in receipt for key in ("finish_reason", "system_fingerprint", "output_tool_call_id"))
+                            or type(receipt.get("created_at")) is not int or receipt["created_at"] <= 0
+                            or DeepSeekRequiredClient._identifier(receipt.get("output_message_id")) != receipt["output_message_id"]
+                            or native != receipt["native_usage"] or mapped != receipt["usage"]):
+                        raise ValueError
+                    continue
+                if native_fields.intersection(receipt):
+                    raise ValueError
                 strict = output_policy == CLEAN_OUTPUT_POLICY_V1 and receipt["stage"] == "clean.llm_semantic"
                 if (receipt["finish_reason"] != ("tool_calls" if strict else "stop")
                         or strict and receipt.get("output_policy_id") != output_policy
@@ -1246,6 +1262,9 @@ def model_summary_v2(llm) -> dict:
         tool_ids = [row["output_tool_call_id"] for row in chats if "output_tool_call_id" in row]
         if len(set(tool_ids)) != len(tool_ids):
             raise ValueError
+        message_ids = [row["output_message_id"] for row in chats if "output_message_id" in row]
+        if len(set(message_ids)) != len(message_ids):
+            raise ValueError
         actual = sum(row["usage"]["total_tokens"] for row in chats)
         charged = (actual * PRICING["token_upper_usd_per_million"] / 1000000
                    + len(searches) * PRICING["search_upper_usd_per_request"]
@@ -1254,7 +1273,7 @@ def model_summary_v2(llm) -> dict:
                 or abs(budget["estimated_charged_usd"] - charged) > 1e-12
                 or charged > limits["max_cost_usd"]):
             raise ValueError
-    except (KeyError, AttributeError, TypeError, ValueError, OverflowError, BudgetRefused):
+    except (KeyError, AttributeError, TypeError, ValueError, OverflowError, BudgetRefused, LLMUnavailable):
         _fail("Required v2 model, native search/fetch or settled budget coverage is incomplete")
     return {"provider": "deepseek", "model": MODEL, "release": RELEASE,
             "required": True, "research_contract": "tiger.short-term-research.v2",

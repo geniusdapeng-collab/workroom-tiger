@@ -51,9 +51,13 @@ _POINTER = re.compile(r"(?:/(?:[A-Za-z_][A-Za-z0-9_.:-]{0,127}|[0-9]{1,10}|\*))*
 def validate_model_diagnostic(value: object) -> dict:
     """Return a detached closed diagnostic or reject without quoting its data."""
     fields = {"schema", "provider", "code", "http_status", "schema_path", "schema_keyword"}
+    version2 = (type(value) is dict and type(value.get("schema")) is str
+                and value["schema"] == "tiger.model-failure.v2")
+    if version2:
+        fields = fields | {"provider_error"}
     if (type(value) is not dict or set(value) - fields
             or not {"schema", "provider", "code"}.issubset(value)
-            or value["schema"] != "tiger.model-failure.v1"
+            or value["schema"] != ("tiger.model-failure.v2" if version2 else "tiger.model-failure.v1")
             or value["provider"] != "deepseek"
             or type(value["code"]) is not str or value["code"] not in MODEL_FAILURE_CODES):
         raise ValueError("Invalid model failure diagnostic")
@@ -62,6 +66,19 @@ def validate_model_diagnostic(value: object) -> dict:
             raise ValueError("Invalid model failure HTTP status")
     elif "http_status" in value:
         raise ValueError("Unexpected model failure HTTP status")
+    if version2:
+        detail = value.get("provider_error")
+        if (any(type(key) is not str for key in value) or type(value["provider"]) is not str
+                or value["code"] != "HTTP_ERROR" or value.get("http_status") not in (400, 422)
+                or type(detail) is not dict or set(detail) != {"schema", "category", "body_state"}
+                or any(type(key) is not str for key in detail)
+                or type(detail["schema"]) is not str or detail["schema"] != "tiger.responses-provider-error.v1"
+                or type(detail["category"]) is not str or detail["category"] not in
+                    ("schema", "tool_choice", "parameters", "model", "request", "unknown")
+                or type(detail["body_state"]) is not str or detail["body_state"] not in
+                    ("parsed", "malformed", "too_large", "unavailable")
+                or detail["body_state"] != "parsed" and detail["category"] != "unknown"):
+            raise ValueError("Invalid Responses provider error diagnostic")
     located = {"schema_path", "schema_keyword"}.intersection(value)
     if located:
         path, keyword = value.get("schema_path"), value.get("schema_keyword")
@@ -70,7 +87,7 @@ def validate_model_diagnostic(value: object) -> dict:
                 or type(path) is not str or len(path) > 512 or _POINTER.fullmatch(path) is None
                 or type(keyword) is not str or keyword not in SCHEMA_FAILURE_KEYWORDS):
             raise ValueError("Invalid model failure schema location")
-    return dict(value)
+    return {**value, **({"provider_error": dict(value["provider_error"])} if version2 else {})}
 
 
 def validate_model_failure_accounting(value: object) -> dict:
@@ -79,13 +96,18 @@ def validate_model_failure_accounting(value: object) -> dict:
               "counts", "actual_tokens", "reserved_tokens", "estimated_charged_usd",
               "estimated_reserved_usd", "frozen", "finish_reason"}
     invalid = ValueError("Invalid model failure accounting")
-    version3 = type(value) is dict and type(value.get("schema")) is str and value["schema"] == "tiger.model-call-accounting.v3"
+    version4 = type(value) is dict and value.get("schema") == "tiger.model-call-accounting.v4"
+    version3 = type(value) is dict and type(value.get("schema")) is str and value["schema"] in (
+        "tiger.model-call-accounting.v3", "tiger.model-call-accounting.v4")
     if version3:
         fields = fields | {"budget_policy_id"}
+    if version4:
+        fields = (fields - {"finish_reason"}) | {"output_policy_id", "response_status", "native_usage"}
     token_limit = 600000 if version3 else 300000
     if (type(value) is not dict or any(type(key) is not str for key in value)
             or set(value) != fields
-            or type(value["schema"]) is not str or value["schema"] != ("tiger.model-call-accounting.v3" if version3 else "tiger.model-call-accounting.v2")
+            or type(value["schema"]) is not str or value["schema"] != ("tiger.model-call-accounting.v4" if version4 else
+                "tiger.model-call-accounting.v3" if version3 else "tiger.model-call-accounting.v2")
             or version3 and (type(value["budget_policy_id"]) is not str or value["budget_policy_id"] != "tiger.budget-policy.v3")
             or type(value["call_id"]) is not str or re.fullmatch(r"[a-f0-9]{32}", value["call_id"]) is None
             or type(value["request_sha256"]) is not str or re.fullmatch(r"[a-f0-9]{64}", value["request_sha256"]) is None
@@ -123,6 +145,36 @@ def validate_model_failure_accounting(value: object) -> dict:
         raise invalid
     if value["status"] == "unknown" and value["frozen"] is not True:
         raise invalid
+    if version4:
+        if (value["kind"] != "chat" or type(value["output_policy_id"]) is not str
+                or value["output_policy_id"] != "tiger.clean-output.responses-schema.v1"
+                or type(value["response_status"]) is not str or value["response_status"] not in
+                    ("in_progress", "completed", "incomplete", "failed", "unknown", "other")):
+            raise invalid
+        native = value["native_usage"]
+        if value["status"] == "settled":
+            if (type(native) is not dict or any(type(key) is not str for key in native)
+                    or set(native) - {"input_tokens", "output_tokens", "total_tokens",
+                    "input_tokens_details", "output_tokens_details"}
+                    or not {"input_tokens", "output_tokens", "total_tokens"}.issubset(native)
+                    or native["input_tokens"] != usage["prompt_tokens"]
+                    or native["output_tokens"] != usage["completion_tokens"]
+                    or native["total_tokens"] != usage["total_tokens"]
+                    or any(type(native[key]) is not int for key in ("input_tokens", "output_tokens", "total_tokens"))):
+                raise invalid
+            native = dict(native)
+            for parent, child, limit in (("input_tokens_details", "cached_tokens", "input_tokens"),
+                                         ("output_tokens_details", "reasoning_tokens", "output_tokens")):
+                if parent in native:
+                    details = native[parent]
+                    if (type(details) is not dict or any(type(key) is not str for key in details) or set(details) != {child}
+                            or type(details[child]) is not int or not 0 <= details[child] <= native[limit]):
+                        raise invalid
+                    native[parent] = dict(details)
+        elif native is not None:
+            raise invalid
+        return {**value, "counts": dict(counts), "usage": dict(usage) if usage is not None else None,
+                "native_usage": native}
     if (value["finish_reason"] is not None and type(value["finish_reason"]) is not str
             or value["finish_reason"] not in (None, "stop", "length", "tool_calls", "content_filter", "other", "unknown")
             or value["kind"] != "chat" and value["finish_reason"] is not None):
@@ -134,8 +186,11 @@ class RequiredModelUnavailable(LLMUnavailable):
     """A transport-created failure carrying only prevalidated safe metadata."""
 
     def __init__(self, code: str, *, http_status: int | None = None,
-                 schema_path: str | None = None, schema_keyword: str | None = None):
+                 schema_path: str | None = None, schema_keyword: str | None = None,
+                 provider_error: dict | None = None):
         diagnostic = {"schema": "tiger.model-failure.v1", "provider": "deepseek", "code": code}
+        if provider_error is not None:
+            diagnostic.update(schema="tiger.model-failure.v2", provider_error=provider_error)
         if http_status is not None:
             diagnostic["http_status"] = http_status
         if schema_path is not None:

@@ -19,7 +19,8 @@ import tempfile
 from typing import Any, Callable
 
 from .redline.execution import EvidenceWriteError
-from .redline.model_diagnostics import MODEL_IO_METHODS, validate_model_diagnostic
+from .redline.model_diagnostics import (MODEL_IO_METHODS, validate_model_diagnostic,
+                                        validate_model_failure_accounting)
 
 MAX_FILE_BYTES = 256 * 1024 * 1024
 SNAPSHOT_SCHEMA = "tiger.snapshot.v1"
@@ -451,7 +452,8 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
                     if name == "error_ref":
                         base_fields = {"error_type", "message", "outcome_observed"}
                         if (not isinstance(value, dict)
-                                or set(value) not in (base_fields, base_fields | {"diagnostic"})
+                                or set(value) not in (base_fields, base_fields | {"diagnostic"},
+                                                     base_fields | {"diagnostic", "accounting"})
                                 or not isinstance(value["error_type"], str) or not value["error_type"]
                                 or value["message"] != "External call failed"
                                 or not isinstance(value["outcome_observed"], bool)):
@@ -463,6 +465,10 @@ def verify_events(root: Path, run_id: str, specs: list[dict]) -> dict:
                                         or value["error_type"] != "RequiredModelUnavailable"):
                                     raise ValueError("Untrusted model failure metadata")
                                 validate_model_diagnostic(value["diagnostic"])
+                                if "accounting" in value:
+                                    accounting = validate_model_failure_accounting(value["accounting"])
+                                    if accounting["kind"] != call["method"].rsplit(".", 1)[-1]:
+                                        raise ValueError("Model failure accounting method differs")
                             except ValueError as exc:
                                 raise EvidenceInvalid("RESULT_INVALID", "I/O error diagnostic differs",
                                                       stage=stage) from exc

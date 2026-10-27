@@ -1,10 +1,13 @@
-"""Closed single-function output protocol for new v2 semantic cleaning.
+"""Versioned closed output protocols for v2 semantic cleaning.
 
-The official strict-function beta enforces source keys, field types and enums.
+The historical strict-function beta enforces source keys, field types and enums.
 Its documented schema subset does not support string/array length bounds; those
 and uniqueness remain mandatory in the unchanged full local keyed and decoded
 semantic validators. The provider projection is not a semantic acceptance gate.
 No function is executed, no tool result is sent and no second model turn exists.
+The separately selected Responses protocol sends the complete existing keyed
+schema, including every bound and source-local quote binding, without projection.
+Both protocols retain the complete unchanged local semantic acceptance gates.
 
 Official contract checked 2026-10-27:
 https://api-docs.deepseek.com/guides/tool_calls/
@@ -18,6 +21,8 @@ import math
 import re
 
 CLEAN_OUTPUT_POLICY_V1 = "tiger.clean-output.strict-function.v1"
+CLEAN_OUTPUT_RESPONSES_POLICY_V1 = "tiger.clean-output.responses-schema.v1"
+CLEAN_OUTPUT_RESPONSES_PATH = "/responses"
 CLEAN_OUTPUT_FUNCTION = "emit_tiger_clean_v2"
 CLEAN_OUTPUT_PATH = "/beta/chat/completions"
 CLEAN_OUTPUT_DESCRIPTION = (
@@ -53,7 +58,7 @@ def clean_output_policy(execution) -> str | None:
     value = getattr(getattr(execution, "policy", None), "clean_output_policy_id", None)
     if value is None:
         return None
-    if (type(value) is not str or value != CLEAN_OUTPUT_POLICY_V1
+    if (type(value) is not str or value not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
             or getattr(execution, "upgrade", False) is not True):
         _invalid()
     return value
@@ -278,3 +283,114 @@ def build_clean_safe_response(*, response_id: str, system_fingerprint: str | Non
             "role": "assistant", "content": None, "tool_calls": [{"id": tool_call_id,
                 "type": "function", "function": {"name": CLEAN_OUTPUT_FUNCTION,
                     "arguments": _canonical(parsed)}}]}}], "usage": deepcopy(usage)}
+
+
+def _validate_responses_clean_schema(schema: dict) -> None:
+    """Admit the complete keyed shape without flattening or deleting a rule.
+
+    The original semantic builders remain the schema's sole source. This
+    structural boundary rejects arbitrary tools/schemas; the complete local
+    schema validator additionally checks every keyword and bound before I/O.
+    Provider acceptance of this particular schema is a separate live fact.
+    """
+    from .deepseek_required import _check_schema
+    from ..redline import LLMUnavailable
+    try:
+        _check_schema(schema)
+        if not _closed_object(schema) or set(schema["properties"]) != {"d"}:
+            _invalid()
+        keyed = schema["properties"]["d"]
+        if type(keyed) is not dict or set(keyed) != {"allOf"} or len(keyed["allOf"]) != 2:
+            _invalid()
+        shared, owned = keyed["allOf"]
+        if (type(shared) is not dict or set(shared) != {"type", "additionalProperties"}
+                or shared["type"] != "object" or not _closed_object(owned)):
+            _invalid()
+        common = shared["additionalProperties"]
+        if not _closed_object(common) or set(common["properties"]) != _DOCUMENT_FIELDS:
+            _invalid()
+
+        def quote_ids(quote):
+            if quote == {"type": "string", "pattern": r"(?!)"}:
+                return []
+            if (type(quote) is not dict or set(quote) != {"type", "enum"}
+                    or quote["type"] != "string" or type(quote["enum"]) is not list
+                    or not quote["enum"] or any(type(part) is not str
+                        or re.fullmatch(r"p(?:0|[1-9][0-9]*)", part) is None for part in quote["enum"])
+                    or len(set(quote["enum"])) != len(quote["enum"])):
+                _invalid()
+            return quote["enum"]
+
+        common_ids = quote_ids(common["properties"]["c"]["items"]["properties"]["q"])
+        for reference, binding in owned["properties"].items():
+            if type(reference) is not str or re.fullmatch(r"d(?:0|[1-9][0-9]*)", reference) is None:
+                _invalid()
+            quote = binding["properties"]["c"]["items"]["properties"]["q"]
+            if (binding != {"properties": {"c": {"items": {"properties": {"q": quote}}}}}
+                    or not set(quote_ids(quote)).issubset(common_ids)):
+                _invalid()
+        _canonical(schema)
+    except (KeyError, TypeError, ValueError, IndexError, RecursionError, OverflowError, LLMUnavailable):
+        _invalid()
+
+
+def build_clean_responses_request(*, system: str, user: str, schema_hint: dict,
+                                  schema: dict, max_tokens: int = 16384,
+                                  temperature: float = 0.2) -> dict:
+    """One stateless, non-thinking response with the exact full keyed schema.
+
+    Official contract checked 2026-10-27 at
+    https://api-docs.deepseek.com/api/create-response/ and
+    https://api-docs.deepseek.com/guides/responses_api/ . No undocumented strict
+    field, tool, continuation, answer repair or hidden reasoning is requested.
+    The clean stage's guidance is already complete in its original user text;
+    a nonempty extra schema hint fails instead of silently being discarded.
+    """
+    if (type(system) is not str or not system.strip() or type(user) is not str or not user.strip()
+            or type(schema_hint) is not dict or schema_hint
+            or type(max_tokens) is not int or max_tokens != 16384
+            or type(temperature) not in (int, float) or temperature != 0.2):
+        _invalid()
+    _validate_responses_clean_schema(schema)
+    return {"model": "deepseek-flash", "instructions": system, "input": user,
+        "reasoning": {"effort": "none"}, "max_output_tokens": max_tokens,
+        "temperature": temperature, "stream": False,
+        "text": {"format": {"type": "json_schema", "name": "tiger_clean_v2", "schema": deepcopy(schema)}}}
+
+
+def clean_responses_request_valid(request) -> bool:
+    """Budget allowlist for this single text-only Responses protocol."""
+    try:
+        if (type(request) is not dict or set(request) != {"model", "instructions", "input", "reasoning",
+                "max_output_tokens", "temperature", "stream", "text"}
+                or request["model"] != "deepseek-flash" or request["stream"] is not False
+                or request["reasoning"] != {"effort": "none"}
+                or type(request["max_output_tokens"]) is not int or request["max_output_tokens"] != 16384
+                or type(request["temperature"]) not in (int, float) or request["temperature"] != 0.2
+                or any(type(request[key]) is not str or not request[key].strip()
+                       for key in ("instructions", "input"))
+                or type(request["text"]) is not dict or set(request["text"]) != {"format"}):
+            return False
+        output = request["text"]["format"]
+        if (type(output) is not dict or set(output) != {"type", "name", "schema"}
+                or output["type"] != "json_schema" or output["name"] != "tiger_clean_v2"):
+            return False
+        _validate_responses_clean_schema(output["schema"])
+        _canonical(request)
+        return True
+    except (KeyError, TypeError, ValueError, IndexError, RecursionError, OverflowError):
+        return False
+
+
+def build_clean_responses_safe_response(*, response_id: str, created_at: int,
+                                       usage: dict, parsed: dict, message_id: str) -> dict:
+    """Sealed native projection; JSON spacing is canonical, semantics exact.
+
+    The caller validates observed identities/status/usage and the full schema.
+    Transport SHA-256 separately binds the actual received bytes. This native
+    envelope has no Chat finish reason, tool call or fabricated fingerprint.
+    """
+    return {"id": response_id, "object": "response", "created_at": created_at,
+        "status": "completed", "model": "deepseek-flash", "output": [{"type": "message",
+            "id": message_id, "status": "completed", "role": "assistant",
+            "content": [{"type": "output_text", "text": _canonical(parsed)}]}], "usage": deepcopy(usage)}

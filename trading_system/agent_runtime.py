@@ -58,11 +58,12 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
     selected_budget = (BUDGET_POLICY_V3 if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
     if selected_budget is not None and (not upgrade or selected_budget != BUDGET_POLICY_V3):
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
-    from .llm.clean_output import CLEAN_OUTPUT_POLICY_V1
-    selected_clean = ((CLEAN_OUTPUT_POLICY_V1 if upgrade and selected_budget == BUDGET_POLICY_V3 else None)
+    from .llm.clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
+    selected_clean = ((CLEAN_OUTPUT_RESPONSES_POLICY_V1 if upgrade and selected_budget == BUDGET_POLICY_V3 else None)
                       if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY else clean_output_policy_id)
     if selected_clean is not None and (type(selected_clean) is not str or not upgrade
-            or selected_clean != CLEAN_OUTPUT_POLICY_V1 or selected_budget != BUDGET_POLICY_V3):
+            or selected_clean not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
+            or selected_budget != BUDGET_POLICY_V3):
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen clean output policy")
     required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
@@ -217,8 +218,9 @@ def source_tree_hash(files: list[dict]) -> str:
 def _policy_source_contract(run: Path) -> str | None:
     """Select the source closure from the trusted fixed policy, never a manifest.
 
-    Absent and historical policies retain their existing source contract. A
-    present malformed policy is an error; it cannot silently choose legacy.
+    Absent policies retain their historical contract. The exact registered
+    strict-function and Responses selectors both require the entire reviewed
+    release closure. A malformed selector cannot silently choose legacy.
     """
     policy_file = safe_path(run, "policy.json", must_exist=False)
     if not policy_file.exists():

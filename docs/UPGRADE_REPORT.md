@@ -536,6 +536,10 @@ SHS 叙事兑现维度（EPS 修正/指引语气）自 v5.0 由 NarrativeAgent L
 
 严格协议同时固定源码闭包 `tiger.strict-source-inventory.v1`。独立合成审查曾发现，若把完整冻结源码和 manifest 一起裁为七个数值模块、同步重算摘要，原严格回放会误接受；原红证据保留。这次修复以可信静态路径注册表规定必需执行文件，显式可选日历另行绑定，并在付费前源码冻结、准入及独立回放检查相同闭包。自包含清单不能自行声明完整。该检查适用于新 strict 合同，历史无字段证据不改写；本地权限和远端签名边界仍按维护文档披露。
 
+第八次 `run-4b2c28ca6e5b4165b8cfb2867e942fb9` 使用干净来源 `1ba9cbbfb7e9e8b6a38e84a36ef6ed6ac6ff4a09`。14 Search 之后首个 strict Beta 请求收到 HTTP400，没有成功模型响应或本地答案校验结果；具体提供方拒绝原因未保留、保持未知。未知用量的 106849 tokens 预留仍冻结，账户未提交，receipt/verify 均为 RUN_INCOMPLETE。该源的本机及真实云端 CI 通过不等于这次真实模型任务通过。
+
+当前新的显式 `tiger.clean-output.responses-schema.v1` 只为清洗改用官方原生 Responses `text.format.json_schema`，发送现有完整 keyed output_schema，保留 allOf、来源局部 q 与全部原 bounds，以及原正文、codec 和本地完整验收。原生 reasoning.effort=none，其他五阶段仍 high/Chat；不使用工具、续轮、自动重试、语义回退或答案修补。新私有 I/O/回放使用原生 completed status、message 身份、native usage 和完整请求预留，不伪造 stop。HTTP400/422 只记录有界固定类别，不把未知旧原因改成已知。原 JSON、strict-function、300k/600k 的既有证据与版本分支保留。官方文档列明该结构化输出通道，但当前具体 schema 和真实完整任务是否成功仍须新 run 的完整账户提交与 receipt/verify 证明。[Responses API](https://api-docs.deepseek.com/api/create-response/)、[Responses guide](https://api-docs.deepseek.com/guides/responses_api/)
+
 ### 11.4 回测、发布与复核
 
 普通数值回测 CLI 默认使用共享 v2 policy，显式选择方式如下；命令来自当前 `main.py` 参数定义：
