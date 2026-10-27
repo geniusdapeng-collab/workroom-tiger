@@ -288,6 +288,14 @@ export function validateEnvelope(envelope, operation, input = {}) {
       && (!envelope.run_id || envelope.execution_mode !== "paper" || !TERMINAL_OK.has(envelope.status)
         || envelope.verification?.ok !== true || !envelope.verification.receipt_sha256)) throw invalid();
     if (operation === "verify" && envelope.summary !== null) throw invalid();
+    const summaryModel = envelope.summary?.model;
+    const slots = plain(summaryModel) && ["clean_output_policy_id", "clean_output_codec_id"].some(key => Object.hasOwn(summaryModel, key));
+    // New protocol claims must enter the complete v2 validator, including when
+    // a forged disclosure would otherwise skip model validation altogether.
+    if (slots && (envelope.status !== "completed"
+      || envelope.summary.disclosures.model_mode !== "enabled"
+      || envelope.summary.disclosures.model_required !== true
+      || envelope.summary.execution_policy !== "whitepaper-execution-v2")) throw invalid();
     if (envelope.summary?.disclosures?.model_mode === "enabled") {
       const model = envelope.summary.model;
       const stages = ["clean.llm_semantic", "tech.sentiment", "tech.risk", "sector.narrative", "decision.debate"];

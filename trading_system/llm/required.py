@@ -459,16 +459,21 @@ def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
     if "assessment" in payload:
         _fail("V2 assessment must come from frozen execution")
     inputs = {"assessment": assessment_context_v2(llm.execution), **payload}
-    from .clean_output import clean_output_policy, CleanOutputInvalid
+    from .clean_output import (clean_output_policy, CleanOutputInvalid,
+        CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1, clean_slots_schema_v1)
     try:
-        strict_clean = clean_output_policy(llm.execution) is not None and stage == "clean.llm_semantic"
+        output_policy = clean_output_policy(llm.execution)
+        strict_clean = output_policy is not None and stage == "clean.llm_semantic"
+        slots_clean = output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 and strict_clean
+        output_schema = clean_slots_schema_v1(schema) if slots_clean else schema
     except CleanOutputInvalid:
         _fail("V2 clean output policy is invalid")
     effort = {"reasoning_effort": "none" if strict_clean else "low"} if stage == "clean.llm_semantic" else {}
     try:
-        out = llm.complete_json(system=SYSTEM_V2, user=TASKS_V2[stage] + "\n" + canonical(inputs),
+        task = CLEAN_SLOTS_TASK_V1 if slots_clean else TASKS_V2[stage]
+        out = llm.complete_json(system=SYSTEM_V2, user=task + "\n" + canonical(inputs),
                                 schema_hint={}, schema=schema, max_tokens=max_tokens, **effort)
-        validate_schema(out, schema)
+        validate_schema(out, output_schema)
         return out
     except LLMUnavailable:
         _fail("Mandatory v2 semantic answer failed transport or validation")
@@ -802,11 +807,122 @@ def clean_keyed_output_v2(value: dict, source_ids, *, batch_ids, decode=False) -
         _fail("V2 source-keyed clean output differs from its exact source coverage")
 
 
+CLEAN_SLOTS_WIRE_V1 = "tiger.clean-slots-wire.v1"
+CLEAN_SLOTS_TASK_V1 = TASKS_V2["clean.llm_semantic"].replace(
+    "相邻来源允许的p0不代表本篇允许p0。format_example仅示范来源键与q的格式，"
+    "省略了必需语义字段，不是完整答案、没有事实含义，不能抄成研究结果。",
+    "相邻来源允许的p0不代表本篇允许p0。clean_wire.output_slots声明每类数组的固定可空槽位；"
+    "所有槽位必须输出，有值从s0连续填写，未使用的尾槽填null，中间不能留空。"
+    "槽位只改变JSON表示，不提供语义答案；摘要、事实、情感及所有判断仍由你逐篇完成。"
+    "tickers最多选择八个相关实体标签，不是穷尽抽取；必要事实与限定须保留在完整摘要和claims。")
+
+
+def clean_slots_output_v1(value: dict, keyed_schema: dict, *, decode=False) -> dict:
+    """Bijectively map the original ordered clean arrays to required slots.
+
+    All semantic values are retained exactly. Null is unused capacity only;
+    a null before a later non-null is rejected, never compacted. The compiled
+    slot schema and the unchanged original keyed schema both gate decoding.
+    Original min/max/unique rules therefore still decide acceptance.
+    """
+    from copy import deepcopy
+    from .clean_output import clean_slots_schema_v1
+    from ..redline.model_diagnostics import RequiredModelUnavailable
+    compiled = clean_slots_schema_v1(keyed_schema)
+    validate_schema(value, compiled if decode else keyed_schema)
+    common = keyed_schema["properties"]["d"]["allOf"][0]["additionalProperties"]
+
+    def visit(item, schema):
+        if schema.get("type") == "array":
+            maximum = schema["maxItems"]
+            if not decode:
+                return {f"s{index}": visit(item[index], schema["items"]) if index < len(item) else None
+                        for index in range(maximum)}
+            result, unused = [], False
+            for index in range(maximum):
+                child = item[f"s{index}"]
+                if child is None:
+                    unused = True
+                else:
+                    if unused:
+                        # Prefix shape has no original JSON Schema keyword or
+                        # path. Report its fixed rejection without inventing
+                        # either location or model-controlled diagnostic data.
+                        raise RequiredModelUnavailable("OUTPUT_SCHEMA_MISMATCH")
+                    result.append(visit(child, schema["items"]))
+            return result
+        if schema.get("type") == "object":
+            return {name: visit(child, schema["properties"][name]) for name, child in item.items()}
+        return deepcopy(item)
+
+    result = {"d": {reference: visit(row, common) for reference, row in value["d"].items()}}
+    validate_schema(result, keyed_schema if decode else compiled)
+    return result
+
+
+def clean_slots_payload_v1(payload: dict, keyed_schema: dict, *, decode=False) -> dict:
+    """Keep every source body/index/binding and declare only slot mechanics.
+
+    The inverse accepts the exact encoder image. Metadata is derived from the
+    unchanged keyed contract, never from a model answer or a guessed source.
+    There is no example containing empty or invented semantic judgments.
+    """
+    from copy import deepcopy
+    from .clean_output import clean_slots_schema_v1, CleanOutputInvalid
+    try:
+        clean_slots_schema_v1(keyed_schema)
+        if decode:
+            if type(payload) is not dict or payload["clean_wire"]["schema"] != CLEAN_SLOTS_WIRE_V1:
+                raise ValueError
+            # The base lossless decoder reconstructs all original sources;
+            # canonical re-encoding below validates this new metadata exactly.
+            base = deepcopy(payload)
+            base["clean_wire"] = clean_payload_wire_v2({"documents": [],
+                "all_source_index": {"columns": ["id", "title", "url", "published_at"], "rows": []}})["clean_wire"]
+            restored = clean_payload_wire_v2(base, decode=True)
+            if clean_slots_payload_v1(restored, keyed_schema) != payload:
+                raise ValueError
+            return restored
+        result = clean_keyed_payload_v2(payload)
+        shared, owned = keyed_schema["properties"]["d"]["allOf"]
+        bindings = result["clean_wire"]["source_bindings"]["rows"]
+        if set(owned["properties"]) != {reference for reference, _ in bindings}:
+            raise ValueError
+        for reference, parts in bindings:
+            expected = {"type": "string", "enum": parts} if parts else {"type": "string", "pattern": r"(?!)"}
+            if owned["properties"][reference]["properties"]["c"]["items"]["properties"]["q"] != expected:
+                raise ValueError
+        policy = result["clean_wire"]
+        policy["schema"] = CLEAN_SLOTS_WIRE_V1
+        policy.pop("format_example")
+        policy.pop("format_example_scope")
+        common = shared["additionalProperties"]["properties"]
+        names = _CLEAN_WIRE_FIELDS_V2["document"]
+        full_names = {short: full for full, short in names.items()}
+        fields = {field: {"field": full_names[field],
+            "slots": [f"s{index}" for index in range(common[field]["maxItems"])],
+            "min_items": common[field]["minItems"], "max_items": common[field]["maxItems"],
+            "unique_items": common[field]["uniqueItems"]} for field in ("t", "e", "h", "f", "c")}
+        policy["output_slots"] = {"fields": fields,
+            "unused": "Each required trailing null slot is unused, never a semantic value.",
+            "order": "Non-null values occupy s0 onward with no holes; preserve model-selected order; never truncate, fill or infer.",
+            "ticker_scope": "At most eight model-selected relevant entity tags, not exhaustive extraction. Keep necessary facts and limitations in summaries and claims."}
+        return result
+    except (KeyError, TypeError, ValueError, IndexError, CleanOutputInvalid):
+        _fail("V1 clean slot input differs from its complete source and slot contract")
+
+
 def clean_v2(llm, docs: list[RawDocument]):
     from .. import config
     from ..search.models import CleanDocumentV2
     from .required_schemas import clean_schema_v2
     from .candidate_research import source_view
+    from .clean_output import (clean_output_policy, CleanOutputInvalid,
+                              CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+    try:
+        slots_clean = clean_output_policy(llm.execution) == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+    except CleanOutputInvalid:
+        _fail("V2 clean output policy is invalid")
     ids = [doc.doc_id for doc in docs]
     if len(ids) != len(set(ids)):
         _fail("V2 semantic cleaning requires unique source identities")
@@ -823,8 +939,11 @@ def clean_v2(llm, docs: list[RawDocument]):
         schema = clean_schema_v2([doc.doc_id for doc in batch], list(TECH_SUBCHAINS),
             config.SECTOR_ETFS, quote_part_ids={key: list(parts) for key, parts in quote_parts.items()},
             all_doc_ids=ids)
-        wire = clean_keyed_payload_v2(payload)
-        out = _call_v2(llm, "clean.llm_semantic", wire, clean_keyed_schema_v2(schema, ids))
+        keyed_schema = clean_keyed_schema_v2(schema, ids)
+        wire = clean_slots_payload_v1(payload, keyed_schema) if slots_clean else clean_keyed_payload_v2(payload)
+        out = _call_v2(llm, "clean.llm_semantic", wire, keyed_schema)
+        if slots_clean:
+            out = clean_slots_output_v1(out, keyed_schema, decode=True)
         out = clean_keyed_output_v2(out, ids, batch_ids=[doc.doc_id for doc in batch], decode=True)
         validate_schema(out, schema)
         _coverage(out["documents"], "id", [doc.doc_id for doc in batch])
@@ -1194,7 +1313,7 @@ def model_summary_v2(llm) -> dict:
     try:
         policy_id = getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None)
         from .clean_output import (clean_output_policy, CLEAN_OUTPUT_POLICY_V1,
-                                   CLEAN_OUTPUT_RESPONSES_POLICY_V1)
+                                   CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
         output_policy = clean_output_policy(getattr(llm, "execution", None))
         expected_budget = BudgetGuard.for_policy(policy_id, clean_output_policy_id=output_policy).snapshot()
         limits = expected_budget["limits"]
@@ -1237,7 +1356,7 @@ def model_summary_v2(llm) -> dict:
                     or receipt["release"] != RELEASE or record["usage"] != receipt["usage"]):
                 raise ValueError
             if kind == "chat":
-                responses = output_policy == CLEAN_OUTPUT_RESPONSES_POLICY_V1 and receipt["stage"] == "clean.llm_semantic"
+                responses = output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1) and receipt["stage"] == "clean.llm_semantic"
                 native_fields = {"response_status", "created_at", "output_message_id", "native_usage"}
                 if responses:
                     from .deepseek_required import responses_usage, DeepSeekRequiredClient
@@ -1280,4 +1399,6 @@ def model_summary_v2(llm) -> dict:
             "response_ids": ids, "call_count": len(chats),
             "required_stages": list(UPGRADE_MODEL_STAGES), "stage_counts": counts,
             "search_count": len(searches), "fetch_count": len(fetches),
-            "search_mode": SEARCH_MODE, "all_required_completed": True, "budget": budget}
+            "search_mode": SEARCH_MODE, "all_required_completed": True, "budget": budget,
+            **({"clean_output_policy_id": output_policy, "clean_output_codec_id": CLEAN_SLOTS_WIRE_V1}
+               if output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 else {})}

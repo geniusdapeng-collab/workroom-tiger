@@ -156,7 +156,7 @@ def validate_model_failure_accounting(value: object) -> dict:
         raise invalid
     if version4:
         if (value["kind"] != "chat" or type(value["output_policy_id"]) is not str
-                or value["output_policy_id"] != "tiger.clean-output.responses-schema.v1"
+                or value["output_policy_id"] not in ("tiger.clean-output.responses-schema.v1", "tiger.clean-output.responses-slots.v1")
                 or type(value["response_status"]) is not str or value["response_status"] not in
                     ("in_progress", "completed", "incomplete", "failed", "unknown", "other")):
             raise invalid

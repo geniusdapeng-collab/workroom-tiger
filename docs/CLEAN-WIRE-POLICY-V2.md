@@ -8,7 +8,8 @@
 
 | 范围 | 原生 API / 输出 | 思考控制字段 | 模型是否仍须真实回答 |
 |---|---|---|---|
-| 当前显式 Responses policy 的 v2 `clean.llm_semantic` | `/responses` / `text.format.json_schema` | `reasoning.effort=none` | 是，单次完整 JSON |
+| 当前显式 Responses slots policy 的 v2 `clean.llm_semantic` | `/responses` / 固定可空槽位 `text.format.json_schema` | `reasoning.effort=none` | 是，单次完整 JSON |
+| 历史 `responses-schema.v1` 的 v2 `clean.llm_semantic` | `/responses` / 原完整 keyed schema | `reasoning.effort=none` | 是，保留原请求 |
 | 历史 `strict-function.v1` 的 v2 `clean.llm_semantic` | Beta Chat / 固定函数 | `thinking.type=disabled`、`reasoning_effort=none` | 是，原单次函数输出 |
 | 未声明输出 policy 的历史 v2 `clean.llm_semantic` | Chat / JSON | `thinking.type=disabled`、`reasoning_effort=low`，保留原请求 | 是 |
 | v2 舆情、风险、板块、公司研究、最终判断 | Chat / JSON | `thinking.type=enabled`、`reasoning_effort=high` | 是 |
@@ -44,7 +45,7 @@
 
 提示要求摘要、逐事实 claims 和来源说明各自保留必要内容，避免跨字段重复抄写或为了凑满上限增加文字。必要事实、反证、未知日期、观点性质与不确定性不能省略；程序不会替模型压缩这些文字。
 
-## 当前 clean：`tiger.clean-keyed-wire.v1`
+## 保留的 keyed clean：`tiger.clean-keyed-wire.v1`
 
 `clean_keyed_payload_v2` 精确保留旧输入 codec 的 documents、全部正文片段和完整全局来源表，只新增明确的来源绑定说明。`clean_wire.source_bindings` 是 `source_ref/allowed_quote_part_ids` 表，列出本批每篇自己允许选择的片段。即使相邻资料允许 `p0`，本篇若 `p0` 不合引文格式，仍不能选择。
 
@@ -74,7 +75,7 @@
 
 依据为 2026-10-27 实际读取的 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 和 [Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。严格函数输出属于 Beta 能力；本地测试和供应商文档不能替代一次完整真实任务及独立 receipt/verify，未来仍可能因服务、输出长度或语义约束失败。
 
-## 当前清洗输出通道：`tiger.clean-output.responses-schema.v1`
+## 保留的清洗输出通道：`tiger.clean-output.responses-schema.v1`
 
 第八次真实任务 `run-4b2c28ca6e5b4165b8cfb2867e942fb9` 使用来源 `1ba9cbbfb7e9e8b6a38e84a36ef6ed6ac6ff4a09`，在 14 次原生 Search 之后，首个 Beta strict 清洗请求收到 HTTP 400。没有取得成功模型响应，也没有进入本地答案校验；提供方错误正文未保留，具体拒绝原因未知。用量未知的 106849 tokens 预留仍在原任务冻结，不能写成零真实费用或被新策略释放。原身份及失败链保留，receipt/verify 均为 `RUN_INCOMPLETE`，账户未提交。
 
@@ -91,6 +92,24 @@
 原生 usage 的 `input_tokens/output_tokens/total_tokens` 保留；为既有预算显式映射为 prompt/completion/total。reasoning tokens 是 output 子集，不能再加一次。合法已知用量在内容/schema 拒绝前结算；缺失、矛盾或超出预留仍冻结。每个请求按包括 schema 的完整 canonical UTF-8 body、framing 和最大输出先预留，同一完整 run 仍受 600k、1 USD、次数和期限约束。旧任务的未知预留留在原任务，不迁入或释放；新源码修正任务有明确新逻辑身份和同样的 per-run 硬限，累计未知费用不能冒称免费。
 
 新的 `/responses` 400/422 诊断只允许有界读取后得到的固定提供方声称类别及固定 body 状态，不保留原 message、任意 type/code/param、正文或秘密。这种分类不是独立证实的根因；未知保持未知。原 JSON 和 strict-function 历史证据不追补新字段。Responses 的无状态会话也不等于供应商完全不缓存输入，官方仍说明有自动 context cache；本协议不发送无效的 `store:false` 来冒充缓存控制。[Context Caching](https://api-docs.deepseek.com/guides/kv_cache/)
+
+## 当前清洗：`tiger.clean-output.responses-slots.v1` / `tiger.clean-slots-wire.v1`
+
+第十次完整任务 `run-b2d2c452ad484675afa37a7684193950` 的前四批八篇清洗通过，第五批 completed 答案在 `/d/d35/t` 违反 `maxItems`。总共116914 tokens 已结算，账户未提交；非法答案没有保留，具体超过几个 ticker 未知。这个原八标签上限是语义标注容量，不是仓位或风险参数。不能通过增大上限、截断答案或删掉必要事实掩盖失败。
+
+新准入对三个 v2 profile 选择独立的 slots 输出 policy，并仅为这个版本增加 `clean_output_codec_id=tiger.clean-slots-wire.v1`。请求仍是原四字段，不能自由选择或覆盖 codec；历史 JSON、strict-function、Responses-schema policy、预算与重放保留各自原合同。静态完整源码闭包继续是 `tiger.strict-source-inventory.v1`。
+
+`clean_slots_schema_v1` 以原 `clean_keyed_schema_v2` 为语义合同，将每来源的共享完整规则与本篇 q 枚举合成闭合对象。只把原有有界列表机械变换为 `s0` 至 `s(N-1)` 的固定必需可空槽位；ticker、事件、产业链、ETF、claims 一起变换，不逐次只修一个 maximum。每个非空槽位的项目 schema 保留原字段、字符串、数值、枚举、来源局部 q 与约束；新提供方 schema 不依赖旧共享 `allOf/additionalProperties` 的装配。
+
+槽位必须形成非空前缀，剩余尾槽为 null。解码按模型实际顺序恢复原列表，null 从未成为事实或默认值。洞、缺键、未知键、类型错误、重复、原 min/max 或语义字段违规仍拒绝。编码超过原上限的列表也拒绝，禁止事后截断或补足。ticker 至多八个模型选出的相关实体，不承诺穷尽实体；必要事实、反证与限制仍属于原摘要和 claims。模型仍自行决定情感、事件、来源、时效和事实，不从 slot schema 得到语义答案。
+
+`clean_slots_payload_v1` 保留完整正文分片、原字段值、覆盖元数据、全部来源索引和本篇引用绑定，只版本化 wire 元数据并增加从原 schema 派生的槽位说明。新提示替换原 variable-array `format_example` 指导；不向模型灌入完整或缺省语义答案。原 keyed payload helper 和旧格式示例保持历史行为。
+
+仅新 selector 的清洗在原固定 `/responses`、相同模型和 reasoning/output/temperature/stream 控制下发送一次完整槽位请求。该新分支以 canonical UTF-8 bytes 直接发送 JSON，使用原 `application/json` header；预算和 request hash 绑定这份完整实际正文，包括全部 schema、正文及元数据。历史通道保留原 `json=request` 发送行为，不能把新分支的字节相等结论追溯给旧调用。Requests 支持直接 `data` 发送并由调用者明确设置 JSON Content-Type，依据：[Requests 官方 Quickstart](https://requests.readthedocs.io/en/latest/user/quickstart/#more-complicated-post-requests)。
+
+私有 request/call 继续使用 v3 原生 Responses 结构：`output_schema/schema_sha256` 始终指原完整 keyed 合同；明确的 `output_policy_id` 选择新版本，完整 `request_sha256` 另绑定实际槽位 provider schema。安全 response 和 parsed 保留模型真正返回的槽位对象，不伪造一个“原生返回的解码数组”。可信 clean 调用立即逆变换，再执行原完整 keyed schema、原语义 schema、覆盖、source-local quote lookup 和 typed 文档构造。独立 replay 从真实上游重建新 payload、完整实际请求、槽位答案与解码结果，不能只验证一个可重算的自包含 hash。
+
+新的预算 allowlist 为独立 `allow_clean_slots`，只有可信新 selector 派生；旧 JSON、strict function 与 Responses-schema 守卫不因此允许槽位格式。40 chat、600k 实际加预留、60 Search、20 Fetch、120 总请求、1 USD 和2400秒均保留。原生状态、usage、空元数据兼容和已知失败结算仍如上一节；不自动重试、换模型或规则回退。固定槽位不保证语义质量、所有提供方 schema keyword 都生效、任意最大回答适合输出窗口，或下次真实完整业务一定成功。
 
 ## 最终输入：`tiger.final-identity-wire.v1`
 

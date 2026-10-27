@@ -22,6 +22,7 @@ import re
 
 CLEAN_OUTPUT_POLICY_V1 = "tiger.clean-output.strict-function.v1"
 CLEAN_OUTPUT_RESPONSES_POLICY_V1 = "tiger.clean-output.responses-schema.v1"
+CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 = "tiger.clean-output.responses-slots.v1"
 CLEAN_OUTPUT_RESPONSES_PATH = "/responses"
 CLEAN_OUTPUT_FUNCTION = "emit_tiger_clean_v2"
 CLEAN_OUTPUT_PATH = "/beta/chat/completions"
@@ -58,7 +59,8 @@ def clean_output_policy(execution) -> str | None:
     value = getattr(getattr(execution, "policy", None), "clean_output_policy_id", None)
     if value is None:
         return None
-    if (type(value) is not str or value not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
+    if (type(value) is not str or value not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                               CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
             or getattr(execution, "upgrade", False) is not True):
         _invalid()
     return value
@@ -394,3 +396,166 @@ def build_clean_responses_safe_response(*, response_id: str, created_at: int,
         "status": "completed", "model": "deepseek-flash", "output": [{"type": "message",
             "id": message_id, "status": "completed", "role": "assistant",
             "content": [{"type": "output_text", "text": _canonical(parsed)}]}], "usage": deepcopy(usage)}
+
+
+def clean_slots_schema_v1(schema: dict) -> dict:
+    """Compile each source's complete contract into closed nullable slots.
+
+    Only the keyed clean contract is accepted. Every source gets its own full
+    document rules and exact own-quote enum. Every bounded array becomes N
+    required s0..s(N-1) properties, each the unchanged item schema or null.
+    String, numeric, enum and nullable-origin rules remain unchanged. Prefix,
+    minimum and uniqueness are still checked against the original array schema
+    after decoding; this provider representation is not semantic acceptance.
+    """
+    _validate_responses_clean_schema(schema)
+    try:
+        shared, owned = schema["properties"]["d"]["allOf"]
+        common = shared["additionalProperties"]
+
+        def slots(node):
+            if node.get("type") == "array":
+                if (set(node) != {"type", "items", "minItems", "maxItems", "uniqueItems"}
+                        or type(node["minItems"]) is not int or type(node["maxItems"]) is not int
+                        or not 0 <= node["minItems"] <= node["maxItems"] <= 1000
+                        or node["uniqueItems"] is not True):
+                    _invalid()
+                item = slots(node["items"])
+                properties = {f"s{index}": {"anyOf": [deepcopy(item), {"type": "null"}]}
+                              for index in range(node["maxItems"])}
+                return {"type": "object", "properties": properties,
+                        "required": list(properties), "additionalProperties": False}
+            result = {}
+            for key, value in node.items():
+                if key == "properties":
+                    result[key] = {name: slots(child) for name, child in value.items()}
+                elif key in ("anyOf", "oneOf", "allOf"):
+                    result[key] = [slots(child) for child in value]
+                else:
+                    result[key] = deepcopy(value)
+            return result
+
+        result = deepcopy(schema)
+        result["properties"]["d"] = deepcopy(owned)
+        for reference, binding in owned["properties"].items():
+            row = deepcopy(common)
+            row["properties"]["c"]["items"]["properties"]["q"] = deepcopy(
+                binding["properties"]["c"]["items"]["properties"]["q"])
+            result["properties"]["d"]["properties"][reference] = slots(row)
+        _validate_clean_slots_schema_v1(result)
+        return result
+    except (KeyError, TypeError, ValueError, IndexError, RecursionError, OverflowError):
+        _invalid()
+
+
+def _validate_clean_slots_schema_v1(schema: dict) -> None:
+    """Closed request boundary for the new codec, independent of user text."""
+    from .deepseek_required import _check_schema
+    from ..redline import LLMUnavailable
+    try:
+        _check_schema(schema)
+        def closed_tree(node):
+            if node.get("type") == "object" and not _closed_object(node):
+                _invalid()
+            if node.get("type") == "array":
+                _invalid()
+            for child in node.get("properties", {}).values():
+                closed_tree(child)
+            for key in ("anyOf", "oneOf", "allOf"):
+                for child in node.get(key, []):
+                    closed_tree(child)
+
+        closed_tree(schema)
+        if not _closed_object(schema) or set(schema["properties"]) != {"d"}:
+            _invalid()
+        sources = schema["properties"]["d"]
+        if not _closed_object(sources):
+            _invalid()
+        fields = {"t": 8, "e": 6, "h": None, "f": None, "c": 4}
+        common = None
+        for reference, row in sources["properties"].items():
+            if (type(reference) is not str or re.fullmatch(r"d(?:0|[1-9][0-9]*)", reference) is None
+                    or not _closed_object(row) or set(row["properties"]) != _DOCUMENT_FIELDS):
+                _invalid()
+            restored = deepcopy(row)
+            for field, maximum in fields.items():
+                array = row["properties"][field]
+                if not _closed_object(array):
+                    _invalid()
+                size = len(array["properties"])
+                if (not 1 <= size <= 1000 or maximum is not None and size != maximum
+                        or set(array["properties"]) != {f"s{index}" for index in range(size)}):
+                    _invalid()
+                item = None
+                for value in array["properties"].values():
+                    if (type(value) is not dict or set(value) != {"anyOf"}
+                            or type(value["anyOf"]) is not list or len(value["anyOf"]) != 2
+                            or value["anyOf"][1] != {"type": "null"}):
+                        _invalid()
+                    if item is None:
+                        item = deepcopy(value["anyOf"][0])
+                    elif item != value["anyOf"][0]:
+                        _invalid()
+                if field in ("h", "f") and (item.get("type") != "string"
+                        or set(item) != {"type", "enum"} or size != len(item["enum"])):
+                    _invalid()
+                restored["properties"][field] = {"type": "array", "items": item,
+                    "minItems": 0, "maxItems": size, "uniqueItems": True}
+            quote = restored["properties"]["c"]["items"]["properties"]["q"]
+            if quote != {"type": "string", "pattern": r"(?!)"} and (
+                    type(quote) is not dict or set(quote) != {"type", "enum"}
+                    or quote["type"] != "string" or type(quote["enum"]) is not list or not quote["enum"]
+                    or len(set(quote["enum"])) != len(quote["enum"])
+                    or any(type(part) is not str or re.fullmatch(r"p(?:0|[1-9][0-9]*)", part) is None
+                           for part in quote["enum"])):
+                _invalid()
+            # Common document semantics must be identical across sources;
+            # only the source-local q selector may vary.
+            restored["properties"]["c"]["items"]["properties"]["q"] = {"type": "string", "pattern": r"(?!)"}
+            if common is None:
+                common = restored
+            elif common != restored:
+                _invalid()
+        _canonical(schema)
+    except (KeyError, TypeError, ValueError, IndexError, RecursionError, OverflowError, LLMUnavailable):
+        _invalid()
+
+
+def build_clean_slots_responses_request(*, system: str, user: str, schema_hint: dict,
+                                        schema: dict, max_tokens: int = 16384,
+                                        temperature: float = 0.2) -> dict:
+    """Same finite native transport, explicitly versioned fixed-slot output."""
+    if (type(system) is not str or not system.strip() or type(user) is not str or not user.strip()
+            or type(schema_hint) is not dict or schema_hint
+            or type(max_tokens) is not int or max_tokens != 16384
+            or type(temperature) not in (int, float) or temperature != 0.2):
+        _invalid()
+    return {"model": "deepseek-flash", "instructions": system, "input": user,
+        "reasoning": {"effort": "none"}, "max_output_tokens": max_tokens,
+        "temperature": temperature, "stream": False,
+        "text": {"format": {"type": "json_schema", "name": "tiger_clean_slots_v1",
+                             "schema": clean_slots_schema_v1(schema)}}}
+
+
+def clean_slots_responses_request_valid(request) -> bool:
+    """Admit only one stateless text-only native request with closed slots."""
+    try:
+        if (type(request) is not dict or set(request) != {"model", "instructions", "input", "reasoning",
+                "max_output_tokens", "temperature", "stream", "text"}
+                or request["model"] != "deepseek-flash" or request["stream"] is not False
+                or request["reasoning"] != {"effort": "none"}
+                or type(request["max_output_tokens"]) is not int or request["max_output_tokens"] != 16384
+                or type(request["temperature"]) not in (int, float) or request["temperature"] != 0.2
+                or any(type(request[key]) is not str or not request[key].strip()
+                       for key in ("instructions", "input"))
+                or type(request["text"]) is not dict or set(request["text"]) != {"format"}):
+            return False
+        output = request["text"]["format"]
+        if (type(output) is not dict or set(output) != {"type", "name", "schema"}
+                or output["type"] != "json_schema" or output["name"] != "tiger_clean_slots_v1"):
+            return False
+        _validate_clean_slots_schema_v1(output["schema"])
+        _canonical(request)
+        return True
+    except (KeyError, TypeError, ValueError, IndexError, RecursionError, OverflowError):
+        return False

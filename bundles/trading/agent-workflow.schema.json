@@ -270,6 +270,14 @@
             },
             "budget": {
               "type": "object"
+            },
+            "clean_output_policy_id": {
+              "type": "string",
+              "const": "tiger.clean-output.responses-slots.v1"
+            },
+            "clean_output_codec_id": {
+              "type": "string",
+              "const": "tiger.clean-slots-wire.v1"
             }
           }
         },

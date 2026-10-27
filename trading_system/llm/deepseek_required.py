@@ -598,10 +598,9 @@ class DeepSeekRequiredClient:
                                 "estimated_charged_usd", "estimated_reserved_usd", "frozen")},
                             "finish_reason": (observation or {}).get("finish_reason")}
                         if responses_protocol:
-                            from .clean_output import CLEAN_OUTPUT_RESPONSES_POLICY_V1
                             accounting.pop("finish_reason")
                             accounting.update(schema="tiger.model-call-accounting.v4",
-                                output_policy_id=CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                output_policy_id=inputs["output_policy_id"],
                                 response_status=(observation or {}).get("response_status", "unknown"),
                                 native_usage=((observation or {}).get("native_usage")
                                               if record["status"] == "settled" else None))
@@ -662,6 +661,13 @@ class DeepSeekRequiredClient:
             _fail("ENDPOINT_NOT_ALLOWED")
         if len(_canonical(request)) > MAX_RESPONSE_BYTES:
             _fail("REQUEST_TOO_LARGE")
+        from .clean_output import clean_output_policy, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+        # New slots policy transmits the exact canonical bytes prepaid and
+        # hashed by BudgetGuard. Historical protocols retain requests' original
+        # json= framing, so archived request builders and behavior stay exact.
+        canonical_slots = (path == "/responses" and
+            clean_output_policy(self.execution) == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+        body = {"data": _canonical(request)} if canonical_slots else {"json": request}
         response = None
         body_deadline = None
         deadline = time.monotonic() + RESPONSE_DEADLINE
@@ -673,7 +679,7 @@ class DeepSeekRequiredClient:
         self._remote_requests += 1
         try:
             response = requests.post(
-                BASE_URL + path, json=request,
+                BASE_URL + path, **body,
                 headers={"Content-Type": "application/json", "Accept": "application/json",
                          "Accept-Encoding": "identity", "Authorization": "Bearer " + self._api_key},
                 # A non-streaming Chat may legitimately wait beyond a native
@@ -866,13 +872,14 @@ class DeepSeekRequiredClient:
                       max_tokens: int = 16384, temperature: float = 0.2, schema: dict,
                       reasoning_effort: str = "high") -> dict:
         stage = self._stage()
-        from .clean_output import clean_output_policy, CleanOutputInvalid, CLEAN_OUTPUT_RESPONSES_POLICY_V1
+        from .clean_output import (clean_output_policy, CleanOutputInvalid,
+            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
         try:
             output_policy = clean_output_policy(self.execution)
         except CleanOutputInvalid:
             _fail("TRUSTED_CONFIGURATION_MISMATCH")
         if output_policy is not None and stage == "clean.llm_semantic":
-            if output_policy == CLEAN_OUTPUT_RESPONSES_POLICY_V1:
+            if output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1):
                 return self._complete_clean_responses(system=system, user=user, schema_hint=schema_hint,
                     max_tokens=max_tokens, temperature=temperature, schema=schema,
                     reasoning_effort=reasoning_effort)
@@ -965,29 +972,34 @@ class DeepSeekRequiredClient:
                                   max_tokens: int, temperature: float, schema: dict,
                                   reasoning_effort: str) -> dict:
         """Accept one completed native message under the unchanged full schema."""
-        from .clean_output import (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_PATH,
+        from .clean_output import (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+            CLEAN_OUTPUT_RESPONSES_PATH, build_clean_slots_responses_request, clean_slots_schema_v1,
             CleanOutputInvalid, build_clean_responses_request, build_clean_responses_safe_response,
             clean_output_policy)
         stage = self._stage()
+        output_policy = clean_output_policy(self.execution)
         if (self.budget is None or stage != "clean.llm_semantic"
-                or clean_output_policy(self.execution) != CLEAN_OUTPUT_RESPONSES_POLICY_V1
+                or output_policy not in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
                 or reasoning_effort != "none"):
             _fail("INVALID_CHAT_REQUEST")
         _check_schema(schema)
         if _canonical(self._clean(schema)) != _canonical(schema):
             _fail("UNSAFE_OUTPUT_SCHEMA")
         try:
-            request = build_clean_responses_request(system=self._text(system) if type(system) is str else system,
+            slots_clean = output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+            builder = build_clean_slots_responses_request if slots_clean else build_clean_responses_request
+            request = builder(system=self._text(system) if type(system) is str else system,
                 user=self._text(user) if type(user) is str else user,
                 schema_hint=self._clean(schema_hint), schema=schema,
                 max_tokens=max_tokens, temperature=temperature)
+            output_schema = clean_slots_schema_v1(schema) if slots_clean else schema
         except CleanOutputInvalid:
             _fail("INVALID_CHAT_REQUEST")
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v3", "call_id": call_id, "stage": stage,
             "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + CLEAN_OUTPUT_RESPONSES_PATH,
             "request": request, "request_sha256": _hash(request), "output_schema": schema,
-            "schema_sha256": _hash(schema), "release": RELEASE, "output_policy_id": CLEAN_OUTPUT_RESPONSES_POLICY_V1}
+            "schema_sha256": _hash(schema), "release": RELEASE, "output_policy_id": output_policy}
         self._admit_call("chat", call_id, request, inputs)
         observation = {}
 
@@ -1067,14 +1079,20 @@ class DeepSeekRequiredClient:
                 _fail("EMPTY_OR_NONOBJECT_MODEL_OUTPUT")
             if _canonical(self._clean(parsed)) != _canonical(parsed):
                 _fail("INVALID_JSON_VALUE")
-            validate_schema(parsed, schema)
+            validate_schema(parsed, output_schema)
+            if slots_clean:
+                from .required import clean_slots_output_v1
+                # Validate original min/max/unique semantics and no holes now,
+                # before creating a completed provider proof. Keep parsed and
+                # safe_response as the actual slot answer, never its expansion.
+                clean_slots_output_v1(parsed, schema, decode=True)
             safe_response = build_clean_responses_safe_response(response_id=response_id,
                 created_at=created, usage=native, parsed=parsed, message_id=message_id)
             return {"schema": "tiger.deepseek-call.v3", "call_id": call_id, "stage": stage,
                 "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
                 "model": MODEL, "release": RELEASE, "usage": usage, "native_usage": native,
                 "response_status": "completed", "created_at": created, "output_message_id": message_id,
-                "output_policy_id": CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                "output_policy_id": output_policy,
                 "request_sha256": inputs["request_sha256"], "response_sha256": _hash(safe_response),
                 "transport_response_sha256": body_hash, "schema_sha256": inputs["schema_sha256"],
                 "response": safe_response, "search_mode": SEARCH_MODE, "parsed": parsed,

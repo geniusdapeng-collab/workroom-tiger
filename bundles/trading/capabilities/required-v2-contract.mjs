@@ -9,6 +9,8 @@ export const MODEL_STAGES_V2 = Object.freeze(['clean.llm_semantic', 'tech.sentim
 const LIMITS = Object.freeze({ max_chat_calls: 40, max_tokens: 300000, max_search_calls: 60, max_fetch_calls: 20, max_remote_requests: 120, max_cost_usd: 1, deadline_seconds: 2400 });
 const BUDGET_POLICY_V3 = 'tiger.budget-policy.v3';
 const LIMITS_V3 = Object.freeze({ ...LIMITS, max_tokens: 600000 });
+const CLEAN_SLOTS_POLICY_V1 = 'tiger.clean-output.responses-slots.v1';
+const CLEAN_SLOTS_CODEC_V1 = 'tiger.clean-slots-wire.v1';
 const HASH = /^[a-f0-9]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const reject = message => { throw new Error(message); };
@@ -39,7 +41,9 @@ export function publicUrl(value) {
       || [...url.searchParams.keys()].some(key => /token|key|signature|authorization|credential|secret|password/i.test(key.replace(/[_-]/g, '')))) reject('Source URL must be public and credential free');
 }
 export function validateModelV2(model) {
-  exact(model, ['provider', 'model', 'release', 'required', 'research_contract', 'response_ids', 'call_count', 'required_stages', 'stage_counts', 'search_count', 'fetch_count', 'search_mode', 'all_required_completed', 'budget'], 'V2 model');
+  const slots = plain(model) && (Object.hasOwn(model, 'clean_output_policy_id') || Object.hasOwn(model, 'clean_output_codec_id'));
+  exact(model, ['provider', 'model', 'release', 'required', 'research_contract', 'response_ids', 'call_count', 'required_stages', 'stage_counts', 'search_count', 'fetch_count', 'search_mode', 'all_required_completed', 'budget', ...(slots ? ['clean_output_policy_id', 'clean_output_codec_id'] : [])], 'V2 model');
+  if (slots && (model.clean_output_policy_id !== CLEAN_SLOTS_POLICY_V1 || model.clean_output_codec_id !== CLEAN_SLOTS_CODEC_V1)) reject('Unsupported clean output policy or codec');
   if (model.provider !== 'deepseek' || model.model !== 'deepseek-flash' || model.release !== 'DeepSeek-V4.1-Flash-1017' || model.required !== true || model.all_required_completed !== true || model.research_contract !== 'tiger.short-term-research.v2' || model.search_mode !== 'provider_native_search') reject('Exact completed required model is mandatory');
   if (!Array.isArray(model.required_stages) || model.required_stages.join('|') !== MODEL_STAGES_V2.join('|')) reject('All six ordered semantic stages are required');
   exact(model.stage_counts, MODEL_STAGES_V2, 'V2 stage counters');
@@ -49,6 +53,7 @@ export function validateModelV2(model) {
   if (model.response_ids.length !== model.call_count) reject('Every chat needs a unique provider response');
   const budget = model.budget;
   const v3 = plain(budget) && budget.schema === 'tiger.request-budget.v3';
+  if (slots && !v3) reject('Clean slots require the registered v3 budget');
   const limits = v3 ? LIMITS_V3 : LIMITS;
   exact(budget, ['schema', 'limits', 'pricing', 'counts', 'actual_tokens', 'reserved_tokens', 'estimated_charged_usd', 'estimated_reserved_usd', 'frozen', 'records', ...(v3 ? ['policy_id'] : [])], 'Request budget');
   if ((!v3 && budget.schema !== 'tiger.request-budget.v2') || v3 && budget.policy_id !== BUDGET_POLICY_V3 || budget.frozen !== false || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0) reject('Every paid request must have settled usage under a reviewed policy');

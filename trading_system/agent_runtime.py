@@ -58,11 +58,13 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
     selected_budget = (BUDGET_POLICY_V3 if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
     if selected_budget is not None and (not upgrade or selected_budget != BUDGET_POLICY_V3):
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
-    from .llm.clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
-    selected_clean = ((CLEAN_OUTPUT_RESPONSES_POLICY_V1 if upgrade and selected_budget == BUDGET_POLICY_V3 else None)
+    from .llm.clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                   CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+    selected_clean = ((CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 if upgrade and selected_budget == BUDGET_POLICY_V3 else None)
                       if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY else clean_output_policy_id)
     if selected_clean is not None and (type(selected_clean) is not str or not upgrade
-            or selected_clean not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1)
+            or selected_clean not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                      CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
             or selected_budget != BUDGET_POLICY_V3):
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen clean output policy")
     required = profile == REQUIRED_PROFILE or upgrade
@@ -133,6 +135,9 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
             value["request_budget_policy_id"] = selected_budget
         if selected_clean is not None:
             value["clean_output_policy_id"] = selected_clean
+        if selected_clean == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1:
+            from .llm.required import CLEAN_SLOTS_WIRE_V1
+            value["clean_output_codec_id"] = CLEAN_SLOTS_WIRE_V1
         value["limitations"][1] = "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
         value["limitations"] += [
             "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
@@ -219,7 +224,7 @@ def _policy_source_contract(run: Path) -> str | None:
     """Select the source closure from the trusted fixed policy, never a manifest.
 
     Absent policies retain their historical contract. The exact registered
-    strict-function and Responses selectors both require the entire reviewed
+    strict-function and registered Responses selectors require the entire reviewed
     release closure. A malformed selector cannot silently choose legacy.
     """
     policy_file = safe_path(run, "policy.json", must_exist=False)

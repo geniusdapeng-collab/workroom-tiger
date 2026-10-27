@@ -27,7 +27,9 @@ from .request_budget import BudgetGuard, BudgetRefused, LIMITS
 from .clean_output import (CLEAN_OUTPUT_PATH, clean_output_policy,
                            build_clean_request, build_clean_safe_response,
                            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_PATH,
-                           build_clean_responses_request, build_clean_responses_safe_response)
+                           CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1, clean_slots_schema_v1,
+                           build_clean_slots_responses_request, build_clean_responses_request,
+                           build_clean_responses_safe_response)
 
 _MODEL_METHODS = {"model.deepseek.search", "model.deepseek.fetch", "model.deepseek.chat"}
 _COLLECTION_AND_MODEL = ("search.collect", *UPGRADE_MODEL_STAGES)
@@ -239,8 +241,8 @@ class ReplayClient:
         arguments = dict(system=self._sanitizer._text(system), user=self._sanitizer._text(user),
             schema_hint=self._sanitizer._clean(schema_hint), schema=schema, max_tokens=max_tokens,
             temperature=temperature)
-        if output_policy == CLEAN_OUTPUT_RESPONSES_POLICY_V1:
-            return self._complete_clean_responses(arguments, schema)
+        if output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1):
+            return self._complete_clean_responses(arguments, schema, output_policy)
         body = (build_clean_request(**arguments) if strict_clean else
                 build_chat_request(**arguments, reasoning_effort=reasoning_effort,
                     thinking_mode=stage_thinking_mode(self._stage_name, upgrade=True)))
@@ -290,7 +292,7 @@ class ReplayClient:
         self._settle("chat", request, proof, usage)
         return deepcopy(proof["parsed"])
 
-    def _complete_clean_responses(self, arguments, schema):
+    def _complete_clean_responses(self, arguments, schema, output_policy):
         """Rebuild only the fixed native Responses contract, never a tool turn.
 
         Original native usage and explicit budget-normalized usage must agree.
@@ -300,7 +302,9 @@ class ReplayClient:
         stage = self._stage_name
         if stage != "clean.llm_semantic":
             _bad("responses_outside_clean_stage", stage=stage)
-        body = build_clean_responses_request(**arguments)
+        slots_clean = output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+        body = (build_clean_slots_responses_request(**arguments) if slots_clean else
+                build_clean_responses_request(**arguments))
         request, proof = self._consume("model.deepseek.chat", body,
             "tiger.deepseek-request.v3", "tiger.deepseek-call.v3",
             {"output_schema", "schema_sha256", "release", "output_policy_id"},
@@ -310,8 +314,8 @@ class ReplayClient:
             endpoint_path=CLEAN_OUTPUT_RESPONSES_PATH)
         if (request["release"] != RELEASE or proof["release"] != RELEASE
                 or proof["requested_model"] != MODEL or proof["model"] != MODEL
-                or request["output_policy_id"] != CLEAN_OUTPUT_RESPONSES_POLICY_V1
-                or proof["output_policy_id"] != CLEAN_OUTPUT_RESPONSES_POLICY_V1
+                or request["output_policy_id"] != output_policy
+                or proof["output_policy_id"] != output_policy
                 or proof["search_mode"] != SEARCH_MODE
                 or proof["response_status"] != "completed"
                 or type(proof["created_at"]) is not int or proof["created_at"] <= 0
@@ -319,7 +323,13 @@ class ReplayClient:
                 or request["schema_sha256"] != _hash(schema)
                 or proof["schema_sha256"] != request["schema_sha256"]):
             _bad("responses_contract", stage=stage)
-        validate_schema(proof["parsed"], schema)
+        validate_schema(proof["parsed"], clean_slots_schema_v1(schema) if slots_clean else schema)
+        if slots_clean:
+            # Validate the exact recorded slot answer against every original
+            # semantic constraint before returning it to clean_v2's decoder.
+            # The safe response below remains the provider's actual slots.
+            from .required import clean_slots_output_v1
+            clean_slots_output_v1(proof["parsed"], schema, decode=True)
         if not _same(self._sanitizer._clean(proof["parsed"]), proof["parsed"]):
             _bad("unclean_responses_output", stage=stage)
         response_id = DeepSeekRequiredClient._identifier(proof["response_id"])
