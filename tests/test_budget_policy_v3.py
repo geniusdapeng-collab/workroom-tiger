@@ -92,7 +92,8 @@ def test_current_v2_profile_selects_v3_from_frozen_policy(profile):
     ("us-public-model-required-intraday-paper-v2", "255f95a5f9eae3897f9c68c14e23088ce9605a9b8d5d59b269ae4abe68ac66dc"),
 ])
 def test_historical_policy_manifest_bytes_stay_exact(profile, expected):
-    assert hashlib.sha256(json_bytes(policy_manifest(profile, budget_policy_id=None))).hexdigest() == expected
+    assert hashlib.sha256(json_bytes(policy_manifest(profile, budget_policy_id=None,
+        clean_output_policy_id=None))).hexdigest() == expected
 
 
 def test_legacy_typed_policy_omits_only_the_new_absent_field():
@@ -191,7 +192,7 @@ def frozen_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "ExecutionPolicy", lambda *args, **kwargs: original(*args,
         **{**kwargs, "provider_names": PUBLIC_PROVIDER_NAMES, "budget_policy_id": V3}))
     execution, root, result, admission, denied, attempts = complete_fixture(tmp_path, monkeypatch)
-    policy = policy_manifest("us-public-model-required-paper-v2")
+    policy = policy_manifest("us-public-model-required-paper-v2", clean_output_policy_id=None)
     atomic_json(root, "policy.json", policy)
     admission["policy_sha256"] = hashlib.sha256(json_bytes(policy)).hexdigest()
     files = [file_ref(root / "source", path.relative_to(root / "source").as_posix(), "application/source")

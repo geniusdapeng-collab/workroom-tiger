@@ -58,17 +58,21 @@ def _canonical(value):
         raise BudgetRefused("INVALID_BUDGET_REQUEST") from exc
 
 
-def token_upper_bound(request: dict) -> tuple[int, int]:
-    """Text only; unbounded images/files/tool loops are deliberately unsupported."""
-    if not isinstance(request, dict):
+def token_upper_bound(request: dict, *, allow_clean_function: bool = False) -> tuple[int, int]:
+    """Text plus one opted-in fixed output function; no image/file/tool loops."""
+    if not isinstance(request, dict) or type(allow_clean_function) is not bool:
         raise BudgetRefused("INVALID_BUDGET_REQUEST")
     messages, output = request.get("messages"), request.get("max_tokens")
+    bounded_function = False
+    if allow_clean_function:
+        from .clean_output import clean_function_request_valid
+        bounded_function = clean_function_request_valid(request)
     if (not isinstance(messages, list) or not messages
             or type(output) is not int or not 1 <= output <= 393216
             or any(not isinstance(m, dict) or set(m) != {"role", "content"}
                    or m["role"] not in {"system", "user"}
                    or not isinstance(m["content"], str) for m in messages)
-            or any(k in request for k in ("tools", "tool_choice", "stream_options"))
+            or (any(k in request for k in ("tools", "tool_choice", "stream_options")) and not bounded_function)
             or request.get("stream", False) is not False):
         raise BudgetRefused("UNBOUNDED_CHAT_REQUEST")
     # JSON escaping and role/content framing are included, then generously
@@ -78,16 +82,23 @@ def token_upper_bound(request: dict) -> tuple[int, int]:
 
 class BudgetGuard:
     @classmethod
-    def for_policy(cls, policy_id=None, *, clock=time.monotonic):
+    def for_policy(cls, policy_id=None, *, clean_output_policy_id=None, clock=time.monotonic):
         """Select only a reviewed version. Legacy constructors remain 300k."""
         limits = policy_limits(policy_id)
         return cls(**limits, clock=clock,
-                   _policy_id=BUDGET_POLICY_V3 if policy_id == BUDGET_POLICY_V3 else None)
+                   _policy_id=BUDGET_POLICY_V3 if policy_id == BUDGET_POLICY_V3 else None,
+                   _clean_output_policy_id=clean_output_policy_id)
 
     def __init__(self, *, max_chat_calls=40, max_tokens=300000,
                  max_search_calls=60, max_fetch_calls=20,
                  max_remote_requests=120, max_cost_usd=1.0,
-                 deadline_seconds=2400, clock=time.monotonic, _policy_id=None):
+                 deadline_seconds=2400, clock=time.monotonic, _policy_id=None,
+                 _clean_output_policy_id=None):
+        if _clean_output_policy_id is not None:
+            from .clean_output import CLEAN_OUTPUT_POLICY_V1
+            if (type(_clean_output_policy_id) is not str or _clean_output_policy_id != CLEAN_OUTPUT_POLICY_V1
+                    or _policy_id != BUDGET_POLICY_V3):
+                raise BudgetRefused("INVALID_BUDGET_POLICY")
         configured = dict(max_chat_calls=max_chat_calls, max_tokens=max_tokens,
                           max_search_calls=max_search_calls, max_fetch_calls=max_fetch_calls,
                           max_remote_requests=max_remote_requests, max_cost_usd=max_cost_usd,
@@ -104,6 +115,7 @@ class BudgetGuard:
             raise BudgetRefused("INVALID_BUDGET_CLOCK")
         self.limits, self._clock, self._started = configured, clock, clock()
         self.policy_id = _policy_id
+        self.clean_output_policy_id = _clean_output_policy_id
         self._records = {}
         self._frozen = False
 
@@ -124,7 +136,8 @@ class BudgetGuard:
         if (sum(snapshot["counts"].values()) >= self.limits["max_remote_requests"]
                 or snapshot["counts"][kind] >= self.limits[f"max_{kind}_calls"]):
             raise BudgetRefused("REQUEST_COUNT_LIMIT")
-        input_bound, output_bound = token_upper_bound(request) if kind == "chat" else (0, 0)
+        input_bound, output_bound = token_upper_bound(request,
+            allow_clean_function=self.clean_output_policy_id is not None) if kind == "chat" else (0, 0)
         total = input_bound + output_bound
         cost = total * PRICING["token_upper_usd_per_million"] / 1000000 if kind == "chat" else PRICING[f"{kind}_upper_usd_per_request"]
         if snapshot["actual_tokens"] + snapshot["reserved_tokens"] + total > self.limits["max_tokens"]:

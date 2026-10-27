@@ -46,9 +46,11 @@ DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 
 
 _CURRENT_BUDGET_POLICY = object()
+_CURRENT_CLEAN_OUTPUT_POLICY = object()
 
 
-def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_POLICY) -> dict:
+def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_POLICY,
+                    clean_output_policy_id=_CURRENT_CLEAN_OUTPUT_POLICY) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
     upgrade = profile in UPGRADE_POLICIES
@@ -56,13 +58,20 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
     selected_budget = (BUDGET_POLICY_V3 if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
     if selected_budget is not None and (not upgrade or selected_budget != BUDGET_POLICY_V3):
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
+    from .llm.clean_output import CLEAN_OUTPUT_POLICY_V1
+    selected_clean = ((CLEAN_OUTPUT_POLICY_V1 if upgrade and selected_budget == BUDGET_POLICY_V3 else None)
+                      if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY else clean_output_policy_id)
+    if selected_clean is not None and (type(selected_clean) is not str or not upgrade
+            or selected_clean != CLEAN_OUTPUT_POLICY_V1 or selected_budget != BUDGET_POLICY_V3):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen clean output policy")
     required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
     policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
                  else "tiger.public-active-paper-policy.v1" if active else POLICY_ID)
     execution = ExecutionPolicy(policy_id=policy_id, model_mode="enabled",
                                 search_source_names=("deepseek_search",),
-                                budget_policy_id=selected_budget) if required else ExecutionPolicy(policy_id=policy_id)
+                                budget_policy_id=selected_budget,
+                                clean_output_policy_id=selected_clean) if required else ExecutionPolicy(policy_id=policy_id)
     value = {
         "schema": "tiger.policy.v1", "profile": profile,
         "paper_account": ACCOUNT, "execution_mode": "paper",
@@ -121,6 +130,8 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
                                        model_mapping_observed_date="2026-10-27")
         if selected_budget is not None:
             value["request_budget_policy_id"] = selected_budget
+        if selected_clean is not None:
+            value["clean_output_policy_id"] = selected_clean
         value["limitations"][1] = "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
         value["limitations"] += [
             "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
@@ -203,8 +214,46 @@ def source_tree_hash(files: list[dict]) -> str:
     return digest(json_bytes(files))
 
 
+def _policy_source_contract(run: Path) -> str | None:
+    """Select the source closure from the trusted fixed policy, never a manifest.
+
+    Absent and historical policies retain their existing source contract. A
+    present malformed policy is an error; it cannot silently choose legacy.
+    """
+    policy_file = safe_path(run, "policy.json", must_exist=False)
+    if not policy_file.exists():
+        return None
+    policy = read_json(run, "policy.json")
+    if not isinstance(policy, dict) or not isinstance(policy.get("execution"), dict):
+        raise EvidenceInvalid("RESULT_INVALID", "Invalid source admission policy")
+    execution = policy["execution"]
+    selected = execution.get("clean_output_policy_id")
+    expected = policy_manifest(policy.get("profile"),
+        budget_policy_id=execution.get("budget_policy_id"), clean_output_policy_id=selected)
+    if policy != strict_json(json_bytes(expected)):
+        raise EvidenceInvalid("RESULT_INVALID", "Source admission policy differs")
+    if selected is None:
+        return None
+    from .source_contract_v1 import STRICT_SOURCE_CONTRACT_V1
+    return STRICT_SOURCE_CONTRACT_V1
+
+
+def _verify_source_contract(files: list[dict], contract_id: str | None) -> None:
+    if contract_id is None:
+        return
+    from .source_contract_v1 import validate_source_paths
+    try:
+        validate_source_paths([ref["path"] for ref in files], contract_id=contract_id)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EvidenceInvalid("RESULT_INVALID", "Strict source inventory differs from registered release") from exc
+
+
 def freeze_source(run: Path, source: Path = SOURCE_ROOT) -> dict:
+    source_contract = _policy_source_contract(run)
     before = source_inventory(source)
+    # The exact trusted path set is checked before any source copy, worker or
+    # paid model operation. It is not inferred from this possibly pruned tree.
+    _verify_source_contract(before, source_contract)
     for ref in before:
         atomic_bytes(run, "source/" + ref["path"], verify_ref(source, ref), exclusive=True)
     after = source_inventory(source)
@@ -226,17 +275,27 @@ def freeze_source(run: Path, source: Path = SOURCE_ROOT) -> dict:
     manifest = {"schema": "tiger.source.v1", "git_commit": revision,
                 "git_worktree_dirty": dirty, "tree_sha256": source_tree_hash(before),
                 "files": before, "dependencies": dependency_identity()}
+    if source_contract is not None:
+        manifest["source_contract_id"] = source_contract
     atomic_json(run, "source-manifest.json", manifest, exclusive=True)
-    verify_source(run)
+    verify_source(run, required_source_contract=source_contract)
     return manifest
 
 
-def verify_source(run: Path) -> dict:
+def verify_source(run: Path, *, required_source_contract: str | None = None) -> dict:
+    source_contract = _policy_source_contract(run)
+    if required_source_contract is not None:
+        if source_contract is not None and source_contract != required_source_contract:
+            raise EvidenceInvalid("RESULT_INVALID", "Strict source contract selection differs")
+        source_contract = required_source_contract
     manifest = read_json(run, "source-manifest.json")
     if (not isinstance(manifest, dict) or manifest.get("schema") != "tiger.source.v1"
             or not isinstance(manifest.get("files"), list)
             or source_tree_hash(manifest["files"]) != manifest.get("tree_sha256")):
         raise EvidenceInvalid("RESULT_INVALID", "Invalid source manifest")
+    if source_contract is not None and manifest.get("source_contract_id") != source_contract:
+        raise EvidenceInvalid("RESULT_INVALID", "Strict source contract identity differs")
+    _verify_source_contract(manifest["files"], source_contract)
     frozen = checked_root(run / "source")
     for ref in manifest["files"]:
         verify_ref(frozen, ref, schema="application/source")
@@ -489,7 +548,8 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
             or not isinstance(request.get("profile"), str)
             or request.get("profile") not in SUPPORTED_PROFILES
             or policy != strict_json(json_bytes(policy_manifest(request["profile"],
-                budget_policy_id=policy.get("execution", {}).get("budget_policy_id"))))):
+                budget_policy_id=policy.get("execution", {}).get("budget_policy_id"),
+                clean_output_policy_id=policy.get("execution", {}).get("clean_output_policy_id"))))):
         raise EvidenceInvalid("RESULT_INVALID", "Admission policy or request identity differs")
     expected = {"schema_version": "tiger.agent-request/v1", "profile": request["profile"],
                 "paper_account": ACCOUNT, "idempotency_key": request.get("idempotency_key")}

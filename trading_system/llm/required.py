@@ -459,7 +459,12 @@ def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
     if "assessment" in payload:
         _fail("V2 assessment must come from frozen execution")
     inputs = {"assessment": assessment_context_v2(llm.execution), **payload}
-    effort = {"reasoning_effort": "low"} if stage == "clean.llm_semantic" else {}
+    from .clean_output import clean_output_policy, CleanOutputInvalid
+    try:
+        strict_clean = clean_output_policy(llm.execution) is not None and stage == "clean.llm_semantic"
+    except CleanOutputInvalid:
+        _fail("V2 clean output policy is invalid")
+    effort = {"reasoning_effort": "none" if strict_clean else "low"} if stage == "clean.llm_semantic" else {}
     try:
         out = llm.complete_json(system=SYSTEM_V2, user=TASKS_V2[stage] + "\n" + canonical(inputs),
                                 schema_hint={}, schema=schema, max_tokens=max_tokens, **effort)
@@ -1188,7 +1193,9 @@ def model_summary_v2(llm) -> dict:
     from ..redline.execution import UPGRADE_MODEL_STAGES
     try:
         policy_id = getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None)
-        expected_budget = BudgetGuard.for_policy(policy_id).snapshot()
+        from .clean_output import clean_output_policy, CLEAN_OUTPUT_POLICY_V1
+        output_policy = clean_output_policy(getattr(llm, "execution", None))
+        expected_budget = BudgetGuard.for_policy(policy_id, clean_output_policy_id=output_policy).snapshot()
         limits = expected_budget["limits"]
         chats, searches, fetches = llm.receipts, llm.search_receipts, llm.fetch_receipts
         budget = llm.budget.snapshot()
@@ -1226,9 +1233,19 @@ def model_summary_v2(llm) -> dict:
                 raise ValueError
             if kind == "chat" and (
                     receipt["provider"] != "deepseek" or receipt["model"] != MODEL
-                    or receipt["release"] != RELEASE or receipt["finish_reason"] != "stop"
-                    or record["usage"] != receipt["usage"]):
+                    or receipt["release"] != RELEASE or record["usage"] != receipt["usage"]):
                 raise ValueError
+            if kind == "chat":
+                strict = output_policy == CLEAN_OUTPUT_POLICY_V1 and receipt["stage"] == "clean.llm_semantic"
+                if (receipt["finish_reason"] != ("tool_calls" if strict else "stop")
+                        or strict and receipt.get("output_policy_id") != output_policy
+                        or not strict and ("output_policy_id" in receipt or "output_tool_call_id" in receipt)
+                        or strict and (type(receipt.get("output_tool_call_id")) is not str
+                                       or not receipt["output_tool_call_id"])):
+                    raise ValueError
+        tool_ids = [row["output_tool_call_id"] for row in chats if "output_tool_call_id" in row]
+        if len(set(tool_ids)) != len(tool_ids):
+            raise ValueError
         actual = sum(row["usage"]["total_tokens"] for row in chats)
         charged = (actual * PRICING["token_upper_usd_per_million"] / 1000000
                    + len(searches) * PRICING["search_upper_usd_per_request"]

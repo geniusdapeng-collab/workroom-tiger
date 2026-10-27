@@ -501,7 +501,12 @@ class DeepSeekRequiredClient:
         self.budget = None
         if getattr(execution, "upgrade", False):
             from .request_budget import BudgetGuard
-            self.budget = BudgetGuard.for_policy(getattr(getattr(execution, "policy", None), "budget_policy_id", None))
+            from .clean_output import clean_output_policy, CleanOutputInvalid
+            try:
+                self.budget = BudgetGuard.for_policy(getattr(getattr(execution, "policy", None), "budget_policy_id", None),
+                    clean_output_policy_id=clean_output_policy(execution))
+            except CleanOutputInvalid:
+                _fail("TRUSTED_CONFIGURATION_MISMATCH")
 
     def _admit_call(self, kind: str, call_id: str, request: dict, inputs: dict) -> None:
         if call_id in self._used_call_ids:
@@ -607,7 +612,7 @@ class DeepSeekRequiredClient:
         return value
 
     def _post_json(self, path: str, request: dict) -> tuple[dict, str]:
-        if path not in ("/chat/completions", "/v1/tools/search", "/v1/tools/fetch"):
+        if path not in ("/chat/completions", "/beta/chat/completions", "/v1/tools/search", "/v1/tools/fetch"):
             _fail("ENDPOINT_NOT_ALLOWED")
         if len(_canonical(request)) > MAX_RESPONSE_BYTES:
             _fail("REQUEST_TOO_LARGE")
@@ -629,7 +634,7 @@ class DeepSeekRequiredClient:
                 # Search/Fetch idle timeout. The existing 180-second acceptance
                 # deadline remains; this does not grant another paid request.
                 timeout=Timeout(total=RESPONSE_DEADLINE, connect=CONNECT_TIMEOUT,
-                                read=RESPONSE_DEADLINE if path == "/chat/completions" else READ_TIMEOUT),
+                                read=RESPONSE_DEADLINE if path in ("/chat/completions", "/beta/chat/completions") else READ_TIMEOUT),
                 allow_redirects=False, verify=True, stream=True)
             status = response.status_code
             if type(status) is not int or status != 200:
@@ -724,6 +729,15 @@ class DeepSeekRequiredClient:
                       max_tokens: int = 16384, temperature: float = 0.2, schema: dict,
                       reasoning_effort: str = "high") -> dict:
         stage = self._stage()
+        from .clean_output import clean_output_policy, CleanOutputInvalid
+        try:
+            output_policy = clean_output_policy(self.execution)
+        except CleanOutputInvalid:
+            _fail("TRUSTED_CONFIGURATION_MISMATCH")
+        if output_policy is not None and stage == "clean.llm_semantic":
+            return self._complete_clean_function(system=system, user=user, schema_hint=schema_hint,
+                max_tokens=max_tokens, temperature=temperature, schema=schema,
+                reasoning_effort=reasoning_effort)
         _check_schema(schema)
         if _canonical(self._clean(schema)) != _canonical(schema):
             _fail("UNSAFE_OUTPUT_SCHEMA")
@@ -804,6 +818,109 @@ class DeepSeekRequiredClient:
 
         proof = self._record_call("model.deepseek.chat", inputs, invoke, observation=observation)
         self.receipts.append({k: v for k, v in proof.items() if k not in ("schema", "parsed", "response")})
+        return proof["parsed"]
+
+    def _complete_clean_function(self, *, system: str, user: str, schema_hint: dict,
+                                 max_tokens: int, temperature: float, schema: dict,
+                                 reasoning_effort: str) -> dict:
+        """Accept one named strict output function; never execute or follow it."""
+        from .clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_FUNCTION,
+            CLEAN_OUTPUT_PATH, CleanOutputInvalid, build_clean_request,
+            build_clean_safe_response, clean_output_policy)
+        stage = self._stage()
+        if (self.budget is None or stage != "clean.llm_semantic"
+                or clean_output_policy(self.execution) != CLEAN_OUTPUT_POLICY_V1
+                or reasoning_effort != "none"):
+            _fail("INVALID_CHAT_REQUEST")
+        _check_schema(schema)
+        if _canonical(self._clean(schema)) != _canonical(schema):
+            _fail("UNSAFE_OUTPUT_SCHEMA")
+        if (not isinstance(system, str) or not system.strip() or not isinstance(user, str) or not user.strip()
+                or not isinstance(schema_hint, dict) or type(max_tokens) is not int
+                or not 1 <= max_tokens <= 393216 or not _finite_number(temperature) or not 0 <= temperature <= 2):
+            _fail("INVALID_CHAT_REQUEST")
+        try:
+            request = build_clean_request(system=self._text(system) if isinstance(system, str) else system,
+                user=self._text(user) if isinstance(user, str) else user,
+                schema_hint=self._clean(schema_hint), schema=schema,
+                max_tokens=max_tokens, temperature=temperature)
+        except CleanOutputInvalid:
+            _fail("UNSUPPORTED_OUTPUT_SCHEMA")
+        call_id = uuid.uuid4().hex
+        inputs = {"schema": "tiger.deepseek-request.v2", "call_id": call_id, "stage": stage,
+            "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + CLEAN_OUTPUT_PATH,
+            "request": request, "request_sha256": _hash(request), "output_schema": schema,
+            "schema_sha256": _hash(schema), "release": RELEASE, "output_policy_id": CLEAN_OUTPUT_POLICY_V1}
+        self._admit_call("chat", call_id, request, inputs)
+        observation = {}
+
+        def invoke():
+            response, body_hash = self._post_json(CLEAN_OUTPUT_PATH, request)
+            choices = response.get("choices")
+            observed = (choices[0].get("finish_reason") if isinstance(choices, list)
+                and len(choices) == 1 and isinstance(choices[0], dict) else None)
+            observation["finish_reason"] = (observed if observed in
+                ("stop", "length", "tool_calls", "content_filter") else
+                "unknown" if observed is None else "other")
+            # A rejected output is still a paid call. Settle before validating
+            # model, finish reason, arguments, source ownership or semantics.
+            usage = self._usage(response.get("usage"))
+            self._settle_budget(call_id, usage)
+            if response.get("model") != MODEL:
+                _fail("RESPONSE_MODEL_MISMATCH")
+            if response.get("object") != "chat.completion":
+                _fail("RESPONSE_OBJECT_MISMATCH")
+            response_id = self._identifier(response.get("id"))
+            if self._api_key in response_id or any(row["response_id"] == response_id for row in self.receipts):
+                _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+            if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
+                _fail("INVALID_CHOICES")
+            choice, message = choices[0], choices[0].get("message")
+            if (type(choice.get("index")) is not int or choice["index"] != 0
+                    or choice.get("finish_reason") != "tool_calls" or type(message) is not dict
+                    or message.get("role") != "assistant" or message.get("content") not in (None, "")
+                    or message.get("function_call") or message.get("reasoning_content")
+                    or type(message.get("tool_calls")) is not list or len(message["tool_calls"]) != 1):
+                _fail("INCOMPLETE_MODEL_RESPONSE")
+            tool = message["tool_calls"][0]
+            if (type(tool) is not dict or set(tool) != {"id", "type", "function"}
+                    or tool["type"] != "function" or type(tool["function"]) is not dict
+                    or set(tool["function"]) != {"name", "arguments"}
+                    or tool["function"]["name"] != CLEAN_OUTPUT_FUNCTION):
+                _fail("INCOMPLETE_MODEL_RESPONSE")
+            tool_id = self._identifier(tool["id"])
+            if self._api_key in tool_id or any(row.get("output_tool_call_id") == tool_id for row in self.receipts):
+                _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+            arguments = tool["function"]["arguments"]
+            if type(arguments) is not str or not arguments.strip():
+                _fail("EMPTY_MODEL_OUTPUT")
+            parsed = _json_loads(arguments)
+            if type(parsed) is not dict or not parsed:
+                _fail("EMPTY_OR_NONOBJECT_MODEL_OUTPUT")
+            if _canonical(self._clean(parsed)) != _canonical(parsed):
+                # Do not redact/repair a semantic answer into an accepted one.
+                # The failure retains only fixed diagnostics and paid usage.
+                _fail("INVALID_JSON_VALUE")
+            validate_schema(parsed, schema)
+            fingerprint = response.get("system_fingerprint")
+            if fingerprint is not None:
+                fingerprint = self._identifier(fingerprint)
+                if self._api_key in fingerprint:
+                    _fail("UNSAFE_RESPONSE_FINGERPRINT")
+            safe_response = build_clean_safe_response(response_id=response_id,
+                system_fingerprint=fingerprint, usage=usage, parsed=parsed, tool_call_id=tool_id)
+            return {"schema": "tiger.deepseek-call.v2", "call_id": call_id, "stage": stage,
+                "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
+                "model": MODEL, "release": RELEASE, "usage": usage,
+                "finish_reason": "tool_calls", "output_policy_id": CLEAN_OUTPUT_POLICY_V1,
+                "output_tool_call_id": tool_id, "request_sha256": inputs["request_sha256"],
+                "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
+                "schema_sha256": inputs["schema_sha256"], "response": safe_response,
+                "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed,
+                **self._budget_proof(inputs)}
+
+        proof = self._record_call("model.deepseek.chat", inputs, invoke, observation=observation)
+        self.receipts.append({key: value for key, value in proof.items() if key not in ("schema", "parsed", "response")})
         return proof["parsed"]
 
     def _source_title(self, title: str) -> str:

@@ -24,6 +24,8 @@ from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
     DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
     stage_thinking_mode, validate_schema)
 from .request_budget import BudgetGuard, BudgetRefused, LIMITS
+from .clean_output import (CLEAN_OUTPUT_PATH, clean_output_policy,
+                           build_clean_request, build_clean_safe_response)
 
 _MODEL_METHODS = {"model.deepseek.search", "model.deepseek.fetch", "model.deepseek.chat"}
 _COLLECTION_AND_MODEL = ("search.collect", *UPGRADE_MODEL_STAGES)
@@ -63,10 +65,11 @@ class ReplayClient:
         self.execution = execution
         self._calls = deepcopy(stage_calls)
         self._stage_name, self._cursor = None, 0
-        self._visited, self._used_ids, self._response_ids = set(), set(), set()
+        self._visited, self._used_ids, self._response_ids, self._tool_call_ids = set(), set(), set(), set()
         self._first_started, self._last_finished, self._clock = None, None, 0.
         self.receipts, self.search_receipts, self.fetch_receipts = [], [], []
         self.budget = BudgetGuard.for_policy(getattr(execution.policy, "budget_policy_id", None),
+                                            clean_output_policy_id=clean_output_policy(execution),
                                             clock=lambda: self._clock)
         # Pure sanitization methods do not initialize the real client, consult
         # configuration or retain a key. Persisted text was already redacted.
@@ -93,7 +96,8 @@ class ReplayClient:
         if self._visited != set(self._calls):
             _bad("unvisited_model_stage")
 
-    def _consume(self, method, body, request_schema, proof_schema, request_extra, proof_extra):
+    def _consume(self, method, body, request_schema, proof_schema, request_extra, proof_extra,
+                 *, endpoint_path=None):
         stage = self._stage_name
         if stage is None or self._cursor >= len(self._calls[stage]):
             _bad("missing_expected_IO", stage=stage)
@@ -112,7 +116,8 @@ class ReplayClient:
             _bad("closed_IO_fields", stage=stage)
         call_id = request["call_id"]
         kind = method.rsplit(".", 1)[1]
-        endpoint = BASE_URL + ("/chat/completions" if kind == "chat" else "/v1/tools/" + kind)
+        endpoint = BASE_URL + (endpoint_path if endpoint_path is not None else
+                              "/chat/completions" if kind == "chat" else "/v1/tools/" + kind)
         if (not _hex(call_id, 32) or call_id in self._used_ids
                 or request["schema"] != request_schema or proof["schema"] != proof_schema
                 or request["call_id"] != proof["call_id"]
@@ -222,20 +227,31 @@ class ReplayClient:
 
     def complete_json(self, *, system, user, schema_hint, schema, max_tokens=16384,
                       temperature=.2, reasoning_effort="high"):
+        output_policy = clean_output_policy(self.execution) if self._stage_name == "clean.llm_semantic" else None
+        strict_clean = output_policy is not None
+        expected_effort = "none" if strict_clean else stage_reasoning_effort(self._stage_name, upgrade=True)
         if (type(reasoning_effort) is not str
-                or reasoning_effort != stage_reasoning_effort(self._stage_name, upgrade=True)):
+                or reasoning_effort != expected_effort):
             _bad("stage_reasoning_effort", stage=self._stage_name)
-        body = build_chat_request(system=self._sanitizer._text(system), user=self._sanitizer._text(user),
+        arguments = dict(system=self._sanitizer._text(system), user=self._sanitizer._text(user),
             schema_hint=self._sanitizer._clean(schema_hint), schema=schema, max_tokens=max_tokens,
-            temperature=temperature, reasoning_effort=reasoning_effort,
-            thinking_mode=stage_thinking_mode(self._stage_name, upgrade=True))
-        request, proof = self._consume("model.deepseek.chat", body, "tiger.deepseek-request.v1", "tiger.deepseek-call.v1",
-            {"output_schema", "schema_sha256", "release"},
+            temperature=temperature)
+        body = (build_clean_request(**arguments) if strict_clean else
+                build_chat_request(**arguments, reasoning_effort=reasoning_effort,
+                    thinking_mode=stage_thinking_mode(self._stage_name, upgrade=True)))
+        request, proof = self._consume("model.deepseek.chat", body,
+            "tiger.deepseek-request.v2" if strict_clean else "tiger.deepseek-request.v1",
+            "tiger.deepseek-call.v2" if strict_clean else "tiger.deepseek-call.v1",
+            {"output_schema", "schema_sha256", "release"} | ({"output_policy_id"} if strict_clean else set()),
             {"requested_model", "response_id", "model", "release", "usage", "finish_reason", "response_sha256",
-             "schema_sha256", "response", "system_fingerprint", "search_mode", "parsed"})
+             "schema_sha256", "response", "system_fingerprint", "search_mode", "parsed"}
+             | ({"output_policy_id", "output_tool_call_id"} if strict_clean else set()),
+            endpoint_path=CLEAN_OUTPUT_PATH if strict_clean else None)
         if (request["release"] != RELEASE or proof["release"] != RELEASE
                 or proof["model"] != MODEL or proof["requested_model"] != MODEL
-                or proof["finish_reason"] != "stop" or proof["search_mode"] != SEARCH_MODE
+                or proof["finish_reason"] != ("tool_calls" if strict_clean else "stop")
+                or strict_clean and (request["output_policy_id"] != output_policy or proof["output_policy_id"] != output_policy)
+                or proof["search_mode"] != SEARCH_MODE
                 or not _same(request["output_schema"], schema)
                 or request["schema_sha256"] != _hash(schema) or proof["schema_sha256"] != request["schema_sha256"]):
             _bad("chat_contract", stage=self._stage_name)
@@ -249,7 +265,14 @@ class ReplayClient:
         if fingerprint is not None:
             DeepSeekRequiredClient._identifier(fingerprint)
         usage = DeepSeekRequiredClient._usage(proof["usage"])
-        response = {"id": response_id, "model": MODEL, "system_fingerprint": fingerprint,
+        if strict_clean:
+            tool_call_id = DeepSeekRequiredClient._identifier(proof["output_tool_call_id"])
+            if tool_call_id in self._tool_call_ids:
+                _bad("duplicate_model_tool_call", stage=self._stage_name)
+            response = build_clean_safe_response(response_id=response_id, system_fingerprint=fingerprint,
+                usage=usage, parsed=proof["parsed"], tool_call_id=tool_call_id)
+        else:
+            response = {"id": response_id, "model": MODEL, "system_fingerprint": fingerprint,
             "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant",
                 "content": json.dumps(proof["parsed"], ensure_ascii=False, sort_keys=True,
                     separators=(",", ":"), allow_nan=False)}}], "usage": usage}
@@ -257,6 +280,8 @@ class ReplayClient:
                 or proof["response_sha256"] != _hash(response)):
             _bad("chat_response_identity_or_usage", stage=self._stage_name)
         self._response_ids.add(response_id)
+        if strict_clean:
+            self._tool_call_ids.add(tool_call_id)
         self._settle("chat", request, proof, usage)
         return deepcopy(proof["parsed"])
 
@@ -358,26 +383,34 @@ def _frozen_execution_policy(run, admission, preflight):
         _bad("frozen_execution_policy_type", stage="daily.preflight")
     fields = deepcopy(typed["fields"])
     base = {"policy_id", "model_mode", "provider_names", "search_source_names", "market_timezone"}
-    if set(fields) not in (base, base | {"budget_policy_id"}) or ("budget_policy_id" in fields and fields["budget_policy_id"] is None):
+    optional = {"budget_policy_id", "clean_output_policy_id"}
+    if (not base.issubset(fields) or set(fields) - base - optional
+            or any(fields[name] is None for name in optional if name in fields)):
         _bad("frozen_execution_policy_fields", stage="daily.preflight")
     for name in ("provider_names", "search_source_names"):
         if type(fields[name]) is not list:
             _bad("frozen_execution_policy_allowlist", stage="daily.preflight")
         fields[name] = tuple(fields[name])
     execution = ExecutionPolicy(**fields)
+    if execution.clean_output_policy_id is not None and "source_sha256" not in admission:
+        _bad("frozen_clean_source_binding", stage="daily.preflight")
     profiles = [profile for profile, row in UPGRADE_POLICIES.items() if row[0] == execution.policy_id]
     if len(profiles) != 1:
         _bad("frozen_execution_policy_profile", stage="daily.preflight")
     policy_file = safe_path(run, "policy.json", must_exist=False)
-    if policy_file.exists() or execution.budget_policy_id is not None or "policy_sha256" in admission:
+    if (policy_file.exists() or execution.budget_policy_id is not None
+            or execution.clean_output_policy_id is not None or "policy_sha256" in admission):
         frozen = read_json(run, "policy.json")
-        expected = policy_manifest(profiles[0], budget_policy_id=execution.budget_policy_id)
+        expected = policy_manifest(profiles[0], budget_policy_id=execution.budget_policy_id,
+                                   clean_output_policy_id=execution.clean_output_policy_id)
         if (admission.get("policy_sha256") != digest(json_bytes(frozen))
                 or not _same(frozen, expected)
                 or not _same(frozen["execution"], execution.to_dict())):
             _bad("frozen_budget_policy_binding", stage="daily.preflight")
     if "source_sha256" in admission:
-        verify_source(run)
+        from ..source_contract_v1 import STRICT_SOURCE_CONTRACT_V1
+        verify_source(run, required_source_contract=(STRICT_SOURCE_CONTRACT_V1
+            if execution.clean_output_policy_id is not None else None))
         if admission["source_sha256"] != digest(read_bytes(run, "source-manifest.json")):
             _bad("frozen_budget_source_binding", stage="daily.preflight")
     return execution
@@ -421,7 +454,7 @@ def _verify(run, result, admission):
                     "proof": read_snapshot(run, call["output_ref"], run_id=run.name, stage=stage, role="output")})
     execution = SimpleNamespace(run_date=date.fromisoformat(assessment["run_date"]),
         policy=_frozen_execution_policy(run, admission, inputs["daily.preflight"]),
-        admitted_at_utc=assessment["admitted_at_utc"], deadline_at_utc=clock.get("deadline_at_utc"))
+        upgrade=True, admitted_at_utc=assessment["admitted_at_utc"], deadline_at_utc=clock.get("deadline_at_utc"))
     if not _same(inputs["pipeline.prepare"].get("policy"), normalize(execution.policy)):
         _bad("pipeline_frozen_execution_policy_binding", stage="pipeline.prepare")
     client = ReplayClient(execution, calls)
