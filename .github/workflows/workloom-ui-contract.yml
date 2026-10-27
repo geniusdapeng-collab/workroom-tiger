@@ -12,7 +12,8 @@ permissions:
 jobs:
   ui-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    # Full Python and serial browser suites share this job; retain every check.
+    timeout-minutes: 120
     env:
       WORKLOOM_DIR: governance
       NODE_ENV: test
