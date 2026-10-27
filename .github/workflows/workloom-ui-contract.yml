@@ -53,6 +53,7 @@ jobs:
             exit 1
           fi
           {
+            printf 'TIGER_TEST_DATABASE_PORT=%s\n' "$PGPORT"
             printf 'DATABASE_URL=postgres://postgres:mock@127.0.0.1:%s/workloom_tiger_ci\n' "$PGPORT"
             printf 'DATABASE_APP_URL=postgres://workloom_app:mockapp@127.0.0.1:%s/workloom_tiger_ci\n' "$PGPORT"
             printf 'DATABASE_GATEWAY_URL=postgres://workloom_gateway:mockgw@127.0.0.1:%s/workloom_tiger_ci\n' "$PGPORT"

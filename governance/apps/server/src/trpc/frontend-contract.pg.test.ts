@@ -10,6 +10,7 @@ import type { Identity } from "@workloom/base/tenancy";
 import { appRouter } from "./router.js";
 import { validateStaffing } from "../service/bundle.js";
 import { staffingDraftHash } from "../service/onboarding-truth.js";
+import { assertFrontendFixtureDatabase } from "../test-fixtures/frontend-database.js";
 
 const RUN_DB = process.env.RUN_FRONTEND_CONTRACT_PG_TESTS === "1";
 const envKeys = ["LLM_PROVIDER", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"] as const;
@@ -112,12 +113,7 @@ describe.skipIf(!RUN_DB)("前端契约接线（真实 tRPC / PostgreSQL，模型
   }
 
   beforeAll(async () => {
-    const urls = ["DATABASE_URL", "DATABASE_APP_URL", "DATABASE_GATEWAY_URL"].map((key) => new URL(process.env[key] ?? "http://invalid"));
-    if (urls.some((url) => !["127.0.0.1", "[::1]"].includes(url.hostname)
-      || url.port !== "55432" || !["postgres:", "postgresql:"].includes(url.protocol)
-      || !/^\/workloom_tiger_[a-z0-9_]+$/.test(url.pathname) || url.pathname !== urls[0]!.pathname)) {
-      throw new Error("只允许同一 workloom_tiger_ 前缀的本机隔离测试库，三种数据库角色必须指向该库");
-    }
+    assertFrontendFixtureDatabase();
     db = new pg.Pool({ connectionString: process.env.DATABASE_URL });
     expect((await getAppPool().query("SELECT current_user,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user")).rows[0])
       .toEqual({ current_user: "workloom_app", rolsuper: false, rolbypassrls: false });
