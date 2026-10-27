@@ -520,7 +520,13 @@ SHS 叙事兑现维度（EPS 修正/指引语气）自 v5.0 由 NarrativeAgent L
 
 下游舆情、风险、叙事及最终判断保留全部来源、完整摘要、每条事实 statement、claim_key、来源与时间限定，使用显式 `columns`/`rows` 编码。嵌套列名按实际字段集合的字典序固定，避免封存 JSON 的键顺序变化破坏合法重放。重复引文文本改为父文档 id 绑定的 `quote_ref`，只含原引文 SHA256 与字符数；全局交付说明明确本次没有重读引文或正文。最终公司引文仍只能来自发行人研究实际展示并绑定的资料，广域哈希引用不能扩张已读范围或新增公司原文事实。
 
-仅 `clean.llm_semantic` 请求 `reasoning_effort=low`；舆情、风险、叙事、发行人研究及最终选择仍为 `high`，所有阶段 `thinking` 均保持 `enabled`，具体请求参数由独立重放核对。官方参数依据：[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。`claim_key` 采用最多 160 字符的小写 ASCII 标识，同一实体、事件和事实跨文档复用；v2 文本与标识符使用严格末尾校验，禁止换行、控制/零宽字符及不允许的尖括号。8 篇批量、16384 输出上限及原有全局预算同时生效；真实 55 来源元数据加合成语义长度的独立容量检查只证明对应单次请求可被当前预算守卫接纳，不预测整轮实际用量。截至本次结构修复验收，完整成功的真实 v2 任务仍为 0；上述代码修复与本机测试不作为完整真实任务通过或盈利证明，后续结果须另按实际 run_id、receipt/verify 记录。
+第五次 `run-855809304c2b46409e64664ca99d20f0` 以来源 `ae0509ded31457e8fee2428431c794512d6f4fae` 执行，在首个八篇清洗批次收到 `finish_reason=length`，实际 prompt 19582、completion 16384、合计 35966 tokens，流程按 `INCOMPLETE_MODEL_RESPONSE` 失败，账户未提交。没有完整接纳的响应证明，因此不能推断第五次的显式 JSON 与 thinking 各消耗多少；它也不改变前四次失败身份和未知用量记录。
+
+当前容量修复采用可逆 `tiger.clean-wire.v1`：每次仍提供全部真实来源索引、逐篇完整正文片段与所有覆盖元数据，只连接重复元数据、缩写字段名和受控来源 ID。逆变换后再次执行原完整 schema，摘要、来源说明、逐事实及引文归属的上限和必要校验不缩减。仅 v2 `clean.llm_semantic` 显式请求 `thinking.type=disabled`、`reasoning_effort=low`；舆情、风险、叙事、发行人研究及最终选择仍为 enabled/high，v1 默认请求保持原样。关闭清洗 thinking 的目的在于容纳结构化语义答案，质量和真实完成率仍须实际检验。依据：[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)、[JSON Output](https://api-docs.deepseek.com/guides/json_mode/)。
+
+最终输入使用完整真实 ID 索引缩写明确的身份字段；自然语言、claim_key/claim_id、引文 hash 和不同父来源不合并。最终模型可以完整修改 thesis，或明确引用同股票本轮已完成并已展示的原模型 thesis；后者逐字展开并在 `model_reference_usage` 披露，不计作重新撰写。最终选择/否决和五个人工执行理由仍由 high thinking 的真实响应产生，原 schema、研究充分性、来源与事实集合、数值风险权限均继续检查。独立回放从真实上游重建请求与展开结果，不能仅凭重算后的自包含 hash 接受修改。
+
+8 篇批量、16384 输出和原整轮预算同时生效。容量检查按实际调用顺序重放同一预算守卫，展示每次预留前缀和首次拒绝；合成摘要/事实长度与假设 usage 必须显式列出。长资料、20 个研究目标或原字段极值仍可能在付费前被预算拒绝，不能从某个单次可接纳请求推导整轮保证。完整约定与条件见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)。`claim_key` 仍为最多 160 字符的小写 ASCII 标识；严格文本格式与原有语义约束保持。上述代码、本机测试和合成容量条件不构成真实完整通过或盈利证明；实际后续成功须另按来源提交、run_id、receipt/verify 记录。
 
 ### 11.4 回测、发布与复核
 

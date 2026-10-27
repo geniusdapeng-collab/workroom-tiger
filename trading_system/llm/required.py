@@ -330,6 +330,9 @@ SYSTEM_V2 = SYSTEM + (
 TASKS_V2 = {
     "clean.llm_semantic": (
         "逐篇处理documents中的完整正文，完成实体消歧、情感、事件、产业链/板块标签和完整中文摘要。"
+        "clean_wire声明可逆传输协议：documents是columns/rows表，以source_ref连接all_source_index的ref；"
+        "该索引保留每篇真实id、完整title、url及published_at，连接后才是每篇完整输入。"
+        "输出按clean_wire.output_fields把原语义字段换成短字段；所有来源引用用该索引的ref，程序逐项还原真实id。"
         "正文完整且仅按顺序展示在content_parts.rows的text列；各列含义见columns，按原顺序阅读全部片段。"
         "仅对documents中的每个id恰好返回一次；all_source_index是全体来源的归属索引，列含义见columns，不代表其他篇正文也已展示。"
         "给出最多四个重要事实及其本篇quote_part_id、明确claim_key。"
@@ -345,6 +348,8 @@ TASKS_V2 = {
         "is_quoteable=false的片段仍须完整阅读和解释，但不能选择为引文；"
         "没有支持该事实的可引用片段时不提取该claim，不能靠删字、改字或编造编号满足格式。"
         "旧/未知日期、AI评论、未具名消息、反证等限定必须进入摘要与origin_note。"
+        "summary覆盖本篇主题与必要限定，claims逐项表达重要事实，origin_note保留来源、时效、观点和可靠性限定；"
+        "避免跨字段逐字复述，不为填满字段上限重复同一事实或凑字数，但不得省略必要事实、反证与不确定性。"
         "没有依据可不提取claims，不能补造。"
     ),
     "tech.sentiment": (
@@ -366,6 +371,12 @@ TASKS_V2 = {
     ),
     "decision.debate": (
         "你作最终选择或否决。只有approved_picks可buy；watch_candidates只能watch。"
+        "final_wire.identity_index将短ref逐一绑定真实文档、行情及事实id，所有受控id引用使用短ref；"
+        "正文中的相似字样只是原文，不能做字符串替换。"
+        "thesis可返回完整修订版，或用唯一字段reuse_thesis引用同symbol本轮已完成的candidate_research.theses原模型结论。"
+        "引用表示沿用已展示的原模型五段、事实与限定，未重新生成该thesis，不是省略研究；"
+        "你仍须真实判断选择或否决，并亲自生成五个人工执行理由。不得引用别的symbol或未完成研究。"
+        "五个人工理由应简洁且各有所指，保留必要事实、反证、时效及执行条件，不复写整个thesis或凑字数。"
         "每个给定symbol恰好一条，数值计划不得更改。参考本轮完整candidate_research、"
         "市场/板块/产业链/科技信号与事件/风险计划，给出普通执行团队读得懂的说明及thesis。"
         "technical_flow_v2用真实结构、量价、主线和数值闸门判断，不统一要求公司利好新闻；"
@@ -489,6 +500,179 @@ def clean_payload_v2(docs, *, all_docs=None) -> dict:
         "rows": [[raw.doc_id, raw.title, raw.url, raw.published or None] for raw in originals]}}
 
 
+CLEAN_WIRE_V2 = "tiger.clean-wire.v1"
+_CLEAN_WIRE_FIELDS_V2 = {
+    "root": {"documents": "d"},
+    "document": {"id": "i", "tickers": "t", "sentiment": "s", "sentiment_score": "v",
+        "events": "e", "summary_zh": "z", "relevance": "r", "chain_ids": "h",
+        "sector_etfs": "f", "provenance": "p", "claims": "c"},
+    "provenance": {"evidence_kind": "k", "origin_id": "o", "origin_note": "n", "time_role": "t"},
+    "claim": {"statement": "s", "quote_part_id": "q", "claim_key": "k", "time_role": "t"},
+}
+
+
+def _clean_wire_ids_v2(source_ids, *, decode):
+    from .required_schemas import _ids
+    ids = _ids(source_ids, allow_empty=True)
+    return ({f"d{index}": identity for index, identity in enumerate(ids)} if decode else
+            {identity: f"d{index}" for index, identity in enumerate(ids)})
+
+
+def _clean_wire_context_v2(context, name):
+    return {("root", "documents"): "document", ("document", "claims"): "claim",
+            ("document", "provenance"): "provenance",
+            ("document", "id"): "source", ("provenance", "origin_id"): "source"}.get(
+                (context, name), "value")
+
+
+def clean_schema_wire_v2(schema: dict, source_ids, *, decode=False) -> dict:
+    """Rename schema properties and opaque source IDs, preserving every rule.
+
+    The original semantic schema is unchanged. Its min/max bounds, patterns,
+    source-local quote bindings and combinators survive this bijective wire
+    mapping and are validated again after decoding the model's answer.
+    """
+    from copy import deepcopy
+    aliases = _clean_wire_ids_v2(source_ids, decode=decode)
+
+    def visit(node, context):
+        names = _CLEAN_WIRE_FIELDS_V2.get(context, {})
+        inverse = {short: full for full, short in names.items()}
+        result = {}
+        for key, value in node.items():
+            if key == "properties":
+                mapped = {}
+                for name, child in value.items():
+                    full = inverse.get(name, name) if decode else name
+                    mapped[full if decode else names.get(name, name)] = visit(
+                        child, _clean_wire_context_v2(context, full))
+                result[key] = mapped
+            elif key == "required":
+                result[key] = [(inverse if decode else names).get(name, name) for name in value]
+            elif key in {"allOf", "anyOf", "oneOf"}:
+                result[key] = [visit(child, context) for child in value]
+            elif key == "items":
+                result[key] = visit(value, context)
+            elif context == "source" and key in {"enum", "const"}:
+                try:
+                    result[key] = [aliases[item] for item in value] if key == "enum" else aliases[value]
+                except (KeyError, TypeError):
+                    _fail("V2 clean wire schema has an unbound source identity")
+            else:
+                # Bounds, natural labels, patterns and all other values are
+                # copied exactly, never tightened, dropped or translated.
+                result[key] = deepcopy(value)
+        return result
+
+    return visit(schema, "root")
+
+
+def clean_output_wire_v2(value: dict, source_ids, *, decode=False) -> dict:
+    """Invert only names and source references; semantic strings stay exact.
+
+    Production validates the complete wire schema before decoding and the
+    complete unchanged semantic schema afterwards. Encoding is also pure so
+    fixtures and independent contract checks can prove both round trips.
+    """
+    from copy import deepcopy
+    aliases = _clean_wire_ids_v2(source_ids, decode=decode)
+
+    def visit(item, context):
+        if context == "source":
+            if item is None:
+                return None
+            try:
+                return aliases[item]
+            except (KeyError, TypeError):
+                _fail("V2 clean wire output has an unbound source identity")
+        if context == "value":
+            return deepcopy(item)
+        if isinstance(item, list):
+            return [visit(child, context) for child in item]
+        if not isinstance(item, dict):
+            _fail("V2 clean wire output differs from its object contract")
+        names = _CLEAN_WIRE_FIELDS_V2[context]
+        mapping = {short: full for full, short in names.items()} if decode else names
+        if any(name not in mapping for name in item):
+            _fail("V2 clean wire output has an unknown field")
+        return {mapping[name]: visit(child, _clean_wire_context_v2(
+            context, mapping[name] if decode else name)) for name, child in item.items()}
+
+    return visit(value, "root")
+
+
+def clean_payload_wire_v2(payload: dict, *, decode=False) -> dict:
+    """Losslessly join repeated source metadata and table field names once.
+
+    Every original source ID/title/URL/date is retained in every call's full
+    registry. Each selected body's exact part rows and all its coverage/hash
+    metadata are retained. The inverse is used by pure verification and tests;
+    it cannot create content, shorten a field or infer source attribution.
+    """
+    from copy import deepcopy
+    base_columns = ["id", "title", "url", "published_at"]
+    try:
+        if not decode:
+            if type(payload) is not dict or set(payload) != {"documents", "all_source_index"}:
+                raise ValueError
+            registry = payload["all_source_index"]
+            if set(registry) != {"columns", "rows"} or registry["columns"] != base_columns:
+                raise ValueError
+            ids = [row[0] for row in registry["rows"]]
+            aliases = _clean_wire_ids_v2(ids, decode=False)
+            source_rows = {row[0]: dict(zip(base_columns, row)) for row in registry["rows"]
+                           if type(row) is list and len(row) == len(base_columns)}
+            if len(source_rows) != len(ids):
+                raise ValueError
+            documents = []
+            for original in payload["documents"]:
+                identity = original["id"]
+                if (identity not in source_rows or any(original[key] != source_rows[identity][key]
+                                                      for key in base_columns)):
+                    raise ValueError
+                documents.append({"source_ref": aliases[identity], **{
+                    key: deepcopy(item) for key, item in original.items() if key not in base_columns}})
+            fields = {kind: {short: full for full, short in names.items()}
+                      for kind, names in _CLEAN_WIRE_FIELDS_V2.items()}
+            return {"clean_wire": {"schema": CLEAN_WIRE_V2, "output_fields": fields,
+                        "source_refs": "Every dN is only an opaque alias for the exact registry id in that row, including cross-batch origin_id. It is not an inferred fact or source origin."},
+                    "documents": _column_table_v2(documents),
+                    "all_source_index": {"columns": ["ref", *base_columns],
+                        "rows": [[aliases[row[0]], *deepcopy(row)] for row in registry["rows"]]}}
+        if (type(payload) is not dict or set(payload) != {"clean_wire", "documents", "all_source_index"}
+                or payload["clean_wire"]["schema"] != CLEAN_WIRE_V2):
+            raise ValueError
+        registry, table = payload["all_source_index"], payload["documents"]
+        if (set(registry) != {"columns", "rows"} or registry["columns"] != ["ref", *base_columns]
+                or set(table) != {"columns", "rows"} or len(set(table["columns"])) != len(table["columns"])):
+            raise ValueError
+        ids = [row[1] for row in registry["rows"]]
+        aliases = _clean_wire_ids_v2(ids, decode=False)
+        source_rows = {}
+        for row in registry["rows"]:
+            if type(row) is not list or len(row) != 5 or row[0] != aliases[row[1]]:
+                raise ValueError
+            source_rows[row[0]] = dict(zip(base_columns, row[1:]))
+        documents = []
+        for values in table["rows"]:
+            if type(values) is not list or len(values) != len(table["columns"]):
+                raise ValueError
+            row = dict(zip(table["columns"], deepcopy(values)))
+            source = source_rows[row.pop("source_ref")]
+            if set(row).intersection(base_columns):
+                raise ValueError
+            documents.append({**source, **row})
+        restored = {"documents": documents, "all_source_index": {
+            "columns": base_columns, "rows": [deepcopy(row[1:]) for row in registry["rows"]]}}
+        # A decoder accepts only the exact canonical encoder image. Unknown
+        # instructions, aliases, fields or reorderings cannot silently vanish.
+        if clean_payload_wire_v2(restored) != payload:
+            raise ValueError
+        return restored
+    except (KeyError, TypeError, ValueError, IndexError):
+        _fail("V2 clean payload wire differs from its lossless source contract")
+
+
 def clean_v2(llm, docs: list[RawDocument]):
     from .. import config
     from ..search.models import CleanDocumentV2
@@ -510,7 +694,10 @@ def clean_v2(llm, docs: list[RawDocument]):
         schema = clean_schema_v2([doc.doc_id for doc in batch], list(TECH_SUBCHAINS),
             config.SECTOR_ETFS, quote_part_ids={key: list(parts) for key, parts in quote_parts.items()},
             all_doc_ids=ids)
-        out = _call_v2(llm, "clean.llm_semantic", payload, schema)
+        wire = clean_payload_wire_v2(payload)
+        out = _call_v2(llm, "clean.llm_semantic", wire, clean_schema_wire_v2(schema, ids))
+        out = clean_output_wire_v2(out, ids, decode=True)
+        validate_schema(out, schema)
         _coverage(out["documents"], "id", [doc.doc_id for doc in batch])
         by_id = {row["id"]: row for row in out["documents"]}
         for raw in batch:
@@ -640,6 +827,156 @@ def build_decision_payload_v2(context: dict, docs, account_usd: float) -> dict:
         "reference_capital_usd": account_usd}
 
 
+FINAL_IDENTITY_WIRE_V2 = "tiger.final-identity-wire.v1"
+_FINAL_IDENTITY_FIELDS_V2 = frozenset({
+    "id", "origin_id", "source_id", "date_source_id", "search_source_id", "fetch_source_id",
+    "evidence_ids", "source_ids", "issuer_identity_evidence_ids",
+})
+
+
+def _final_identity_map_v2(identities, *, decode):
+    from .required_schemas import _ids
+    identities = _ids(identities, allow_empty=True)
+    return ({f"w{index}": identity for index, identity in enumerate(identities)} if decode else
+            {identity: f"w{index}" for index, identity in enumerate(identities)})
+
+
+def final_identity_values_v2(value, identities, *, decode=False):
+    """Map only explicitly named identity fields and their table columns.
+
+    Natural-text fields, arbitrary claim_key/claim_id values, quote hashes and
+    dictionary keys are untouched even when their text equals an ID or alias.
+    Each different source retains its own original-ID registry row.
+    """
+    from copy import deepcopy
+    aliases = _final_identity_map_v2(identities, decode=decode)
+
+    def visit(item, field=""):
+        if isinstance(item, str):
+            return aliases.get(item, item) if field in _FINAL_IDENTITY_FIELDS_V2 else item
+        if isinstance(item, list):
+            return [visit(child, field) for child in item]
+        if isinstance(item, dict):
+            if set(item) == {"columns", "rows"}:
+                columns, rows = item["columns"], item["rows"]
+                if (type(columns) is not list or any(type(name) is not str for name in columns)
+                        or len(set(columns)) != len(columns) or type(rows) is not list
+                        or any(type(row) is not list or len(row) != len(columns) for row in rows)):
+                    _fail("Final v2 identity table differs from its named columns")
+                return {"columns": deepcopy(columns), "rows": [[visit(child, name)
+                    for name, child in zip(columns, row)] for row in rows]}
+            return {key: visit(child, key) for key, child in item.items()}
+        return deepcopy(item)
+
+    return visit(value)
+
+
+def final_identity_schema_v2(schema, identities, *, decode=False):
+    """Bijectively rename only the original schema's opaque identity enums."""
+    from copy import deepcopy
+    aliases = _final_identity_map_v2(identities, decode=decode)
+
+    def visit(item, field=""):
+        if isinstance(item, list):
+            return [visit(child, field) for child in item]
+        if isinstance(item, dict):
+            result = {}
+            for key, value in item.items():
+                if key == "properties":
+                    result[key] = {name: visit(child, name) for name, child in value.items()}
+                elif key == "enum" and field in _FINAL_IDENTITY_FIELDS_V2:
+                    result[key] = [aliases.get(child, child) if type(child) is str else deepcopy(child)
+                                   for child in value]
+                elif key == "const" and field in _FINAL_IDENTITY_FIELDS_V2 and type(value) is str:
+                    result[key] = aliases.get(value, value)
+                else:
+                    result[key] = visit(value, field)
+            return result
+        return deepcopy(item)
+
+    return visit(schema)
+
+
+def final_payload_wire_v2(payload, *, decode=False):
+    """Keep every final input value while abbreviating repeated opaque IDs."""
+    from copy import deepcopy
+    try:
+        if decode:
+            if type(payload) is not dict or "final_wire" not in payload:
+                raise ValueError
+            wire = payload["final_wire"]
+            if (set(wire) != {"schema", "identity_index", "thesis_reuse", "source_payload_sha256"}
+                    or wire["schema"] != FINAL_IDENTITY_WIRE_V2
+                    or wire["identity_index"]["columns"] != ["ref", "id"]):
+                raise ValueError
+            identities = [row[1] for row in wire["identity_index"]["rows"]]
+            restored = final_identity_values_v2({key: value for key, value in payload.items()
+                                                 if key != "final_wire"}, identities, decode=True)
+            if final_payload_wire_v2(restored) != payload:
+                raise ValueError
+            return restored
+        if type(payload) is not dict or "final_wire" in payload:
+            raise ValueError
+        table = payload["document_index"]
+        position = table["columns"].index("id")
+        identities = [row[position] for row in table["rows"]]
+        for key in ("research_source_index", "fact_evidence", "market_evidence"):
+            identities.extend(row["id"] for row in payload[key])
+        identities = list(dict.fromkeys(identities))
+        aliases = _final_identity_map_v2(identities, decode=False)
+        return {"final_wire": {"schema": FINAL_IDENTITY_WIRE_V2,
+                    "source_payload_sha256": hashlib.sha256(_json(payload).encode()).hexdigest(),
+                    "identity_index": {"columns": ["ref", "id"],
+                        "rows": [[reference, identity] for identity, reference in aliases.items()]},
+                    "thesis_reuse": "A reuse_thesis selects only this symbol's complete candidate_research.theses model result already shown in this request. Its text is retained exactly, not newly generated or independently reread by the final model."},
+                **final_identity_values_v2(deepcopy(payload), identities)}
+    except (KeyError, TypeError, ValueError, IndexError):
+        _fail("Final v2 identity wire differs from its complete original registry")
+
+
+def final_thesis_wire_schema_v2(schema, symbols):
+    """Allow a complete literal thesis or an exact same-symbol model reference.
+
+    The full literal branch retains all prior semantic bounds. The reuse
+    branch is closed and owner-bound even before the unchanged final semantic
+    validators run on the exact expanded original model result.
+    """
+    from copy import deepcopy
+    from .required_schemas import _ids, _object, _allowed
+    symbols = _ids(symbols, allow_empty=True, symbols=True)
+    result = deepcopy(schema)
+    if not symbols:
+        return result
+    row = result["properties"]["decisions"]["items"]
+    literal = row["properties"]["thesis"]
+    row["properties"]["thesis"] = {"oneOf": [literal, _object(reuse_thesis=_allowed(symbols))]}
+    row.setdefault("allOf", []).append({"oneOf": [{"properties": {
+        "symbol": {"const": symbol}, "thesis": {"anyOf": [
+            {"required": ["schema_version"]},
+            {"properties": {"reuse_thesis": {"const": symbol}}}]}}} for symbol in symbols]})
+    return result
+
+
+def _resolve_final_theses_v2(out, research):
+    from copy import deepcopy
+    theses = research["theses"]
+    by_symbol = {row["symbol"]: row for row in theses}
+    if len(by_symbol) != len(theses):
+        _fail("Final v2 thesis reuse requires unique completed issuer results")
+    result, references = deepcopy(out), []
+    for row in result["decisions"]:
+        thesis = row["thesis"]
+        if "reuse_thesis" not in thesis:
+            continue
+        symbol = row["symbol"]
+        if set(thesis) != {"reuse_thesis"} or thesis["reuse_thesis"] != symbol or symbol not in by_symbol:
+            _fail("Final v2 thesis reference does not belong to its own completed issuer")
+        row["thesis"] = deepcopy(by_symbol[symbol])
+        references.append({"symbol": symbol, "field": "thesis",
+            "source": "candidate_research.theses", "source_symbol": symbol})
+    return result, references
+
+
 def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     from .candidate_research import (_raw, evidence_allows_buy, plain, validate_thesis,
                                      presented_views_for_symbol)
@@ -653,7 +990,15 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     market_by_symbol = {row["symbol"]: row for row in payload["market_evidence"]}
     schema = decision_schema_v2(symbols, list(by_id), [row["id"] for row in payload["market_evidence"]],
                                 [row["id"] for row in research["fact_evidence"]])
-    out = _call_v2(llm, "decision.debate", payload, schema, max_tokens=16384)
+    wire_payload = final_payload_wire_v2(payload)
+    identities = [row[1] for row in wire_payload["final_wire"]["identity_index"]["rows"]]
+    thesis_wire_schema = final_thesis_wire_schema_v2(schema, symbols)
+    wire_schema = final_identity_schema_v2(thesis_wire_schema, identities)
+    out = _call_v2(llm, "decision.debate", wire_payload, wire_schema, max_tokens=16384)
+    out = final_identity_values_v2(out, identities, decode=True)
+    validate_schema(out, thesis_wire_schema)
+    out, references = _resolve_final_theses_v2(out, research)
+    validate_schema(out, schema)
     _coverage(out["decisions"], "symbol", symbols)
     buys = {row["symbol"] for row in out["decisions"] if row["action"] == "buy"}
     if (not buys.issubset(approved) or (out["action"] == "BUY") != bool(buys)
@@ -709,7 +1054,8 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     context["action"], context["market_view"] = out["action"], out["action_summary"]
     context["action_summary"], context["execution_decisions"] = out["action_summary"], instructions
     return {"status": "model_required_v2", "triggered": symbols, "evidence": {},
-            "model_output": out, "execution_decisions": instructions, "action_summary": out["action_summary"]}
+            "model_output": out, "model_reference_usage": references,
+            "execution_decisions": instructions, "action_summary": out["action_summary"]}
 
 
 def model_summary_v2(llm) -> dict:

@@ -47,8 +47,22 @@ def _thesis(symbol, payload, *, followup=False):
 
 
 def _answer(stage, payload, schema, *, followup=True):
+    if stage == "decision.debate" and "final_wire" in payload:
+        from trading_system.llm.required import (final_payload_wire_v2,
+            final_identity_values_v2, final_identity_schema_v2)
+        identities = [row[1] for row in payload["final_wire"]["identity_index"]["rows"]]
+        restored = final_payload_wire_v2({key: value for key, value in payload.items()
+                                          if key != "assessment"}, decode=True)
+        restored["assessment"] = payload["assessment"]
+        answer = _answer(stage, restored,
+            final_identity_schema_v2(schema, identities, decode=True), followup=followup)
+        return final_identity_values_v2(answer, identities)
     props = schema["properties"]
     if stage == "clean.llm_semantic":
+        from trading_system.llm.required import clean_payload_wire_v2, clean_output_wire_v2
+        wire = {key: value for key, value in payload.items() if key != "assessment"}
+        payload = clean_payload_wire_v2(wire, decode=True)
+        source_ids = [row[0] for row in payload["all_source_index"]["rows"]]
         documents = []
         for row in payload["documents"]:
             parts = [part for part in row["content_parts"]["rows"] if part[2] is True]
@@ -60,7 +74,7 @@ def _answer(stage, payload, schema, *, followup=True):
                 "relevance": .5, "chain_ids": [], "sector_etfs": [], "claims": claims,
                 "provenance": {"evidence_kind": "unknown", "origin_id": None,
                                "origin_note": "SYNTHETIC_TEST 不编造独立原始来源。", "time_role": "unknown"}})
-        return {"documents": documents}
+        return clean_output_wire_v2({"documents": documents}, source_ids)
     if stage == "tech.sentiment":
         return {"chains": [{"chain_id": chain, "heat": None, "sentiment_score": None,
             "narrative_change": "unknown", "key_drivers": ["SYNTHETIC_TEST 未核实，不补中性分。"],

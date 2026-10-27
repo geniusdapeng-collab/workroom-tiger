@@ -28,7 +28,8 @@ def test_only_v2_extraction_uses_low_effort_with_actual_budget_bound_request(
     assert answer == {"score": 7, "reason": "evidence"}
     assert len(requests_seen) == 1
     assert requests_seen[0]["reasoning_effort"] == effort
-    assert requests_seen[0]["thinking"] == {"type": "enabled"}
+    assert requests_seen[0]["thinking"] == {"type":
+        "disabled" if upgrade and stage == "clean.llm_semantic" else "enabled"}
     assert configured.calls[0]["output"]["request_sha256"] == configured.calls[0]["inputs"]["request_sha256"]
     if upgrade:
         assert configured.calls[0]["inputs"]["budget_reservation"]["request_sha256"] == client.receipts[0]["request_sha256"]

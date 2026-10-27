@@ -21,7 +21,8 @@ from ..redline import LLMUnavailable
 from ..redline.execution import (RequiredModelFailed, StrictObservationError, UPGRADE_MODEL_STAGES,
                                  daily_stage_contract)
 from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
-    DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort, validate_schema)
+    DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
+    stage_thinking_mode, validate_schema)
 from .request_budget import BudgetGuard, BudgetRefused, LIMITS
 
 _MODEL_METHODS = {"model.deepseek.search", "model.deepseek.fetch", "model.deepseek.chat"}
@@ -225,7 +226,8 @@ class ReplayClient:
             _bad("stage_reasoning_effort", stage=self._stage_name)
         body = build_chat_request(system=self._sanitizer._text(system), user=self._sanitizer._text(user),
             schema_hint=self._sanitizer._clean(schema_hint), schema=schema, max_tokens=max_tokens,
-            temperature=temperature, reasoning_effort=reasoning_effort)
+            temperature=temperature, reasoning_effort=reasoning_effort,
+            thinking_mode=stage_thinking_mode(self._stage_name, upgrade=True))
         request, proof = self._consume("model.deepseek.chat", body, "tiger.deepseek-request.v1", "tiger.deepseek-call.v1",
             {"output_schema", "schema_sha256", "release"},
             {"requested_model", "response_id", "model", "release", "usage", "finish_reason", "response_sha256",

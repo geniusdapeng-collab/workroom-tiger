@@ -13,7 +13,8 @@ from types import SimpleNamespace
 import pytest
 
 from trading_system.agent_evidence import EvidenceInvalid
-from trading_system.llm.deepseek_required import MODEL, RELEASE, SEARCH_MODE, build_chat_request
+from trading_system.llm.deepseek_required import (MODEL, RELEASE, SEARCH_MODE,
+    build_chat_request, stage_thinking_mode)
 from trading_system.llm.request_budget import BudgetGuard, LIMITS
 
 ADMITTED = "2026-10-27T14:00:00+00:00"
@@ -113,7 +114,7 @@ def reasoning_record(stage, effort):
               "required": ["status"], "additionalProperties": False}
     kwargs = {"system": "SYNTHETIC_TEST system", "user": "SYNTHETIC_TEST input",
               "schema_hint": {}, "schema": schema, "max_tokens": 256, "temperature": .2}
-    body = build_chat_request(**kwargs)
+    body = build_chat_request(**kwargs, thinking_mode=stage_thinking_mode(stage, upgrade=True))
     body["reasoning_effort"] = effort
     identity = "2" * 32
     guard = BudgetGuard(**LIMITS, clock=lambda: 0.)
@@ -539,7 +540,7 @@ def test_rehashed_tail_requires_actual_account_observations_and_pure_business_re
 
 @pytest.mark.parametrize("tamper", ["risk_assessment", "research_context", "research_plan",
     "source_index", "research_counters", "research_thesis", "numeric_budget", "native_IO_order",
-    "native_IO_omission", "prompt_documents", "reasoning_effort", "final_action", "final_picks", "final_model", "policy_source"])
+    "native_IO_omission", "prompt_documents", "reasoning_effort", "thinking_mode", "final_action", "final_picks", "final_model", "policy_source"])
 def test_rehashed_semantic_mutations_fail_even_with_valid_event_chain(tmp_path, monkeypatch, tamper):
     from trading_system.agent_evidence import (atomic_json, file_ref, read_json,
         SNAPSHOT_SCHEMA, verify_events)
@@ -568,7 +569,7 @@ def test_rehashed_semantic_mutations_fail_even_with_valid_event_chain(tmp_path, 
         rewrite_stage(root, "search.collect", reverse)
     elif tamper == "native_IO_omission":
         rewrite_stage(root, "search.collect", lambda _, out: out["io_calls"].pop())
-    elif tamper in {"prompt_documents", "reasoning_effort"}:
+    elif tamper in {"prompt_documents", "reasoning_effort", "thinking_mode"}:
         def change(_, out):
             call = out["io_calls"][0]
             request_blob = read_json(root, call["input_ref"]["path"])
@@ -576,8 +577,13 @@ def test_rehashed_semantic_mutations_fail_even_with_valid_event_chain(tmp_path, 
             if tamper == "reasoning_effort":
                 assert request["request"]["reasoning_effort"] == "low"
                 request["request"]["reasoning_effort"] = "high"
+            elif tamper == "thinking_mode":
+                assert request["request"]["thinking"] == {"type": "disabled"}
+                request["request"]["thinking"] = {"type": "enabled"}
             else:
-                request["request"]["messages"][1]["content"] = request["request"]["messages"][1]["content"].replace('"documents":[', '"documents_omitted":[', 1)
+                before = request["request"]["messages"][1]["content"]
+                request["request"]["messages"][1]["content"] = before.replace('"documents":{', '"documents_omitted":{', 1)
+                assert request["request"]["messages"][1]["content"] != before
             request["request_sha256"] = h(request["request"])
             atomic_json(root, call["input_ref"]["path"], request_blob)
             call["input_ref"] = file_ref(root, call["input_ref"]["path"], SNAPSHOT_SCHEMA)

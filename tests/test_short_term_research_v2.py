@@ -247,6 +247,10 @@ class SemanticStub:
 
     def complete_json(self, **kwargs):
         self.requests.append(copy.deepcopy(kwargs))
+        payload = json.loads(kwargs["user"].split("\n", 1)[1])
+        if "final_wire" in payload:
+            identities = [row[1] for row in payload["final_wire"]["identity_index"]["rows"]]
+            return required.final_identity_values_v2(copy.deepcopy(self.answer), identities)
         return copy.deepcopy(self.answer)
 
 
@@ -794,6 +798,31 @@ class BoundedCleanClient:
         } for row in payload["documents"]]}
 
 
+def clean_with_wire_fixture(client, documents):
+    """Translate the explicit wire protocol around existing semantic fixtures.
+
+    All original semantic assertions below stay unchanged. Direct wire shape,
+    bijection, schema bounds and actual transport policy are tested separately
+    in test_clean_capacity_wire_v2.py, without a semantic-fixture adapter.
+    """
+    class WireClient:
+        execution = client.execution
+
+        def complete_json(self, **kwargs):
+            task, serialized = kwargs["user"].split("\n", 1)
+            wire = json.loads(serialized)
+            assessment = wire.pop("assessment")
+            payload = required.clean_payload_wire_v2(wire, decode=True)
+            source_ids = [row[0] for row in payload["all_source_index"]["rows"]]
+            semantic_kwargs = {**kwargs,
+                "user": task + "\n" + research_module().canonical({"assessment": assessment, **payload}),
+                "schema": required.clean_schema_wire_v2(kwargs["schema"], source_ids, decode=True)}
+            answer = client.complete_json(**semantic_kwargs)
+            return required.clean_output_wire_v2(answer, source_ids)
+
+    return required.clean_v2(WireClient(), documents)
+
+
 @pytest.mark.parametrize("count", [0, 1, 8, 9, 16, 56])
 def test_v2_clean_part_selection_batches_preserve_every_full_body_and_global_source(count):
     documents = [RawDocument(f"synthetic-clean-{number}", "deepseek_search",
@@ -803,7 +832,7 @@ def test_v2_clean_part_selection_batches_preserve_every_full_body_and_global_sou
         for number in range(count)]
     before = normalize(documents)
     client = BoundedCleanClient()
-    cleaned = required.clean_v2(client, documents)
+    cleaned = clean_with_wire_fixture(client, documents)
     assert [row.raw.doc_id for row in cleaned] == [row.doc_id for row in documents]
     assert len(client.requests) == max(1, (count + 7) // 8)
     payloads = [json.loads(row["user"].split("\n", 1)[1]) for row in client.requests]
@@ -838,7 +867,7 @@ def test_v2_clean_failed_later_batch_is_not_retried_or_returned_as_partial_succe
     documents = [public_document(f"synthetic-clean-{number}") for number in range(16)]
     client = BoundedCleanClient(fail_call=2)
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(client, documents)
+        clean_with_wire_fixture(client, documents)
     assert len(client.requests) == 2
     assert [[row["id"] for row in json.loads(request["user"].split("\n", 1)[1])["documents"]]
             for request in client.requests] == [
@@ -855,7 +884,7 @@ def test_v2_clean_machine_claim_identity_rejects_ambiguous_or_multiline_keys(key
             return out
     client = InvalidKeyClient()
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(client, [public_document()])
+        clean_with_wire_fixture(client, [public_document()])
     assert len(client.requests) == 1  # no silent repair or paid retry
 
 
@@ -873,7 +902,7 @@ def test_v2_clean_all_free_text_rejects_unsafe_trailing_characters_without_repai
     # Plain prose remains checked even though quotes now use selected IDs.
     doc = public_document(content=prefix + " SYNTHETIC_TEST continuation")
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(UnsafeTextClient(), [doc])
+        clean_with_wire_fixture(UnsafeTextClient(), [doc])
 
 
 @pytest.mark.parametrize("key", ["nvda_fy2026_q3_hbm_supply", "aaa:2026-10-26:orders.v1", "a" * 160])
@@ -883,13 +912,13 @@ def test_v2_clean_accepts_bounded_machine_identifiers_without_changing_them(key)
             out = super().complete_json(**kwargs)
             out["documents"][0]["claims"][0]["claim_key"] = key
             return out
-    result = required.clean_v2(ValidKeyClient(), [public_document()])
+    result = clean_with_wire_fixture(ValidKeyClient(), [public_document()])
     assert result[0].claims[0]["claim_key"] == key
 
 
 def test_v2_clean_uses_low_effort_with_explicit_identity_and_safe_quote_guidance_only():
     client = BoundedCleanClient()
-    result = required.clean_v2(client, [public_document("synthetic-one"), public_document("synthetic-two")])
+    result = clean_with_wire_fixture(client, [public_document("synthetic-one"), public_document("synthetic-two")])
     request = client.requests[0]
     assert request["reasoning_effort"] == "low" and request["max_tokens"] == 16384
     assert "nvda_fy2026_q3_hbm_supply" in request["user"]
@@ -906,7 +935,7 @@ def test_v2_clean_same_fact_key_can_cross_documents_and_is_not_regenerated_by_pr
             for row in out["documents"]:
                 row["claims"][0]["claim_key"] = "aaa_fy2026_orders_increased"
             return out
-    result = required.clean_v2(SameFactClient(), [public_document("synthetic-one"), public_document("synthetic-two")])
+    result = clean_with_wire_fixture(SameFactClient(), [public_document("synthetic-one"), public_document("synthetic-two")])
     assert [row.claims[0]["claim_key"] for row in result] == ["aaa_fy2026_orders_increased"] * 2
 
 
@@ -935,7 +964,7 @@ def test_v2_clean_part_table_preserves_the_exact_complete_normalized_source(char
 def test_v2_clean_resolves_original_unicode_from_the_selected_part_without_model_copy():
     original = public_document(content="SYNTHETIC_TEST Zażółć gęślą jaźń. 原始 Unicode 不得被抄写改字。")
     client = BoundedCleanClient()
-    result = required.clean_v2(client, [original])
+    result = clean_with_wire_fixture(client, [original])
     request = client.requests[0]
     payload = json.loads(request["user"].split("\n", 1)[1])
     selected = payload["documents"][0]["content_parts"]["rows"][0]
@@ -965,7 +994,7 @@ def test_v2_clean_unsafe_source_part_is_still_displayed_but_cannot_be_selected(u
             return out
     client = UnsafePartClient()
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(client, [original])
+        clean_with_wire_fixture(client, [original])
     assert len(client.requests) == 1
     assert original.content == "".join(part[1] for part in parts)
 
@@ -986,7 +1015,7 @@ def test_v2_clean_all_unquoteable_or_empty_sources_remain_analyzed_without_fabri
     docs = [public_document("synthetic-unsafe", content="<SYNTHETIC_TEST unsafe source>"),
             public_document("synthetic-empty", content=" \n\t")]
     client = NoQuoteClient()
-    result = required.clean_v2(client, docs)
+    result = clean_with_wire_fixture(client, docs)
     assert len(client.requests) == 1 and len(result) == 2
     assert all(row.claims == [] and row.summary_zh for row in result)
     assert [row.raw for row in result] == docs
@@ -1007,7 +1036,7 @@ def test_v2_clean_quote_part_identity_must_exist_in_its_own_source(bad_id):
             return out
     client = ForeignPartClient()
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(client, docs)
+        clean_with_wire_fixture(client, docs)
     assert len(client.requests) == 1  # no repair, claim deletion or retry
 
 
@@ -1024,7 +1053,7 @@ def test_v2_clean_never_accepts_a_model_copied_quote_or_defaults_a_missing_part(
             return out
     client = CopiedQuoteClient()
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(client, [public_document()])
+        clean_with_wire_fixture(client, [public_document()])
     assert len(client.requests) == 1
 
 
@@ -1212,7 +1241,7 @@ def test_v2_clean_ticker_identity_cannot_hide_a_trailing_newline():
             out["documents"][0]["tickers"] = ["AAA\n"]
             return out
     with pytest.raises(RequiredModelFailed):
-        required.clean_v2(UnsafeTickerClient(), [public_document()])
+        clean_with_wire_fixture(UnsafeTickerClient(), [public_document()])
 
 
 def test_v2_thesis_claim_identity_cannot_hide_a_trailing_newline():

@@ -388,7 +388,8 @@ def _json_loads(value: bytes | str) -> object:
 
 def build_chat_request(*, system: str, user: str, schema_hint: dict,
                        schema: dict, max_tokens: int = 16384,
-                       temperature: float = 0.2, reasoning_effort: str = "high") -> dict:
+                       temperature: float = 0.2, reasoning_effort: str = "high",
+                       thinking_mode: str = "enabled") -> dict:
     """Pure exact request framing, also used by the read-only proof replay."""
     return {"model": MODEL, "messages": [
         {"role": "system", "content": system + "\nReturn exactly one JSON object. JSON only."},
@@ -396,7 +397,7 @@ def build_chat_request(*, system: str, user: str, schema_hint: dict,
          _canonical(schema).decode() + "\nJSON field guidance:\n" +
          _canonical(schema_hint).decode()}],
         "max_tokens": max_tokens, "temperature": temperature, "stream": False,
-        "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"},
+        "response_format": {"type": "json_object"}, "thinking": {"type": thinking_mode},
         "reasoning_effort": reasoning_effort}
 
 
@@ -408,6 +409,21 @@ def stage_reasoning_effort(stage: str, *, upgrade: bool = False) -> str:
     request policy, not evidence that lower effort improves semantic accuracy.
     """
     return "low" if upgrade and stage == "clean.llm_semantic" else "high"
+
+
+def stage_thinking_mode(stage: str, *, upgrade: bool = False) -> str:
+    """tiger.clean-wire.v1 disables thinking for v2 extraction only.
+
+    This still requests a complete semantic answer from the same Flash model.
+    It reserves the existing 16384 output tokens for that answer rather than
+    explicit hidden thinking. Research, risk and final judgment retain enabled
+    high thinking; the immutable v1 request default is also enabled/high.
+    Official toggle/JSON documentation checked on 2026-10-27:
+    https://api-docs.deepseek.com/guides/thinking_mode/
+    https://api-docs.deepseek.com/guides/json_mode/
+    This is a capacity policy, not evidence of improved semantic accuracy.
+    """
+    return "disabled" if upgrade and stage == "clean.llm_semantic" else "enabled"
 
 
 class _BodyDeadline:
@@ -704,7 +720,8 @@ class DeepSeekRequiredClient:
             _fail("INVALID_CHAT_REQUEST")
         request = build_chat_request(system=self._text(system), user=self._text(user),
             schema_hint=self._clean(schema_hint), schema=schema,
-            max_tokens=max_tokens, temperature=temperature, reasoning_effort=reasoning_effort)
+            max_tokens=max_tokens, temperature=temperature, reasoning_effort=reasoning_effort,
+            thinking_mode=stage_thinking_mode(stage, upgrade=self.budget is not None))
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/chat/completions",
