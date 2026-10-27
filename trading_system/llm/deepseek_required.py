@@ -1010,23 +1010,55 @@ class DeepSeekRequiredClient:
                 _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
             created = response.get("created_at")
             output = response.get("output")
-            if (status != "completed" or type(created) is not int or created <= 0
-                    or response.get("error") is not None or response.get("incomplete_details") is not None
-                    or type(output) is not list or len(output) != 1 or type(output[0]) is not dict):
-                _fail("INCOMPLETE_MODEL_RESPONSE")
+            if status != "completed":
+                _fail("RESPONSES_NOT_COMPLETED")
+            if type(created) is not int or created <= 0:
+                _fail("RESPONSES_INVALID_CREATED_AT")
+            if response.get("error") is not None:
+                _fail("RESPONSES_ERROR_PRESENT")
+            if response.get("incomplete_details") is not None:
+                _fail("RESPONSES_INCOMPLETE_DETAILS_PRESENT")
+            if type(output) is not list:
+                _fail("RESPONSES_INVALID_OUTPUT_TYPE")
+            if len(output) != 1:
+                _fail("RESPONSES_INVALID_OUTPUT_COUNT")
+            if type(output[0]) is not dict:
+                _fail("RESPONSES_INVALID_OUTPUT_ITEM")
             message = output[0]
-            if (set(message) != {"type", "id", "status", "role", "content"}
-                    or message["type"] != "message" or message["status"] != "completed"
-                    or message["role"] != "assistant" or type(message["content"]) is not list
-                    or len(message["content"]) != 1 or type(message["content"][0]) is not dict):
-                _fail("INCOMPLETE_MODEL_RESPONSE")
+            message_fields = {"type", "id", "status", "role", "content"}
+            if not message_fields.issubset(message) or set(message) - message_fields - {"phase"}:
+                _fail("RESPONSES_INVALID_MESSAGE_FIELDS")
+            if message["type"] != "message":
+                _fail("RESPONSES_UNEXPECTED_OUTPUT_TYPE")
+            if message["status"] != "completed":
+                _fail("RESPONSES_MESSAGE_NOT_COMPLETED")
+            if message["role"] != "assistant":
+                _fail("RESPONSES_INVALID_MESSAGE_ROLE")
+            # Compatible optional metadata must still describe a final answer.
+            # It never enters the sealed semantic response projection.
+            if message.get("phase") is not None and message["phase"] != "final_answer":
+                _fail("RESPONSES_INVALID_MESSAGE_PHASE")
+            if type(message["content"]) is not list:
+                _fail("RESPONSES_INVALID_CONTENT_TYPE")
+            if len(message["content"]) != 1:
+                _fail("RESPONSES_INVALID_CONTENT_COUNT")
+            if type(message["content"][0]) is not dict:
+                _fail("RESPONSES_INVALID_CONTENT_PART")
             message_id = self._identifier(message["id"])
             if self._api_key in message_id or any(row.get("output_message_id") == message_id for row in self.receipts):
                 _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
             part = message["content"][0]
-            if (set(part) not in ({"type", "text"}, {"type", "text", "annotations"})
-                    or part["type"] != "output_text" or part.get("annotations", []) != []):
-                _fail("INCOMPLETE_MODEL_RESPONSE")
+            part_fields = {"type", "text"}
+            if not part_fields.issubset(part) or set(part) - part_fields - {"annotations", "logprobs"}:
+                _fail("RESPONSES_INVALID_CONTENT_FIELDS")
+            if part["type"] != "output_text":
+                _fail("RESPONSES_UNEXPECTED_CONTENT_TYPE")
+            annotations = part.get("annotations", [])
+            if type(annotations) is not list or annotations:
+                _fail("RESPONSES_INVALID_ANNOTATIONS")
+            logprobs = part.get("logprobs")
+            if logprobs is not None and (type(logprobs) is not list or logprobs):
+                _fail("RESPONSES_INVALID_LOGPROBS")
             text = part["text"]
             if type(text) is not str or not text.strip():
                 _fail("EMPTY_MODEL_OUTPUT")

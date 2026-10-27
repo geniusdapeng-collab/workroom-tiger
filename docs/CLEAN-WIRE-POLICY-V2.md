@@ -86,6 +86,8 @@
 
 原生 Responses 的成功终态为 `object=response`、`status=completed`，不是 Chat 的 `finish_reason`。本地接受契约要求一个 completed assistant message 和一个非空 `output_text`；incomplete、failed、in_progress、推理或工具条目、空/重复键/非有限或带尾随文字的 JSON 均不能成为成功。新私有 I/O/proof 保留原生 response status、created_at、message 身份和 native usage；不制造 `stop` 或工具调用身份，重放从同一 builder 重建端点、完整正文/schema、解析结果及安全响应。
 
+原生消息还可能带可选 `phase`，文本项可能带可选 `logprobs`。适配器接受 `phase` 缺省/null/`final_answer`，拒绝中间 `commentary` 或未知值；`logprobs` 仅接受缺省/null/空数组，原 `annotations` 仍仅接受缺省/空数组。这些经验证的惰性元数据与原空 annotations 一样不进入安全响应投影；原传输 SHA 仍区分完整收到的正文。未知字段、非空未请求的元数据、推理/工具条目和所有原语义/来源/数量限制继续拒绝，不通过宽泛忽略字段来修复正文。该兼容修复不改变业务 policy、请求或 proof 版本。各原生响应拒绝位置另有固定安全错误码，避免以同一个 `INCOMPLETE_MODEL_RESPONSE` 掩盖不同边界；不保留原字段值或回答。
+
 原生 usage 的 `input_tokens/output_tokens/total_tokens` 保留；为既有预算显式映射为 prompt/completion/total。reasoning tokens 是 output 子集，不能再加一次。合法已知用量在内容/schema 拒绝前结算；缺失、矛盾或超出预留仍冻结。每个请求按包括 schema 的完整 canonical UTF-8 body、framing 和最大输出先预留，同一完整 run 仍受 600k、1 USD、次数和期限约束。旧任务的未知预留留在原任务，不迁入或释放；新源码修正任务有明确新逻辑身份和同样的 per-run 硬限，累计未知费用不能冒称免费。
 
 新的 `/responses` 400/422 诊断只允许有界读取后得到的固定提供方声称类别及固定 body 状态，不保留原 message、任意 type/code/param、正文或秘密。这种分类不是独立证实的根因；未知保持未知。原 JSON 和 strict-function 历史证据不追补新字段。Responses 的无状态会话也不等于供应商完全不缓存输入，官方仍说明有自动 context cache；本协议不发送无效的 `store:false` 来冒充缓存控制。[Context Caching](https://api-docs.deepseek.com/guides/kv_cache/)

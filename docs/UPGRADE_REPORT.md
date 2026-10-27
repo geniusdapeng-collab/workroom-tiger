@@ -540,6 +540,10 @@ SHS 叙事兑现维度（EPS 修正/指引语气）自 v5.0 由 NarrativeAgent L
 
 当前新的显式 `tiger.clean-output.responses-schema.v1` 只为清洗改用官方原生 Responses `text.format.json_schema`，发送现有完整 keyed output_schema，保留 allOf、来源局部 q 与全部原 bounds，以及原正文、codec 和本地完整验收。原生 reasoning.effort=none，其他五阶段仍 high/Chat；不使用工具、续轮、自动重试、语义回退或答案修补。新私有 I/O/回放使用原生 completed status、message 身份、native usage 和完整请求预留，不伪造 stop。HTTP400/422 只记录有界固定类别，不把未知旧原因改成已知。原 JSON、strict-function、300k/600k 的既有证据与版本分支保留。官方文档列明该结构化输出通道，但当前具体 schema 和真实完整任务是否成功仍须新 run 的完整账户提交与 receipt/verify 证明。[Responses API](https://api-docs.deepseek.com/api/create-response/)、[Responses guide](https://api-docs.deepseek.com/guides/responses_api/)
 
+第九次 `run-599239fa6ea24998a88c2aec5d3a2b0f` 使用来源 `2cfce1c82c347f9fc439492d562a8d21d9c0fe96`，14 Search 后首个 Responses 请求已返回原生 completed 和有效用量：输入17941、输出14923、合计32864 tokens，均已结算，无剩余预留；本地原生响应形状检查以通用 `INCOMPLETE_MODEL_RESPONSE` 拒绝，尚未进入答案 schema 校验或账户提交。原回答没有保留，因此具体拒绝字段仍未知，不能写成服务端 schema 不支持或第九次已成功。
+
+为缩小适配边界，另执行了一次有明确预算的合成协议诊断，单请求、最大输出64、完整请求预留不超过10000 tokens/0.012 USD，仅保存字段类型/数量、状态和用量，不保存回答或推理正文。这次真实诊断返回116 tokens，观测到消息含 `phase` 字段、文本项含 `logprobs` 字段，原 exact-key 检查必然拒绝该形状；它未保存 phase 的值和 logprobs 的数量，也不是第九次原回答的证据。当前最小兼容修复只允许文档支持的最终答案/空元数据，保持原安全投影、完整本地 schema、来源归属和风险权限；细分固定原生错误码。合成协议诊断不计作真实完整任务或投资能力证明。
+
 ### 11.4 回测、发布与复核
 
 普通数值回测 CLI 默认使用共享 v2 policy，显式选择方式如下；命令来自当前 `main.py` 参数定义：
