@@ -333,10 +333,14 @@ TASKS_V2 = {
         "clean_wire声明可逆传输协议：documents是columns/rows表，以source_ref连接all_source_index的ref；"
         "该索引保留每篇真实id、完整title、url及published_at，连接后才是每篇完整输入。"
         "输出按clean_wire.output_fields把原语义字段换成短字段；所有来源引用用该索引的ref，程序逐项还原真实id。"
+        "本协议的d是按本批source_ref为键的JSON对象，不是数组；每个本批键恰好一次，键内不再输出i或id。"
+        "每个来源的c中q只从clean_wire.source_bindings中该来源自己的allowed_quote_part_ids选择；"
+        "相邻来源允许的p0不代表本篇允许p0。format_example仅示范来源键与q的格式，"
+        "省略了必需语义字段，不是完整答案、没有事实含义，不能抄成研究结果。"
         "正文完整且仅按顺序展示在content_parts.rows的text列；各列含义见columns，按原顺序阅读全部片段。"
         "仅对documents中的每个id恰好返回一次；all_source_index是全体来源的归属索引，列含义见columns，不代表其他篇正文也已展示。"
         "给出最多四个重要事实及其本篇quote_part_id、明确claim_key。"
-        "quote_part_id只能选本篇is_quoteable=true的一个part_id，例如p0；不要重抄quote文字，不得合并编号或借用别篇编号。"
+        "quote_part_id只能选本篇is_quoteable=true且列在本篇允许列表中的一个part_id；不要重抄quote文字，不得合并编号或借用别篇编号。"
         "程序将逐字原样取回该片段作为quote，不作改写或近似匹配；事实含义、是否有依据、重要性和所有语义仍由你判断。"
         "is_quoteable只代表片段满足引文格式，不代表可信、独立、相关或当前。"
         "不能把邻篇事实归给本篇。来源primary/media/commentary/unknown；"
@@ -673,6 +677,126 @@ def clean_payload_wire_v2(payload: dict, *, decode=False) -> dict:
         _fail("V2 clean payload wire differs from its lossless source contract")
 
 
+CLEAN_KEYED_WIRE_V2 = "tiger.clean-keyed-wire.v1"
+
+
+def clean_keyed_payload_v2(payload: dict, *, decode=False) -> dict:
+    """Keep the exact input bodies and registry; declare source-keyed answers.
+
+    The tiny JSON example contains only an actually permitted source/part
+    binding. It intentionally omits semantic fields and is not an answer or a
+    claim that the example part supports any fact. Old wire helpers stay exact.
+    """
+    from copy import deepcopy
+    try:
+        if decode:
+            if type(payload) is not dict or payload["clean_wire"]["schema"] != CLEAN_KEYED_WIRE_V2:
+                raise ValueError
+            legacy = deepcopy(payload)
+            legacy["clean_wire"] = clean_payload_wire_v2({"documents": [],
+                "all_source_index": {"columns": ["id", "title", "url", "published_at"], "rows": []}})["clean_wire"]
+            restored = clean_payload_wire_v2(legacy, decode=True)
+            if clean_keyed_payload_v2(restored) != payload:
+                raise ValueError
+            return restored
+        result = clean_payload_wire_v2(payload)
+        bindings = []
+        for values in result["documents"]["rows"]:
+            row = dict(zip(result["documents"]["columns"], values))
+            bindings.append([row["source_ref"], [part[0] for part in row["content_parts"]["rows"] if part[2] is True]])
+        example = {"d": {}}
+        if bindings:
+            reference, parts = bindings[0]
+            example["d"][reference] = {"c": [{"q": parts[0]}] if parts else []}
+        policy = result["clean_wire"]
+        policy["schema"] = CLEAN_KEYED_WIRE_V2
+        policy["output_fields"]["document"].pop("i")
+        policy["source_bindings"] = {"columns": ["source_ref", "allowed_quote_part_ids"], "rows": bindings}
+        policy["format_example"] = example
+        policy["format_example_scope"] = (
+            "Source-key and own-quote-ID shape only; not a complete answer. All required semantic fields are omitted here, "
+            "not defaulted. This example provides no summary, fact, sentiment or evidence judgment, and the shown part "
+            "does not imply support for a claim. Produce every required semantic field yourself from each complete source.")
+        return result
+    except (KeyError, TypeError, ValueError, IndexError):
+        _fail("V2 source-keyed clean input differs from its complete source bindings")
+
+
+def clean_keyed_schema_v2(schema: dict, source_ids) -> dict:
+    """Share every semantic rule once; bind each exact source key locally.
+
+    allOf combines a common additionalProperties schema with the closed set of
+    required source keys and their own quote enums. No source-dependent oneOf
+    or duplicated common schemas are needed. Original semantics are validated
+    again after decoding. Unexpected old schema structure fails closed.
+    """
+    from copy import deepcopy
+    from .required_schemas import _object
+    result = clean_schema_wire_v2(schema, source_ids)
+    array = result["properties"]["d"]
+    common = deepcopy(array["items"])
+    identity = common["properties"]["i"]
+    references = identity.get("enum", [])
+    expected_identity = ({"type": "string", "enum": references} if references else
+                         {"type": "string", "pattern": r"(?!)"})
+    if identity != expected_identity:
+        _fail("V2 source-keyed clean schema has an unregistered identity constraint")
+    if (set(array) != {"type", "items", "minItems", "maxItems", "uniqueItems"}
+            or array["type"] != "array" or array["minItems"] != len(references)
+            or array["maxItems"] != len(references) or array["uniqueItems"] is not True):
+        _fail("V2 source-keyed clean schema differs from its original complete coverage")
+    conditions = common.pop("allOf", [])
+    if ((not references and conditions != [])
+            or references and (len(conditions) != 1 or set(conditions[0]) != {"oneOf"})):
+        _fail("V2 source-keyed clean schema has an unregistered source constraint")
+    branches = conditions[0]["oneOf"] if references else []
+    by_reference = {}
+    for branch in branches:
+        try:
+            reference = branch["properties"]["i"]["const"]
+            quote = branch["properties"]["c"]["items"]["properties"]["q"]
+            if (reference not in references or reference in by_reference or branch != {"properties": {
+                    "i": {"const": reference}, "c": {"items": {"properties": {"q": quote}}}}}):
+                raise ValueError
+            by_reference[reference] = {"properties": {"c": {"items": {"properties": {"q": deepcopy(quote)}}}}}
+        except (KeyError, TypeError, ValueError):
+            _fail("V2 source-keyed clean schema has an ambiguous quote owner")
+    if set(by_reference) != set(references):
+        _fail("V2 source-keyed clean schema omitted an original source")
+    common["properties"].pop("i")
+    common["required"].remove("i")
+    result["properties"]["d"] = {"allOf": [
+        {"type": "object", "additionalProperties": common}, _object(**by_reference)]}
+    return result
+
+
+def clean_keyed_output_v2(value: dict, source_ids, *, batch_ids, decode=False) -> dict:
+    """Retain every source's semantic values in the original input projection.
+
+    The old clean result already indexed model rows by identity then emitted
+    the original input order. Source keys preserve that same projection, not
+    arbitrary old raw JSON array order. Claim order and natural text stay exact.
+    """
+    aliases = _clean_wire_ids_v2(source_ids, decode=False)
+    try:
+        if len(batch_ids) != len(set(batch_ids)) or any(identity not in aliases for identity in batch_ids):
+            raise ValueError
+        references = [aliases[identity] for identity in batch_ids]
+        if decode:
+            if (type(value) is not dict or set(value) != {"d"} or type(value["d"]) is not dict
+                    or set(value["d"]) != set(references)
+                    or any(type(row) is not dict or "i" in row for row in value["d"].values())):
+                raise ValueError
+            legacy = {"d": [{"i": reference, **value["d"][reference]} for reference in references]}
+            return clean_output_wire_v2(legacy, source_ids, decode=True)
+        legacy = clean_output_wire_v2(value, source_ids)
+        _coverage(legacy["d"], "i", references)
+        rows = {row["i"]: {key: item for key, item in row.items() if key != "i"} for row in legacy["d"]}
+        return {"d": {reference: rows[reference] for reference in references}}
+    except (KeyError, TypeError, ValueError):
+        _fail("V2 source-keyed clean output differs from its exact source coverage")
+
+
 def clean_v2(llm, docs: list[RawDocument]):
     from .. import config
     from ..search.models import CleanDocumentV2
@@ -694,9 +818,9 @@ def clean_v2(llm, docs: list[RawDocument]):
         schema = clean_schema_v2([doc.doc_id for doc in batch], list(TECH_SUBCHAINS),
             config.SECTOR_ETFS, quote_part_ids={key: list(parts) for key, parts in quote_parts.items()},
             all_doc_ids=ids)
-        wire = clean_payload_wire_v2(payload)
-        out = _call_v2(llm, "clean.llm_semantic", wire, clean_schema_wire_v2(schema, ids))
-        out = clean_output_wire_v2(out, ids, decode=True)
+        wire = clean_keyed_payload_v2(payload)
+        out = _call_v2(llm, "clean.llm_semantic", wire, clean_keyed_schema_v2(schema, ids))
+        out = clean_keyed_output_v2(out, ids, batch_ids=[doc.doc_id for doc in batch], decode=True)
         validate_schema(out, schema)
         _coverage(out["documents"], "id", [doc.doc_id for doc in batch])
         by_id = {row["id"]: row for row in out["documents"]}
@@ -1060,9 +1184,12 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
 
 def model_summary_v2(llm) -> dict:
     """Reconcile completed six-stage calls against every settled reservation."""
-    from .request_budget import LIMITS, PRICING
+    from .request_budget import BudgetGuard, BudgetRefused, PRICING
     from ..redline.execution import UPGRADE_MODEL_STAGES
     try:
+        policy_id = getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None)
+        expected_budget = BudgetGuard.for_policy(policy_id).snapshot()
+        limits = expected_budget["limits"]
         chats, searches, fetches = llm.receipts, llm.search_receipts, llm.fetch_receipts
         budget = llm.budget.snapshot()
         counts = {stage: sum(row["stage"] == stage for row in chats)
@@ -1077,20 +1204,25 @@ def model_summary_v2(llm) -> dict:
                 or len(set(ids)) != len(ids) or any(type(identity) is not str or not identity for identity in ids)
                 or len(set(call_ids)) != len(call_ids) or set(records) != set(call_ids)
                 or len(records) != len(budget["records"])
-                or budget["schema"] != "tiger.request-budget.v2"
+                or set(budget) != set(expected_budget)
+                or budget["schema"] != expected_budget["schema"]
+                or budget.get("policy_id") != expected_budget.get("policy_id")
                 or budget["frozen"] is not False or budget["reserved_tokens"] != 0
                 or budget["estimated_reserved_usd"] != 0 or budget["counts"] != expected_counts
-                or budget["limits"] != LIMITS or budget["pricing"] != PRICING
-                or len(searches) < 14 or len(searches) > LIMITS["max_search_calls"]
-                or len(fetches) > LIMITS["max_fetch_calls"]
-                or len(chats) > LIMITS["max_chat_calls"]
-                or len(all_receipts) > LIMITS["max_remote_requests"]
+                or budget["limits"] != limits or budget["pricing"] != PRICING
+                or len(searches) < 14 or len(searches) > limits["max_search_calls"]
+                or len(fetches) > limits["max_fetch_calls"]
+                or len(chats) > limits["max_chat_calls"]
+                or len(all_receipts) > limits["max_remote_requests"]
                 or any(row["status"] != "settled" for row in records.values())):
             raise ValueError
         for kind, receipt in all_receipts:
             record = records[receipt["call_id"]]
             reservation = record["reservation"]
-            if reservation["kind"] != kind or reservation["request_sha256"] != receipt["request_sha256"]:
+            expected_reservation_schema = "tiger.request-budget-reservation.v3" if policy_id else "tiger.request-budget-reservation.v2"
+            if (reservation["kind"] != kind or reservation["request_sha256"] != receipt["request_sha256"]
+                    or reservation["schema"] != expected_reservation_schema
+                    or reservation.get("policy_id") != expected_budget.get("policy_id")):
                 raise ValueError
             if kind == "chat" and (
                     receipt["provider"] != "deepseek" or receipt["model"] != MODEL
@@ -1101,11 +1233,11 @@ def model_summary_v2(llm) -> dict:
         charged = (actual * PRICING["token_upper_usd_per_million"] / 1000000
                    + len(searches) * PRICING["search_upper_usd_per_request"]
                    + len(fetches) * PRICING["fetch_upper_usd_per_request"])
-        if (budget["actual_tokens"] != actual or actual > LIMITS["max_tokens"]
+        if (budget["actual_tokens"] != actual or actual > limits["max_tokens"]
                 or abs(budget["estimated_charged_usd"] - charged) > 1e-12
-                or charged > LIMITS["max_cost_usd"]):
+                or charged > limits["max_cost_usd"]):
             raise ValueError
-    except (KeyError, AttributeError, TypeError, ValueError, OverflowError):
+    except (KeyError, AttributeError, TypeError, ValueError, OverflowError, BudgetRefused):
         _fail("Required v2 model, native search/fetch or settled budget coverage is incomplete")
     return {"provider": "deepseek", "model": MODEL, "release": RELEASE,
             "required": True, "research_contract": "tiger.short-term-research.v2",

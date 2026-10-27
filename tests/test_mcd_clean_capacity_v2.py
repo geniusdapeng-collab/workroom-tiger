@@ -184,8 +184,18 @@ def test_wire_helpers_are_consumed_by_clean_and_both_real_and_replay_request_bui
     required_tree = ast.parse((LLM / "required.py").read_text())
     clean = next(node for node in required_tree.body if isinstance(node, ast.FunctionDef) and node.name == "clean_v2")
     calls = [node.func.id for node in ast.walk(clean) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
-    for name in ("clean_payload_wire_v2", "clean_schema_wire_v2", "clean_output_wire_v2", "validate_schema", "_coverage"):
+    keyed = {"clean_keyed_payload_v2": "clean_payload_wire_v2",
+        "clean_keyed_schema_v2": "clean_schema_wire_v2",
+        "clean_keyed_output_v2": "clean_output_wire_v2"}
+    definitions = {node.name: node for node in required_tree.body if isinstance(node, ast.FunctionDef)}
+    selected = keyed if set(keyed).issubset(definitions) else keyed.values()
+    for name in (*selected, "validate_schema", "_coverage"):
         assert name in calls, "clean_v2 must actually consume " + name
+    if selected is keyed:
+        for wrapper, original in keyed.items():
+            nested = [node.func.id for node in ast.walk(definitions[wrapper])
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+            assert original in nested, wrapper + " must retain the original codec " + original
     for file in ("deepseek_required.py", "required_proof_v2.py"):
         tree = ast.parse((LLM / file).read_text())
         frames = [node for node in ast.walk(tree) if isinstance(node, ast.Call)

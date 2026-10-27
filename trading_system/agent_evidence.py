@@ -111,10 +111,12 @@ def normalize(value: object, _active: set[int] | None = None,
             items = [descend(item) for item in value]
             return {"__type__": "set", "values": sorted(items, key=json_bytes)}
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            from .redline.execution import ExecutionPolicy
+            values = (value.to_dict() if type(value) is ExecutionPolicy else
+                      {field.name: getattr(value, field.name) for field in dataclasses.fields(value)})
             return {"__type__": "dataclass",
                     "class": f"{type(value).__module__}.{type(value).__qualname__}",
-                    "fields": {field.name: descend(getattr(value, field.name))
-                               for field in dataclasses.fields(value)}}
+                    "fields": {name: descend(item) for name, item in values.items()}}
         # Lazy imports keep doctor/describe/readonly startup free of market
         # client imports and avoid initializing any provider cache.
         import numpy as np

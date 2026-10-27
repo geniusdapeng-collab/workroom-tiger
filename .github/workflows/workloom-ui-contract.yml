@@ -123,7 +123,7 @@ jobs:
           pnpm -C "$WORKLOOM_DIR" suite
           if [ -f requirements.txt ] && [ -d tests ] && find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
             python -m pip install --disable-pip-version-check -r requirements.txt
-            python -m pytest -q
+            TIGER_TEST_NODE="$(command -v node)" python -m pytest -q
           fi
       - name: 验证 Tiger CLI、MCP、配置与真实 Python 协议
         run: |

@@ -7,6 +7,8 @@ export const INTRADAY_PROFILE = 'us-public-model-required-intraday-paper-v2';
 export const UPGRADE_PROFILES = Object.freeze([UPGRADE_PROFILE, PREMARKET_PROFILE, INTRADAY_PROFILE]);
 export const MODEL_STAGES_V2 = Object.freeze(['clean.llm_semantic', 'tech.sentiment', 'tech.risk', 'sector.narrative', 'research.candidates', 'decision.debate']);
 const LIMITS = Object.freeze({ max_chat_calls: 40, max_tokens: 300000, max_search_calls: 60, max_fetch_calls: 20, max_remote_requests: 120, max_cost_usd: 1, deadline_seconds: 2400 });
+const BUDGET_POLICY_V3 = 'tiger.budget-policy.v3';
+const LIMITS_V3 = Object.freeze({ ...LIMITS, max_tokens: 600000 });
 const HASH = /^[a-f0-9]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const reject = message => { throw new Error(message); };
@@ -46,14 +48,17 @@ export function validateModelV2(model) {
   ids(model.response_ids, LIMITS.max_chat_calls);
   if (model.response_ids.length !== model.call_count) reject('Every chat needs a unique provider response');
   const budget = model.budget;
-  exact(budget, ['schema', 'limits', 'pricing', 'counts', 'actual_tokens', 'reserved_tokens', 'estimated_charged_usd', 'estimated_reserved_usd', 'frozen', 'records'], 'Request budget');
-  if (budget.schema !== 'tiger.request-budget.v2' || budget.frozen !== false || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0) reject('Every paid request must have settled usage');
-  exact(budget.limits, Object.keys(LIMITS), 'Request limits');
-  if (Object.entries(LIMITS).some(([key, value]) => budget.limits[key] !== value)) reject('Request budget differs from the reviewed policy');
+  const v3 = plain(budget) && budget.schema === 'tiger.request-budget.v3';
+  const limits = v3 ? LIMITS_V3 : LIMITS;
+  exact(budget, ['schema', 'limits', 'pricing', 'counts', 'actual_tokens', 'reserved_tokens', 'estimated_charged_usd', 'estimated_reserved_usd', 'frozen', 'records', ...(v3 ? ['policy_id'] : [])], 'Request budget');
+  if ((!v3 && budget.schema !== 'tiger.request-budget.v2') || v3 && budget.policy_id !== BUDGET_POLICY_V3 || budget.frozen !== false || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0) reject('Every paid request must have settled usage under a reviewed policy');
+  exact(budget.limits, Object.keys(limits), 'Request limits');
+  if (Object.entries(limits).some(([key, value]) => budget.limits[key] !== value)) reject('Request budget differs from the reviewed policy');
   const price = budget.pricing;
   exact(price, ['observed_date', 'source', 'model', 'token_upper_usd_per_million', 'search_upper_usd_per_request', 'fetch_upper_usd_per_request', 'basis', 'invoice'], 'Budget pricing');
   if (price.observed_date !== '2026-10-27' || price.source !== 'https://api-docs.deepseek.com/quick_start/pricing/' || price.model !== 'deepseek-flash' || price.token_upper_usd_per_million !== 1.2 || price.search_upper_usd_per_request !== .00075 || price.fetch_upper_usd_per_request !== .00075 || price.invoice !== false) reject('Unreviewed budget pricing');
   plainText(price.basis, 500);
+  if (v3 && price.basis !== 'Peak output price applied to all tokens; every native request charged conservatively.') reject('Unreviewed budget pricing basis');
   exact(budget.counts, ['chat', 'search', 'fetch'], 'Budget counts');
   if (budget.counts.chat !== model.call_count || budget.counts.search !== model.search_count || budget.counts.fetch !== model.fetch_count) reject('Budget and model counts disagree');
   if (!Array.isArray(budget.records) || budget.records.length !== model.call_count + model.search_count + model.fetch_count || budget.records.length > LIMITS.max_remote_requests) reject('Budget record coverage differs');
@@ -61,15 +66,17 @@ export function validateModelV2(model) {
   for (const [index, record] of budget.records.entries()) {
     exact(record, ['reservation', 'status', 'usage'], 'Budget record');
     const r = record.reservation;
-    exact(r, ['schema', 'call_id', 'kind', 'sequence', 'request_sha256', 'input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound', 'estimated_cost_upper_usd', 'counts_before', 'actual_tokens_before', 'reserved_tokens_before'], 'Budget reservation');
-    if (record.status !== 'settled' || r.schema !== 'tiger.request-budget-reservation.v2' || !/^[a-f0-9]{32}$/.test(r.call_id) || calls.has(r.call_id) || !hash(r.request_sha256) || !Object.hasOwn(counts, r.kind) || r.sequence !== index + 1) reject('Unsettled or duplicate request reservation');
+    exact(r, ['schema', 'call_id', 'kind', 'sequence', 'request_sha256', 'input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound', 'estimated_cost_upper_usd', 'counts_before', 'actual_tokens_before', 'reserved_tokens_before', ...(v3 ? ['policy_id'] : [])], 'Budget reservation');
+    if (record.status !== 'settled' || r.schema !== (v3 ? 'tiger.request-budget-reservation.v3' : 'tiger.request-budget-reservation.v2') || v3 && r.policy_id !== BUDGET_POLICY_V3 || !/^[a-f0-9]{32}$/.test(r.call_id) || calls.has(r.call_id) || !hash(r.request_sha256) || !Object.hasOwn(counts, r.kind) || r.sequence !== index + 1) reject('Unsettled or duplicate request reservation');
     calls.add(r.call_id);
     exact(r.counts_before, ['chat', 'search', 'fetch'], 'Admission counters');
     if (Object.keys(counts).some(kind => r.counts_before[kind] !== counts[kind]) || r.actual_tokens_before !== actual || r.reserved_tokens_before !== 0) reject('Admission ledger does not reconcile');
-    for (const key of ['input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound']) if (!integer(r[key], 0, LIMITS.max_tokens)) reject('Token reservation invalid');
+    for (const key of ['input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound']) if (!integer(r[key], 0, limits.max_tokens)) reject('Token reservation invalid');
     if (r.token_upper_bound !== r.input_token_upper_bound + r.output_token_upper_bound) reject('Token bounds do not reconcile');
     const reservationCost = r.kind === 'chat' ? r.token_upper_bound * price.token_upper_usd_per_million / 1e6 : price[`${r.kind}_upper_usd_per_request`];
     if (!finite(r.estimated_cost_upper_usd, 0, 1) || Math.abs(r.estimated_cost_upper_usd - reservationCost) > 1e-12) reject('Reservation cost is invalid');
+    if (actual + r.token_upper_bound > limits.max_tokens || charged + reservationCost > limits.max_cost_usd + 1e-12
+        || counts[r.kind] >= limits[`max_${r.kind}_calls`] || index >= limits.max_remote_requests) reject('Request reservation exceeds the prepaid policy');
     if (r.kind === 'chat') {
       exact(record.usage, ['prompt_tokens', 'completion_tokens', 'total_tokens'], 'Actual usage', ['prompt_cache_hit_tokens', 'prompt_cache_miss_tokens', 'prompt_tokens_details', 'completion_tokens_details']);
       const u = record.usage;
@@ -83,7 +90,7 @@ export function validateModelV2(model) {
     }
     counts[r.kind]++;
   }
-  if (Object.keys(counts).some(kind => counts[kind] !== budget.counts[kind]) || actual !== budget.actual_tokens || actual > LIMITS.max_tokens || !finite(budget.estimated_charged_usd, 0, LIMITS.max_cost_usd) || Math.abs(charged - budget.estimated_charged_usd) > 1e-12) reject('Settled token or cost totals disagree');
+  if (Object.keys(counts).some(kind => counts[kind] !== budget.counts[kind]) || actual !== budget.actual_tokens || actual > limits.max_tokens || !finite(budget.estimated_charged_usd, 0, limits.max_cost_usd) || Math.abs(charged - budget.estimated_charged_usd) > 1e-12) reject('Settled token or cost totals disagree');
   return model;
 }
 export function validateThesisV2(thesis, { symbol, marketId = null, evidenceIds = null, sourceIndex = [], admittedAt = null } = {}) {

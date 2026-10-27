@@ -26,6 +26,19 @@ LIMITS = {
     "max_remote_requests": 120, "max_cost_usd": 1.0,
     "deadline_seconds": 2400,
 }
+LEGACY_BUDGET_POLICY_ID = "tiger.budget-policy.v2"
+BUDGET_POLICY_V3 = "tiger.budget-policy.v3"
+
+
+def policy_limits(policy_id=None) -> dict:
+    """Closed source policy registry; reported numeric limits cannot select it."""
+    if policy_id is None or type(policy_id) is str and policy_id == LEGACY_BUDGET_POLICY_ID:
+        return deepcopy(LIMITS)
+    if type(policy_id) is str and policy_id == BUDGET_POLICY_V3:
+        return {**LIMITS, "max_tokens": 600000}
+    raise BudgetRefused("INVALID_BUDGET_POLICY")
+
+
 PRICING = {
     "observed_date": "2026-10-27",
     "source": "https://api-docs.deepseek.com/quick_start/pricing/",
@@ -64,22 +77,33 @@ def token_upper_bound(request: dict) -> tuple[int, int]:
 
 
 class BudgetGuard:
+    @classmethod
+    def for_policy(cls, policy_id=None, *, clock=time.monotonic):
+        """Select only a reviewed version. Legacy constructors remain 300k."""
+        limits = policy_limits(policy_id)
+        return cls(**limits, clock=clock,
+                   _policy_id=BUDGET_POLICY_V3 if policy_id == BUDGET_POLICY_V3 else None)
+
     def __init__(self, *, max_chat_calls=40, max_tokens=300000,
                  max_search_calls=60, max_fetch_calls=20,
                  max_remote_requests=120, max_cost_usd=1.0,
-                 deadline_seconds=2400, clock=time.monotonic):
+                 deadline_seconds=2400, clock=time.monotonic, _policy_id=None):
         configured = dict(max_chat_calls=max_chat_calls, max_tokens=max_tokens,
                           max_search_calls=max_search_calls, max_fetch_calls=max_fetch_calls,
                           max_remote_requests=max_remote_requests, max_cost_usd=max_cost_usd,
                           deadline_seconds=deadline_seconds)
+        ceiling = policy_limits(_policy_id)
+        if _policy_id is not None and (_policy_id != BUDGET_POLICY_V3 or configured != ceiling):
+            raise BudgetRefused("INVALID_BUDGET_LIMIT")
         for key, value in configured.items():
             if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not math.isfinite(value) or value <= 0 or value > LIMITS[key]
+                    or not math.isfinite(value) or value <= 0 or value > ceiling[key]
                     or key not in {"max_cost_usd", "deadline_seconds"} and type(value) is not int):
                 raise BudgetRefused("INVALID_BUDGET_LIMIT")
         if not callable(clock):
             raise BudgetRefused("INVALID_BUDGET_CLOCK")
         self.limits, self._clock, self._started = configured, clock, clock()
+        self.policy_id = _policy_id
         self._records = {}
         self._frozen = False
 
@@ -108,7 +132,7 @@ class BudgetGuard:
         if snapshot["estimated_charged_usd"] + snapshot["estimated_reserved_usd"] + cost > self.limits["max_cost_usd"] + 1e-12:
             raise BudgetRefused("COST_BUDGET_LIMIT")
         reservation = {
-            "schema": "tiger.request-budget-reservation.v2", "call_id": call_id,
+            "schema": "tiger.request-budget-reservation.v3" if self.policy_id else "tiger.request-budget-reservation.v2", "call_id": call_id,
             "kind": kind, "sequence": len(self._records) + 1,
             "request_sha256": request_hash,
             "input_token_upper_bound": input_bound, "output_token_upper_bound": output_bound,
@@ -116,6 +140,8 @@ class BudgetGuard:
             "counts_before": snapshot["counts"], "actual_tokens_before": snapshot["actual_tokens"],
             "reserved_tokens_before": snapshot["reserved_tokens"],
         }
+        if self.policy_id is not None:
+            reservation["policy_id"] = self.policy_id
         self._records[call_id] = {"reservation": reservation, "status": "reserved", "usage": None}
         return deepcopy(reservation)
 
@@ -163,7 +189,8 @@ class BudgetGuard:
             else:
                 reserved += reservation["token_upper_bound"]
                 reserved_cost += reservation["estimated_cost_upper_usd"]
-        return {"schema": "tiger.request-budget.v2", "limits": deepcopy(self.limits),
+        return {"schema": "tiger.request-budget.v3" if self.policy_id else "tiger.request-budget.v2",
+                **({"policy_id": self.policy_id} if self.policy_id else {}), "limits": deepcopy(self.limits),
                 "pricing": deepcopy(PRICING), "counts": counts, "actual_tokens": actual,
                 "reserved_tokens": reserved, "estimated_charged_usd": charged_cost,
                 "estimated_reserved_usd": reserved_cost, "frozen": self._frozen,

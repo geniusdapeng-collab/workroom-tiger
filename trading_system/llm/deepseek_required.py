@@ -225,11 +225,13 @@ def _schema_child_path(path: str, segment: str | int) -> str | None:
 
 
 def _schema_mismatch(value: object, schema: dict, depth: int = 0,
-                     path: str = "") -> tuple[str, str]:
+                     path: str = "", *, trusted_properties=frozenset()) -> tuple[str, str]:
     """Locate a rejected instance without returning its keys, values or text.
 
     This runs only after the unchanged acceptance validator rejects the value.
-    Combinator and extra-property failures stay at the parent instance path.
+    One uniquely failing allOf child may be located more precisely. A shared
+    additionalProperties rule may name only keys declared by sibling schemas;
+    arbitrary model keys and unresolved alternatives stay at the parent path.
     """
     if depth > 64:
         return path, "depth"
@@ -243,6 +245,14 @@ def _schema_mismatch(value: object, schema: dict, depth: int = 0,
         return path, "enum"
     for key, accept in (("allOf", all), ("anyOf", any)):
         if key in schema and not accept(_matches(value, child, depth + 1) for child in schema[key]):
+            if key == "allOf":
+                failed = [child for child in schema[key] if not _matches(value, child, depth + 1)]
+                if len(failed) == 1:
+                    known = set(trusted_properties) | set(schema.get("properties", {}))
+                    for child in schema[key]:
+                        known.update(child.get("properties", {}))
+                    return _schema_mismatch(value, failed[0], depth + 1, path,
+                                            trusted_properties=frozenset(known))
             return path, key
     if "oneOf" in schema and sum(_matches(value, child, depth + 1) for child in schema["oneOf"]) != 1:
         return path, "oneOf"
@@ -260,6 +270,10 @@ def _schema_mismatch(value: object, schema: dict, depth: int = 0,
                     return ((path, "depth") if child is None else
                             _schema_mismatch(item, props[key], depth + 1, child))
             elif extra is False or (isinstance(extra, dict) and not _matches(item, extra, depth + 1)):
+                if isinstance(extra, dict) and key in trusted_properties:
+                    child = _schema_child_path(path, key)
+                    return ((path, "depth") if child is None else
+                            _schema_mismatch(item, extra, depth + 1, child))
                 return path, "additionalProperties"
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0):
@@ -486,8 +500,8 @@ class DeepSeekRequiredClient:
         self._used_call_ids: set[str] = set()
         self.budget = None
         if getattr(execution, "upgrade", False):
-            from .request_budget import BudgetGuard, LIMITS
-            self.budget = BudgetGuard(**LIMITS)
+            from .request_budget import BudgetGuard
+            self.budget = BudgetGuard.for_policy(getattr(getattr(execution, "policy", None), "budget_policy_id", None))
 
     def _admit_call(self, kind: str, call_id: str, request: dict, inputs: dict) -> None:
         if call_id in self._used_call_ids:
@@ -531,7 +545,8 @@ class DeepSeekRequiredClient:
                         budget = self.budget.snapshot()
                         record = next(row for row in budget["records"]
                                       if row["reservation"]["call_id"] == inputs["call_id"])
-                        error.bind_accounting({"schema": "tiger.model-call-accounting.v2",
+                        error.bind_accounting({"schema": "tiger.model-call-accounting.v3" if self.budget.policy_id else "tiger.model-call-accounting.v2",
+                            **({"budget_policy_id": self.budget.policy_id} if self.budget.policy_id else {}),
                             "call_id": inputs["call_id"], "request_sha256": inputs["request_sha256"],
                             "kind": record["reservation"]["kind"], "status": record["status"],
                             "usage": ({key: record["usage"][key] for key in

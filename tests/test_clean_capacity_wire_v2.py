@@ -157,9 +157,10 @@ class DirectWireClient:
         payload = json.loads(kwargs["user"].split("\n", 1)[1])
         assessment = payload.pop("assessment")
         assert assessment["run_date"] == "2026-10-27"
-        canonical = required.clean_payload_wire_v2(payload, decode=True)
+        canonical = required.clean_keyed_payload_v2(payload, decode=True)
         ids = [row[0] for row in canonical["all_source_index"]["rows"]]
-        value = required.clean_output_wire_v2(annotations(canonical), ids)
+        value = required.clean_keyed_output_v2(annotations(canonical), ids,
+            batch_ids=[row["id"] for row in canonical["documents"]])
         if self.mutate:
             self.mutate(value)
         return value
@@ -177,7 +178,7 @@ def test_direct_production_wire_consumes_every_source_once_and_restores_original
     for request in client.requests:
         payload = json.loads(request["user"].split("\n", 1)[1])
         payload.pop("assessment")
-        decoded = required.clean_payload_wire_v2(payload, decode=True)
+        decoded = required.clean_keyed_payload_v2(payload, decode=True)
         shown.extend(row["id"] for row in decoded["documents"])
         assert [row[0] for row in decoded["all_source_index"]["rows"]] == [doc.doc_id for doc in originals]
         assert request["max_tokens"] == 16384 and request["reasoning_effort"] == "low"
@@ -194,13 +195,13 @@ def test_direct_production_wire_consumes_every_source_once_and_restores_original
     "extra_quote", "duplicate_document", "omitted_document", "omitted_claim_key", "empty_summary"])
 def test_direct_wire_rejects_invalid_model_answer_without_repair_retry_or_partial_success(mutation):
     def change(value):
-        row = value["d"][0]
+        row = value["d"]["d0"]
         if mutation == "unknown_field": row["unregistered"] = "SYNTHETIC_TEST"
         elif mutation == "unknown_source": row["p"]["o"] = "d999"
         elif mutation == "foreign_part": row["c"][0]["q"] = "p999"
         elif mutation == "extra_quote": row["c"][0]["quote"] = "SYNTHETIC_TEST"
-        elif mutation == "duplicate_document": value["d"][1] = deepcopy(row)
-        elif mutation == "omitted_document": value["d"].pop()
+        elif mutation == "duplicate_document": value["d"]["d1"] = {"i": "d0", **deepcopy(row)}
+        elif mutation == "omitted_document": value["d"].pop("d1")
         elif mutation == "omitted_claim_key": del row["c"][0]["k"]
         else: row["z"] = ""
     client = DirectWireClient(mutate=change)

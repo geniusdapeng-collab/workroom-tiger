@@ -812,13 +812,19 @@ def clean_with_wire_fixture(client, documents):
             task, serialized = kwargs["user"].split("\n", 1)
             wire = json.loads(serialized)
             assessment = wire.pop("assessment")
-            payload = required.clean_payload_wire_v2(wire, decode=True)
+            from trading_system import config
+            from trading_system.llm.required_schemas import clean_schema_v2
+            from trading_system.tech_chain.universe import TECH_SUBCHAINS
+            payload = required.clean_keyed_payload_v2(wire, decode=True)
             source_ids = [row[0] for row in payload["all_source_index"]["rows"]]
+            batch_ids = [row["id"] for row in payload["documents"]]
             semantic_kwargs = {**kwargs,
                 "user": task + "\n" + research_module().canonical({"assessment": assessment, **payload}),
-                "schema": required.clean_schema_wire_v2(kwargs["schema"], source_ids, decode=True)}
+                "schema": clean_schema_v2(batch_ids, list(TECH_SUBCHAINS), config.SECTOR_ETFS,
+                    quote_part_ids={row["id"]: [part[0] for part in row["content_parts"]["rows"] if part[2]]
+                                    for row in payload["documents"]}, all_doc_ids=source_ids)}
             answer = client.complete_json(**semantic_kwargs)
-            return required.clean_output_wire_v2(answer, source_ids)
+            return required.clean_keyed_output_v2(answer, source_ids, batch_ids=batch_ids)
 
     return required.clean_v2(WireClient(), documents)
 

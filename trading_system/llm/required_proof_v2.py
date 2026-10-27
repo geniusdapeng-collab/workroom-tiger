@@ -16,9 +16,9 @@ import re
 from types import SimpleNamespace
 
 from ..agent_evidence import (EvidenceInvalid, normalize, read_bytes, read_snapshot,
-                              read_json, safe_path, strict_json, verify_events)
+                              read_json, safe_path, strict_json, verify_events, digest, json_bytes)
 from ..redline import LLMUnavailable
-from ..redline.execution import (RequiredModelFailed, StrictObservationError, UPGRADE_MODEL_STAGES,
+from ..redline.execution import (ExecutionPolicy, ExecutionContractError, RequiredModelFailed, StrictObservationError, UPGRADE_MODEL_STAGES,
                                  daily_stage_contract)
 from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
     DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
@@ -66,7 +66,8 @@ class ReplayClient:
         self._visited, self._used_ids, self._response_ids = set(), set(), set()
         self._first_started, self._last_finished, self._clock = None, None, 0.
         self.receipts, self.search_receipts, self.fetch_receipts = [], [], []
-        self.budget = BudgetGuard(**LIMITS, clock=lambda: self._clock)
+        self.budget = BudgetGuard.for_policy(getattr(execution.policy, "budget_policy_id", None),
+                                            clock=lambda: self._clock)
         # Pure sanitization methods do not initialize the real client, consult
         # configuration or retain a key. Persisted text was already redacted.
         self._sanitizer = DeepSeekRequiredClient.__new__(DeepSeekRequiredClient)
@@ -131,7 +132,7 @@ class ReplayClient:
             _bad("call_time_or_overlap", stage=stage)
         if self._first_started is None:
             self._first_started = started
-        if (finished - self._first_started).total_seconds() > LIMITS["deadline_seconds"]:
+        if (finished - self._first_started).total_seconds() > self.budget.limits["deadline_seconds"]:
             _bad("recorded_call_deadline", stage=stage)
         deadline = getattr(self.execution, "deadline_at_utc", None)
         if deadline is not None and finished >= _instant(deadline):
@@ -336,8 +337,50 @@ def verify_required_model_v2(run, result, admission):
     except EvidenceInvalid:
         raise
     except (KeyError, TypeError, ValueError, IndexError, AttributeError, OverflowError,
-            LLMUnavailable, RequiredModelFailed, StrictObservationError, BudgetRefused, RecursionError):
+            LLMUnavailable, ExecutionContractError, RequiredModelFailed, StrictObservationError, BudgetRefused, RecursionError):
         _bad("invalid_or_missing_replay_evidence")
+
+
+def _frozen_execution_policy(run, admission, preflight):
+    """Choose a closed policy from sealed execution, never reported counters.
+
+    Real admissions additionally validate the entire frozen source in the
+    outer verifier. Minimal historical offline fixtures may omit policy.json;
+    they can reconstruct only the original implicit 300k policy.
+    """
+    from ..agent_runtime import policy_manifest, verify_source
+    from ..redline.execution import UPGRADE_POLICIES
+    typed = preflight["policy"]
+    if (not isinstance(typed, dict) or set(typed) != {"__type__", "class", "fields"}
+            or typed["__type__"] != "dataclass"
+            or typed["class"] != "trading_system.redline.execution.ExecutionPolicy"
+            or not isinstance(typed["fields"], dict)):
+        _bad("frozen_execution_policy_type", stage="daily.preflight")
+    fields = deepcopy(typed["fields"])
+    base = {"policy_id", "model_mode", "provider_names", "search_source_names", "market_timezone"}
+    if set(fields) not in (base, base | {"budget_policy_id"}) or ("budget_policy_id" in fields and fields["budget_policy_id"] is None):
+        _bad("frozen_execution_policy_fields", stage="daily.preflight")
+    for name in ("provider_names", "search_source_names"):
+        if type(fields[name]) is not list:
+            _bad("frozen_execution_policy_allowlist", stage="daily.preflight")
+        fields[name] = tuple(fields[name])
+    execution = ExecutionPolicy(**fields)
+    profiles = [profile for profile, row in UPGRADE_POLICIES.items() if row[0] == execution.policy_id]
+    if len(profiles) != 1:
+        _bad("frozen_execution_policy_profile", stage="daily.preflight")
+    policy_file = safe_path(run, "policy.json", must_exist=False)
+    if policy_file.exists() or execution.budget_policy_id is not None or "policy_sha256" in admission:
+        frozen = read_json(run, "policy.json")
+        expected = policy_manifest(profiles[0], budget_policy_id=execution.budget_policy_id)
+        if (admission.get("policy_sha256") != digest(json_bytes(frozen))
+                or not _same(frozen, expected)
+                or not _same(frozen["execution"], execution.to_dict())):
+            _bad("frozen_budget_policy_binding", stage="daily.preflight")
+    if "source_sha256" in admission:
+        verify_source(run)
+        if admission["source_sha256"] != digest(read_bytes(run, "source-manifest.json")):
+            _bad("frozen_budget_source_binding", stage="daily.preflight")
+    return execution
 
 
 def _verify(run, result, admission):
@@ -377,8 +420,10 @@ def _verify(run, result, admission):
                     "request": read_snapshot(run, call["input_ref"], run_id=run.name, stage=stage, role="input"),
                     "proof": read_snapshot(run, call["output_ref"], run_id=run.name, stage=stage, role="output")})
     execution = SimpleNamespace(run_date=date.fromisoformat(assessment["run_date"]),
-        policy=SimpleNamespace(market_timezone=assessment["market_timezone"]),
+        policy=_frozen_execution_policy(run, admission, inputs["daily.preflight"]),
         admitted_at_utc=assessment["admitted_at_utc"], deadline_at_utc=clock.get("deadline_at_utc"))
+    if not _same(inputs["pipeline.prepare"].get("policy"), normalize(execution.policy)):
+        _bad("pipeline_frozen_execution_policy_binding", stage="pipeline.prepare")
     client = ReplayClient(execution, calls)
 
     def equal(actual, expected, reason, stage):

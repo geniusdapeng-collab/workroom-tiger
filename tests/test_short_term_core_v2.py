@@ -59,9 +59,9 @@ def _answer(stage, payload, schema, *, followup=True):
         return final_identity_values_v2(answer, identities)
     props = schema["properties"]
     if stage == "clean.llm_semantic":
-        from trading_system.llm.required import clean_payload_wire_v2, clean_output_wire_v2
+        from trading_system.llm.required import clean_keyed_payload_v2, clean_keyed_output_v2
         wire = {key: value for key, value in payload.items() if key != "assessment"}
-        payload = clean_payload_wire_v2(wire, decode=True)
+        payload = clean_keyed_payload_v2(wire, decode=True)
         source_ids = [row[0] for row in payload["all_source_index"]["rows"]]
         documents = []
         for row in payload["documents"]:
@@ -74,7 +74,8 @@ def _answer(stage, payload, schema, *, followup=True):
                 "relevance": .5, "chain_ids": [], "sector_etfs": [], "claims": claims,
                 "provenance": {"evidence_kind": "unknown", "origin_id": None,
                                "origin_note": "SYNTHETIC_TEST 不编造独立原始来源。", "time_role": "unknown"}})
-        return clean_output_wire_v2({"documents": documents}, source_ids)
+        return clean_keyed_output_v2({"documents": documents}, source_ids,
+            batch_ids=[row["id"] for row in payload["documents"]])
     if stage == "tech.sentiment":
         return {"chains": [{"chain_id": chain, "heat": None, "sentiment_score": None,
             "narrative_change": "unknown", "key_drivers": ["SYNTHETIC_TEST 未核实，不补中性分。"],

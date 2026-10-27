@@ -144,9 +144,16 @@
   const nonnegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
   function settledBudgetValid(model) {
     const budget = model.budget;
-    if (!recordObject(budget) || budget.schema !== "tiger.request-budget.v2" || budget.frozen !== false
+    if (!recordObject(budget)) return false;
+    const current = budget.schema === "tiger.request-budget.v3" && budget.policy_id === "tiger.budget-policy.v3";
+    const archived = budget.schema === "tiger.request-budget.v2" && !Object.hasOwn(budget, "policy_id");
+    const limits = { max_chat_calls: 40, max_tokens: current ? 600000 : 300000, max_search_calls: 60,
+      max_fetch_calls: 20, max_remote_requests: 120, max_cost_usd: 1, deadline_seconds: 2400 };
+    if ((!current && !archived) || !recordObject(budget.limits)
+      || Object.keys(budget.limits).length !== Object.keys(limits).length
+      || Object.entries(limits).some(([key, value]) => budget.limits[key] !== value) || budget.frozen !== false
       || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0
-      || !nonnegativeInteger(budget.actual_tokens) || budget.actual_tokens > 300000
+      || !nonnegativeInteger(budget.actual_tokens) || budget.actual_tokens > limits.max_tokens
       || !finite(budget.estimated_charged_usd) || budget.estimated_charged_usd < 0 || budget.estimated_charged_usd > 1.000000001
       || model.call_count > 40 || !nonnegativeInteger(model.search_count) || model.search_count < 14 || model.search_count > 60
       || !nonnegativeInteger(model.fetch_count) || model.fetch_count > 20
@@ -158,6 +165,8 @@
     for (const item of budget.records) {
       const reservation = item?.reservation;
       if (item?.status !== "settled" || !reservation || !plainText(reservation.call_id) || ids.has(reservation.call_id)
+        || reservation.schema !== (current ? "tiger.request-budget-reservation.v3" : "tiger.request-budget-reservation.v2")
+        || (current ? reservation.policy_id !== budget.policy_id : Object.hasOwn(reservation, "policy_id"))
         || !Object.hasOwn(counts, reservation.kind)) return false;
       ids.add(reservation.call_id); counts[reservation.kind] += 1;
     }

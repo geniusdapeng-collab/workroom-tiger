@@ -427,7 +427,7 @@ def test_missing_or_oversize_source_title_is_never_invented_or_truncated(
     ("secret-modeltext", {"type": "number"}, "", "type"),
     (1, {"const": 2}, "", "const"),
     (1, {"enum": [2, 3]}, "", "enum"),
-    (1, {"allOf": [{"type": "number"}, {"minimum": 2}]}, "", "allOf"),
+    (1, {"allOf": [{"type": "number"}, {"minimum": 2}]}, "", "minimum"),
     (1, {"anyOf": [{"type": "string"}, {"type": "null"}]}, "", "anyOf"),
     (1, {"oneOf": [{"type": "number"}, {"type": "integer"}]}, "", "oneOf"),
     ({}, {"type": "object", "required": ["declared"]}, "", "required"),

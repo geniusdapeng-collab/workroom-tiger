@@ -79,9 +79,14 @@ def validate_model_failure_accounting(value: object) -> dict:
               "counts", "actual_tokens", "reserved_tokens", "estimated_charged_usd",
               "estimated_reserved_usd", "frozen", "finish_reason"}
     invalid = ValueError("Invalid model failure accounting")
+    version3 = type(value) is dict and type(value.get("schema")) is str and value["schema"] == "tiger.model-call-accounting.v3"
+    if version3:
+        fields = fields | {"budget_policy_id"}
+    token_limit = 600000 if version3 else 300000
     if (type(value) is not dict or any(type(key) is not str for key in value)
             or set(value) != fields
-            or type(value["schema"]) is not str or value["schema"] != "tiger.model-call-accounting.v2"
+            or type(value["schema"]) is not str or value["schema"] != ("tiger.model-call-accounting.v3" if version3 else "tiger.model-call-accounting.v2")
+            or version3 and (type(value["budget_policy_id"]) is not str or value["budget_policy_id"] != "tiger.budget-policy.v3")
             or type(value["call_id"]) is not str or re.fullmatch(r"[a-f0-9]{32}", value["call_id"]) is None
             or type(value["request_sha256"]) is not str or re.fullmatch(r"[a-f0-9]{64}", value["request_sha256"]) is None
             or type(value["kind"]) is not str or value["kind"] not in ("chat", "search", "fetch")
@@ -96,9 +101,9 @@ def validate_model_failure_accounting(value: object) -> dict:
             or sum(counts.values()) > 120 or counts[value["kind"]] < 1):
         raise invalid
     for key in ("actual_tokens", "reserved_tokens"):
-        if type(value[key]) is not int or not 0 <= value[key] <= 300000:
+        if type(value[key]) is not int or not 0 <= value[key] <= token_limit:
             raise invalid
-    if value["actual_tokens"] + value["reserved_tokens"] > 300000:
+    if value["actual_tokens"] + value["reserved_tokens"] > token_limit:
         raise invalid
     for key in ("estimated_charged_usd", "estimated_reserved_usd"):
         if (type(value[key]) not in (int, float) or not 0 <= value[key] <= 1 + 1e-12
@@ -110,7 +115,7 @@ def validate_model_failure_accounting(value: object) -> dict:
     if value["status"] == "settled" and value["kind"] == "chat":
         if (type(usage) is not dict or any(type(key) is not str for key in usage)
                 or set(usage) != {"prompt_tokens", "completion_tokens", "total_tokens"}
-                or any(type(n) is not int or not 0 <= n <= 300000 for n in usage.values())
+                or any(type(n) is not int or not 0 <= n <= token_limit for n in usage.values())
                 or usage["total_tokens"] != usage["prompt_tokens"] + usage["completion_tokens"]
                 or usage["total_tokens"] > value["actual_tokens"]):
             raise invalid

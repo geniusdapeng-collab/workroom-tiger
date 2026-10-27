@@ -100,8 +100,14 @@ class ExecutionPolicy:
     provider_names: tuple[str, ...] = PUBLIC_PROVIDER_NAMES
     search_source_names: tuple[str, ...] = PUBLIC_SEARCH_SOURCE_NAMES
     market_timezone: str = "America/New_York"
+    budget_policy_id: str | None = None
 
     def __post_init__(self):
+        if self.budget_policy_id is not None:
+            from ..llm.request_budget import BUDGET_POLICY_V3
+            if (type(self.budget_policy_id) is not str or self.policy_id not in UPGRADE_POLICY_IDS
+                    or self.budget_policy_id != BUDGET_POLICY_V3):
+                raise ExecutionContractError("Unsupported versioned request budget policy")
         required = self.policy_id in MODEL_POLICY_IDS
         if not self.policy_id or self.model_mode != ("enabled" if required else "disabled"):
             raise ExecutionContractError("Strict public paper requires a disabled model policy")
@@ -114,6 +120,13 @@ class ExecutionPolicy:
             if (not values or len(set(values)) != len(values)
                     or any(name not in allowed for name in values)):
                 raise ExecutionContractError(f"Invalid public {label} allowlist")
+
+    def to_dict(self):
+        """Preserve the exact five-field historical policy serialization."""
+        value = asdict(self)
+        if self.budget_policy_id is None:
+            value.pop("budget_policy_id")
+        return value
 
 
 @dataclass(frozen=True)

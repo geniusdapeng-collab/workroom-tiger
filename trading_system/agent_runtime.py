@@ -45,23 +45,31 @@ REQUIRED_ACCOUNT_FILES = frozenset({
 DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 
 
-def policy_manifest(profile: str = PROFILE) -> dict:
+_CURRENT_BUDGET_POLICY = object()
+
+
+def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_POLICY) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
     upgrade = profile in UPGRADE_POLICIES
+    from .llm.request_budget import BUDGET_POLICY_V3, policy_limits
+    selected_budget = (BUDGET_POLICY_V3 if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
+    if selected_budget is not None and (not upgrade or selected_budget != BUDGET_POLICY_V3):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
     required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
     policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
                  else "tiger.public-active-paper-policy.v1" if active else POLICY_ID)
     execution = ExecutionPolicy(policy_id=policy_id, model_mode="enabled",
-                                search_source_names=("deepseek_search",)) if required else ExecutionPolicy(policy_id=policy_id)
+                                search_source_names=("deepseek_search",),
+                                budget_policy_id=selected_budget) if required else ExecutionPolicy(policy_id=policy_id)
     value = {
         "schema": "tiger.policy.v1", "profile": profile,
         "paper_account": ACCOUNT, "execution_mode": "paper",
         "initial_cash_usd": 100000.0, "market": "us",
         "universe": "extended", "strategy": "evidence-complete-active-v1" if active else "reviewed_source_defaults",
         "use_tuned": False, "real_broker": False,
-        "execution": asdict(execution),
+        "execution": execution.to_dict(),
         "market_timezone": "America/New_York",
         "date_basis": "admission instant in market timezone",
         "search_collection_budget_seconds": 45.0,
@@ -103,14 +111,16 @@ def policy_manifest(profile: str = PROFILE) -> dict:
             "Fallback sectors are frozen NASDAQ vendor proxies, not GICS membership or historical point-in-time classifications.",
         ]
     if upgrade:
-        from .llm.request_budget import LIMITS, PRICING
+        from .llm.request_budget import PRICING
         value.update(workflow_phase=UPGRADE_POLICIES[profile][1], universe="full",
                      strategy="whitepaper-evidence-execution-v2",
                      execution_policy="whitepaper-execution-v2", max_positions=10,
-                     request_budget=dict(LIMITS), request_pricing=dict(PRICING),
+                     request_budget=policy_limits(selected_budget), request_pricing=dict(PRICING),
                      accounting_state_usage="Risk constraints, execution continuity and report-only cohorts; never historical semantic scores.")
         value["model_contract"].update(research_contract="tiger.candidate-research.v2",
                                        model_mapping_observed_date="2026-10-27")
+        if selected_budget is not None:
+            value["request_budget_policy_id"] = selected_budget
         value["limitations"][1] = "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
         value["limitations"] += [
             "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
@@ -471,13 +481,15 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
     if (not isinstance(admission, dict) or set(admission) != {
             "schema", "run_id", "clock", "parent", "request_sha256", "policy_sha256", "source_sha256"}
             or not isinstance(request, dict) or not isinstance(policy, dict)
+            or not isinstance(policy.get("execution"), dict)
             or admission.get("schema") != "tiger.admission.v1"
             or admission.get("run_id") != run.name or not RUN_RE.fullmatch(run.name)
             or admission.get("request_sha256") != digest(json_bytes(request))
             or admission.get("policy_sha256") != digest(json_bytes(policy))
             or not isinstance(request.get("profile"), str)
             or request.get("profile") not in SUPPORTED_PROFILES
-            or policy != strict_json(json_bytes(policy_manifest(request["profile"])))):
+            or policy != strict_json(json_bytes(policy_manifest(request["profile"],
+                budget_policy_id=policy.get("execution", {}).get("budget_policy_id"))))):
         raise EvidenceInvalid("RESULT_INVALID", "Admission policy or request identity differs")
     expected = {"schema_version": "tiger.agent-request/v1", "profile": request["profile"],
                 "paper_account": ACCOUNT, "idempotency_key": request.get("idempotency_key")}
