@@ -14,6 +14,7 @@ import uuid
 
 import pytest
 
+import trading_system.llm.clean_output as wire
 from trading_system.agent_evidence import EvidenceInvalid, atomic_json, digest, json_bytes, read_bytes
 from trading_system.agent_runtime import SOURCE_ROOT, freeze_source, policy_manifest
 from trading_system.llm.clean_output import (
@@ -56,6 +57,16 @@ def valid_answer(schema):
         "p": {"k": "unknown", "o": None, "n": "SYNTHETIC_TEST 来源归属未知。", "t": "unknown"},
         "c": []} for ref in refs}}
     return clean_compact_lists_output_v1(keyed, schema)
+
+
+def test_compact_ticker_guidance_does_not_weaken_the_exact_schema():
+    schema = keyed_schema()
+    answer = valid_answer(schema)
+    answer["d0__t"] = "KRX:000660"
+    assert "KRX:000660" in wire.COMPACT_EXPRESSION_GUIDANCE
+    assert "ticker正则" in wire.COMPACT_EXPRESSION_GUIDANCE
+    with pytest.raises(RequiredModelUnavailable):
+        validate_schema(answer, wire.clean_compact_lists_schema_v1(schema))
 
 
 def pure_fixture(*, rejection=True, second_rejected=False, empty=False, invalid_kind="summary"):

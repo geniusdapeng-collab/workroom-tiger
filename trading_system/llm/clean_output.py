@@ -589,7 +589,9 @@ COMPACT_DESCRIPTION = (
     'This output-only function performs no external action and has no tool result or follow-up turn.')
 COMPACT_EXPRESSION_GUIDANCE = (
     '摘要建议200–450字符，在原800字符硬上限内保留本篇必要事实、限定、反证和未知；'
-    '这是表达建议，不是新的验收下限或省略证据的许可。')
+    '这是表达建议，不是新的验收下限或省略证据的许可。'
+    't字段只能写入符合provider schema ticker正则的代码；带交易所前缀或冒号的标签'
+    '（例如KRX:000660）不得写入，无法映射为合法ticker时省略该项。')
 _COMPACT_LISTS = ('t', 'e', 'h', 'f')
 _COMPACT_SUFFIXES = frozenset((*_COMPACT_LISTS, 's', 'v', 'z', 'r',
     *(f'p__{name}' for name in ('k', 'o', 'n', 't')),
