@@ -12,7 +12,7 @@ import test_clean_compact_regeneration_core_v1 as core
 from trading_system.llm import clean_output as wire, required
 from trading_system.llm.candidate_research import source_view
 from trading_system.llm.deepseek_required import DeepSeekRequiredClient, _hash
-from trading_system.llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
+from trading_system.llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4, semantic_output_tokens
 from trading_system.redline.execution import UPGRADE_MODEL_STAGES
 from trading_system.redline.model_diagnostics import RequiredModelUnavailable
 from trading_system.search.models import RawDocument
@@ -112,7 +112,11 @@ def test_all_56_sources_can_regenerate_and_summary_reconciles_every_attempt():
     simple = {'type': 'object', 'properties': {'ok': {'const': True}}, 'required': ['ok'], 'additionalProperties': False}
     for stage in UPGRADE_MODEL_STAGES[1:]:
         client.execution.stage(stage)
-        client.complete_json(system='SYNTHETIC_TEST', user='SYNTHETIC_TEST', schema_hint={}, schema=simple)
+        client.complete_json(system='SYNTHETIC_TEST', user='SYNTHETIC_TEST', schema_hint={}, schema=simple,
+            max_tokens=semantic_output_tokens(stage, client.execution.policy.budget_policy_id))
+    semantic = [request for path, request in seen if path == '/chat/completions']
+    assert len(semantic) == 5
+    assert all(request['max_tokens'] == 65536 and request['reasoning_effort'] == 'high' for request in semantic)
     summary = required.model_summary_v2(client)
     assert summary['rejected_call_count'] == client._clean_regenerations_used == 56
     assert summary['accepted_call_count'] == 61 and summary['call_count'] == 117
