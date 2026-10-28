@@ -1,0 +1,36 @@
+{
+  "schema": "tiger.synthetic-legacy-request-golden.v1",
+  "source_commit": "b304991727e9230cb42732de3a1791ae9fa54918",
+  "source_files": {
+    "trading_system/llm/candidate_research.py": "9dbfab46002d458856e04cded287dce342957f6582dc86a1c60ab53d274e3e89",
+    "trading_system/llm/required.py": "b44dbb97df07fd2020f515be8adf64271158611c39bda8fc7787057610266c33",
+    "trading_system/llm/required_schemas.py": "7896f1c9ec8237e95415645c32f4db188a094fa1327f2a8e1a527bd105795e71",
+    "trading_system/llm/deepseek_required.py": "fea51005debd10e8bfd0243e856d9bacd8219e23ed4906b35b45ac4d4fcc7d33"
+  },
+  "synthetic_only": true,
+  "network_attempts": 0,
+  "real_model_calls": 0,
+  "profiles": {
+    "none": {
+      "research_requests": "c73eb53619bcb46479709755955af209094f65834aca64a51bac25215134bde7",
+      "decision_requests": "f2cccbd00828d1563ac23e15b6733219a4f1d36c180fd1da160947c036a3952d",
+      "research": "301e33c2ea71586b93f01068249a0795457a38374a7dbc9fce2f5e380bdf5ffc",
+      "decision": "7241bbf2a9cfae5a951ebc9399688f439e12324de7a8cfce21aa11a6a0e97334",
+      "native_calls": "542b8390f6902f5404760df835c196a734fa75e45999afcc9362159e140fda9a"
+    },
+    "tiger.budget-policy.v2": {
+      "research_requests": "c73eb53619bcb46479709755955af209094f65834aca64a51bac25215134bde7",
+      "decision_requests": "f2cccbd00828d1563ac23e15b6733219a4f1d36c180fd1da160947c036a3952d",
+      "research": "301e33c2ea71586b93f01068249a0795457a38374a7dbc9fce2f5e380bdf5ffc",
+      "decision": "7241bbf2a9cfae5a951ebc9399688f439e12324de7a8cfce21aa11a6a0e97334",
+      "native_calls": "542b8390f6902f5404760df835c196a734fa75e45999afcc9362159e140fda9a"
+    },
+    "tiger.budget-policy.v3": {
+      "research_requests": "c73eb53619bcb46479709755955af209094f65834aca64a51bac25215134bde7",
+      "decision_requests": "f2cccbd00828d1563ac23e15b6733219a4f1d36c180fd1da160947c036a3952d",
+      "research": "301e33c2ea71586b93f01068249a0795457a38374a7dbc9fce2f5e380bdf5ffc",
+      "decision": "7241bbf2a9cfae5a951ebc9399688f439e12324de7a8cfce21aa11a6a0e97334",
+      "native_calls": "542b8390f6902f5404760df835c196a734fa75e45999afcc9362159e140fda9a"
+    }
+  }
+}

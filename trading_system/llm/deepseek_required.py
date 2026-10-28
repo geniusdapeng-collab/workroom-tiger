@@ -50,7 +50,7 @@ _SENSITIVE_QUERY = frozenset({
     "sessiontoken", "clientsecret", "accesskey", "accesskeyid", "securitytoken", "jwt",
 })
 _SCHEMA_KEYS = frozenset({
-    "type", "properties", "required", "additionalProperties", "items", "enum",
+    "type", "properties", "required", "additionalProperties", "items", "contains", "enum",
     "const", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
     "minItems", "maxItems", "minLength", "maxLength", "pattern", "uniqueItems",
     "anyOf", "oneOf", "allOf", "title", "description", "$schema",
@@ -126,6 +126,8 @@ def _check_schema(schema: object, depth: int = 0) -> None:
             _check_schema(extra, depth + 1)
     if "items" in schema:
         _check_schema(schema["items"], depth + 1)
+    if "contains" in schema:
+        _check_schema(schema["contains"], depth + 1)
     for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
         if key in schema and not _finite_number(schema[key]):
             _fail("INVALID_SCHEMA_BOUND")
@@ -199,6 +201,8 @@ def _matches(value: object, schema: dict, depth: int = 0) -> bool:
                                              for x in value[i + 1:]):
             return False
         if "items" in schema and any(not _matches(v, schema["items"], depth + 1) for v in value):
+            return False
+        if "contains" in schema and not any(_matches(v, schema["contains"], depth + 1) for v in value):
             return False
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value)):
@@ -291,6 +295,9 @@ def _schema_mismatch(value: object, schema: dict, depth: int = 0,
                     child = _schema_child_path(path, index)
                     return ((path, "depth") if child is None else
                             _schema_mismatch(item, schema["items"], depth + 1, child))
+        if "contains" in schema and not any(_matches(item, schema["contains"], depth + 1) for item in value):
+            # No element matched; there is no unique failing item to expose.
+            return path, "contains"
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             return path, "minLength"

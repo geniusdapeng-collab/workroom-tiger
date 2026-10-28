@@ -58,7 +58,7 @@ MODEL_FAILURE_CODES = frozenset({
 })
 SCHEMA_FAILURE_KEYWORDS = frozenset({
     "type", "const", "enum", "allOf", "anyOf", "oneOf", "required",
-    "additionalProperties", "minItems", "maxItems", "uniqueItems", "items",
+    "additionalProperties", "minItems", "maxItems", "uniqueItems", "items", "contains",
     "minLength", "maxLength", "pattern", "minimum", "maximum",
     "exclusiveMinimum", "exclusiveMaximum", "depth",
 })

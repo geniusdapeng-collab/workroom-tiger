@@ -293,3 +293,156 @@ def decision_schema_v2(symbols, doc_ids, market_ids, fact_ids=()) -> dict:
     )
     return _object(action=_enum(["BUY", "WAIT", "AVOID"]), action_summary=_text_v2(2400),
                    decisions=_array(row, len(candidates), len(candidates), unique=True))
+
+
+def _binding_rows_v4(bindings, symbols, docs, facts, markets):
+    """Accept only a complete deterministic guide for this exact request."""
+    try:
+        if (type(bindings) is not dict or bindings["schema"] != "tiger.thesis-request-bindings.v1"
+                or bindings["phase"] not in {"initial", "final", "decision"}
+                or type(bindings["sources"]) is not list or type(bindings["targets"]) is not list):
+            raise ValueError
+        sources = bindings["sources"]
+        targets = bindings["targets"]
+        if (_ids([row["source_id"] for row in sources], allow_empty=True) != docs
+                or _ids([row["symbol"] for row in targets], allow_empty=True, symbols=True) != symbols):
+            raise ValueError
+        for row in sources:
+            options = row["date_options"]
+            if type(options) is not list or not options or options[0]["date_source_id"] is not None:
+                raise ValueError
+            dates = [option["date_source_id"] for option in options]
+            if len(set(dates)) != len(dates) or any(item is not None and item not in docs for item in dates):
+                raise ValueError
+            for option in options:
+                if option["allowed_time_roles"] not in (["background", "unknown"], ["current", "background", "unknown"]):
+                    raise ValueError
+        for target in targets:
+            if [row["scope"] for row in target["five_part"]] != ["market", "sector", "chain", "stock", "plan"]:
+                raise ValueError
+            for part in target["five_part"]:
+                values = _ids(part["evidence_ids"])
+                allowed = markets if part["scope"] == "stock" else facts
+                if part["requirement"] != "at_least_one" or any(value not in allowed for value in values):
+                    raise ValueError
+                if part["scope"] == "stock" and (len(values) != 1 or not values[0].startswith("md_" + target["symbol"] + "_")):
+                    raise ValueError
+            if any(identity not in docs for identity in _ids(target["issuer_identity_evidence_ids"], allow_empty=True)):
+                raise ValueError
+            followup = target["followup"]
+            if (type(followup["question_max_characters"]) is not int
+                    or not 0 <= followup["question_max_characters"] <= 40
+                    or any(identity not in docs for identity in _ids(followup["fetch_source_id"], allow_empty=True))):
+                raise ValueError
+            for option in target["news_current_complete_options"]:
+                if option["source_id"] not in target["issuer_identity_evidence_ids"] or not any(
+                        row["source_id"] == option["source_id"] and any(
+                            date["date_source_id"] == option["date_source_id"] and "current" in date["allowed_time_roles"]
+                            for date in row["date_options"]) for row in sources):
+                    raise ValueError
+        return sources, targets
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("MODEL_SCHEMA_REQUEST_BINDINGS_REQUIRED") from None
+
+
+def _date_binding_v4(source_id, date_source_id, **properties):
+    """Null permits omission, matching claim.get(date_source_id) exactly."""
+    result = {"properties": {"source_id": {"const": source_id},
+                             "date_source_id": {"const": date_source_id}, **properties}}
+    if date_source_id is not None:
+        result["required"] = ["date_source_id"]
+    return result
+
+
+def _followup_binding_v4(target, phase):
+    inactive = {"properties": {"needed": {"const": False}, "question": {"type": "null"},
+                               "fetch_source_id": {"type": "null"}}}
+    if phase != "initial":
+        return inactive
+    action = target["followup"]
+    limit = action["question_max_characters"]
+    question = ({**_text_v2(limit), "allOf": [{"pattern": r'^[^<>:"\x00-\x1f]*(?![\s\S])'}]}
+                if limit else {"type": "null"})
+    active = {"properties": {"needed": {"const": True},
+                              "question": _nullable(question),
+                              "fetch_source_id": _nullable(_allowed(action["fetch_source_id"]))},
+              "anyOf": [{"properties": {"question": {"type": "string"}}},
+                        {"properties": {"fetch_source_id": {"type": "string"}}}]}
+    return {"oneOf": [inactive, active]}
+
+
+def _news_binding_v4(target):
+    choices = [{"properties": {"strategy": {"const": "technical_flow_v2"}}},
+               {"properties": {"strategy": {"const": "news_event_v2"},
+                               "status": _enum(["insufficient", "contradictory"])}}]
+    sufficient = []
+    for option in target["news_current_complete_options"]:
+        identity = option["source_id"]
+        match = _date_binding_v4(identity, option["date_source_id"],
+            time_role={"const": "current"}, evidence_kind={"const": "primary"}, origin_id={"const": identity})
+        sufficient.append({"properties": {
+            "issuer_identity_evidence_ids": {"contains": {"const": identity}},
+            "claims": {"contains": match}}})
+    if sufficient:
+        choices.append({"properties": {"strategy": {"const": "news_event_v2"},
+            "status": {"const": "sufficient"}, "issuer_name": {"type": "string"}}, "anyOf": sufficient})
+    return {"oneOf": choices}
+
+
+def thesis_schema_v4(symbols, doc_ids, fact_ids, market_ids, *, bindings):
+    """Add only existing semantic relations; leave archived v2 bytes intact."""
+    from copy import deepcopy
+    candidates = _ids(symbols, allow_empty=True, symbols=True)
+    docs, facts, markets = (_ids(values, allow_empty=True) for values in (doc_ids, fact_ids, market_ids))
+    sources, targets = _binding_rows_v4(bindings, candidates, docs, facts, markets)
+    result = deepcopy(thesis_schema_v2(candidates, docs, facts, markets))
+    claim = result["properties"]["claims"]["items"]
+    if sources:
+        claim["allOf"] = [{"oneOf": [
+            _date_binding_v4(row["source_id"], option["date_source_id"],
+                             time_role=_enum(option["allowed_time_roles"]))
+            for row in sources for option in row["date_options"]]}]
+    result["allOf"] = [{"oneOf": [
+        {"properties": {"status": {"const": "sufficient"}}},
+        {"properties": {"status": _enum(["insufficient", "contradictory"]), "gaps": {"minItems": 1}}}]}]
+    if targets:
+        choices = []
+        for target in targets:
+            parts = {part["scope"]: {"properties": {
+                "evidence_ids": {"contains": _allowed(part["evidence_ids"])}}}
+                for part in target["five_part"]}
+            choices.append({"properties": {
+                "symbol": {"const": target["symbol"]},
+                "issuer_identity_evidence_ids": {"items": _allowed(target["issuer_identity_evidence_ids"])},
+                "five_part": {"properties": parts},
+                "followup": _followup_binding_v4(target, bindings["phase"])},
+                "allOf": [_news_binding_v4(target)]})
+        result["allOf"].append({"oneOf": choices})
+    return result
+
+
+def research_schema_v4(symbols, doc_ids, fact_ids, market_ids, *, bindings):
+    candidates = _ids(symbols, allow_empty=True, symbols=True)
+    return _object(coverage_summary=_text_v2(1600),
+        theses=_array(thesis_schema_v4(candidates, doc_ids, fact_ids, market_ids, bindings=bindings),
+                      len(candidates), len(candidates), unique=True))
+
+
+def decision_schema_v4(symbols, doc_ids, market_ids, fact_ids=(), *, bindings, base_schema=None):
+    from copy import deepcopy
+    candidates = _ids(symbols, allow_empty=True, symbols=True)
+    # The caller may already have applied another source-owned decision
+    # contract. Add thesis bindings without discarding its fields or allOf.
+    result = deepcopy(base_schema) if base_schema is not None else decision_schema_v2(candidates, doc_ids, market_ids, fact_ids)
+    row = result["properties"]["decisions"]["items"]
+    row["properties"]["thesis"] = thesis_schema_v4(candidates, doc_ids, fact_ids, market_ids, bindings=bindings)
+    if candidates:
+        choices = []
+        for target in bindings["targets"]:
+            market_id = next(part["evidence_ids"][0] for part in target["five_part"] if part["scope"] == "stock")
+            choices.append({"properties": {
+                "symbol": {"const": target["symbol"]},
+                "thesis": {"properties": {"symbol": {"const": target["symbol"]}}},
+                "source_ids": {"items": _allowed([*doc_ids, market_id]), "contains": {"const": market_id}}}})
+        row.setdefault("allOf", []).append({"oneOf": choices})
+    return result

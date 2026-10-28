@@ -1295,6 +1295,18 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     market_by_symbol = {row["symbol"]: row for row in payload["market_evidence"]}
     schema = decision_schema_v2(symbols, list(by_id), [row["id"] for row in payload["market_evidence"]],
                                 [row["id"] for row in research["fact_evidence"]])
+    from .request_budget import BUDGET_POLICY_V4
+    if getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None) == BUDGET_POLICY_V4:
+        from .candidate_research import build_thesis_binding_guide
+        from .required_schemas import decision_schema_v4
+        bindings = build_thesis_binding_guide(symbols=symbols, documents=research_docs,
+            fact_evidence=research["fact_evidence"], market_evidence=payload["market_evidence"],
+            assessment=research["assessment"], phase="decision",
+            presented_by_symbol={symbol: presented_views_for_symbol(research, symbol) for symbol in symbols})
+        payload = {**payload, "request_bindings": bindings}
+        schema = decision_schema_v4(symbols, list(by_id),
+            [row["id"] for row in payload["market_evidence"]],
+            [row["id"] for row in research["fact_evidence"]], bindings=bindings, base_schema=schema)
     wire_payload = final_payload_wire_v2(payload)
     identities = [row[1] for row in wire_payload["final_wire"]["identity_index"]["rows"]]
     thesis_wire_schema = final_thesis_wire_schema_v2(schema, symbols)

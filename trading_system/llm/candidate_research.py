@@ -354,6 +354,121 @@ def _published(doc, claim, by_id):
         return None
 
 
+REQUEST_BINDINGS_V4 = "tiger.thesis-request-bindings.v1"
+
+
+def build_thesis_binding_guide(*, symbols, documents, fact_evidence, market_evidence,
+                              assessment, phase, presented_by_symbol,
+                              supplemental_query_templates=None):
+    """Expose existing semantic predicates before generation, without answers.
+
+    Eligibility below is derived only from frozen source metadata, admission
+    time and actual presentations. It does not classify a source as primary,
+    infer an origin, select evidence, or amend any model output. In particular,
+    the stock paragraph requires its own md but need not also cite a stock fx.
+    """
+    assessment = validate_assessment(assessment)
+    try:
+        from .required_schemas import _ids
+        symbols = _ids(symbols, allow_empty=True, symbols=True)
+        if phase not in {"initial", "final", "decision"}:
+            raise ValueError
+        docs = [_raw(doc) for doc in documents]
+        by_id = {doc.doc_id: doc for doc in docs}
+        markets = {row["symbol"]: row for row in market_evidence}
+        if (len(by_id) != len(docs) or len(markets) != len(market_evidence)
+                or set(markets) != set(symbols) or set(presented_by_symbol) != set(symbols)):
+            raise ValueError
+        _ids(list(by_id), allow_empty=True)
+        _ids([row["id"] for row in fact_evidence], allow_empty=True)
+        _ids([row["id"] for row in market_evidence], allow_empty=True)
+        clock = datetime.fromisoformat(assessment["admitted_at_utc"].replace("Z", "+00:00"))
+        source_bindings = []
+        for doc in docs:
+            references = [None]
+            reference = doc.meta.get("search_source_id")
+            if reference in by_id and by_id[reference].url == doc.url:
+                references.append(reference)
+            options = []
+            for reference in references:
+                when = _published(doc, {"date_source_id": reference}, by_id)
+                age = None if when is None else (clock - when).total_seconds()
+                current = age is not None and 0 <= age <= NEWS_EVENT_MAX_AGE_DAYS * 86400
+                date_doc = doc if reference is None else by_id[reference]
+                options.append({"date_source_id": reference,
+                    "published_at": date_doc.published or None,
+                    "age_seconds_at_admission": age,
+                    "allowed_time_roles": (["current"] if current else []) + ["background", "unknown"]})
+            source_bindings.append({"source_id": doc.doc_id, "date_options": options})
+        targets = []
+        for symbol in symbols:
+            views = {view["id"]: view for view in presented_by_symbol[symbol]}
+            if len(views) != len(presented_by_symbol[symbol]) or not set(views).issubset(by_id):
+                raise ValueError
+            own_sources = [doc.doc_id for doc in docs if symbol in doc.meta.get("target_symbols", [])]
+            scope_bindings = []
+            for scope in FIVE_PARTS:
+                expected = ([markets[symbol]["id"]] if scope == "stock" else
+                            [row["id"] for row in fact_evidence
+                             if row.get("symbol") == symbol and row.get("scope") == scope])
+                if not expected:
+                    raise ValueError
+                scope_bindings.append({"scope": scope, "evidence_ids": expected,
+                                       "requirement": "at_least_one"})
+            question_limit = 0
+            if phase == "initial":
+                template = supplemental_query_templates[symbol]
+                question_limit = min(40, 128 - len(template.format(question="")))
+                if question_limit < 1:
+                    raise ValueError
+            news_options = [{"source_id": source["source_id"], "date_source_id": option["date_source_id"]}
+                for source in source_bindings
+                if source["source_id"] in own_sources
+                and views.get(source["source_id"], {}).get("content_complete") is True
+                for option in source["date_options"] if "current" in option["allowed_time_roles"]]
+            targets.append({"symbol": symbol, "five_part": scope_bindings,
+                "issuer_identity_evidence_ids": own_sources,
+                "followup": {"question_max_characters": question_limit,
+                             "fetch_source_id": own_sources if phase == "initial" else []},
+                "news_current_complete_options": news_options})
+        return {"schema": REQUEST_BINDINGS_V4, "assessment": assessment, "phase": phase,
+            "current_max_age_seconds": NEWS_EVENT_MAX_AGE_DAYS * 86400,
+            "sources": source_bindings, "targets": targets,
+            "rules": [
+                "Each five_part scope must include at least one listed evidence_id; stock requires its own md, not an additional stock fx.",
+                "For each claim select one date option for its source_id. Omitted date_source_id means null. Search cannot cite itself for its date.",
+                "current is legal only in that date option's allowed_time_roles, measured at frozen admission, inclusive of exactly seven days.",
+                "Source/date eligibility does not establish primary evidence or origin. The model must assess those from the actual displayed text.",
+                "news_event_v2 sufficient needs an eligible current complete claim with evidence_kind primary, origin_id equal to source_id, issuer_name, and that same source in issuer_identity_evidence_ids.",
+                "claim_id must be unique. quote must be exact displayed text; preserve contrary facts, risks and gaps. Non-sufficient status requires a gap.",
+                "Initial followup needed=true needs a question or fetch_source_id; false requires both null. Questions exclude control characters and <>:\". Final and decision followup must be false with both fields null.",
+                "Final research can retain an initial claim's exact non-statement fields when its text is not redisplayed. Final decision can only retain completed research claims or explicitly reuse its own complete thesis; it cannot invent or alter claim bindings.",
+            ]}
+    except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+        fail("Research request bindings differ from frozen evidence and presentation")
+
+
+def _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol):
+    """Add metadata without replacing any original payload field or content."""
+    from copy import deepcopy
+    from .required_schemas import research_schema_v4
+    symbols = [row["symbol"] for row in payload["targets"]]
+    available = {row["id"] for row in payload["documents"]}
+    presentations = {symbol: [deepcopy(view) for view in presented_by_symbol.get(symbol, [])
+                              if view["id"] in available] for symbol in symbols}
+    _remember_presentations(presentations, symbols, payload["documents"])
+    guide = build_thesis_binding_guide(symbols=symbols,
+        documents=[doc for doc in source_docs if doc.doc_id in available],
+        fact_evidence=payload["fact_evidence"], market_evidence=payload["market_evidence"],
+        assessment=payload["assessment"], phase=payload["phase"],
+        presented_by_symbol=presentations,
+        supplemental_query_templates={row["symbol"]: row["supplemental_query_template"] for row in plan["targets"]})
+    schema = research_schema_v4(symbols, [row["id"] for row in payload["documents"]],
+        [row["id"] for row in payload["fact_evidence"]], [row["id"] for row in payload["market_evidence"]],
+        bindings=guide)
+    return {**payload, "request_bindings": guide}, schema
+
+
 def validate_thesis(thesis: dict, *, symbol: str, documents, market_snapshot: dict,
                     fact_evidence: list[dict], assessment: dict,
                     presented_documents: list[dict] | None = None) -> None:
@@ -673,6 +788,8 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
         payload = build_research_payload(plan, batch, source_docs, facts, market, phase="initial")
         schema = research_schema_v2(batch, [doc["id"] for doc in payload["documents"]],
             [row["id"] for row in payload["fact_evidence"]], [row["id"] for row in payload["market_evidence"]])
+        if policy_id == BUDGET_POLICY_V4:
+            payload, schema = _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol)
         out = _research_call(llm, payload, schema, plan["limits"]["max_output_tokens"])
         rounds.append({"phase": "initial", "batch_symbols": batch, "output": out,
                        "payload_sha256": digest(payload), "schema_sha256": digest(schema)})
@@ -698,6 +815,8 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
                    for identity in action["source_ids"]])))
         schema = research_schema_v2(changed, [doc["id"] for doc in payload["documents"]],
             [row["id"] for row in payload["fact_evidence"]], [row["id"] for row in payload["market_evidence"]])
+        if policy_id == BUDGET_POLICY_V4:
+            payload, schema = _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol)
         out = _research_call(llm, payload, schema, plan["limits"]["max_output_tokens"])
         rounds.append({"phase": "final", "batch_symbols": changed, "output": out,
                        "payload_sha256": digest(payload), "schema_sha256": digest(schema)})
