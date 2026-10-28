@@ -393,11 +393,18 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict:
     return result
 
 
-def _json_loads(value: bytes | str) -> object:
+def _json_loads(value: bytes | str, *, finite_floats: bool = False) -> object:
+    def parse_float(text: str) -> float:
+        number = float(text)
+        if not math.isfinite(number):
+            _fail("NONFINITE_RESPONSE_JSON")
+        return number
+
     try:
         if isinstance(value, bytes):
             value = value.decode("utf-8", "strict")
-        return json.loads(value, parse_constant=_reject_constant, object_pairs_hook=_unique_pairs)
+        return json.loads(value, parse_constant=_reject_constant, object_pairs_hook=_unique_pairs,
+                          **({"parse_float": parse_float} if finite_floats else {}))
     except (ValueError, UnicodeError, RecursionError):
         _fail("INVALID_RESPONSE_JSON")
 
@@ -726,7 +733,11 @@ class DeepSeekRequiredClient:
                     _fail("RESPONSE_TOO_LARGE")
                 chunks.append(chunk)
             raw = b"".join(chunks)
-            obj = _json_loads(raw)
+            # Compact envelopes may carry ignored metadata. Reject numeric
+            # overflow while decoding the complete JSON, before projection.
+            # Historical protocols retain their original parser behavior.
+            obj = _json_loads(raw, finite_floats=(path == "/beta/chat/completions"
+                and output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1))
             if not isinstance(obj, dict):
                 _fail("RESPONSE_NOT_OBJECT")
             return obj, hashlib.sha256(raw).hexdigest()
@@ -1105,12 +1116,20 @@ class DeepSeekRequiredClient:
                     if type(message.get('tool_calls')) is not list or len(message['tool_calls']) != 1:
                         _fail('COMPACT_INVALID_TOOL_COUNT')
                     tool = message['tool_calls'][0]
-                    if type(tool) is not dict or set(tool) != {'id', 'type', 'function'}:
+                    if type(tool) is not dict:
+                        _fail('COMPACT_TOOL_NOT_OBJECT')
+                    if not {'id', 'type', 'function'}.issubset(tool):
                         _fail('COMPACT_INVALID_TOOL_FIELDS')
                     if tool['type'] != 'function':
                         _fail('COMPACT_INVALID_TOOL_TYPE')
-                    if type(tool['function']) is not dict or set(tool['function']) != {'name', 'arguments'}:
+                    if type(tool['function']) is not dict:
+                        _fail('COMPACT_FUNCTION_NOT_OBJECT')
+                    if not {'name', 'arguments'}.issubset(tool['function']):
                         _fail('COMPACT_INVALID_FUNCTION_FIELDS')
+                    # Required response fields are consumed and validated;
+                    # unconsumed envelope metadata is ignored, not interpreted.
+                    # The safe projection below omits it while the original
+                    # complete transport body remains bound by body_hash.
                     if tool['function']['name'] != CLEAN_OUTPUT_FUNCTION:
                         _fail('COMPACT_INVALID_FUNCTION_NAME')
                     tool_id = self._identifier(tool['id'])

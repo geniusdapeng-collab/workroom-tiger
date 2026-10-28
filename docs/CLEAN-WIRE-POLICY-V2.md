@@ -136,6 +136,10 @@ ticker、事件、产业链、ETF 列表使用逗号标量，只有原项目语�
 
 第十二次完整任务 `run-a60339d90778460c970b03f30d2ea334` 使用来源 `70856e2da3648a93f276a7f2c6216b7590dbcd5f`，完成14次原生Search后在首个compact清洗调用以 `INCOMPLETE_MODEL_RESPONSE` 失败。该调用 `finish_reason=tool_calls`，输入10854、输出1247、合计12101 tokens均已结算，剩余预留为0，未生成成功回执。旧复合诊断没有保留精确触发字段，不能认定非空content就是此次失败原因；本次修复依据官方允许的响应形式和离线反例，同时补齐后续诊断。旧失败及其账本保持原样。
 
+compact 的工具对象与函数对象按官方响应对象的必需字段读取：分别必须包含 `id/type/function` 和 `name/arguments`，仍逐项检查实际使用的身份、类型、固定函数名与参数。未消费的附加传输字段不解释、不执行，也不进入私有安全响应投影或语义输入；完整接收正文继续由 `transport_response_sha256` 绑定，严格 JSON 重复键/非有限值与总响应大小边界仍执行。工具参数内部仍使用完整闭合 schema；省略必需字段、错误类型、多个工具、错误身份或非法参数继续拒绝。此兼容处理只作用于当前compact通道，不改变历史非compact协议。
+
+第十三次完整任务 `run-e771075e70a34beda5b4f98ef070a0b0` 使用来源 `73ce5e769ac2c8ac181945d827efe163df89adff`，14次Search后首个clean调用以固定 `COMPACT_INVALID_TOOL_FIELDS` 失败；输入10853、输出1256、总计12109 tokens已结算、零预留、无成功回执。该诊断将范围缩小到工具对象/字段集合，但原对象未封存，具体缺失或附加字段仍未知；不能把常见的 `index` 当成这次已观察事实。兼容修复依据官方对象契约及离线反例，不改写第十二或十三次失败。
+
 ## 最终输入：`tiger.final-identity-wire.v1`
 
 最终判断仍接收完整广域摘要、claims、provenance、引文 hash/长度、公司研究、五段假设、事实证据、行情证据和研究来源索引。`final_payload_wire_v2` 在 `final_wire.identity_index` 的 `ref/id` 表中保留每个真实 ID，并在受控身份位置使用唯一 `wN`。

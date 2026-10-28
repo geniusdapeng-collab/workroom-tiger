@@ -110,11 +110,11 @@ def test_rejected_and_regenerated_content_are_bound_separately_without_becoming_
     ("tools_missing", "COMPACT_INVALID_TOOL_COUNT"),
     ("tools_empty", "COMPACT_INVALID_TOOL_COUNT"),
     ("tools_multiple", "COMPACT_INVALID_TOOL_COUNT"),
-    ("tool_type_not_object", "COMPACT_INVALID_TOOL_FIELDS"),
-    ("tool_extra", "COMPACT_INVALID_TOOL_FIELDS"),
+    ("tool_type_not_object", "COMPACT_TOOL_NOT_OBJECT"),
+    ("tool_missing", "COMPACT_INVALID_TOOL_FIELDS"),
     ("tool_kind", "COMPACT_INVALID_TOOL_TYPE"),
-    ("function_type", "COMPACT_INVALID_FUNCTION_FIELDS"),
-    ("function_extra", "COMPACT_INVALID_FUNCTION_FIELDS"),
+    ("function_type", "COMPACT_FUNCTION_NOT_OBJECT"),
+    ("function_missing", "COMPACT_INVALID_FUNCTION_FIELDS"),
     ("function_name", "COMPACT_INVALID_FUNCTION_NAME"),
 ])
 def test_each_envelope_refusal_has_one_closed_value_free_code_and_retains_paid_usage(case, code):
@@ -141,10 +141,10 @@ def test_each_envelope_refusal_has_one_closed_value_free_code_and_retains_paid_u
     elif case == "tools_empty": message["tool_calls"] = []
     elif case == "tools_multiple": message["tool_calls"].append(deepcopy(tool))
     elif case == "tool_type_not_object": message["tool_calls"][0] = marker
-    elif case == "tool_extra": tool[marker] = marker
+    elif case == "tool_missing": tool.pop("id")
     elif case == "tool_kind": tool["type"] = marker
     elif case == "function_type": tool["function"] = marker
-    elif case == "function_extra": tool["function"][marker] = marker
+    elif case == "function_missing": tool["function"].pop("name")
     else: tool["function"]["name"] = marker
     seen = install_responses(client, [response])
     with pytest.raises(RequiredModelUnavailable) as caught:
