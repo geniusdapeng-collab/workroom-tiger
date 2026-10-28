@@ -2,9 +2,11 @@
 
 This change exposes existing research validation rules in the request before a
 model generates a thesis. It applies to `tiger.budget-policy.v4` research initial
-assessment, supplemental final assessment, and final decision. It does not amend
-model output or relax the existing source, quote, time, numerical-risk, or
-paper-account validators.
+assessment, supplemental final assessment, and final decision. New v4 research
+also uses explicit source-part and validated initial-claim references, described
+below. Their deterministic expansion copies the selected original values; it
+does not repair a rejected answer or relax the source, quote, time,
+numerical-risk, or paper-account validators.
 
 The motivating run, FULL16, remains failed. Its saved non-text field projection
 contains 10 theses and 59 claims: 3 stock sections omit their own market evidence,
@@ -26,7 +28,7 @@ not a stored model response from production.
 The v4 change adds `request_bindings` to the original payload. Every original
 payload field remains. It leaves source text allocation, full-source metadata,
 input truncation markers, clean output handling, maximum output tokens, budget
-policy, call counts, model selection, thinking configuration, and semantic
+policy, call-count limits, model selection, thinking configuration, and semantic
 authority unchanged. The normal request budget calculation includes the entire
 new guide and schema. A request that exceeds an unchanged budget still fails.
 
@@ -130,3 +132,117 @@ future scheduled execution. Those require their own exact-source receipts.
 
 No retry of a failed real run is part of this patch. No old receipt, account state,
 failure history, execution identity, or source content is rewritten.
+
+## Exact displayed quote selection for v4 research
+
+FULL17, `run-fd36b5eb003e4ab6b5bf5defd3a32c3d`, also remains failed. Its source
+was `5fb6abbc172d4b8c7650433b73f7efe276b414c3`. All six issuer-research model
+answers passed their actual request schemas. The final ALLE answer omitted an
+optional `date_source_id` that had been explicitly null in the initial answer;
+the unchanged exact claim-retention comparison rejected that representation.
+Independent replay also found three actual quotes, for ESTC, APA and ALLE, that
+were not exact substrings of their sources. Accepting the optional-field change
+alone would therefore leave the original quote failures. Case folding, deleting
+punctuation or rewriting those answers is not an acceptable repair. The run
+settled 66 Chat calls, 26 Search calls and 1,317,402 tokens, with estimated cost
+USD 1.6003824 and no remaining reservation. This estimate is not a provider bill.
+There was no account commit or successful receipt.
+
+For new v4 initial and supplemental research requests, `research_quote_selection`
+adds `tiger.research-quote-selection.v1`. Every pre-existing payload field,
+`documents[].content` string, source ordering, original hash, completeness flag,
+allocation cap and frozen assessment remains. Its `sources` entries contain
+`source_id`, `presented_content_sha256` and an ordered `content_parts` table with
+columns `part_id`, `text`, `is_quoteable`. The existing clean part builder splits
+the exact displayed text into at most 600-character slices. Concatenating every
+original slice restores that same displayed text, including unsafe slices.
+A separate `quote_parts` table has columns `part_id`, `text`. It includes every
+safe original slice and every format-safe contiguous run inside an unsafe
+slice, so one forbidden character does not hide the rest of a source from quote
+selection. Those runs are split only at the original format's forbidden
+characters; no semantic extraction, case change, punctuation repair, trimming or
+joining creates their text. The original unsafe slice remains displayed.
+
+A safe flag describes only the quote format; it does not establish truth,
+relevance, primary-source status, origin or freshness. Empty or unshown bodies
+provide no selectable quotes. The additive table duplicates displayed text, and
+its complete size is included in the normal request reservation. Source and
+batch text limits bound the number of parts; no first-N truncation silently
+discards later safe text. A pathological input that exceeds the complete
+request budget is refused before a paid call, not shortened to obtain success.
+
+A current-source claim keeps its original model-generated semantic fields and
+replaces only literal `quote` with `quote_part_id`. The selected part must belong
+to that claim's `source_id` and the content actually displayed for this request.
+The resolver copies only that exact part text into the canonical `quote` field.
+Unknown, unsafe, foreign-source and unshown-tail part IDs are rejected. It does
+not search for a similar phrase, fix case or punctuation, combine parts, or
+invent a fallback quote. The model still decides what the chosen text means.
+The quote-selection representation uses these bounded slices rather than an
+arbitrary substring; all original displayed text remains available for analysis.
+
+Ordinary claims retain the existing permission to cite another issuer's source
+that was actually displayed in the same batch. This repair adds no new issuer
+ownership condition to ordinary claims. Issuer identity and Fetch keep their
+existing source ownership checks; source and origin may differ when the original
+contract permits it. In a final request, the metadata-only source registry also
+includes the already observed source, origin, and non-null date-parent IDs used
+by that symbol's validated initial claims. This supports retaining a legitimate
+cross-issuer citation after only one issuer enters supplemental research. It
+does not add earlier bodies to the current documents or quote-parts tables. A
+new current-source claim still cannot select an earlier, unshown source; only
+the exact same-symbol retained reference can restore that initial claim.
+
+Before v4 research performs any supplemental Search or Fetch, every initial
+thesis must pass the complete original research schema and the unchanged
+`validate_thesis` against its exact displayed views. Only these validated
+initial claims can be retained. Final requests list `retained_initial_claims`
+by symbol, `initial_thesis_sha256`, and each claim's
+`retained_initial_claim_ref`, `claim_id`, `claim_index`, `claim_sha256`.
+The alternative output is exactly `{retained_initial_claim_ref, statement}`.
+It selects one claim from the same symbol's frozen initial thesis and changes
+only the model's interpretation in `statement`. All other binding fields,
+including whether the optional date field is absent or explicitly null, are
+copied exactly. Unknown references, other symbols, mixed literal/reference
+fields and modified initial bindings are rejected.
+
+Supplemental searches can append a newly observed issuer to the same source's
+`target_symbols`. Immutable source fields and exact historical displayed prefixes
+remain bound; the old ownership list must be a prefix of the current list.
+Initial claims are revalidated using their historical ownership, so a later
+issuer association cannot retroactively validate an invalid initial identity.
+Only v4's cumulative `previous_source_index` and final `source_index` use current
+observed source metadata. Their presentation lengths, hashes, completeness and
+per-symbol delivery records remain exact, and final decision replay reconstructs
+the same index. Legacy index-builder behavior stays the default.
+
+After resolving either representation, the whole canonical answer is checked
+against the original v4 schema and the original thesis validator. Source/date
+relations, current-time limits, primary/news intersections, five-part evidence,
+gaps, followup constraints and final numerical authority remain mandatory.
+The original bad FULL17 literal answers are not converted into valid selections
+or successful historical results.
+
+For v4 research only, `model_rounds` also records `selection_output` and
+`claim_reference_usage` alongside the resolved output and payload/schema hashes.
+The provider proof records the actual raw selection answer. Independent replay
+reconstructs the same payload, schema, exact selection resolution and budget
+from frozen inputs and recorded I/O. A saved resolved claim or self-consistent
+hash cannot substitute for that reconstruction. This is a local application
+schema over the existing Chat JSON channel; it does not assert server-side
+schema enforcement or guarantee semantically relevant choices.
+
+The alternate design used source-relative character offsets. It would add less
+metadata but require the model to count Unicode characters and normalized
+boundaries correctly. Explicit source-bound part selection was chosen to remove
+the transcription/counting task that failed in the real run. Existing clean,
+final-decision, no-policy, v2 and v3 request paths retain their prior behavior.
+No retry, additional model call, increased limit or relaxed original validator
+is introduced by this representation.
+
+`tests/test_research_quote_selection_v4.py` exercises the selection and retention
+boundaries; `tests/test_research_request_contract_v4.py` preserves the request
+contract and legacy goldens. `tests/test_research_contract_proof_v4.py` covers
+production request construction, two-stage research, final decision, and
+independent recorded-I/O replay with synthetic transport. These tests do not
+count as a completed real workflow.

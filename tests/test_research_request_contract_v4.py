@@ -257,6 +257,11 @@ def test_v4_initial_final_decision_keep_every_old_input_and_use_exact_new_schema
         original_payload = json.loads(original["user"].split("\n", 1)[1])
         payload = json.loads(current["user"].split("\n", 1)[1])
         guide = payload.pop("request_bindings")
+        selections = payload.pop("research_quote_selection")
+        assert selections["schema"] == research.RESEARCH_QUOTE_SELECTION_V4
+        for original_source, selection in zip(original_payload["documents"], selections["sources"]):
+            assert selection["source_id"] == original_source["id"]
+            assert "".join(part[1] for part in selection["content_parts"]["rows"]) == original_source["content"]
         assert payload == original_payload
         assert guide["phase"] == payload["phase"] and guide["schema"] == research.REQUEST_BINDINGS_V4
         assert current["max_tokens"] == 65536
@@ -324,11 +329,20 @@ def test_final_partial_current_presentation_does_not_erase_previous_complete_del
     plan = research.build_research_plan(context(watch=["AAA"]), ASSESSMENT)
     payload = research.build_research_payload(plan, ["AAA"], [doc], facts(), [market()], phase="final")
     payload["documents"] = [research.source_view(doc, characters=30)]
+    payload["preliminary"] = [event_thesis(doc)]
     original = deepcopy(payload)
     bound, schema = research._bound_research_request_v4(payload, plan, [doc], {"AAA": [research.source_view(doc)]})
-    assert payload == original and {key: value for key, value in bound.items() if key != "request_bindings"} == original
+    assert payload == original and {key: value for key, value in bound.items()
+        if key not in {"request_bindings", "research_quote_selection"}} == original
     assert bound["request_bindings"]["targets"][0]["news_current_complete_options"]
-    validate_schema({"coverage_summary": "SYNTHETIC_TEST retained full observation", "theses": [event_thesis(doc)]}, schema)
+    value = event_thesis(doc)
+    reference = bound["research_quote_selection"]["retained_initial_claims"][0]["claims"][0]
+    value["claims"] = [{"retained_initial_claim_ref": reference["retained_initial_claim_ref"],
+                        "statement": value["claims"][0]["statement"]}]
+    output = {"coverage_summary": "SYNTHETIC_TEST retained full observation", "theses": [value]}
+    validate_schema(output, schema)
+    restored, _ = research._resolve_research_quotes_v4(output, bound, schema)
+    original_validate(restored["theses"][0], [doc], [research.source_view(doc)])
 
 
 @pytest.mark.parametrize("change", ["missing_md", "self_date", "invented_quote", "duplicate_claim_id", "cross_symbol_reuse", "unapproved_buy"])

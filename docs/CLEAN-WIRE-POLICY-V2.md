@@ -167,6 +167,12 @@ compact 的工具对象与函数对象按官方响应对象的必需字段读取
 
 这个可选引用避免强制重抄已有五段和 claims。五个人工理由仍可使用原完整上限，因此任何合法最大回答都必能在 16,384 tokens 内完成的保证并不存在；模型若返回 length、空内容或非法引用，仍按失败处理。
 
+## v4 公司研究的逐字引文选择
+
+当前 v4 的初评与补证终评采用 `tiger.research-quote-selection.v1`：模型从本轮实际展示的来源片段中选择引文，终评也可显式保留同股票已验证初评 claim 的原始绑定并重新表述 statement。原正文完整保留；安全子片段只按既有格式禁止字符划分，不能改大小写、标点、拼接文字或代写事实。保留的来源登记只增加必要的已观察元数据，不把未重展的正文当成本轮已展示引文。解码后仍过原 schema 与原 thesis 校验，旧 None/v2/v3 请求及本文件的 clean/final 协议不变。
+
+该修复针对第十七次完整任务的补证引用字段丢失与非逐字引文；该任务仍为失败，没有账户提交或成功回执。准确字段、边界、实际失败口径和验证入口见 [Research request contract for budget policy v4](RESEARCH-REQUEST-CONTRACT-V4.md#exact-displayed-quote-selection-for-v4-research)。本地测试不代替新的完整真实任务及独立 receipt/verify。
+
 ## 整轮预算与证据边界
 
 当前新v2准入显式使用 `tiger.budget-policy.v4`：**20000000实际加预留tokens、160 chat、60 Search、20 Fetch、240远端请求、30 USD保守估价、7200秒**。snapshot/reservation均使用schema4并携带精确policy_id，只能和当前compact清洗一起选择。历史显式v3保留600000 tokens、40 chat、120远端、1 USD、2400秒及schema3；历史/默认`BudgetGuard()`、`LIMITS`、`for_policy(None)`和预算v2仍为300000及原schema2。版本来自可信execution/admission和冻结回放绑定，模型答案、请求payload或任意数值limits不能选择新政策。

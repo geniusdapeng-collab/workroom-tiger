@@ -55,6 +55,24 @@ RESEARCH_TASK = (
     "只有真实不确定性需要补证，不为凑调用次数补搜。最后一轮不得继续请求工具；"
     "仍未解决的缺口保留，必要证据不足status=insufficient，不能补默认事实。"
 )
+RESEARCH_QUOTE_SELECTION_V4 = "tiger.research-quote-selection.v1"
+RESEARCH_SYSTEM_V4 = RESEARCH_SYSTEM.replace(
+    "每个事实claim的quote须逐字取自该source_id实际展示的content，不能借别篇内容归到本篇。",
+    "事实claim只选择research_quote_selection中该source_id实际展示的quote_part_id，不重抄quote；"
+    "程序只绑定该原样片段，不替你判断事实含义，不能借别篇片段归到本篇。")
+RESEARCH_TASK_V4 = RESEARCH_TASK + (
+    "research_quote_selection.sources逐源列出与documents.content完全相同的有序content_parts；"
+    "part_id只在该source_id内有效，is_quoteable只表示格式可引用，不表示真实、相关、独立或当前。"
+    "quote_parts列出可选原文：包括合规完整块pN，以及不合规块内仅按禁止字符边界划分的合规连续片段pN.sK；"
+    "未改字、删字或拼接，所有原文仍完整展示。"
+    "本轮新claim保留全部语义字段，以本篇quote_parts中一个quote_part_id代替quote；"
+    "statement、来源性质、origin_id与时间角色仍由你根据正文判断，不编造编号或合并片段。"
+    "补证终评可用严格只有retained_initial_claim_ref和statement的对象，选择本symbol的已验证初评claim；"
+    "引用记录绑定初评版本和原claim，程序保留全部原非statement字段，包括date_source_id是否出现。"
+    "retained只保留此前已展示的原引文，不表示这次重读未展示正文；新statement由你生成，"
+    "不能用别symbol的引用，也不能借引用改变来源、时间、origin或claim_id。"
+    "没有支持事实的可引用片段时保留缺口，不输出该事实，不得改写原文来凑引文。"
+)
 
 
 def fail(reason="Candidate research evidence is incomplete or invalid"):
@@ -448,14 +466,63 @@ def build_thesis_binding_guide(*, symbols, documents, fact_evidence, market_evid
         fail("Research request bindings differ from frozen evidence and presentation")
 
 
-def _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol):
+def _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol, *, initial_fact_evidence=None):
     """Add metadata without replacing any original payload field or content."""
     from copy import deepcopy
-    from .required_schemas import research_schema_v4
+    from dataclasses import replace
+    from .required_schemas import research_quote_schema_v4
     symbols = [row["symbol"] for row in payload["targets"]]
     available = {row["id"] for row in payload["documents"]}
-    presentations = {symbol: [deepcopy(view) for view in presented_by_symbol.get(symbol, [])
-                              if view["id"] in available] for symbol in symbols}
+    by_id = {doc.doc_id: doc for doc in source_docs}
+    try:
+        if any(view != source_view(by_id[view["id"]], characters=view["presented_content_characters"])
+               for view in payload["documents"]):
+            raise ValueError
+        preliminary = payload["preliminary"] or []
+        if (type(preliminary) is not list
+                or len({row["symbol"] for row in preliminary}) != len(preliminary)
+                or any(row["symbol"] not in symbols for row in preliminary)
+                or payload["phase"] != "final" and preliminary):
+            raise ValueError
+        for thesis in preliminary:
+            previous = {view["id"]: view for view in presented_by_symbol.get(thesis["symbol"], [])}
+            for claim in thesis["claims"]:
+                for key in ("source_id", "origin_id", "date_source_id"):
+                    identity = claim.get(key)
+                    if identity is not None:
+                        # A retained ordinary claim can cite another issuer's
+                        # source shown in its initial batch. Register only its
+                        # already-observed dependencies, never another body.
+                        if identity not in previous or identity not in by_id:
+                            raise ValueError
+                        available.add(identity)
+        presentations = {symbol: [deepcopy(view) for view in presented_by_symbol.get(symbol, [])
+                                  if view["id"] in available] for symbol in symbols}
+        historical_docs = {}
+        for symbol in symbols:
+            prior = presented_by_symbol.get(symbol, [])
+            if len({view["id"] for view in prior}) != len(prior):
+                raise ValueError
+            historical_docs[symbol] = []
+            for view in prior:
+                doc = by_id[view["id"]]
+                old_owners, current_owners = view["target_symbols"], doc.meta.get("target_symbols", [])
+                if (type(old_owners) is not list or len(set(old_owners)) != len(old_owners)
+                        or current_owners[:len(old_owners)] != old_owners):
+                    raise ValueError
+                # merge_documents can append newly observed owners to the
+                # same immutable source. Revalidate the initial thesis with
+                # its original ownership, never this later extension.
+                historical = replace(doc, meta={**doc.meta, "target_symbols": list(old_owners)})
+                if view != source_view(historical, characters=view["presented_content_characters"]):
+                    raise ValueError
+                historical_docs[symbol].append(historical)
+        if (payload["previous_source_index"] is not None
+                and payload["previous_source_index"] != build_source_index(source_docs, presented_by_symbol,
+                                                                            current_metadata=True)):
+            raise ValueError
+    except (KeyError, TypeError, ValueError, AttributeError):
+        fail("Research quote selection differs from the actual displayed source")
     _remember_presentations(presentations, symbols, payload["documents"])
     guide = build_thesis_binding_guide(symbols=symbols,
         documents=[doc for doc in source_docs if doc.doc_id in available],
@@ -463,10 +530,138 @@ def _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol):
         assessment=payload["assessment"], phase=payload["phase"],
         presented_by_symbol=presentations,
         supplemental_query_templates={row["symbol"]: row["supplemental_query_template"] for row in plan["targets"]})
-    schema = research_schema_v4(symbols, [row["id"] for row in payload["documents"]],
+    # Initial outputs are validated before followups. Validate the referents
+    # again at this boundary, using only the exact cumulative shown prefixes.
+    for thesis in preliminary:
+        market = next((row for row in payload["market_evidence"] if row["symbol"] == thesis["symbol"]), None)
+        previous = presented_by_symbol.get(thesis["symbol"], [])
+        validate_thesis(thesis, symbol=thesis["symbol"],
+            documents=historical_docs[thesis["symbol"]],
+            market_snapshot=market, fact_evidence=(payload["fact_evidence"]
+                if initial_fact_evidence is None else initial_fact_evidence),
+            assessment=payload["assessment"], presented_documents=previous)
+    selection = _research_quote_selection_v4(payload)
+    schema = research_quote_schema_v4(symbols, [row["source_id"] for row in guide["sources"]],
         [row["id"] for row in payload["fact_evidence"]], [row["id"] for row in payload["market_evidence"]],
-        bindings=guide)
-    return {**payload, "request_bindings": guide}, schema
+        bindings=guide, quote_selection=selection, preliminary=payload["preliminary"])
+    return {**payload, "request_bindings": guide, "research_quote_selection": selection}, schema
+
+
+def _research_source_parts_v4(content):
+    """Preserve full fixed slices and expose all format-safe contiguous runs.
+
+    Splitting occurs only at a character forbidden by the unchanged quote
+    format. Spaces are not separators, and no run is trimmed or concatenated.
+    Every selected text is an exact substring; no sentence or fact is chosen.
+    """
+    from .required import clean_content_parts_v2
+    from .required_schemas import _text_v2
+    pattern = _text_v2(600)["pattern"]
+    content_parts = clean_content_parts_v2(content)
+    quotes = []
+    for identity, text, safe in content_parts["rows"]:
+        if safe:
+            quotes.append([identity, text])
+            continue
+        start, number = 0, 0
+        for index in range(len(text) + 1):
+            # The known safe prefix makes ordinary whitespace testable without
+            # interpreting the pattern's nonblank whole-string requirement as
+            # a ban on spaces inside an otherwise valid quote.
+            if index < len(text) and re.fullmatch(pattern, "x" + text[index]) is not None:
+                continue
+            fragment = text[start:index]
+            if re.fullmatch(pattern, fragment) is not None:
+                quotes.append([f"{identity}.s{number}", fragment])
+                number += 1
+            start = index + 1
+    return {"content_parts": content_parts,
+            "quote_parts": {"columns": ["part_id", "text"], "rows": quotes}}
+
+
+def _research_quote_selection_v4(payload):
+    """Bind choices to exact current text and exact own-symbol initial claims.
+
+    This is an index, not an answer. It neither chooses a fact nor edits any
+    text. The body is retained verbatim in documents as well as in its parts.
+    """
+    try:
+        symbols = [row["symbol"] for row in payload["targets"]]
+        if len(symbols) != len(set(symbols)) or payload["phase"] not in {"initial", "final"}:
+            raise ValueError
+        sources = []
+        for view in payload["documents"]:
+            content = view["content"]
+            if (type(content) is not str or len(content) != view["presented_content_characters"]
+                    or hashlib.sha256(content.encode()).hexdigest() != view["presented_content_sha256"]):
+                raise ValueError
+            sources.append({"source_id": view["id"],
+                "presented_content_sha256": view["presented_content_sha256"],
+                **_research_source_parts_v4(content)})
+        preliminary = payload["preliminary"] or []
+        if (type(preliminary) is not list or payload["phase"] == "initial" and preliminary
+                or len({row["symbol"] for row in preliminary}) != len(preliminary)
+                or any(row["symbol"] not in symbols for row in preliminary)):
+            raise ValueError
+        retained = []
+        for thesis in preliminary:
+            initial_hash = digest(thesis)
+            claims = []
+            for index, claim in enumerate(thesis["claims"]):
+                identity = {"symbol": thesis["symbol"], "initial_thesis_sha256": initial_hash,
+                            "claim_index": index, "claim_sha256": digest(claim)}
+                claims.append({"retained_initial_claim_ref": "ri_" + digest(identity)[:24],
+                    "claim_id": claim["claim_id"], "claim_index": index, "claim_sha256": identity["claim_sha256"]})
+            retained.append({"symbol": thesis["symbol"], "initial_thesis_sha256": initial_hash, "claims": claims})
+        return {"schema": RESEARCH_QUOTE_SELECTION_V4, "sources": sources,
+                "retained_initial_claims": retained}
+    except (KeyError, TypeError, ValueError, AttributeError):
+        fail("Research quote choices differ from exact source and initial claim identities")
+
+
+def _resolve_research_quotes_v4(out, payload, schema):
+    """Resolve explicit selections only, then reapply the original contract."""
+    from copy import deepcopy
+    from .required_schemas import research_schema_v4
+    try:
+        selection = _research_quote_selection_v4(payload)
+        if selection != payload["research_quote_selection"]:
+            raise ValueError
+        validate_schema(out, schema)
+        parts = {row["source_id"]: dict(row["quote_parts"]["rows"]) for row in selection["sources"]}
+        preliminary = {row["symbol"]: row for row in payload["preliminary"] or []}
+        retained = {row["symbol"]: {claim["retained_initial_claim_ref"]: claim for claim in row["claims"]}
+                    for row in selection["retained_initial_claims"]}
+        result, references = deepcopy(out), []
+        for thesis in result["theses"]:
+            resolved = []
+            for claim in thesis["claims"]:
+                if "retained_initial_claim_ref" in claim:
+                    if set(claim) != {"retained_initial_claim_ref", "statement"} or payload["phase"] != "final":
+                        raise ValueError
+                    reference = retained[thesis["symbol"]][claim["retained_initial_claim_ref"]]
+                    original = preliminary[thesis["symbol"]]["claims"][reference["claim_index"]]
+                    restored = deepcopy(original)
+                    restored["statement"] = claim["statement"]
+                    references.append({"symbol": thesis["symbol"], "claim_id": restored["claim_id"],
+                        "retained_initial_claim_ref": claim["retained_initial_claim_ref"],
+                        "initial_thesis_sha256": digest(preliminary[thesis["symbol"]]),
+                        "initial_claim_sha256": reference["claim_sha256"]})
+                else:
+                    quote = parts[claim["source_id"]][claim["quote_part_id"]]
+                    restored = {key: value for key, value in claim.items() if key != "quote_part_id"} | {"quote": quote}
+                    references.append({"symbol": thesis["symbol"], "claim_id": restored["claim_id"],
+                        "source_id": claim["source_id"], "quote_part_id": claim["quote_part_id"],
+                        "quote_sha256": hashlib.sha256(quote.encode()).hexdigest()})
+                resolved.append(restored)
+            thesis["claims"] = resolved
+        original_schema = research_schema_v4([row["symbol"] for row in payload["targets"]],
+            [row["source_id"] for row in payload["request_bindings"]["sources"]], [row["id"] for row in payload["fact_evidence"]],
+            [row["id"] for row in payload["market_evidence"]], bindings=payload["request_bindings"])
+        validate_schema(result, original_schema)
+        return result, references
+    except (LLMUnavailable, KeyError, TypeError, ValueError, AttributeError, IndexError):
+        fail("Research claim selection is not an exact admitted source or retained initial claim")
 
 
 def validate_thesis(thesis: dict, *, symbol: str, documents, market_snapshot: dict,
@@ -668,8 +863,10 @@ def build_research_payload(plan: dict, symbols: list[str], documents, fact_evide
 
 def _research_call(llm, payload, schema, max_tokens):
     try:
-        out = llm.complete_json(system=RESEARCH_SYSTEM,
-            user=RESEARCH_TASK + "\n" + canonical(payload), schema_hint={}, schema=schema, max_tokens=max_tokens)
+        selected = "research_quote_selection" in payload
+        out = llm.complete_json(system=RESEARCH_SYSTEM_V4 if selected else RESEARCH_SYSTEM,
+            user=(RESEARCH_TASK_V4 if selected else RESEARCH_TASK) + "\n" + canonical(payload),
+            schema_hint={}, schema=schema, max_tokens=max_tokens)
         validate_schema(out, schema)
     except LLMUnavailable:
         fail("Mandatory issuer research model failed")
@@ -679,7 +876,7 @@ def _research_call(llm, payload, schema, max_tokens):
     return out
 
 
-def build_source_index(documents, presented_by_symbol: dict) -> list[dict]:
+def build_source_index(documents, presented_by_symbol: dict, *, current_metadata=False) -> list[dict]:
     """Cumulative actual issuer deliveries; never publish article bodies."""
     result = []
     for raw in documents:
@@ -693,6 +890,11 @@ def build_source_index(documents, presented_by_symbol: dict) -> list[dict]:
                 "presented_content_characters", "content_complete", "presented_content_sha256")}})
             if shown["presented_content_characters"] > longest["presented_content_characters"]:
                 longest = shown
+        if current_metadata:
+            # v4 publishes merged source metadata with the exact delivered
+            # prefix size/hash. Initial ownership witnesses remain unchanged
+            # in the recorded requests and retained-claim validation above.
+            longest = source_view(raw, characters=longest["presented_content_characters"])
         result.append({key: value for key, value in longest.items() if key != "content"}
                       | {"presentations": presentations})
     return result
@@ -768,6 +970,7 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
     symbols = [target["symbol"] for target in plan["targets"]]
     market = market_snapshots(context["market_data"], symbols,
                              {key: assessment[key] for key in ("run_date", "market_timezone")})
+    market_by_symbol = {row["symbol"]: row for row in market}
     facts = build_fact_evidence(context, plan)
     source_docs, initial_actions = [], []
     for target in plan["targets"]:
@@ -789,10 +992,20 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
         schema = research_schema_v2(batch, [doc["id"] for doc in payload["documents"]],
             [row["id"] for row in payload["fact_evidence"]], [row["id"] for row in payload["market_evidence"]])
         if policy_id == BUDGET_POLICY_V4:
-            payload, schema = _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol)
+            payload, schema = _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol,
+                                                        initial_fact_evidence=facts)
         out = _research_call(llm, payload, schema, plan["limits"]["max_output_tokens"])
+        selection_record = {}
+        if policy_id == BUDGET_POLICY_V4:
+            selected_out = out
+            out, references = _resolve_research_quotes_v4(out, payload, schema)
+            for thesis in out["theses"]:
+                validate_thesis(thesis, symbol=thesis["symbol"], documents=source_docs,
+                    market_snapshot=market_by_symbol[thesis["symbol"]], fact_evidence=facts,
+                    assessment=assessment, presented_documents=payload["documents"])
+            selection_record = {"selection_output": selected_out, "claim_reference_usage": references}
         rounds.append({"phase": "initial", "batch_symbols": batch, "output": out,
-                       "payload_sha256": digest(payload), "schema_sha256": digest(schema)})
+                       "payload_sha256": digest(payload), "schema_sha256": digest(schema), **selection_record})
         _remember_presentations(presented_by_symbol, batch, payload["documents"])
         initial_theses.extend(out["theses"])
         summaries.append(out["coverage_summary"])
@@ -806,7 +1019,8 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
             continue
         payload = build_research_payload(plan, changed, source_docs, facts, market, phase="final",
             preliminary=[final_by_symbol[symbol] for symbol in changed],
-            previous_source_index=build_source_index(source_docs, presented_by_symbol),
+            previous_source_index=build_source_index(source_docs, presented_by_symbol,
+                                                     current_metadata=policy_id == BUDGET_POLICY_V4),
             priority_source_ids=list(dict.fromkeys(
                 [action["fetched_source_id"] for action in supplemental_actions
                  if action["symbol"] in changed and action["method"] == "fetch"]
@@ -816,10 +1030,16 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
         schema = research_schema_v2(changed, [doc["id"] for doc in payload["documents"]],
             [row["id"] for row in payload["fact_evidence"]], [row["id"] for row in payload["market_evidence"]])
         if policy_id == BUDGET_POLICY_V4:
-            payload, schema = _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol)
+            payload, schema = _bound_research_request_v4(payload, plan, source_docs, presented_by_symbol,
+                                                        initial_fact_evidence=facts)
         out = _research_call(llm, payload, schema, plan["limits"]["max_output_tokens"])
+        selection_record = {}
+        if policy_id == BUDGET_POLICY_V4:
+            selected_out = out
+            out, references = _resolve_research_quotes_v4(out, payload, schema)
+            selection_record = {"selection_output": selected_out, "claim_reference_usage": references}
         rounds.append({"phase": "final", "batch_symbols": changed, "output": out,
-                       "payload_sha256": digest(payload), "schema_sha256": digest(schema)})
+                       "payload_sha256": digest(payload), "schema_sha256": digest(schema), **selection_record})
         initial_claims = {symbol: final_by_symbol[symbol]["claims"] for symbol in changed}
         current_views = {view["id"]: view for view in payload["documents"]}
         for thesis in out["theses"]:
@@ -836,7 +1056,6 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
         final_by_symbol.update({row["symbol"]: row for row in out["theses"]})
     if len(rounds) > plan["limits"]["max_model_calls"]:
         fail("Issuer research model batch budget was exceeded")
-    market_by_symbol = {row["symbol"]: row for row in market}
     final = [final_by_symbol[symbol] for symbol in symbols]
     for row in final:
         if row["followup"]["needed"]:
@@ -847,7 +1066,8 @@ def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
     actions = [*initial_actions, *supplemental_actions]
     return {"schema": RESULT_SCHEMA, "assessment": assessment, "plan": plan,
             "documents": source_docs, "fact_evidence": facts, "market_evidence": market,
-            "source_index": build_source_index(source_docs, presented_by_symbol),
+            "source_index": build_source_index(source_docs, presented_by_symbol,
+                                               current_metadata=policy_id == BUDGET_POLICY_V4),
             "model_rounds": rounds, "theses": final,
             "coverage": {"requested_symbols": plan["requested_symbols"], "selected_symbols": symbols,
                 "researched_symbols": [row["symbol"] for row in final],

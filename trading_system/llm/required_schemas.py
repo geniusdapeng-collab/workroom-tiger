@@ -428,6 +428,124 @@ def research_schema_v4(symbols, doc_ids, fact_ids, market_ids, *, bindings):
                       len(candidates), len(candidates), unique=True))
 
 
+def research_quote_schema_v4(symbols, doc_ids, fact_ids, market_ids, *, bindings,
+                             quote_selection, preliminary=None):
+    """Select exact displayed text or a validated own-symbol initial claim.
+
+    The decoded answer must also pass research_schema_v4 and validate_thesis.
+    This wire schema adds source-local part ownership, explicit retained
+    ownership and non-vacuous news witnesses; it supplies no semantic values.
+    """
+    from copy import deepcopy
+    import hashlib
+    import json
+    from .candidate_research import _research_source_parts_v4
+
+    def hashed(value):
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+    result = research_schema_v4(symbols, doc_ids, fact_ids, market_ids, bindings=bindings)
+    try:
+        if (type(quote_selection) is not dict or set(quote_selection) != {
+                "schema", "sources", "retained_initial_claims"}
+                or quote_selection["schema"] != "tiger.research-quote-selection.v1"
+                or bindings["phase"] not in {"initial", "final"}):
+            raise ValueError
+        sources = quote_selection["sources"]
+        if any(identity not in doc_ids for identity in _ids([row["source_id"] for row in sources], allow_empty=True)):
+            raise ValueError
+        parts = {}
+        for row in sources:
+            table = row["content_parts"]
+            if (set(row) != {"source_id", "presented_content_sha256", "content_parts", "quote_parts"}
+                    or set(table) != {"columns", "rows"}
+                    or table["columns"] != ["part_id", "text", "is_quoteable"]
+                    or type(table["rows"]) is not list):
+                raise ValueError
+            for index, part in enumerate(table["rows"]):
+                if (type(part) is not list or len(part) != 3 or part[0] != f"p{index}"
+                        or type(part[1]) is not str or not 1 <= len(part[1]) <= 600
+                        or type(part[2]) is not bool
+                        or part[2] != (re.fullmatch(_text_v2(600)["pattern"], part[1]) is not None)):
+                    raise ValueError
+            content = "".join(part[1] for part in table["rows"])
+            expected = _research_source_parts_v4(content)
+            if (hashlib.sha256(content.encode()).hexdigest() != row["presented_content_sha256"]
+                    or table != expected["content_parts"] or row["quote_parts"] != expected["quote_parts"]):
+                raise ValueError
+            # The source and batch character limits bound this complete list.
+            # Applying the generic 1000-identity helper here would silently
+            # impose a new quotation limit on sources with many unsafe chars.
+            parts[row["source_id"]] = [part[0] for part in row["quote_parts"]["rows"]]
+        initial = preliminary or []
+        if type(initial) is not list or bindings["phase"] == "initial" and initial:
+            raise ValueError
+        by_symbol = {row["symbol"]: row for row in initial}
+        if len(by_symbol) != len(initial) or not set(by_symbol).issubset(symbols):
+            raise ValueError
+        retained_rows = quote_selection["retained_initial_claims"]
+        if type(retained_rows) is not list or [row["symbol"] for row in retained_rows] != list(by_symbol):
+            raise ValueError
+        retained, all_references = {}, []
+        for row in retained_rows:
+            thesis = by_symbol[row["symbol"]]
+            if (set(row) != {"symbol", "initial_thesis_sha256", "claims"}
+                    or row["initial_thesis_sha256"] != hashed(thesis)
+                    or type(row["claims"]) is not list or len(row["claims"]) != len(thesis["claims"])):
+                raise ValueError
+            choices = {}
+            for index, (reference, claim) in enumerate(zip(row["claims"], thesis["claims"])):
+                identity = {"symbol": row["symbol"], "initial_thesis_sha256": row["initial_thesis_sha256"],
+                            "claim_index": index, "claim_sha256": hashed(claim)}
+                expected = {"retained_initial_claim_ref": "ri_" + hashed(identity)[:24],
+                    "claim_id": claim["claim_id"], "claim_index": index, "claim_sha256": identity["claim_sha256"]}
+                if reference != expected:
+                    raise ValueError
+                choices[reference["retained_initial_claim_ref"]] = claim
+            _ids(list(choices), allow_empty=True)
+            retained[row["symbol"]] = choices
+            all_references.extend(choices)
+        _ids(all_references, allow_empty=True)
+
+        thesis = result["properties"]["theses"]["items"]
+        current = deepcopy(thesis["properties"]["claims"]["items"])
+        current["properties"].pop("quote")
+        current["properties"]["quote_part_id"] = _allowed(list(dict.fromkeys(
+            part for values in parts.values() for part in values)))
+        current["required"] = ["quote_part_id" if field == "quote" else field for field in current["required"]]
+        if sources:
+            current.setdefault("allOf", []).append({"oneOf": [{"properties": {
+                "source_id": {"const": identity}, "quote_part_id": _allowed(values)}}
+                for identity, values in parts.items()]})
+        retained_claim = _object(retained_initial_claim_ref=_allowed(all_references), statement=_text_v2(700))
+        thesis["properties"]["claims"]["items"] = {"oneOf": [current, retained_claim]}
+        if symbols:
+            for branch, target in zip(thesis["allOf"][1]["oneOf"], bindings["targets"]):
+                owned = retained.get(target["symbol"], {})
+                branch["properties"]["claims"] = {"items": {"oneOf": [
+                    {"required": ["source_id", "quote_part_id"]},
+                    {"required": ["retained_initial_claim_ref"], "properties": {
+                        "retained_initial_claim_ref": _allowed(owned)}}]}}
+                news = branch["allOf"][0]["oneOf"]
+                if len(news) == 3:
+                    for sufficient, option in zip(news[2]["anyOf"], target["news_current_complete_options"]):
+                        witness = sufficient["properties"]["claims"]["contains"]
+                        witness["required"] = list(dict.fromkeys([*witness.get("required", []),
+                            "source_id", "origin_id", "evidence_kind", "time_role", "quote_part_id"]))
+                        references = [reference for reference, claim in owned.items()
+                            if claim["source_id"] == option["source_id"]
+                            and claim.get("date_source_id") == option["date_source_id"]
+                            and claim["origin_id"] == option["source_id"]
+                            and claim["evidence_kind"] == "primary" and claim["time_role"] == "current"]
+                        sufficient["properties"]["claims"]["contains"] = {"anyOf": [witness,
+                            {"required": ["retained_initial_claim_ref"], "properties": {
+                                "retained_initial_claim_ref": _allowed(references)}}]}
+        return result
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError):
+        raise ValueError("MODEL_SCHEMA_RESEARCH_QUOTE_SELECTION_REQUIRED") from None
+
+
 def decision_schema_v4(symbols, doc_ids, market_ids, fact_ids=(), *, bindings, base_schema=None):
     from copy import deepcopy
     candidates = _ids(symbols, allow_empty=True, symbols=True)
