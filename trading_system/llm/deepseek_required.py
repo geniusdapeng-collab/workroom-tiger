@@ -17,7 +17,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
@@ -682,7 +682,31 @@ class DeepSeekRequiredClient:
         body = {"data": _canonical(request)} if canonical_slots else {"json": request}
         response = None
         body_deadline = None
-        deadline = time.monotonic() + RESPONSE_DEADLINE
+        started = time.monotonic()
+        duration = RESPONSE_DEADLINE
+        from .request_budget import (BUDGET_POLICY_V4, SEMANTIC_OUTPUT_STAGES,
+            SEMANTIC_RESPONSE_DEADLINE_V4, BudgetRefused, policy_limits, semantic_output_tokens)
+        if (getattr(getattr(self, "budget", None), "policy_id", None) == BUDGET_POLICY_V4
+                and path == "/chat/completions" and self._stage() in SEMANTIC_OUTPUT_STAGES
+                and request.get("reasoning_effort") == "high"
+                and request.get("thinking") == {"type": "enabled"}):
+            if (getattr(self.execution.policy, "budget_policy_id", None) != BUDGET_POLICY_V4
+                    or type(request.get("max_tokens")) is not int
+                    or request["max_tokens"] != semantic_output_tokens(self._stage(), BUDGET_POLICY_V4)):
+                _fail("INVALID_CHAT_REQUEST")
+            try:
+                admitted = datetime.fromisoformat(self.execution.admitted_at_utc.replace("Z", "+00:00"))
+                if admitted.tzinfo is None or admitted.utcoffset() != timedelta(0):
+                    _fail("INVALID_CHAT_REQUEST")
+                absolute_remaining = (admitted + timedelta(
+                    seconds=policy_limits(BUDGET_POLICY_V4)["deadline_seconds"])
+                    - datetime.now(timezone.utc)).total_seconds()
+                duration = min(SEMANTIC_RESPONSE_DEADLINE_V4, self.budget.remaining_seconds(), absolute_remaining)
+            except (AttributeError, TypeError, ValueError, OverflowError, BudgetRefused):
+                _fail("INVALID_CHAT_REQUEST")
+            if not math.isfinite(duration) or duration <= 0:
+                _fail("RESPONSE_DEADLINE")
+        deadline = started + duration
 
         def deadline_expired() -> bool:
             return (body_deadline is not None and body_deadline.expired.is_set()
@@ -695,10 +719,10 @@ class DeepSeekRequiredClient:
                 headers={"Content-Type": "application/json", "Accept": "application/json",
                          "Accept-Encoding": "identity", "Authorization": "Bearer " + self._api_key},
                 # A non-streaming Chat may legitimately wait beyond a native
-                # Search/Fetch idle timeout. The existing 180-second acceptance
-                # deadline remains; this does not grant another paid request.
-                timeout=Timeout(total=RESPONSE_DEADLINE, connect=CONNECT_TIMEOUT,
-                                read=RESPONSE_DEADLINE if path in ("/chat/completions", "/beta/chat/completions", "/responses") else READ_TIMEOUT),
+                # Search/Fetch idle timeout. Only the frozen v4 nonclean high
+                # stages use the bounded longer window; no extra paid request.
+                timeout=Timeout(total=duration, connect=CONNECT_TIMEOUT,
+                                read=duration if path in ("/chat/completions", "/beta/chat/completions", "/responses") else READ_TIMEOUT),
                 allow_redirects=False, verify=True, stream=True)
             status = response.status_code
             if type(status) is not int or status != 200:
@@ -915,6 +939,12 @@ class DeepSeekRequiredClient:
                 or not 1 <= max_tokens <= 393216 or not _finite_number(temperature)
                 or not 0 <= temperature <= 2 or type(reasoning_effort) is not str
                 or reasoning_effort != stage_reasoning_effort(stage, upgrade=self.budget is not None)):
+            _fail("INVALID_CHAT_REQUEST")
+        from .request_budget import BUDGET_POLICY_V4, SEMANTIC_OUTPUT_STAGES, semantic_output_tokens
+        if (self.budget is not None and self.budget.policy_id == BUDGET_POLICY_V4
+                and stage in SEMANTIC_OUTPUT_STAGES
+                and (getattr(self.execution.policy, "budget_policy_id", None) != BUDGET_POLICY_V4
+                     or max_tokens != semantic_output_tokens(stage, BUDGET_POLICY_V4))):
             _fail("INVALID_CHAT_REQUEST")
         request = build_chat_request(system=self._text(system), user=self._text(user),
             schema_hint=self._clean(schema_hint), schema=schema,

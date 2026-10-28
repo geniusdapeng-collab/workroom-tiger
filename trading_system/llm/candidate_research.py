@@ -7,7 +7,7 @@ can replay this module with sealed I/O instead of trusting saved success flags.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import InitVar, asdict, dataclass, is_dataclass
 from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
@@ -23,6 +23,7 @@ from ..search.models import CleanDocument, RawDocument
 from .deepseek_required import sanitize_url, validate_schema
 from .market_evidence import market_snapshots
 from .required_schemas import research_schema_v2, thesis_schema_v2
+from .request_budget import BUDGET_POLICY_V4, semantic_output_tokens
 
 
 RESEARCH_CONTRACT = "tiger.short-term-research.v2"
@@ -122,12 +123,19 @@ class ResearchBudget:
     search_results: int = 3
     source_characters: int = 24000
     batch_content_characters: int = 60000
+    _budget_policy_id: InitVar[str | None] = None
 
-    def __post_init__(self):
+    @classmethod
+    def for_policy(cls, policy_id=None):
+        return cls(max_output_tokens=semantic_output_tokens("research.candidates", policy_id),
+                   _budget_policy_id=policy_id)
+
+    def __post_init__(self, _budget_policy_id):
         hard = {"candidate_symbols": 10, "holding_symbols": 10,
                 "max_search_calls": 40, "max_fetch_calls": 20,
                 "batch_symbols": 3, "max_model_calls": 14,
-                "max_output_tokens": 8192, "search_results": 3,
+                "max_output_tokens": semantic_output_tokens("research.candidates", _budget_policy_id),
+                "search_results": 3,
                 "source_characters": 24000, "batch_content_characters": 60000}
         if any(type(getattr(self, key)) is not int or not 1 <= getattr(self, key) <= cap
                for key, cap in hard.items()):
@@ -633,6 +641,14 @@ def presented_views_for_symbol(research: dict, symbol: str) -> list[dict]:
 
 def research_candidates(llm, context: dict, documents, *, budget=None) -> dict:
     assessment = assessment_from_execution(llm.execution)
+    policy_id = getattr(llm.execution.policy, "budget_policy_id", None)
+    output_limit = semantic_output_tokens("research.candidates", policy_id)
+    if budget is None:
+        budget = ResearchBudget.for_policy(policy_id)
+    if (not isinstance(budget, ResearchBudget)
+            or budget.max_output_tokens > output_limit
+            or policy_id == BUDGET_POLICY_V4 and budget.max_output_tokens != output_limit):
+        fail("Research output budget exceeds its frozen execution policy")
     plan = build_research_plan(context, assessment, budget=budget)
     symbols = [target["symbol"] for target in plan["targets"]]
     market = market_snapshots(context["market_data"], symbols,

@@ -44,6 +44,8 @@ node scripts/tiger-agent.mjs run --python /absolute/path/to/python \
 
 每次远端调用前须通过统一预算预留。当前新v2任务选择`tiger.budget-policy.v4`：最多160次chat、20000000实际加预留tokens、60次Search、20次Fetch、240次远端请求、保守估算30 USD、7200秒。旧显式v3保留600000 tokens，旧v2保留300000 tokens，其余旧限额为40 chat/120远端/1 USD/2400秒，旧回执不变。发行人子预算另限 40 次 Search、20 次 Fetch、14 次 chat。所有来源逐篇完整清洗，只有已知用量且安全的schema拒绝可完整重新生成一次，v4整轮最多追加56次；正文、来源索引和时效门槛保留，其他错误不追加尝试。全部预留及实际usage必须结算一致；未知付费结果冻结，不能规则代答。美元数是按冻结上限费率计算的估计，不是账单承诺。详见 [官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
 
+当前v4在清洗之外的五个语义阶段（`tech.sentiment`、`tech.risk`、`sector.narrative`、`research.candidates`、`decision.debate`）统一显式请求 `max_tokens=65536`，保留 high 推理；清洗继续为 32768、disabled/none。该选择来自 `request_budget.semantic_output_tokens`，发行人初评/补证终评共同消费冻结 `plan.limits.max_output_tokens`，独立验证重建同一请求与预留。旧隐式/v2/v3 请求上限保持 8192/12288/16384 的原阶段值，不回写历史。只对上述v4普通 Chat 的高推理请求，响应窗口取 900 秒、预算单调时钟剩余、准入时刻加 7200 秒的绝对剩余三者最小值；无剩余时间时不发起 HTTP。旧政策、清洗、Search/Fetch 保留原窗口，响应正文仍限 1 MiB；未知结果冻结且不自动重试。900秒是源代码约束的网络窗口，不是从既有证明时间戳重新测出的单次耗时；独立证明继续核验整轮/绝对期限。65536 是上限，不承诺使用量、输出完整或任务成功。2026-10-28 核对的 [官方 Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/) 将 thinking 默认额度列为 64K，仍须以本任务的真实完成状态、usage 和独立回执判断。
+
 每个目标必须有市场、板块、产业链、个股、计划五段依据，并保留入场触发、反证、风险、缺口。`technical_flow_v2` 可以没有公司利好新闻，但仍需具体量价/结构/主线与事件未知边界；`news_event_v2` 的充分证据必须有冻结接纳时刻前 7 日内、归属本发行人、实际完整展示的原始资料。不同域名不自动算独立来源；模型识别原始来源，无法识别时保持未知。空风险预警也不能自动变成风险维度满分。
 
 每个 buy/watch 恰好绑定自己的真实 `market_evidence`：`{id,symbol,as_of,close,series_sha256}`，由冻结完整日线重建；ID 为 `md_<symbol>_<YYYYMMDD>_<摘要前24位>`。`close` 仅是其日期收盘参考，不是获准入场或成交价格。盘前/盘中在纽约 16:00 之前只使用前一完整交易日日线；提前收市仍保守等待 16:00。交易日历不保证覆盖临时特殊休市；官方常规/提前时段见 [NYSE Hours & Calendars](https://www.nyse.com/markets/hours-calendars)。

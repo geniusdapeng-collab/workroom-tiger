@@ -1065,12 +1065,17 @@ def semantic_payload_v2(docs) -> dict:
         }}
 
 
+def _semantic_output_tokens(llm, stage):
+    from .request_budget import semantic_output_tokens
+    return semantic_output_tokens(stage, getattr(llm.execution.policy, "budget_policy_id", None))
+
+
 def sentiment_v2(llm, docs):
     from ..tech_chain.agents import SentimentEvidenceRow
     from .required_schemas import sentiment_schema_v2
     chains, ids = list(TECH_SUBCHAINS), [doc.raw.doc_id for doc in docs]
     out = _call_v2(llm, "tech.sentiment", {"chains": chains, **semantic_payload_v2(docs)},
-                   sentiment_schema_v2(chains, ids), max_tokens=8192)
+                   sentiment_schema_v2(chains, ids), max_tokens=_semantic_output_tokens(llm, "tech.sentiment"))
     _coverage(out["chains"], "chain_id", chains)
     return {row["chain_id"]: SentimentEvidenceRow(**row, degraded=False) for row in out["chains"]}
 
@@ -1079,7 +1084,8 @@ def risk_v2(llm, docs):
     from ..tech_chain.agents import RiskAssessment
     from .required_schemas import risk_schema_v2
     out = _call_v2(llm, "tech.risk", {"chains": list(TECH_SUBCHAINS), **semantic_payload_v2(docs)},
-                   risk_schema_v2(list(TECH_SUBCHAINS), [doc.raw.doc_id for doc in docs]), max_tokens=12288)
+                   risk_schema_v2(list(TECH_SUBCHAINS), [doc.raw.doc_id for doc in docs]),
+                   max_tokens=_semantic_output_tokens(llm, "tech.risk"))
     return RiskAssessment(out["assessment"], [RiskAlert(**row) for row in out["alerts"]],
                           list(out["evidence_ids"]))
 
@@ -1087,7 +1093,8 @@ def risk_v2(llm, docs):
 def narrative_v2(llm, docs, etfs):
     from .required_schemas import narrative_schema_v2
     out = _call_v2(llm, "sector.narrative", {"etfs": etfs, **semantic_payload_v2(docs)},
-                   narrative_schema_v2(etfs, [doc.raw.doc_id for doc in docs]), max_tokens=12288)
+                   narrative_schema_v2(etfs, [doc.raw.doc_id for doc in docs]),
+                   max_tokens=_semantic_output_tokens(llm, "sector.narrative"))
     _coverage(out["sectors"], "etf", etfs)
     return {row["etf"]: {"score": row["narrative_score"], "bias": row["eps_revision_bias"],
         "tone": row["guidance_tone"], "evidence": "; ".join(row["evidence"]),
@@ -1292,7 +1299,8 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     identities = [row[1] for row in wire_payload["final_wire"]["identity_index"]["rows"]]
     thesis_wire_schema = final_thesis_wire_schema_v2(schema, symbols)
     wire_schema = final_identity_schema_v2(thesis_wire_schema, identities)
-    out = _call_v2(llm, "decision.debate", wire_payload, wire_schema, max_tokens=16384)
+    out = _call_v2(llm, "decision.debate", wire_payload, wire_schema,
+                   max_tokens=_semantic_output_tokens(llm, "decision.debate"))
     out = final_identity_values_v2(out, identities, decode=True)
     validate_schema(out, thesis_wire_schema)
     out, references = _resolve_final_theses_v2(out, research)

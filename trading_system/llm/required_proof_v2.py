@@ -24,7 +24,8 @@ from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
     DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
     stage_thinking_mode, validate_schema, responses_usage, _json_loads, MAX_RESPONSE_BYTES)
 from ..redline.model_diagnostics import RequiredModelUnavailable
-from .request_budget import BudgetGuard, BudgetRefused, BUDGET_POLICY_V4, LIMITS
+from .request_budget import (BudgetGuard, BudgetRefused, BUDGET_POLICY_V4, LIMITS,
+                             SEMANTIC_OUTPUT_STAGES, semantic_output_tokens)
 from .clean_output import (CLEAN_OUTPUT_PATH, clean_output_policy,
                            build_clean_request, build_clean_safe_response,
                            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_PATH,
@@ -243,6 +244,10 @@ class ReplayClient:
 
     def complete_json(self, *, system, user, schema_hint, schema, max_tokens=16384,
                       temperature=.2, reasoning_effort="high"):
+        if (self.budget.policy_id == BUDGET_POLICY_V4 and self._stage_name in SEMANTIC_OUTPUT_STAGES
+                and (type(max_tokens) is not int
+                     or max_tokens != semantic_output_tokens(self._stage_name, BUDGET_POLICY_V4))):
+            _bad("semantic_output_budget", stage=self._stage_name)
         output_policy = clean_output_policy(self.execution) if self._stage_name == "clean.llm_semantic" else None
         strict_clean = output_policy is not None
         expected_effort = "none" if strict_clean else stage_reasoning_effort(self._stage_name, upgrade=True)

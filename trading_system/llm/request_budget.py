@@ -30,6 +30,14 @@ LIMITS = {
 LEGACY_BUDGET_POLICY_ID = "tiger.budget-policy.v2"
 BUDGET_POLICY_V3 = "tiger.budget-policy.v3"
 BUDGET_POLICY_V4 = "tiger.budget-policy.v4"
+SEMANTIC_OUTPUT_TOKENS_V4 = 65536
+SEMANTIC_RESPONSE_DEADLINE_V4 = 900.0
+_SEMANTIC_OUTPUT_TOKENS = {
+    "tech.sentiment": 8192, "tech.risk": 12288,
+    "sector.narrative": 12288, "research.candidates": 8192,
+    "decision.debate": 16384,
+}
+SEMANTIC_OUTPUT_STAGES = frozenset(_SEMANTIC_OUTPUT_TOKENS)
 
 
 def policy_limits(policy_id=None) -> dict:
@@ -43,6 +51,14 @@ def policy_limits(policy_id=None) -> dict:
                 "max_remote_requests": 240, "max_cost_usd": 30.0,
                 "deadline_seconds": 7200}
     raise BudgetRefused("INVALID_BUDGET_POLICY")
+
+
+def semantic_output_tokens(stage: str, policy_id=None) -> int:
+    """Source-bound ceilings; historical policy request bytes stay unchanged."""
+    policy_limits(policy_id)
+    if type(stage) is not str or stage not in SEMANTIC_OUTPUT_STAGES:
+        raise BudgetRefused("INVALID_SEMANTIC_STAGE")
+    return SEMANTIC_OUTPUT_TOKENS_V4 if policy_id == BUDGET_POLICY_V4 else _SEMANTIC_OUTPUT_TOKENS[stage]
 
 
 PRICING = {
@@ -151,6 +167,12 @@ class BudgetGuard:
         self.clean_output_policy_id = _clean_output_policy_id
         self._records = {}
         self._frozen = False
+
+    def remaining_seconds(self) -> float:
+        elapsed = self._clock() - self._started
+        if not math.isfinite(elapsed) or elapsed < 0:
+            raise BudgetRefused("INVALID_BUDGET_CLOCK")
+        return max(0.0, self.limits["deadline_seconds"] - elapsed)
 
     def reserve(self, kind: str, call_id: str, request: dict) -> dict:
         if kind not in {"chat", "search", "fetch"} or not isinstance(call_id, str) or not re.fullmatch(r"[a-f0-9]{32}", call_id):
