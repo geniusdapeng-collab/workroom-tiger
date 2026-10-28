@@ -210,8 +210,14 @@ def test_v1_prefix_semantic_schema_and_budget_limits_are_preserved(modules):
     _, transport, _ = modules
     prefix = (LLM / "required.py").read_bytes()[:19031]
     assert hashlib.sha256(prefix).hexdigest() == "f2cd003fbe8a87f42aa6dd5c62b7d5cbacd6ecaa6826a889f46275f3452777b1"
-    assert hashlib.sha256((LLM / "required_schemas.py").read_bytes()).hexdigest() == \
-        "7896f1c9ec8237e95415645c32f4db188a094fa1327f2a8e1a527bd105795e71"
+    # b304991727e9230cb42732de3a1791ae9fa54918: preserve every original helper
+    # and v1/v2 clean, sentiment, risk, narrative, thesis and research builder.
+    # New v4 builders are additive; pinning the entire file forbids that valid
+    # extension. The remaining default decision builder is pinned below by its
+    # complete returned schemas, including every nested field and constraint.
+    schema_prefix = (LLM / "required_schemas.py").read_bytes()[:13624]
+    assert hashlib.sha256(schema_prefix).hexdigest() == \
+        "66b83f93566078b633e38dd91400df5c1049fbb7abc17170b904eaa98b415be5"
     budget = plain_module("request_budget.py")
     assert budget["LIMITS"] == {"max_chat_calls": 40, "max_tokens": 300000,
         "max_search_calls": 60, "max_fetch_calls": 20, "max_remote_requests": 120,
@@ -227,3 +233,26 @@ def test_v1_prefix_semantic_schema_and_budget_limits_are_preserved(modules):
     assert guard.snapshot()["reserved_tokens"] > 0
     with pytest.raises(budget["BudgetRefused"], match="UNKNOWN_USAGE_FREEZES_BUDGET"):
         guard.reserve("chat", "b" * 32, request)
+
+
+@pytest.mark.parametrize("symbols,docs,markets,facts,expected", [
+    ([], [], [], [],
+     "65847a969d978930631974dfbe10c9e62c8b5b8c60f274f742ba636d8e68e2db"),
+    (["AAPL"], ["doc_1"], ["md_AAPL_20261027_" + "a" * 24],
+     ["fx_stock_AAPL", "fx_market_AAPL"],
+     "a39ef405bdd0b396c5da4fc34128348eb39a72c0deed30942bbe92c5bb1d977c"),
+    (["AAPL", "BRK.B"], ["doc_1", "doc_2"],
+     ["md_AAPL_20261027_" + "a" * 24, "md_BRK.B_20261027_" + "b" * 24],
+     ["fx_stock_AAPL", "fx_stock_BRK.B", "fx_sector_SPY"],
+     "78321209ba6c5bd676ab59393e73f206b9e3898dabee506c6d8f1fcd4ab38e20"),
+])
+def test_legacy_default_decision_schema_matches_complete_historical_output(
+        modules, symbols, docs, markets, facts, expected):
+    # Goldens were produced from the complete b304 source whose original
+    # required_schemas.py SHA256 is 7896f1c9ec8237e95415645c32f4db188a094fa1327f2a8e1a527bd105795e71.
+    # No opt-in research or tranche contract may change this legacy call.
+    _, _, schemas = modules
+    result = schemas["decision_schema_v2"](symbols, docs, markets, facts)
+    serialized = json.dumps(result, ensure_ascii=False, sort_keys=True,
+                            separators=(",", ":"), allow_nan=False).encode("utf-8")
+    assert hashlib.sha256(serialized).hexdigest() == expected
