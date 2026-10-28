@@ -602,6 +602,13 @@ _COMPACT_REGEN_INSTRUCTION = (
     '\nGenerate the entire original batch again from all unchanged inputs. Return every required schema key. '
     'Do not repair, copy, truncate or reuse any earlier answer. The feedback contains only the trusted schema rejection; '
     'all original evidence, semantic and source constraints remain mandatory.\n')
+_COMPACT_QUARTET_INSTRUCTION = (
+    '\nCompact claim contract: Within every claim slot, s/q/k/t must either all be nonempty '
+    'and satisfy their original constraints, or all be empty strings, including claim_key k. '
+    'Decide the supported statement and its own-source quote first; never prefill a key for an absent or discarded claim. '
+    'Do not invent a statement, quote or time role to complete a slot. Actual claims occupy a consecutive prefix; '
+    'every unused trailing slot has all four leaves empty. Emit every key in the provider required array order: '
+    'summary and provenance before claims, then statement s, quote q, claim_key k and time_role t within each claim.')
 
 
 def _compact_array_schema(node):
@@ -755,6 +762,7 @@ def clean_compact_lists_output_v1(value, keyed_schema, *, decode=False):
         validate_schema(result, local)
         return result
     result = {'d': {}}
+    original_claim_leaves = keyed_schema['properties']['d']['allOf'][0]['additionalProperties']['properties']['c']['items']['properties']
     for reference in references:
         row = {field: ([] if value[reference + '__' + field] == '' else
                        value[reference + '__' + field].split(',')) for field in _COMPACT_LISTS}
@@ -768,6 +776,21 @@ def clean_compact_lists_output_v1(value, keyed_schema, *, decode=False):
             if all(child == '' for child in claim.values()):
                 unused = True
             else:
+                empty = next((field for field in ('s', 'q', 'k', 't') if claim[field] == ''), None)
+                if empty is not None:
+                    # A partial quartet already violates the original claim
+                    # contract. Locate that exact original leaf before the
+                    # two mandatory keyed allOf branches collapse its detail.
+                    try:
+                        validate_schema(claim[empty], original_claim_leaves[empty])
+                    except RequiredModelUnavailable as error:
+                        diagnostic = error.diagnostic
+                        if diagnostic['code'] != 'OUTPUT_SCHEMA_MISMATCH' or 'schema_keyword' not in diagnostic:
+                            raise
+                        raise RequiredModelUnavailable('OUTPUT_SCHEMA_MISMATCH',
+                            schema_path=f'/d/{reference}/c/{index}/{empty}' + diagnostic['schema_path'],
+                            schema_keyword=diagnostic['schema_keyword']) from None
+                    _invalid()
                 if unused:
                     raise RequiredModelUnavailable('OUTPUT_SCHEMA_MISMATCH')
                 row['c'].append(claim)
@@ -795,7 +818,26 @@ def _compact_share(projected):
             interned[identity], definitions[alias] = alias, deepcopy(leaf)
         result['properties'][name] = {'$ref': '#/$def/' + interned[identity]}
     result['$def'] = definitions
+    result['required'] = _compact_required_order(projected['properties'])
     return result
+
+
+def _compact_required_order(properties):
+    """Order only the required array; canonical properties/refs stay exact."""
+    suffixes = ('z', 'p__k', 'p__o', 'p__n', 'p__t', 'r', 't', 'e', 'h', 'f', 's', 'v',
+        *(f'c__s{index}__{field}' for index in range(4) for field in ('s', 'q', 'k', 't')))
+    groups = {}
+    for name in properties:
+        if type(name) is not str or '__' not in name:
+            _invalid()
+        source, suffix = name.split('__', 1)
+        if re.fullmatch(r'd(?:0|[1-9][0-9]*)', source) is None or suffix not in _COMPACT_SUFFIXES:
+            _invalid()
+        groups.setdefault(source, set()).add(suffix)
+    if any(fields != _COMPACT_SUFFIXES for fields in groups.values()):
+        _invalid()
+    return [source + '__' + suffix for source in sorted(groups, key=lambda value: (len(value), value))
+            for suffix in suffixes]
 
 
 def expand_clean_compact_lists_provider_schema_v1(provider, *, keyed_schema=None):
@@ -807,12 +849,15 @@ def expand_clean_compact_lists_provider_schema_v1(provider, *, keyed_schema=None
                 or provider['type'] != 'object' or provider['additionalProperties'] is not False
                 or type(provider['properties']) is not dict or type(provider['required']) is not list
                 or list(provider['properties']) != sorted(provider['properties'])
-                or provider['required'] != list(provider['properties']) or type(provider['$def']) is not dict):
+                or provider['required'] != _compact_required_order(provider['properties']) or type(provider['$def']) is not dict):
             _invalid()
         definitions = provider['$def']
         if set(definitions) != {'l' + str(index) for index in range(len(definitions))}:
             _invalid()
         projected = {name: deepcopy(child) for name, child in provider.items() if name != '$def'}
+        # The original local projection is unchanged; only the provider's
+        # requested emission order differs. JSON object order is not a gate.
+        projected['required'] = list(projected['properties'])
         groups, used = {}, set()
         for name, reference in provider['properties'].items():
             if type(name) is not str:
@@ -955,7 +1000,7 @@ def build_clean_compact_lists_request(*, system, user, schema_hint, schema,
     if len(sources) > 4:
         _invalid()
     return {'model': 'deepseek-flash', 'messages': [
-        {'role': 'system', 'content': system + CLEAN_OUTPUT_INSTRUCTION + _compact_feedback_suffix(regeneration_feedback)},
+        {'role': 'system', 'content': system + _COMPACT_QUARTET_INSTRUCTION + CLEAN_OUTPUT_INSTRUCTION + _compact_feedback_suffix(regeneration_feedback)},
         {'role': 'user', 'content': user}], 'max_tokens': 32768, 'temperature': 0.2, 'stream': False,
         'thinking': {'type': 'disabled'}, 'reasoning_effort': 'none',
         'tools': [{'type': 'function', 'function': {'name': CLEAN_OUTPUT_FUNCTION, 'strict': True,
@@ -984,14 +1029,14 @@ def clean_compact_lists_function_request_valid(request):
         system = request['messages'][0]['content']
         if _COMPACT_REGEN_PREFIX in system:
             base, feedback = system.rsplit(_COMPACT_REGEN_PREFIX, 1)
-            if (not base.endswith(CLEAN_OUTPUT_INSTRUCTION) or not feedback.startswith(_COMPACT_REGEN_INSTRUCTION)):
+            if (not base.endswith(_COMPACT_QUARTET_INSTRUCTION + CLEAN_OUTPUT_INSTRUCTION) or not feedback.startswith(_COMPACT_REGEN_INSTRUCTION)):
                 return False
             encoded = feedback[len(_COMPACT_REGEN_INSTRUCTION):]
             from .deepseek_required import _json_loads
             decoded = _json_loads(encoded)
             if _compact_feedback_suffix(decoded) != _COMPACT_REGEN_PREFIX + feedback:
                 return False
-        elif not system.endswith(CLEAN_OUTPUT_INSTRUCTION):
+        elif not system.endswith(_COMPACT_QUARTET_INSTRUCTION + CLEAN_OUTPUT_INSTRUCTION):
             return False
         tool = request['tools'][0]
         if type(tool) is not dict or set(tool) != {'type', 'function'} or tool['type'] != 'function':
