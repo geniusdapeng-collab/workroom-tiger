@@ -396,6 +396,11 @@ TASKS_V2 = {
         "最终thesis的followup必须needed=false，仍需未来资料的条件写入gaps和entry_triggers。"
     ),
 }
+DECISION_V4_TASK = TASKS_V2["decision.debate"].replace(
+    "每条source_ids必须引用自己的唯一md_行情，最多八篇真实文档；",
+    "每条decision输出market_evidence_id，必须引用自己的唯一md_行情；"
+    "article_source_ids只列最多八篇真实文档，不写行情ID，程序按固定顺序组装最终source_ids。"
+    "不得在article_source_ids中引用其他股票行情或编造来源。")
 
 BROAD_QUERIES_V2 = {
     "memory": "DRAM NAND HBM prices inventory Samsung SK Hynix Micron",
@@ -454,7 +459,7 @@ def collect_v2(llm, topics: dict[str, str], trade_date: str) -> list[RawDocument
     return documents
 
 
-def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
+def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384, task=None):
     from .candidate_research import canonical
     if "assessment" in payload:
         _fail("V2 assessment must come from frozen execution")
@@ -474,7 +479,7 @@ def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
         _fail("V2 clean output policy is invalid")
     effort = {"reasoning_effort": "none" if strict_clean else "low"} if stage == "clean.llm_semantic" else {}
     try:
-        task = CLEAN_SLOTS_TASK_V1 if slots_clean else TASKS_V2[stage]
+        task = CLEAN_SLOTS_TASK_V1 if slots_clean else (task or TASKS_V2[stage])
         if compact_clean:
             references = payload['clean_wire']['output_source_refs']
             count = len(output_schema['properties'])
@@ -1135,7 +1140,8 @@ def build_decision_payload_v2(context: dict, docs, account_usd: float) -> dict:
 FINAL_IDENTITY_WIRE_V2 = "tiger.final-identity-wire.v1"
 _FINAL_IDENTITY_FIELDS_V2 = frozenset({
     "id", "origin_id", "source_id", "date_source_id", "search_source_id", "fetch_source_id",
-    "evidence_ids", "source_ids", "issuer_identity_evidence_ids",
+    "evidence_ids", "source_ids", "article_source_ids", "market_evidence_id",
+    "issuer_identity_evidence_ids",
 })
 
 
@@ -1247,7 +1253,7 @@ def final_thesis_wire_schema_v2(schema, symbols):
     validators run on the exact expanded original model result.
     """
     from copy import deepcopy
-    from .required_schemas import _ids, _object, _allowed
+    from .required_schemas import _ids, _object, _allowed, _array
     symbols = _ids(symbols, allow_empty=True, symbols=True)
     result = deepcopy(schema)
     if not symbols:
@@ -1255,10 +1261,81 @@ def final_thesis_wire_schema_v2(schema, symbols):
     row = result["properties"]["decisions"]["items"]
     literal = row["properties"]["thesis"]
     row["properties"]["thesis"] = {"oneOf": [literal, _object(reuse_thesis=_allowed(symbols))]}
+
+    # The final model chooses article evidence, but its own frozen market
+    # snapshot is a deterministic consequence of the decision symbol. Do not
+    # ask the model to transcribe that opaque ID into a second field. The wire
+    # maps (symbol -> market_evidence_id) one-to-one and the decoder restores
+    # the unchanged canonical source_ids before any business validator runs.
+    target_groups = [
+        relation for relation in row.get("allOf", [])
+        if set(relation) == {"oneOf"} and relation["oneOf"] and all(
+            set(branch.get("properties", {})) >= {"symbol", "source_ids"}
+            for branch in relation["oneOf"])
+    ]
+    if len(target_groups) > 1:
+        _fail("Final v2 decision target binding is ambiguous")
+    if not target_groups:
+        # None/v2/v3 deliberately retain their historical final wire and exact
+        # request/schema bytes. The stricter market-identity partition is only
+        # emitted when the v4 source-bound decision group is present.
+        row.setdefault("allOf", []).append({"oneOf": [{"properties": {
+            "symbol": {"const": symbol}, "thesis": {"anyOf": [
+                {"required": ["schema_version"]},
+                {"properties": {"reuse_thesis": {"const": symbol}}}]}}} for symbol in symbols]})
+        return result
+    target_group = target_groups[0]
+    market_by_symbol = {}
+    document_ids = set()
+    for branch in target_group["oneOf"]:
+        properties = branch["properties"]
+        symbol = properties["symbol"]["const"]
+        source = properties["source_ids"]
+        market_id = source["contains"]["const"]
+        if symbol in market_by_symbol or market_id in market_by_symbol.values():
+            _fail("Final v2 decision market binding is not bijective")
+        market_by_symbol[symbol] = market_id
+        document_ids.update(identity for identity in source["items"]["enum"]
+                            if identity != market_id)
+        properties["market_evidence_id"] = {"const": market_id}
+        properties.pop("source_ids")
+    if set(market_by_symbol) != set(symbols):
+        _fail("Final v2 decision market binding differs from its targets")
+    documents = sorted(document_ids)
+    row["properties"].pop("source_ids")
+    row["properties"]["market_evidence_id"] = _allowed(
+        [market_by_symbol[symbol] for symbol in symbols])
+    row["properties"]["article_source_ids"] = _array(_allowed(documents), 0, 8, unique=True)
+    required = []
+    for name in row["required"]:
+        if name == "source_ids":
+            required.extend(("market_evidence_id", "article_source_ids"))
+        else:
+            required.append(name)
+    row["required"] = required
     row.setdefault("allOf", []).append({"oneOf": [{"properties": {
         "symbol": {"const": symbol}, "thesis": {"anyOf": [
             {"required": ["schema_version"]},
             {"properties": {"reuse_thesis": {"const": symbol}}}]}}} for symbol in symbols]})
+    return result
+
+
+def _resolve_decision_citations_v2(out, market_by_symbol, documents_by_id):
+    """Restore the unchanged canonical source_ids from exact target bindings."""
+    from copy import deepcopy
+    result = deepcopy(out)
+    for row in result["decisions"]:
+        symbol = row["symbol"]
+        market_id = row.pop("market_evidence_id", None)
+        article_ids = row.pop("article_source_ids", None)
+        own_market = market_by_symbol.get(symbol)
+        if (own_market is None or market_id != own_market["id"]
+                or type(article_ids) is not list
+                or len(article_ids) > 8 or len(set(article_ids)) != len(article_ids)
+                or any(type(identity) is not str or identity not in documents_by_id
+                       for identity in article_ids)):
+            _fail("Final decision market or article evidence differs from its target")
+        row["source_ids"] = [market_id, *article_ids]
     return result
 
 
@@ -1296,7 +1373,8 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     schema = decision_schema_v2(symbols, list(by_id), [row["id"] for row in payload["market_evidence"]],
                                 [row["id"] for row in research["fact_evidence"]])
     from .request_budget import BUDGET_POLICY_V4
-    if getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None) == BUDGET_POLICY_V4:
+    v4 = getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None) == BUDGET_POLICY_V4
+    if v4:
         from .candidate_research import build_thesis_binding_guide
         from .required_schemas import decision_schema_v4
         bindings = build_thesis_binding_guide(symbols=symbols, documents=research_docs,
@@ -1312,9 +1390,11 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
     thesis_wire_schema = final_thesis_wire_schema_v2(schema, symbols)
     wire_schema = final_identity_schema_v2(thesis_wire_schema, identities)
     out = _call_v2(llm, "decision.debate", wire_payload, wire_schema,
-                   max_tokens=_semantic_output_tokens(llm, "decision.debate"))
+                   max_tokens=_semantic_output_tokens(llm, "decision.debate"),
+                   task=DECISION_V4_TASK if v4 else None)
     out = final_identity_values_v2(out, identities, decode=True)
-    validate_schema(out, thesis_wire_schema)
+    if v4:
+        out = _resolve_decision_citations_v2(out, market_by_symbol, by_id)
     out, references = _resolve_final_theses_v2(out, research)
     validate_schema(out, schema)
     _coverage(out["decisions"], "symbol", symbols)

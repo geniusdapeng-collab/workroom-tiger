@@ -24,7 +24,8 @@ def answer_for(context, *, reuse=True):
             "entry_condition": "SYNTHETIC_TEST 复核完整计划后重新研究。",
             "invalidation": "SYNTHETIC_TEST 原结构失效即取消。",
             "risk_note": "SYNTHETIC_TEST 原始来源与时效限定仍全部保留。",
-            "source_ids": [research["market_evidence"][0]["id"]],
+            "market_evidence_id": research["market_evidence"][0]["id"],
+            "article_source_ids": [],
             "thesis": {"reuse_thesis": symbol} if reuse else deepcopy(thesis)}]}
 
 
@@ -32,10 +33,16 @@ class FinalWireClient(SemanticStub):
     def complete_json(self, **kwargs):
         self.requests.append(deepcopy(kwargs))
         payload = json.loads(kwargs["user"].split("\n", 1)[1])
+        answer = deepcopy(self.answer)
+        if "request_bindings" not in payload:
+            for row in answer["decisions"]:
+                market_id = row.pop("market_evidence_id")
+                article_ids = row.pop("article_source_ids")
+                row["source_ids"] = [market_id, *article_ids]
         if "final_wire" in payload:
             identities = [row[1] for row in payload["final_wire"]["identity_index"]["rows"]]
-            return required.final_identity_values_v2(deepcopy(self.answer), identities)
-        return deepcopy(self.answer)
+            return required.final_identity_values_v2(answer, identities)
+        return answer
 
 
 def test_final_model_boundary_can_select_its_own_completed_issuer_thesis_without_recopy():
@@ -76,7 +83,9 @@ def two_issuer_answer(context):
     research = context["candidate_research"]
     second = deepcopy(result["decisions"][0])
     second.update(symbol="BBB", thesis={"reuse_thesis": "BBB"},
-        source_ids=[next(row["id"] for row in research["market_evidence"] if row["symbol"] == "BBB")])
+        market_evidence_id=next(row["id"] for row in research["market_evidence"]
+                                if row["symbol"] == "BBB"),
+        article_source_ids=[])
     result["decisions"].append(second)
     return result
 

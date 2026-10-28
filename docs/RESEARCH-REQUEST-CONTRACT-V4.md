@@ -246,3 +246,21 @@ contract and legacy goldens. `tests/test_research_contract_proof_v4.py` covers
 production request construction, two-stage research, final decision, and
 independent recorded-I/O replay with synthetic transport. These tests do not
 count as a completed real workflow.
+
+## Exact final-decision market binding
+
+The v4 final-decision wire also separates the deterministic own-stock market
+snapshot from model-selected article evidence. Each decision emits one
+`market_evidence_id` and an `article_source_ids` array, with no literal
+`source_ids` field in the wire answer. The schema binds
+`market_evidence_id` to the exact target symbol and limits article IDs to
+displayed documents. The decoder restores the unchanged canonical
+`source_ids` order as `[market_evidence_id, ...article_source_ids]` before the
+original decision schema, owned-market check, thesis validators, numeric
+authority checks and coverage checks run.
+
+This removes an unnecessary transcription of an opaque market ID without
+relaxing the business contract. Unknown market IDs, foreign article IDs,
+duplicates, more than eight articles, cross-symbol thesis reuse and any
+subsequent loss of the own-market snapshot remain failures. Legacy schemas,
+historical requests and all risk thresholds are unchanged.

@@ -271,6 +271,14 @@ def test_v4_initial_final_decision_keep_every_old_input_and_use_exact_new_schema
         assert "contains" in research.canonical(current["schema"])
     legacy_wire = json.loads(old["decision_requests"][0]["user"].split("\n", 1)[1])
     current_wire = json.loads(new["decision_requests"][0]["user"].split("\n", 1)[1])
+    legacy_row = old["decision_requests"][0]["schema"]["properties"]["decisions"]["items"]
+    current_row = new["decision_requests"][0]["schema"]["properties"]["decisions"]["items"]
+    assert "source_ids" in legacy_row["properties"]
+    assert {"market_evidence_id", "article_source_ids"}.isdisjoint(legacy_row["properties"])
+    assert "source_ids" not in current_row["properties"]
+    assert {"market_evidence_id", "article_source_ids"} <= set(current_row["required"])
+    assert "每条source_ids必须引用自己的唯一md_行情" in old["decision_requests"][0]["user"]
+    assert "每条decision输出market_evidence_id" in new["decision_requests"][0]["user"]
     legacy_wire.pop("assessment")
     current_wire.pop("assessment")
     restored = required.final_payload_wire_v2(current_wire, decode=True)

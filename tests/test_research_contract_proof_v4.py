@@ -138,7 +138,7 @@ def decision_answer(payload):
             "action_summary": "SYNTHETIC_TEST wait.", "why_this": "SYNTHETIC_TEST candidate.",
             "why_now": "SYNTHETIC_TEST frozen time.", "entry_condition": "SYNTHETIC_TEST no entry.",
             "invalidation": "SYNTHETIC_TEST changed evidence.", "risk_note": "SYNTHETIC_TEST offline.",
-            "source_ids": [market["id"]],
+            "market_evidence_id": market["id"], "article_source_ids": [],
             "thesis": {"reuse_thesis": market["symbol"]}} for market in restored["market_evidence"]]}
     return final_identity_values_v2(answer, identities)
 
@@ -299,6 +299,11 @@ def test_two_real_stages_bind_v4_guide_schema_receipts_and_independent_replay(re
         assert "contains" in canonical(schema)
         if row["request"]["stage"] == STAGES[1]:
             assert proof["parsed"]["decisions"][0]["thesis"] == {"reuse_thesis": "AAA"}
+            expected_market_ref = next(item["id"] for item in payload["market_evidence"]
+                                       if item["symbol"] == "AAA")
+            assert proof["parsed"]["decisions"][0]["market_evidence_id"] == expected_market_ref
+            assert proof["parsed"]["decisions"][0]["article_source_ids"] == []
+            assert "source_ids" not in proof["parsed"]["decisions"][0]
             payload = final_payload_wire_v2({key: value for key, value in payload.items()
                                             if key != "assessment"}, decode=True)
         guide = payload["request_bindings"]
