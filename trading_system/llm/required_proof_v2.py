@@ -22,14 +22,20 @@ from ..redline.execution import (ExecutionPolicy, ExecutionContractError, Requir
                                  daily_stage_contract)
 from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
     DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
-    stage_thinking_mode, validate_schema, responses_usage)
-from .request_budget import BudgetGuard, BudgetRefused, LIMITS
+    stage_thinking_mode, validate_schema, responses_usage, _json_loads, MAX_RESPONSE_BYTES)
+from ..redline.model_diagnostics import RequiredModelUnavailable
+from .request_budget import BudgetGuard, BudgetRefused, BUDGET_POLICY_V4, LIMITS
 from .clean_output import (CLEAN_OUTPUT_PATH, clean_output_policy,
                            build_clean_request, build_clean_safe_response,
                            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_PATH,
                            CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1, clean_slots_schema_v1,
                            build_clean_slots_responses_request, build_clean_responses_request,
-                           build_clean_responses_safe_response)
+                           build_clean_responses_safe_response,
+                           CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1, CLEAN_COMPACT_LISTS_WIRE_V1,
+                           CLEAN_REGENERATION_POLICY_V1, build_clean_compact_lists_request,
+                           build_clean_compact_lists_safe_response, clean_compact_lists_schema_v1,
+                           clean_compact_lists_output_v1, clean_regeneration_feedback_v1,
+                           clean_logical_call_sha256)
 
 _MODEL_METHODS = {"model.deepseek.search", "model.deepseek.fetch", "model.deepseek.chat"}
 _COLLECTION_AND_MODEL = ("search.collect", *UPGRADE_MODEL_STAGES)
@@ -71,6 +77,8 @@ class ReplayClient:
         self._stage_name, self._cursor = None, 0
         self._visited, self._used_ids, self._response_ids, self._tool_call_ids = set(), set(), set(), set()
         self._output_message_ids = set()
+        self._clean_logical_calls, self._used_rejections = set(), set()
+        self._regeneration_count = 0
         self._first_started, self._last_finished, self._clock = None, None, 0.
         self.receipts, self.search_receipts, self.fetch_receipts = [], [], []
         self.budget = BudgetGuard.for_policy(getattr(execution.policy, "budget_policy_id", None),
@@ -159,8 +167,11 @@ class ReplayClient:
         self.budget.settle(request["call_id"], usage)
         if not _same(self.budget.snapshot(), proof["budget_after"]):
             _bad("budget_settlement", stage=self._stage_name)
-        omitted = {"schema", "response", "parsed"} if kind == "chat" else {"schema", "results"} if kind == "search" else {"schema", "page"}
+        omitted = ({"schema", "response", "parsed", "rejection_diagnostic"} if kind == "chat"
+                   else {"schema", "results"} if kind == "search" else {"schema", "page"})
         receipt = {key: deepcopy(value) for key, value in proof.items() if key not in omitted}
+        if kind == "chat" and proof["schema"] == "tiger.deepseek-call.v4":
+            receipt["proof_sha256"] = _hash(proof)
         {"chat": self.receipts, "search": self.search_receipts, "fetch": self.fetch_receipts}[kind].append(receipt)
 
     def _document(self, document, kind, request, proof):
@@ -241,6 +252,12 @@ class ReplayClient:
         arguments = dict(system=self._sanitizer._text(system), user=self._sanitizer._text(user),
             schema_hint=self._sanitizer._clean(schema_hint), schema=schema, max_tokens=max_tokens,
             temperature=temperature)
+        if output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+            if (arguments["system"] != system or arguments["user"] != user
+                    or not _same(arguments["schema_hint"], schema_hint)
+                    or not _same(self._sanitizer._clean(schema), schema)):
+                _bad("unsafe_compact_original_input_or_schema", stage=self._stage_name)
+            return self._complete_clean_compact_regeneration(arguments, schema)
         if output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1):
             return self._complete_clean_responses(arguments, schema, output_policy)
         body = (build_clean_request(**arguments) if strict_clean else
@@ -291,6 +308,143 @@ class ReplayClient:
             self._tool_call_ids.add(tool_call_id)
         self._settle("chat", request, proof, usage)
         return deepcopy(proof["parsed"])
+
+    def _complete_clean_compact_regeneration(self, arguments, schema):
+        """Reproduce each charged attempt and only the source-defined regeneration.
+
+        The immediately preceding complete, safe schema rejection determines
+        feedback. No saved retry flag, parsed replacement or later response can
+        create permission to consume another attempt.
+        """
+        from .candidate_research import assessment_from_execution
+        stage = self._stage_name
+        if stage != "clean.llm_semantic":
+            _bad("compact_outside_clean_stage", stage=stage)
+        base = build_clean_compact_lists_request(**arguments)
+        compact_schema = clean_compact_lists_schema_v1(schema)
+        batch_limit = 1 if self.budget.policy_id == BUDGET_POLICY_V4 else 4
+        if len({name.split("__", 1)[0] for name in compact_schema["properties"]}) > batch_limit:
+            _bad("compact_source_batch_limit", stage=stage)
+        logical = clean_logical_call_sha256(run_id=self.execution.run_id,
+            assessment=assessment_from_execution(self.execution), request=base, schema=schema)
+        if logical in self._clean_logical_calls:
+            _bad("duplicate_logical_clean_call", stage=stage)
+        self._clean_logical_calls.add(logical)
+        previous, feedback = None, None
+        provenance = {"output_policy_id": CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
+            "output_codec_id": CLEAN_COMPACT_LISTS_WIRE_V1,
+            "regeneration_policy_id": CLEAN_REGENERATION_POLICY_V1,
+            "logical_call_sha256": logical}
+
+        def safe_tree(value, depth=0):
+            if depth > 64:
+                _bad("unsafe_compact_output_depth", stage=stage)
+            if isinstance(value, str):
+                try:
+                    value.encode("utf-8", "strict")
+                except UnicodeError:
+                    _bad("unsafe_decoded_compact_unicode", stage=stage)
+                if self._sanitizer._text(value) != value:
+                    _bad("unsafe_decoded_compact_output", stage=stage)
+            elif isinstance(value, dict):
+                for key, item in value.items():
+                    safe_tree(key, depth + 1)
+                    safe_tree(item, depth + 1)
+            elif isinstance(value, list):
+                for item in value:
+                    safe_tree(item, depth + 1)
+
+        for generation in range(2):
+            if generation:
+                maximum = 56 if self.budget.policy_id == BUDGET_POLICY_V4 else 4
+                if self._regeneration_count >= maximum or previous in self._used_rejections:
+                    _bad("clean_regeneration_allowance", stage=stage)
+                self._used_rejections.add(previous)
+                self._regeneration_count += 1
+            body = (base if generation == 0 else
+                    build_clean_compact_lists_request(**arguments, regeneration_feedback=feedback))
+            if self._cursor >= len(self._calls[stage]):
+                _bad("missing_compact_attempt", stage=stage)
+            recorded = self._calls[stage][self._cursor].get("proof")
+            if not isinstance(recorded, dict) or recorded.get("outcome") not in ("accepted", "rejected"):
+                _bad("compact_outcome", stage=stage)
+            accepted = recorded["outcome"] == "accepted"
+            request, proof = self._consume("model.deepseek.chat", body,
+                "tiger.deepseek-request.v4", "tiger.deepseek-call.v4",
+                {"output_schema", "schema_sha256", "release", "generation_index",
+                 "previous_rejection_sha256", *provenance},
+                {"requested_model", "response_id", "model", "release", "usage", "finish_reason",
+                 "response_sha256", "schema_sha256", "response", "system_fingerprint", "search_mode",
+                 "output_tool_call_id", "outcome", "generation_index", "previous_rejection_sha256",
+                 *provenance} | ({"parsed"} if accepted else
+                    {"visible_arguments_sha256", "rejection_diagnostic"}),
+                endpoint_path=CLEAN_OUTPUT_PATH)
+            expected = {**provenance, "generation_index": generation,
+                        "previous_rejection_sha256": previous}
+            if (any(not _same(request[name], value) or not _same(proof[name], value)
+                    for name, value in expected.items())
+                    or type(proof["generation_index"]) is not int
+                    or type(request["generation_index"]) is not int
+                    or request["release"] != RELEASE or proof["release"] != RELEASE
+                    or proof["requested_model"] != MODEL or proof["model"] != MODEL
+                    or proof["finish_reason"] != "tool_calls" or proof["search_mode"] != SEARCH_MODE
+                    or not _same(request["output_schema"], schema)
+                    or request["schema_sha256"] != _hash(schema)
+                    or proof["schema_sha256"] != request["schema_sha256"]):
+                _bad("compact_attempt_provenance_or_contract", stage=stage)
+            response_id = DeepSeekRequiredClient._identifier(proof["response_id"])
+            tool_id = DeepSeekRequiredClient._identifier(proof["output_tool_call_id"])
+            if response_id in self._response_ids or tool_id in self._tool_call_ids:
+                _bad("duplicate_compact_identity", stage=stage)
+            fingerprint = proof["system_fingerprint"]
+            if fingerprint is not None:
+                DeepSeekRequiredClient._identifier(fingerprint)
+            for identity in (response_id, tool_id, fingerprint):
+                if identity is not None and self._sanitizer._text(identity) != identity:
+                    _bad("unsafe_compact_identity", stage=stage)
+            usage = DeepSeekRequiredClient._usage(proof["usage"])
+            try:
+                text = proof["response"]["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            except (KeyError, TypeError, IndexError):
+                _bad("compact_visible_arguments", stage=stage)
+            if (type(text) is not str or not text.strip() or len(text.encode("utf-8")) > MAX_RESPONSE_BYTES
+                    or self._sanitizer._text(text) != text):
+                _bad("unsafe_compact_visible_arguments", stage=stage)
+            parsed = _json_loads(text)
+            safe_tree(parsed)
+            diagnostic = None
+            try:
+                validate_schema(parsed, compact_schema)
+                clean_compact_lists_output_v1(parsed, schema, decode=True)
+            except RequiredModelUnavailable as error:
+                if error.diagnostic["code"] != "OUTPUT_SCHEMA_MISMATCH":
+                    _bad("compact_terminal_output_failure", stage=stage)
+                diagnostic = error.diagnostic
+                clean_regeneration_feedback_v1(diagnostic)
+            if accepted:
+                if diagnostic is not None or not _same(proof["parsed"], parsed):
+                    _bad("compact_false_acceptance", stage=stage)
+                response = build_clean_compact_lists_safe_response(response_id=response_id,
+                    system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id, parsed=parsed)
+            else:
+                if (diagnostic is None or not _same(proof["rejection_diagnostic"], diagnostic)
+                        or proof["visible_arguments_sha256"] != hashlib.sha256(text.encode("utf-8")).hexdigest()):
+                    _bad("compact_false_rejection_or_diagnostic", stage=stage)
+                response = build_clean_compact_lists_safe_response(response_id=response_id,
+                    system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id, visible_arguments=text)
+            if (not _same(usage, proof["usage"]) or not _same(response, proof["response"])
+                    or proof["response_sha256"] != _hash(response)):
+                _bad("compact_safe_response_or_usage", stage=stage)
+            self._response_ids.add(response_id)
+            self._tool_call_ids.add(tool_id)
+            self._settle("chat", request, proof, usage)
+            if accepted:
+                return deepcopy(parsed)
+            if generation == 1:
+                _bad("second_compact_rejection", stage=stage)
+            previous = _hash(proof)
+            feedback = clean_regeneration_feedback_v1(diagnostic)
+        _bad("unaccepted_compact_call", stage=stage)
 
     def _complete_clean_responses(self, arguments, schema, output_policy):
         """Rebuild only the fixed native Responses contract, never a tool turn.
@@ -517,7 +671,7 @@ def _verify(run, result, admission):
                 calls[stage].append({"method": call["method"],
                     "request": read_snapshot(run, call["input_ref"], run_id=run.name, stage=stage, role="input"),
                     "proof": read_snapshot(run, call["output_ref"], run_id=run.name, stage=stage, role="output")})
-    execution = SimpleNamespace(run_date=date.fromisoformat(assessment["run_date"]),
+    execution = SimpleNamespace(run_id=run.name, run_date=date.fromisoformat(assessment["run_date"]),
         policy=_frozen_execution_policy(run, admission, inputs["daily.preflight"]),
         upgrade=True, admitted_at_utc=assessment["admitted_at_utc"], deadline_at_utc=clock.get("deadline_at_utc"))
     if not _same(inputs["pipeline.prepare"].get("policy"), normalize(execution.policy)):

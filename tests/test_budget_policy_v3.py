@@ -38,7 +38,7 @@ def test_factory_keeps_legacy_exact_and_admits_only_the_explicit_v3():
         BudgetGuard.for_policy(V3, max_tokens=900000)
 
 
-@pytest.mark.parametrize("identity", ["tiger.budget-policy.v4", "", {}, 3, False])
+@pytest.mark.parametrize("identity", ["tiger.budget-policy.v99", "", {}, 3, False])
 def test_unregistered_policy_cannot_choose_a_larger_budget(identity):
     with pytest.raises(BudgetRefused, match="INVALID_BUDGET_POLICY"):
         BudgetGuard.for_policy(identity)
@@ -76,8 +76,8 @@ def test_v3_does_not_raise_chat_count_or_deadline():
 
 
 @pytest.mark.parametrize("profile", list(UPGRADE_POLICIES))
-def test_current_v2_profile_selects_v3_from_frozen_policy(profile):
-    policy = policy_manifest(profile)
+def test_explicit_v3_profile_selects_v3_from_frozen_policy(profile):
+    policy = policy_manifest(profile, budget_policy_id=V3)
     assert policy["execution"]["budget_policy_id"] == V3
     assert policy["request_budget"] == {**LIMITS, "max_tokens": 600000}
     assert policy["request_budget_policy_id"] == V3
@@ -174,7 +174,7 @@ def test_v3_failure_accounting_rejects_unsupported_policy_or_excess(tamper):
         "reserved_tokens": 100000, "estimated_charged_usd": .48, "estimated_reserved_usd": .12,
         "frozen": True, "finish_reason": None}
     if tamper == "policy_missing": value.pop("budget_policy_id")
-    elif tamper == "policy_unknown": value["budget_policy_id"] = "tiger.budget-policy.v4"
+    elif tamper == "policy_unknown": value["budget_policy_id"] = "tiger.budget-policy.v99"
     elif tamper == "actual_over": value["actual_tokens"] = 600001
     elif tamper == "sum_over": value["reserved_tokens"] = 200001
     else: value["estimated_reserved_usd"] = .6

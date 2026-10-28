@@ -480,11 +480,12 @@ def supervisor(state: Path, run_id: str, *, account_fd: int, run_fd: int,
                      - datetime.now(timezone.utc)).total_seconds()
         if remaining <= 0:
             raise TimeoutError("Admission deadline elapsed")
-        deadline = time.monotonic() + min(remaining, 2400)
+        admitted_seconds = _policy["business_deadline_seconds"]
+        deadline = time.monotonic() + min(remaining, admitted_seconds)
         def timed_out(_signum, _frame):
             raise TimeoutError("Business deadline elapsed")
         signal.signal(signal.SIGALRM, timed_out)
-        signal.setitimer(signal.ITIMER_REAL, min(remaining, 2400))
+        signal.setitimer(signal.ITIMER_REAL, min(remaining, admitted_seconds))
         timer_started = True
         atomic_json(run, "processes.json", {"supervisor_pid": os.getpid(),
                                           "supervisor_process_group": os.getpgrp()},

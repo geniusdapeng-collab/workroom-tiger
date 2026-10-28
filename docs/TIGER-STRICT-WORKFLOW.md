@@ -39,7 +39,7 @@ v2 采用共享确定性执行策略：A/B/C 模板和全部数值闸门必须�
 
 严格入口的 Yahoo 日线下载显式保留交易所时区（`ignore_tz=False`），先把供应商原始带时区索引和值写入证据，再由现有观察边界投影到冻结的纽约日期。韩、台与美股混合取数时不能先丢失时区，也不能事后把无时区日期统一猜成 UTC、纽约时间或直接放行次日；真正越过纽约日期的观测仍然拒绝。日线日期标签不是实时成交时间，也不证明该交易日已经收盘。普通 Yahoo 入口保留原来的默认行为。参数语义见 [yfinance 官方下载文档](https://ranaroussi.github.io/yfinance/reference/yfinance.functions.html)。
 
-profile 的字段、允许源、阶段注册表和策略语义必须视为版本化合同。当前验证器按对应 v1/v2 policy 精确比较，并对 v2 重放全部语义请求和数值风险输入。源码变化可以作为历史来源披露；这不表示任何未来 policy 都能验证旧回执。改变阶段或 policy 时必须采用新 profile，并保留匹配的历史验证器或设计明确的账户迁移；不能在原标识下悄悄改变定义，也不能承诺尚未实现的跨版本兼容。
+profile 的字段、允许源、阶段注册表和策略语义必须视为版本化合同。当前验证器按对应 v1/v2 policy 精确比较，并对 v2 重放全部语义请求和数值风险输入。源码变化可以作为历史来源披露；这不表示任何未来 policy 都能验证旧回执。改变既有业务 policy 身份的含义或阶段时，须显式版本化并采用新 profile，或设计明确的账户迁移。新增独立输出子协议可以保留既有业务 profile，但必须由新的 policy/codec 选择器、完整源码和请求证明明确区分，并保留匹配历史 manifest 的原 builder 与验证器。不能在原策略身份下悄悄改变定义，也不能承诺尚未实现的跨版本兼容。
 
 ## 执行顺序和证据
 
@@ -61,9 +61,29 @@ daily.preflight → state.reset → pipeline.prepare
 
 开始步骤时立即保存输入快照；结束前必须保存一次输出。重复、乱序、重叠、缺输出、跨线程写证据和未完成 I/O 均违反执行合同。异常结束记录 failed，并阻止成功推进。旧模型禁用 profile，允许有明确证据的 passthrough；v2 的六个 LLM 阶段全部 `allow_passthrough=false`，不可用、空结果或透传均为失败，不能把外层聊天模型当成内层成功。
 
-v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正确 model/id/usage，并按对应协议核对完成状态（Chat 的 finish_reason / Responses 的 completed）、完整闭合 schema 与确切条目覆盖。当前清洗每批最多 8 篇，逐篇展示完整规则清洗正文：按原顺序切为最多 600 字符的 `content_parts`，拼接后与原 `source_view` 完全一致；规则清洗正文完整不等于供应商原生文章完整，原生字符数与覆盖标记另行保留。模型决定事实含义、来源归属与时效，返回本篇可引用的 `quote_part_id`；程序只按该来源的编号取回逐字引文，不模糊匹配、删改事实或自动重试。格式不允许引用的片段仍展示给模型，不能把可引用标记当成可信度判断。每批还包含全部来源的归属索引，索引不能冒充别篇正文已展示。
+v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正确 model/id/usage，并按对应协议核对完成状态（Chat 的 finish_reason / Responses 的 completed）、完整闭合 schema 与确切条目覆盖。当前 compact 清洗每批最多 4 篇；历史协议仍为 8 篇。逐篇展示完整规则清洗正文：按原顺序切为最多 600 字符的 `content_parts`，拼接后与原 `source_view` 完全一致；规则清洗正文完整不等于供应商原生文章完整，原生字符数与覆盖标记另行保留。模型决定事实含义、来源归属与时效，返回本篇可引用的 `quote_part_id`；程序只按该来源的编号取回逐字引文，不模糊匹配、删改事实或修补模型答案。格式不允许引用的片段仍展示给模型，不能把可引用标记当成可信度判断。每批还包含全部来源的归属索引，索引不能冒充别篇正文已展示。
 
-当前新准入显式冻结 `tiger.clean-output.responses-slots.v1` 和 `tiger.clean-slots-wire.v1`。完整索引保留真实 id、标题、URL、日期，以 `dN` 引用连接本批正文表；回答的 `d` 按本批来源键闭合，每篇恰好一次，各篇引文编号只取自自己的允许列表。ticker、事件、链、ETF 和 claims 的原有有界列表统一编码成必需的 `s0…s(N-1)` 可空槽位：非空值必须连续占据前缀，尾部 null 表示未使用，不生成语义值。每来源闭合 schema 保留本篇 q 枚举和原字符串/数值规则；答案逆变换后继续执行完整原 keyed schema、原语义 schema、来源覆盖和逐字引文校验。ticker 至多八个模型选出的相关实体标签，不代表穷尽实体；必要事实仍须保留在原摘要与 claims 中。程序不删尾、填值、代写语义或重试。
+## 当前清洗：compact lists 与有界完整重新生成
+
+三个 v2 profile 的新准入显式冻结 `tiger.clean-output.compact-lists-regeneration.v1`、`tiger.clean-compact-lists-wire.v1` 和 `tiger.model-regeneration.clean-schema.v1`。当前budget v4每批一篇，每来源28个必需标量；旧显式budget v3仍每批最多四篇。历史八篇协议保留原builder、请求、证明和语义。逐篇分配只减少同时输出的结构，不删除来源、正文、事实字段、来源索引或时效检查。仅清洗使用固定 `/beta/chat/completions`、一个强制 `strict=true` 的 `emit_tiger_clean_v2` 输出函数、disabled/none、`max_tokens=32768`。输出函数不执行业务动作。其余五个语义阶段继续原 high/JSON 通道。
+
+ticker、事件、产业链、ETF 列表使用逗号标量，只有原项目语法能证明分隔符和空项目不可能出现时才可编译。空串仅表示空列表，逆变换保留原顺序，不 trim、排序、去重、截断或补值。四个 claims 槽的空字符串仅表示尾部未使用；洞、部分空字段、重复或本篇 q 违规仍拒绝。完整原 keyed schema、原语义 schema、覆盖、逐字引文与 typed 文档构造继续执行。摘要原 800 上限不放宽；提示中的 200–450 字符是表达建议，不是必要事实删减权限或新验收下界。
+
+全部正文分片、全局来源索引、assessment、覆盖和本篇引用绑定精确保留。提供方以规范 `$def/$ref` 共享相同叶 schema，严格展开必须等于本地完整标量投影；外部、循环、悬空、链式、未用或非规范引用拒绝。仅投影文档未支持的长度 keyword，其原上界仍由注册 pattern 和完整本地合同执行。固定字段映射只有一份；请求与预算绑定完整 canonical UTF-8 bytes。官方通道依据：[Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。该文档不能证明服务端必定执行每个约束，本地完整验收始终必需。
+
+只有以下条件同时成立才允许新的完整生成：实际响应完整、模型/响应/工具身份合法且唯一、`finish_reason=tool_calls`、标准 usage 已知并已结算、严格 JSON 没有重复键或非有限值、原文与全部解码键值的安全脱敏结果均与原值相同，随后完整 schema/逆变换以固定 `OUTPUT_SCHEMA_MISMATCH` 拒绝。每来源最多追加一次，budget v4每完整任务最多追加56次；旧显式v3仍每批一次、整轮最多四次。第二次拒绝、额度不足或预算不准入即失败。语法、重复键、秘密、身份、HTTP、超时、长度终止和未知结果均终止，不触发重新生成；未知用量继续冻结。安全检查不通过的原拒绝文本不封存。
+
+新生成仍使用相同完整 user 输入和 schema；只有固定 system 后缀加入从前次拒绝派生的闭合反馈。不发送旧答案、任意异常文字或语义提示，不修补已经返回的答案。非阻塞逻辑调用锁阻止重入；generation1 的输入和前次拒绝摘要须在付费 I/O 前持久记录，不提供崩溃后模型调用恢复或第二控制器自动重跑。
+
+私有 request/call v4 记录 accepted/rejected 的有序并集、实际参数、安全响应、真实用量、预算、generation_index、logical_call_sha256 和 previous_rejection_sha256。拒绝是已完成的模型 I/O，但不进入语义管线；终止传输/安全错误仍走原 error_ref。独立回放从真实上游重建请求，重新解析并复现原答案被拒绝，核对同一批紧邻且只消费一次的新生成；有效答案谎报拒绝、遗漏已付费调用、重复身份、换输入、改反馈或连贯重算外层 hash 均不能替代可信采集锚点。只有接纳值进入后续阶段。
+
+完成汇总的 call_count、response_ids、stage_counts 计入全部真实尝试；增加精确的 regeneration_policy_id、accepted_call_count、rejected_call_count，后两者之和等于 call_count，拒绝数随可信预算版本分别为v4的0..56、v3的0..4，且不得超过已接纳的clean逻辑调用数。六阶段仍各需接纳答案，Node、受控回执和公开研究投影按同一闭合合同检查；旧/disabled/非 upgrade 形状不能夹带这些字段。安全响应及其原拒绝文本仅留私有证明，不公开。哈希与回放提供相对可信源码/采集/准入锚点的本地完整性证据，不是提供方签名，也不能排除所有锚点均被替换的完整伪造。
+
+当前新任务显式使用 `tiger.budget-policy.v4`：160 chat、20000000 实际加预留 tokens、60 Search、20 Fetch、240 远端请求、保守估算 30 USD、7200 秒；逐次先预留后调用，全部尝试共享同一账本。最多56篇逐篇清洗的结构上界为 56 clean + 56 重新生成 + 14 发行人调用 + 4 其他语义调用 = 130 chat，另最多54 Search和20 Fetch，总计204次远端调用。旧显式v3仍为四篇一批、最多四次追加，40 chat/600000 tokens/120远端/1 USD/2400秒，旧回执不变。这些是容量上限，不是真实费用或成功率承诺。新的 `allow_clean_compact_regeneration` 只从可信 selector 派生，旧各协议 allowlist 不扩大。
+
+第十一次完整任务 `run-553dcd7df45c4dcea389276e79e2cfda` 使用来源 `2acab5a0aac74e90a6b729e0da2c7c25e214f117` 的 Responses slots 版本，首个原生清洗回答未通过 JSON 解析；实际输入 48741、输出 13683、合计 62424 tokens，14 Search、零 Fetch，已结算、零剩余预留、账户未提交。原无效回答未保留，具体语法原因未知。后续单独协议诊断不改写这个未知原因，也不计为完整业务成功。该新策略须由全新的完整任务及独立 receipt/verify 证明；代码、合成测试和诊断均不算真实完整成功。
+
+以下段落记录历史 Responses slots 的原单次行为：`tiger.clean-output.responses-slots.v1` 和 `tiger.clean-slots-wire.v1`。完整索引保留真实 id、标题、URL、日期，以 `dN` 引用连接本批正文表；回答的 `d` 按本批来源键闭合，每篇恰好一次，各篇引文编号只取自自己的允许列表。ticker、事件、链、ETF 和 claims 的原有有界列表统一编码成必需的 `s0…s(N-1)` 可空槽位：非空值必须连续占据前缀，尾部 null 表示未使用，不生成语义值。每来源闭合 schema 保留本篇 q 枚举和原字符串/数值规则；答案逆变换后继续执行完整原 keyed schema、原语义 schema、来源覆盖和逐字引文校验。ticker 至多八个模型选出的相关实体标签，不代表穷尽实体；必要事实仍须保留在原摘要与 claims 中。程序不删尾、填值、代写语义或重试。
 
 仅清洗阶段在固定 `/responses` 使用 `text.format.json_schema`、原生 `reasoning.effort=none` 单次生成完整答案；成功状态为 completed，usage 的 input/output/total 与预算显式映射，不捏造 finish_reason。私有 proof 的 `output_schema/schema_sha256` 继续绑定原 keyed 合同，`output_policy_id` 选择槽位版本，完整 `request_sha256` 绑定实际提供方槽位 schema；安全 response/parsed 保存实际槽位答案，解码语义结果另由原调用链验证。历史 `tiger.clean-output.responses-schema.v1`、`tiger.clean-keyed-wire.v1`、strict-function 和未声明 policy 的 JSON 分支各自保留原 builder、策略与重放。历史 strict-function 在 Beta 端点使用一次固定 strict 输出函数，未声明 policy 的历史 v2 为 disabled/low；旧 v1 及其余五个语义阶段继续 enabled/high。任何提供方格式或关闭 thinking 均不证明语义质量、任意 schema 支持或完整任务必定成功。完整约定见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)；官方通道依据为 [Responses API](https://api-docs.deepseek.com/guides/responses_api/) 和 [Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。
 
@@ -73,11 +93,11 @@ v2 在六个注册语义阶段实际调用固定 Flash。每个响应要求正�
 
 最终输入的 `tiger.final-identity-wire.v1` 只缩写明确身份字段及表列，完整真实 ID 注册表与原 payload SHA 一并展示；正文、claim_key/claim_id、引文 hash 和不同父来源不合并或替换。最终模型可完整修订 thesis，也可返回闭合的同股票 `reuse_thesis`，沿用本轮已展示的原模型研究；这种沿用通过 `model_reference_usage` 披露，不能冒充新写的研究。模型仍以 high 完成选择/否决和五个人工执行理由，展开后执行原完整 schema、研究归属、事实集合和数值买入权限校验。独立回放从上游重建原输入，不能只靠可重算的自包含 hash。
 
-所有远端 I/O 共用先预留后调用预算。新 v2-profile 接纳显式选择 `tiger.budget-policy.v3`：chat≤40、实际加预留 tokens≤600000、Search≤60、Fetch≤20、总请求≤120、保守估算≤1 USD、业务期限 2400 秒。原默认守卫、未声明新预算的历史 policy 和 `tiger.request-budget.v2` 仍为 300000 tokens；新 proof/reservation 为 v3 并携带精确 policy_id，不能靠填写 600000 数值升级。接纳、preflight、pipeline.prepare 的完整执行策略、实际 I/O 和独立重放必须一致。600000×1.2/1000000 加 80×0.00075 的冻结保守估算为 0.78 USD，费用、次数与期限上限继续分别执行；预算扩展不证明真实完成率。计费失败照实结算，结果未知时冻结；不自动重试或循环补证。每个成功模型阶段的实际 usage、唯一响应身份与全部预算记录必须一致且无未结算预留。
+所有远端I/O共用先预留后调用预算。新v2-profile接纳选择`tiger.budget-policy.v4`，额度见前节；snapshot/reservation使用schema4并携带精确policy_id。旧显式v3和原默认v2分别保留600000/300000及各自原上限、证明形状。接纳、preflight、pipeline.prepare、完整执行策略、实际I/O和独立回放必须一致，不能靠填写更大的数值升级。预算扩大不证明真实完成率；失败已知用量照实结算，未知结果冻结。每个成功模型阶段的实际usage、唯一响应身份和全部预算记录必须一致且无未结算预留。
 
 独立验证器从事件和子 I/O 快照重算全部请求/schema/安全响应哈希、响应身份和 usage，重建完整模型输入文档及数值上下文，逐字段核对清洗/舆情/风险/叙事实际输出与 parsed 模型答案，并核对下游消费。最终模型选择只允许缩小原风险批准集合；人读计划中的价格/股数/止损/仓位/风险绑定原 TradePick。任何对应缺失或规则代写均为 `MODEL_REQUIRED_FAILED`，在账户指针提交之前失败。成功仅为 `completed`，不能发布 completed_degraded。原始远端响应不落盘，仅保存摘要；安全响应和模型 JSON 可重算，属于本地协作进程完整性证据，不是远端签名证明。
 
-Responses 槽位、历史 Responses schema 与历史 strict-function 显式清洗策略都要求 `tiger.strict-source-inventory.v1`：可信源码中的静态注册表固定全部必需执行路径，只有 `events_calendar.json` 为显式可选。`freeze_source` 在复制和 worker/付费前比较真实库存；准入和独立回放再按同一可信合同核对清单、逐文件内容及 admission 摘要。验证器不能从运行者自报的 manifest 或已删减目录生成预期集合，因此即使同步删去文件并重算摘要也会拒绝。旧无 strict 字段的历史策略保留原验证，新增或移除执行路径须有意更新/版本化注册表及库存回归。
+当前 compact、历史 Responses 槽位、历史 Responses schema 与历史 strict-function 显式清洗策略都要求 `tiger.strict-source-inventory.v1`：可信源码中的静态注册表固定全部必需执行路径，只有 `events_calendar.json` 为显式可选。`freeze_source` 在复制和 worker/付费前比较真实库存；准入和独立回放再按同一可信合同核对清单、逐文件内容及 admission 摘要。验证器不能从运行者自报的 manifest 或已删减目录生成预期集合，因此即使同步删去文件并重算摘要也会拒绝。旧无 strict 字段的历史策略保留原验证，新增或移除执行路径须有意更新/版本化注册表及库存回归。
 
 原生 Responses 可附带不改变答案内容的可选元数据：消息的 `phase` 只接受缺省、null 或 `final_answer`，拒绝 `commentary` 和未知值；文本项的 `logprobs` 只接受缺省、null 或空数组，`annotations` 继续只接受缺省或空数组。消息和文本项的其余未知字段、推理/工具条目、多条消息或多段文本仍拒绝。已验证的这些惰性元数据不进入原有安全响应投影，实际传输摘要仍绑定原始正文；本修复不改变请求、业务语义、来源校验或协议身份。原生完成、消息、phase、文本和元数据等拒绝分支使用各自固定的安全错误码，旧通用错误码仍保留，不保存任意字段名、值或回答正文。
 
@@ -115,9 +135,9 @@ Responses 槽位、历史 Responses schema 与历史 strict-function 显式清�
 
 ## 时间、并发和错误
 
-单个业务任务的总期限为 2400 秒。Node 单次提交/查询观察上限为 60 秒，CLI 默认等待窗口为 2460 秒；观察超时和业务超时是两个不同结果。
+新v4业务任务总期限为7200秒；旧版本保持2400秒。Node 单次提交/查询观察上限为 60 秒，CLI默认等待窗口为7260秒；观察超时和业务超时是两个不同结果。
 
-原两个 profile 的公开搜索 45 秒收集预算适用于每一批查询；主题会展开为多批查询，不能把它描述为整个搜索阶段只花 45 秒。收集期限之后的数据不再参与决策，已启动线程另有最多 15 秒的收尾等待；未结束的线程阻止流程成功。model-required 使用同步、有界响应的原生 Search/Fetch，每次请求连接/读取期限和 1 MiB 响应上限由适配器固定；无跨模型或来源回退，任一必需主题失败即停，最外层 2400 秒业务期限仍然生效。
+原两个 profile 的公开搜索 45 秒收集预算适用于每一批查询；主题会展开为多批查询，不能把它描述为整个搜索阶段只花 45 秒。收集期限之后的数据不再参与决策，已启动线程另有最多 15 秒的收尾等待；未结束的线程阻止流程成功。model-required 使用同步、有界响应的原生 Search/Fetch，每次请求连接/读取期限和 1 MiB 响应上限由适配器固定；无跨模型或来源回退，任一必需主题失败即停，最外层业务期限按可信预算版本执行（v4为7200秒，旧版本2400秒）。
 
 Responses 只使用官方原生请求/响应字段；其 stateless 不表示供应商完全不缓存输入。第八次历史 Beta 请求的 HTTP400 具体原因未知、预留继续冻结；新的有界错误诊断只保留提供方声称的固定类别，不落原 message 或任意错误文本。完整协议与历史边界见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)。
 
@@ -129,7 +149,7 @@ Responses 只使用官方原生请求/响应字段；其 stateless 不表示供�
 
 严格工作流的 Stooq 串行日线批次采用每批连续三次无有效产出的可用性探测预算；观察到有效 DataFrame 即重置连续计数，已取得的原始帧保留。预算耗尽后，未尝试的 ticker 交给原有可信真实源回退链，不降低覆盖率、新鲜度或数据质量门槛。少数普通缺失不能证明远端服务失败，所以证据只声明 `source_exhausted=true`、`reason=availability_budget_exhausted`、`service_failure_asserted=false`，列明尝试数、无产出数、按类型汇总的错误及未尝试清单；不序列化原始错误正文。批次恰好结束或空输入不会伪报预算耗尽。普通非严格 Stooq 调用默认仍无此探测数量上限。
 
-`EvidenceWriteError`、`ExecutionContractError` 和 `StrictObservationError` 必须原样终止，不能作为无产出累计后继续回退。严格模式保持 `allow_challenge=false`，遇到访问验证仍拒绝，不求解或绕过挑战。三次是探测次数边界，不保证整个公开取数阶段的墙钟上限；各原有来源仍有自己的网络等待，最外层2400秒截止时间继续有效。该修复只避免一个连续无产出的串行来源先消耗数百次请求，不能保证公开源一定提供足够数据。
+`EvidenceWriteError`、`ExecutionContractError` 和 `StrictObservationError` 必须原样终止，不能作为无产出累计后继续回退。严格模式保持 `allow_challenge=false`，遇到访问验证仍拒绝，不求解或绕过挑战。三次是探测次数边界，不保证整个公开取数阶段的墙钟上限；各原有来源仍有自己的网络等待，最外层版本化截止时间继续有效（v4为7200秒，旧版本2400秒）。该修复只避免一个连续无产出的串行来源先消耗数百次请求，不能保证公开源一定提供足够数据。
 
 错误返回统一 envelope 和受控 code/message/run_id/stage/details_ref；不把原始 HTTP 正文、密钥或完整环境返回给 Agent。详细退出码见操作指南。
 

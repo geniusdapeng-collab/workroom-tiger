@@ -146,18 +146,26 @@
     const budget = model.budget;
     if (!recordObject(budget)) return false;
     const current = budget.schema === "tiger.request-budget.v3" && budget.policy_id === "tiger.budget-policy.v3";
+    const expanded = budget.schema === "tiger.request-budget.v4" && budget.policy_id === "tiger.budget-policy.v4";
+    const versioned = current || expanded;
     const archived = budget.schema === "tiger.request-budget.v2" && !Object.hasOwn(budget, "policy_id");
-    const limits = { max_chat_calls: 40, max_tokens: current ? 600000 : 300000, max_search_calls: 60,
-      max_fetch_calls: 20, max_remote_requests: 120, max_cost_usd: 1, deadline_seconds: 2400 };
-    if ((!current && !archived) || !recordObject(budget.limits)
+    const limits = { max_chat_calls: expanded ? 160 : 40, max_tokens: expanded ? 20000000 : current ? 600000 : 300000, max_search_calls: 60,
+      max_fetch_calls: 20, max_remote_requests: expanded ? 240 : 120, max_cost_usd: expanded ? 30 : 1, deadline_seconds: expanded ? 7200 : 2400 };
+    if (expanded && (model.clean_output_policy_id !== "tiger.clean-output.compact-lists-regeneration.v1"
+      || model.clean_output_codec_id !== "tiger.clean-compact-lists-wire.v1"
+      || model.regeneration_policy_id !== "tiger.model-regeneration.clean-schema.v1"
+      || !nonnegativeInteger(model.rejected_call_count) || model.rejected_call_count > 56
+      || !positiveInteger(model.accepted_call_count) || model.accepted_call_count + model.rejected_call_count !== model.call_count
+      || model.rejected_call_count > model.stage_counts["clean.llm_semantic"] - model.rejected_call_count)) return false;
+    if ((!versioned && !archived) || !recordObject(budget.limits)
       || Object.keys(budget.limits).length !== Object.keys(limits).length
       || Object.entries(limits).some(([key, value]) => budget.limits[key] !== value) || budget.frozen !== false
       || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0
       || !nonnegativeInteger(budget.actual_tokens) || budget.actual_tokens > limits.max_tokens
-      || !finite(budget.estimated_charged_usd) || budget.estimated_charged_usd < 0 || budget.estimated_charged_usd > 1.000000001
-      || model.call_count > 40 || !nonnegativeInteger(model.search_count) || model.search_count < 14 || model.search_count > 60
+      || !finite(budget.estimated_charged_usd) || budget.estimated_charged_usd < 0 || budget.estimated_charged_usd > limits.max_cost_usd + 1e-9
+      || model.call_count > limits.max_chat_calls || !nonnegativeInteger(model.search_count) || model.search_count < 14 || model.search_count > 60
       || !nonnegativeInteger(model.fetch_count) || model.fetch_count > 20
-      || model.call_count + model.search_count + model.fetch_count > 120
+      || model.call_count + model.search_count + model.fetch_count > limits.max_remote_requests
       || !recordObject(budget.counts) || budget.counts.chat !== model.call_count || budget.counts.search !== model.search_count || budget.counts.fetch !== model.fetch_count
       || !Array.isArray(budget.records) || budget.records.length !== model.call_count + model.search_count + model.fetch_count) return false;
     const ids = new Set();
@@ -165,8 +173,8 @@
     for (const item of budget.records) {
       const reservation = item?.reservation;
       if (item?.status !== "settled" || !reservation || !plainText(reservation.call_id) || ids.has(reservation.call_id)
-        || reservation.schema !== (current ? "tiger.request-budget-reservation.v3" : "tiger.request-budget-reservation.v2")
-        || (current ? reservation.policy_id !== budget.policy_id : Object.hasOwn(reservation, "policy_id"))
+        || reservation.schema !== (expanded ? "tiger.request-budget-reservation.v4" : current ? "tiger.request-budget-reservation.v3" : "tiger.request-budget-reservation.v2")
+        || (versioned ? reservation.policy_id !== budget.policy_id : Object.hasOwn(reservation, "policy_id"))
         || !Object.hasOwn(counts, reservation.kind)) return false;
       ids.add(reservation.call_id); counts[reservation.kind] += 1;
     }

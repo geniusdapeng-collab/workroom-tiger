@@ -460,17 +460,28 @@ def _call_v2(llm, stage: str, payload: dict, schema: dict, *, max_tokens=16384):
         _fail("V2 assessment must come from frozen execution")
     inputs = {"assessment": assessment_context_v2(llm.execution), **payload}
     from .clean_output import (clean_output_policy, CleanOutputInvalid,
-        CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1, clean_slots_schema_v1)
+        CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1, clean_slots_schema_v1,
+        CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1, clean_compact_lists_schema_v1,
+        COMPACT_EXPRESSION_GUIDANCE)
     try:
         output_policy = clean_output_policy(llm.execution)
         strict_clean = output_policy is not None and stage == "clean.llm_semantic"
         slots_clean = output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 and strict_clean
-        output_schema = clean_slots_schema_v1(schema) if slots_clean else schema
+        compact_clean = output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1 and strict_clean
+        output_schema = (clean_compact_lists_schema_v1(schema) if compact_clean else
+                         clean_slots_schema_v1(schema) if slots_clean else schema)
     except CleanOutputInvalid:
         _fail("V2 clean output policy is invalid")
     effort = {"reasoning_effort": "none" if strict_clean else "low"} if stage == "clean.llm_semantic" else {}
     try:
         task = CLEAN_SLOTS_TASK_V1 if slots_clean else TASKS_V2[stage]
+        if compact_clean:
+            references = payload['clean_wire']['output_source_refs']
+            count = len(output_schema['properties'])
+            boundary = (f'本次输出边界：只处理本批source_ref={",".join(references)}；'
+                f'每篇28键，总计精确{count}个必需标量键，全部必须输出且各一次。'
+                '唯一扁平根对象，仅schema声明的键，无其他键、嵌套对象或数组。')
+            task = boundary + CLEAN_COMPACT_TASK_V1 + COMPACT_EXPRESSION_GUIDANCE + boundary
         out = llm.complete_json(system=SYSTEM_V2, user=task + "\n" + canonical(inputs),
                                 schema_hint={}, schema=schema, max_tokens=max_tokens, **effort)
         validate_schema(out, output_schema)
@@ -817,6 +828,34 @@ CLEAN_SLOTS_TASK_V1 = TASKS_V2["clean.llm_semantic"].replace(
     "tickers最多选择八个相关实体标签，不是穷尽抽取；必要事实与限定须保留在完整摘要和claims。")
 
 
+def _compact_task_v1():
+    task = TASKS_V2['clean.llm_semantic']
+    replacements = {
+        '输出按clean_wire.output_fields把原语义字段换成短字段；所有来源引用用该索引的ref，程序逐项还原真实id。':
+            'clean_wire.mapping是唯一输出映射：每行suffix对应原semantic_field及encoding和原约束；输出键为本篇source_ref加双下划线再加suffix，所有来源引用仍用索引ref，程序逐项原样还原真实id。',
+        '本协议的d是按本批source_ref为键的JSON对象，不是数组；每个本批键恰好一次，键内不再输出i或id。':
+            '本协议只输出唯一扁平根对象，每篇28个必需标量字段，全部本批键各一次；键只取provider schema的properties，禁止额外键、嵌套d、来源对象、数组、i或id。',
+        '每个来源的c中q只从clean_wire.source_bindings中该来源自己的allowed_quote_part_ids选择；':
+            '每个来源的claim q叶只从clean_wire.source_bindings中该来源自己的allowed_quote_part_ids选择；',
+        '相邻来源允许的p0不代表本篇允许p0。format_example仅示范来源键与q的格式，省略了必需语义字段，不是完整答案、没有事实含义，不能抄成研究结果。':
+            '相邻来源允许的p0不代表本篇允许p0。t/e/h/f各只用一个逗号分隔字符串表示原列表：无项目填空字符串，有项目按原顺序用半角逗号连接完整token，不写空项目或空格，不排序、去重、补值或推断。tickers最多选择八个相关实体标签，不是穷尽抽取；必要事实与限定保留在摘要和claims。',
+        '仅对documents中的每个id恰好返回一次；all_source_index是全体来源的归属索引，列含义见columns，不代表其他篇正文也已展示。':
+            '仅为documents中实际source_ref输出schema声明的全部键；all_source_index只提供全体归属索引，列含义见columns，不代表其他篇正文展示，也不能据此生成其输出键。',
+        '仅能识别原始报道时origin_id引用给定源ID，未知用null。':
+            '仅能识别原始报道时origin_id原样引用给定来源ref，未知只填空JSON字符串。',
+        '没有依据可不提取claims，不能补造。':
+            '没有依据可不提取claims，不能补造。claims仍有s0至s3四个位置，每个位置有statement/q/claim_key/time_role对应的四个标量叶；实际claim从s0连续填写，未用尾位置的四叶必须全部为空字符串，不能部分空或中间留空。摘要最长800字符，事实statement和来源origin_note各最长600字符；其余原限制见mapping和schema。这些是上限，不需要凑满；保留必要事实、限定、反证和未知，避免跨字段重复。',
+    }
+    for previous, current in replacements.items():
+        if task.count(previous) != 1:
+            _fail('Compact clean task differs from its registered semantic instructions')
+        task = task.replace(previous, current)
+    return task
+
+
+CLEAN_COMPACT_TASK_V1 = _compact_task_v1()
+
+
 def clean_slots_output_v1(value: dict, keyed_schema: dict, *, decode=False) -> dict:
     """Bijectively map the original ordered clean arrays to required slots.
 
@@ -918,20 +957,27 @@ def clean_v2(llm, docs: list[RawDocument]):
     from .required_schemas import clean_schema_v2
     from .candidate_research import source_view
     from .clean_output import (clean_output_policy, CleanOutputInvalid,
-                              CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+                              CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                              CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
+                              clean_compact_lists_payload_v1, clean_compact_lists_output_v1,
+                              clean_compact_execution_limits)
     try:
-        slots_clean = clean_output_policy(llm.execution) == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+        output_policy = clean_output_policy(llm.execution)
+        slots_clean = output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+        compact_clean = output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
     except CleanOutputInvalid:
         _fail("V2 clean output policy is invalid")
     ids = [doc.doc_id for doc in docs]
     if len(ids) != len(set(ids)):
         _fail("V2 semantic cleaning requires unique source identities")
     result = []
-    # Four attributed facts use short part IDs instead of recopied quotes. No
-    # source/body is omitted: up to 56 broad sources use seven clean calls;
-    # seven + at most 14 issuer calls + four other stages = 25 < the 40 cap.
-    # Actual token/cost admission remains the unchanged prepaid budget's job.
-    batches = [docs[start:start + 8] for start in range(0, len(docs), 8)] or [[]]
+    # v4 processes every complete source separately: at most56 initial clean
+    # calls +56 complete regenerations +14 issuer +four other stages =130.
+    # Historical compact v3 remains4 sources/batch,4 extra generations/run;
+    # older protocols retain8 sources/batch. No body, registry, freshness or
+    # local semantic gate is removed by partitioning the model assignment.
+    batch_size = clean_compact_execution_limits(llm.execution)[0] if compact_clean else 8
+    batches = [docs[start:start + batch_size] for start in range(0, len(docs), batch_size)] or [[]]
     for batch in batches:
         payload = clean_payload_v2(batch, all_docs=docs)
         quote_parts = {row["id"]: {part[0]: part[1] for part in row["content_parts"]["rows"]
@@ -940,9 +986,13 @@ def clean_v2(llm, docs: list[RawDocument]):
             config.SECTOR_ETFS, quote_part_ids={key: list(parts) for key, parts in quote_parts.items()},
             all_doc_ids=ids)
         keyed_schema = clean_keyed_schema_v2(schema, ids)
-        wire = clean_slots_payload_v1(payload, keyed_schema) if slots_clean else clean_keyed_payload_v2(payload)
-        out = _call_v2(llm, "clean.llm_semantic", wire, keyed_schema)
-        if slots_clean:
+        wire = (clean_compact_lists_payload_v1(payload, keyed_schema) if compact_clean else
+                clean_slots_payload_v1(payload, keyed_schema) if slots_clean else clean_keyed_payload_v2(payload))
+        out = _call_v2(llm, "clean.llm_semantic", wire, keyed_schema,
+                       max_tokens=32768 if compact_clean else 16384)
+        if compact_clean:
+            out = clean_compact_lists_output_v1(out, keyed_schema, decode=True)
+        elif slots_clean:
             out = clean_slots_output_v1(out, keyed_schema, decode=True)
         out = clean_keyed_output_v2(out, ids, batch_ids=[doc.doc_id for doc in batch], decode=True)
         validate_schema(out, schema)
@@ -1308,26 +1358,32 @@ def decision_v2(llm, context: dict, docs, account_usd: float) -> dict:
 
 def model_summary_v2(llm) -> dict:
     """Reconcile completed six-stage calls against every settled reservation."""
-    from .request_budget import BudgetGuard, BudgetRefused, PRICING
+    from .request_budget import BudgetGuard, BudgetRefused, PRICING, BUDGET_POLICY_V4
     from ..redline.execution import UPGRADE_MODEL_STAGES
     try:
         policy_id = getattr(getattr(getattr(llm, "execution", None), "policy", None), "budget_policy_id", None)
         from .clean_output import (clean_output_policy, CLEAN_OUTPUT_POLICY_V1,
-                                   CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+            CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1, CLEAN_COMPACT_LISTS_WIRE_V1, CLEAN_REGENERATION_POLICY_V1,
+            clean_compact_execution_limits)
         output_policy = clean_output_policy(getattr(llm, "execution", None))
+        compact = output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
         expected_budget = BudgetGuard.for_policy(policy_id, clean_output_policy_id=output_policy).snapshot()
         limits = expected_budget["limits"]
         chats, searches, fetches = llm.receipts, llm.search_receipts, llm.fetch_receipts
         budget = llm.budget.snapshot()
         counts = {stage: sum(row["stage"] == stage for row in chats)
                   for stage in UPGRADE_MODEL_STAGES}
+        accepted_counts = {stage: sum(row['stage'] == stage and row.get('outcome', 'accepted') == 'accepted'
+                                     for row in chats) for stage in UPGRADE_MODEL_STAGES}
+        rejected_count = sum(row.get('outcome') == 'rejected' for row in chats)
         expected_counts = {"chat": len(chats), "search": len(searches), "fetch": len(fetches)}
         ids = [row["response_id"] for row in chats]
         all_receipts = [(kind, row) for kind, rows in (("chat", chats), ("search", searches), ("fetch", fetches))
                         for row in rows]
         call_ids = [row["call_id"] for _, row in all_receipts]
         records = {row["reservation"]["call_id"]: row for row in budget["records"]}
-        if (not all(counts.values()) or sum(counts.values()) != len(chats)
+        if (not all(counts.values()) or not all(accepted_counts.values()) or sum(counts.values()) != len(chats)
                 or len(set(ids)) != len(ids) or any(type(identity) is not str or not identity for identity in ids)
                 or len(set(call_ids)) != len(call_ids) or set(records) != set(call_ids)
                 or len(records) != len(budget["records"])
@@ -1346,7 +1402,8 @@ def model_summary_v2(llm) -> dict:
         for kind, receipt in all_receipts:
             record = records[receipt["call_id"]]
             reservation = record["reservation"]
-            expected_reservation_schema = "tiger.request-budget-reservation.v3" if policy_id else "tiger.request-budget-reservation.v2"
+            expected_reservation_schema = ("tiger.request-budget-reservation.v4" if policy_id == BUDGET_POLICY_V4
+                else "tiger.request-budget-reservation.v3" if policy_id else "tiger.request-budget-reservation.v2")
             if (reservation["kind"] != kind or reservation["request_sha256"] != receipt["request_sha256"]
                     or reservation["schema"] != expected_reservation_schema
                     or reservation.get("policy_id") != expected_budget.get("policy_id")):
@@ -1356,6 +1413,29 @@ def model_summary_v2(llm) -> dict:
                     or receipt["release"] != RELEASE or record["usage"] != receipt["usage"]):
                 raise ValueError
             if kind == "chat":
+                compact_clean = compact and receipt['stage'] == 'clean.llm_semantic'
+                compact_fields = {'output_codec_id', 'regeneration_policy_id', 'generation_index',
+                    'logical_call_sha256', 'previous_rejection_sha256', 'outcome', 'proof_sha256',
+                    'visible_arguments_sha256'}
+                if not compact_clean and compact_fields.intersection(receipt):
+                    raise ValueError
+                if compact_clean:
+                    import re
+                    if (receipt.get('output_policy_id') != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+                            or receipt.get('output_codec_id') != CLEAN_COMPACT_LISTS_WIRE_V1
+                            or receipt.get('regeneration_policy_id') != CLEAN_REGENERATION_POLICY_V1
+                            or receipt.get('finish_reason') != 'tool_calls'
+                            or receipt.get('outcome') not in ('accepted', 'rejected')
+                            or type(receipt.get('generation_index')) is not int or receipt['generation_index'] not in (0, 1)
+                            or any(type(receipt.get(key)) is not str or re.fullmatch('[a-f0-9]{64}', receipt[key]) is None
+                                   for key in ('logical_call_sha256', 'proof_sha256'))
+                            or type(receipt.get('output_tool_call_id')) is not str or not receipt['output_tool_call_id']
+                            or {'response_status', 'created_at', 'output_message_id', 'native_usage'}.intersection(receipt)
+                            or receipt['outcome'] == 'accepted' and 'visible_arguments_sha256' in receipt
+                            or receipt['outcome'] == 'rejected' and (type(receipt.get('visible_arguments_sha256')) is not str
+                                or re.fullmatch('[a-f0-9]{64}', receipt['visible_arguments_sha256']) is None)):
+                        raise ValueError
+                    continue
                 responses = output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1) and receipt["stage"] == "clean.llm_semantic"
                 native_fields = {"response_status", "created_at", "output_message_id", "native_usage"}
                 if responses:
@@ -1378,6 +1458,32 @@ def model_summary_v2(llm) -> dict:
                         or strict and (type(receipt.get("output_tool_call_id")) is not str
                                        or not receipt["output_tool_call_id"])):
                     raise ValueError
+        if compact:
+            seen, pending = set(), None
+            for receipt in chats:
+                if receipt['stage'] != 'clean.llm_semantic':
+                    continue
+                logical = receipt['logical_call_sha256']
+                if receipt['generation_index'] == 0:
+                    if logical in seen or pending is not None or receipt['previous_rejection_sha256'] is not None:
+                        raise ValueError
+                    seen.add(logical)
+                    if receipt['outcome'] == 'rejected':
+                        pending = receipt
+                else:
+                    if (pending is None or logical != pending['logical_call_sha256']
+                            or receipt['outcome'] != 'accepted'
+                            or receipt['previous_rejection_sha256'] != pending['proof_sha256']
+                            or receipt['schema_sha256'] != pending['schema_sha256']
+                            or receipt['request_sha256'] == pending['request_sha256']
+                            or records[receipt['call_id']]['reservation']['sequence'] !=
+                               records[pending['call_id']]['reservation']['sequence'] + 1):
+                        raise ValueError
+                    pending = None
+            if (pending is not None or not 0 <= rejected_count <= clean_compact_execution_limits(llm.execution)[1]
+                    or rejected_count > accepted_counts['clean.llm_semantic']
+                    or sum(accepted_counts.values()) + rejected_count != len(chats)):
+                raise ValueError
         tool_ids = [row["output_tool_call_id"] for row in chats if "output_tool_call_id" in row]
         if len(set(tool_ids)) != len(tool_ids):
             raise ValueError
@@ -1401,4 +1507,8 @@ def model_summary_v2(llm) -> dict:
             "search_count": len(searches), "fetch_count": len(fetches),
             "search_mode": SEARCH_MODE, "all_required_completed": True, "budget": budget,
             **({"clean_output_policy_id": output_policy, "clean_output_codec_id": CLEAN_SLOTS_WIRE_V1}
-               if output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 else {})}
+               if output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 else {}),
+            **({'clean_output_policy_id': output_policy, 'clean_output_codec_id': CLEAN_COMPACT_LISTS_WIRE_V1,
+                'regeneration_policy_id': CLEAN_REGENERATION_POLICY_V1,
+                'accepted_call_count': len(chats) - rejected_count, 'rejected_call_count': rejected_count}
+               if compact else {})}

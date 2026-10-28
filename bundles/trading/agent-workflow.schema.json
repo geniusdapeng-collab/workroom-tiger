@@ -214,7 +214,7 @@
             "response_ids": {
               "type": "array",
               "minItems": 5,
-              "maxItems": 100,
+              "maxItems": 160,
               "items": {
                 "type": "string",
                 "minLength": 1,
@@ -225,7 +225,7 @@
             "call_count": {
               "type": "integer",
               "minimum": 5,
-              "maximum": 100
+              "maximum": 160
             },
             "required_stages": {
               "type": "array",
@@ -273,11 +273,31 @@
             },
             "clean_output_policy_id": {
               "type": "string",
-              "const": "tiger.clean-output.responses-slots.v1"
+              "enum": [
+                "tiger.clean-output.responses-slots.v1",
+                "tiger.clean-output.compact-lists-regeneration.v1"
+              ]
             },
             "clean_output_codec_id": {
               "type": "string",
-              "const": "tiger.clean-slots-wire.v1"
+              "enum": [
+                "tiger.clean-slots-wire.v1",
+                "tiger.clean-compact-lists-wire.v1"
+              ]
+            },
+            "regeneration_policy_id": {
+              "type": "string",
+              "const": "tiger.model-regeneration.clean-schema.v1"
+            },
+            "accepted_call_count": {
+              "type": "integer",
+              "minimum": 6,
+              "maximum": 160
+            },
+            "rejected_call_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 56
             }
           }
         },

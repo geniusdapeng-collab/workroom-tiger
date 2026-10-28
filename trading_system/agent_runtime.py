@@ -54,19 +54,27 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
     upgrade = profile in UPGRADE_POLICIES
-    from .llm.request_budget import BUDGET_POLICY_V3, policy_limits
-    selected_budget = (BUDGET_POLICY_V3 if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
-    if selected_budget is not None and (not upgrade or selected_budget != BUDGET_POLICY_V3):
-        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
+    from .llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4, policy_limits
     from .llm.clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                                   CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
-    selected_clean = ((CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 if upgrade and selected_budget == BUDGET_POLICY_V3 else None)
+                                   CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                   CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+    # Explicit historical clean selectors continue to select their original
+    # budget. Only the current compact path admits the expanded source policy.
+    current_compact = clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY or clean_output_policy_id == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+    selected_budget = ((BUDGET_POLICY_V4 if current_compact else BUDGET_POLICY_V3) if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
+    if selected_budget is not None and (not upgrade or selected_budget not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
+    selected_clean = ((CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1 if upgrade and selected_budget in (BUDGET_POLICY_V3, BUDGET_POLICY_V4) else None)
                       if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY else clean_output_policy_id)
     if selected_clean is not None and (type(selected_clean) is not str or not upgrade
             or selected_clean not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                                      CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
-            or selected_budget != BUDGET_POLICY_V3):
+                                      CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                      CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+            or selected_budget not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+            or selected_budget == BUDGET_POLICY_V4 and selected_clean != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1):
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen clean output policy")
+    if selected_budget == BUDGET_POLICY_V4 and selected_clean != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+        raise EvidenceInvalid("RESULT_INVALID", "Expanded budget requires the compact clean output policy")
     required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
     policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
@@ -86,7 +94,7 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
         "date_basis": "admission instant in market timezone",
         "search_collection_budget_seconds": 45.0,
         "search_cleanup_budget_seconds": 15.0,
-        "business_deadline_seconds": DEADLINE_SECONDS,
+        "business_deadline_seconds": policy_limits(selected_budget)["deadline_seconds"],
         "access_challenges": "refuse",
         "stages": daily_stage_contract(required, upgrade),
         "limitations": [
@@ -138,6 +146,12 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
         if selected_clean == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1:
             from .llm.required import CLEAN_SLOTS_WIRE_V1
             value["clean_output_codec_id"] = CLEAN_SLOTS_WIRE_V1
+        if selected_clean == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+            from .llm.clean_output import CLEAN_COMPACT_LISTS_WIRE_V1, CLEAN_REGENERATION_POLICY_V1
+            value.update(clean_output_codec_id=CLEAN_COMPACT_LISTS_WIRE_V1,
+                         regeneration_policy_id=CLEAN_REGENERATION_POLICY_V1,
+                         clean_regeneration_limits={"max_per_batch": 1,
+                            "max_per_run": 56 if selected_budget == BUDGET_POLICY_V4 else 4})
         value["limitations"][1] = "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
         value["limitations"] += [
             "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
@@ -148,7 +162,9 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
     return value
 
 
-def frozen_clock(instant: datetime | None = None) -> dict:
+def frozen_clock(instant: datetime | None = None, *, budget_policy_id=None) -> dict:
+    from .llm.request_budget import policy_limits
+    deadline_seconds = policy_limits(budget_policy_id)["deadline_seconds"]
     instant = instant or datetime.now().astimezone()
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise EvidenceInvalid("RESULT_INVALID", "Admission requires an aware timestamp")
@@ -160,15 +176,15 @@ def frozen_clock(instant: datetime | None = None) -> dict:
             "market_timezone": "America/New_York",
             "market_timestamp": market.isoformat(), "run_date": market.date().isoformat(),
             "deadline_at_utc": datetime.fromtimestamp(
-                utc.timestamp() + DEADLINE_SECONDS, timezone.utc).isoformat()}
+                utc.timestamp() + deadline_seconds, timezone.utc).isoformat()}
 
 
-def validate_clock(clock: dict) -> None:
+def validate_clock(clock: dict, *, budget_policy_id=None) -> None:
     if not isinstance(clock, dict):
         raise EvidenceInvalid("RESULT_INVALID", "Missing admission clock")
     try:
         host = datetime.fromisoformat(clock["host_timestamp"])
-        expected = frozen_clock(host)
+        expected = frozen_clock(host, budget_policy_id=budget_policy_id)
     except (TypeError, ValueError, KeyError) as exc:
         raise EvidenceInvalid("RESULT_INVALID", "Invalid admission clock") from exc
     if clock != expected:
@@ -563,7 +579,7 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
     if (request != expected or not isinstance(request.get("idempotency_key"), str)
             or not KEY_RE.fullmatch(request["idempotency_key"])):
         raise EvidenceInvalid("RESULT_INVALID", "Stored request differs from fixed profile")
-    validate_clock(admission["clock"])
+    validate_clock(admission["clock"], budget_policy_id=policy["execution"].get("budget_policy_id"))
     source = verify_source(run)
     if admission.get("source_sha256") != digest(read_bytes(run, "source-manifest.json")):
         raise EvidenceInvalid("EVIDENCE_HASH_MISMATCH", "Admission source identity differs")

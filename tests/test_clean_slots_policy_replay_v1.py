@@ -26,9 +26,9 @@ CODEC = "tiger.clean-slots-wire.v1"
 
 
 @pytest.mark.parametrize("profile", list(UPGRADE_POLICIES))
-def test_new_admission_selects_exact_slots_policy_codec_and_v3_budget(profile):
+def test_explicit_historical_admission_selects_exact_slots_policy_codec_and_v3_budget(profile):
     from trading_system.llm.clean_output import CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
-    policy = policy_manifest(profile)
+    policy = policy_manifest(profile, clean_output_policy_id=RESPONSES_POLICY)
     assert CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 == RESPONSES_POLICY
     assert policy["execution"]["clean_output_policy_id"] == RESPONSES_POLICY
     assert policy["clean_output_policy_id"] == RESPONSES_POLICY
@@ -140,7 +140,7 @@ def install_responses_fixture(monkeypatch, *, mutate_response=None, empty_source
 
 def seal_fixture(root, admission, phase):
     profile = next(key for key, row in UPGRADE_POLICIES.items() if row[1] == phase)
-    policy = policy_manifest(profile)
+    policy = policy_manifest(profile, clean_output_policy_id=RESPONSES_POLICY)
     atomic_json(root, "policy.json", policy)
     admission["policy_sha256"] = digest(json_bytes(policy))
     shutil.rmtree(root / "source")
@@ -424,7 +424,7 @@ def test_slots_actual_admission_does_not_accept_selector_as_request_parameter(tm
     root.mkdir()
     (root / "work").mkdir()
     profile = next(iter(UPGRADE_POLICIES))
-    policy = policy_manifest(profile)
+    policy = policy_manifest(profile, clean_output_policy_id=RESPONSES_POLICY)
     request = {"schema_version": "tiger.agent-request/v1", "profile": profile,
         "paper_account": "public-usd", "idempotency_key": "SYNTHETIC_TEST-responses-admission"}
     atomic_json(root, "policy.json", policy)

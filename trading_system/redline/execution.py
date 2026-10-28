@@ -105,21 +105,28 @@ class ExecutionPolicy:
 
     def __post_init__(self):
         if self.budget_policy_id is not None:
-            from ..llm.request_budget import BUDGET_POLICY_V3
+            from ..llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
             if (type(self.budget_policy_id) is not str or self.policy_id not in UPGRADE_POLICY_IDS
-                    or self.budget_policy_id != BUDGET_POLICY_V3):
+                    or self.budget_policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)):
                 raise ExecutionContractError("Unsupported versioned request budget policy")
+            if self.budget_policy_id == BUDGET_POLICY_V4:
+                from ..llm.clean_output import CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+                if self.clean_output_policy_id != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+                    raise ExecutionContractError("Expanded budget requires the compact clean output policy")
         if self.clean_output_policy_id is not None:
             from ..llm.clean_output import (CLEAN_OUTPUT_POLICY_V1,
                                            CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                                           CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
-            from ..llm.request_budget import BUDGET_POLICY_V3
+                                           CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                           CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+            from ..llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
             if (type(self.clean_output_policy_id) is not str
                     or self.policy_id not in UPGRADE_POLICY_IDS
                     or self.clean_output_policy_id not in (CLEAN_OUTPUT_POLICY_V1,
                                                           CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                                                          CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
-                    or self.budget_policy_id != BUDGET_POLICY_V3):
+                                                          CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                                          CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+                    or self.budget_policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+                    or self.budget_policy_id == BUDGET_POLICY_V4 and self.clean_output_policy_id != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1):
                 raise ExecutionContractError("Unsupported versioned clean output policy")
         required = self.policy_id in MODEL_POLICY_IDS
         if not self.policy_id or self.model_mode != ("enabled" if required else "disabled"):

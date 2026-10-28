@@ -13,7 +13,7 @@ export const PROFILE = "us-public-paper-v1";
 export const REQUIRED_PROFILE = "us-public-model-required-paper-v1";
 export const OPERATIONS = Object.freeze(["doctor", "describe", "run", "status", "receipt", "verify"]);
 export const LIMITS = Object.freeze({ inputBytes: 65536, outputBytes: 1024 * 1024, v2OutputBytes: 4 * 1024 * 1024, stderrBytes: 65536,
-  frameBytes: 131072, requestMs: 60000, waitMs: 2460000, pollMs: 1000, depth: 64, concurrent: 4,
+  frameBytes: 131072, requestMs: 60000, waitMs: 7260000, pollMs: 1000, depth: 64, concurrent: 4,
   terminateMs: 250, cleanupMs: 2000 });
 const RUN_ID = /^run-[0-9a-f]{32}$/u;
 const TERMINAL_OK = new Set(["completed", "completed_degraded"]);
@@ -289,10 +289,10 @@ export function validateEnvelope(envelope, operation, input = {}) {
         || envelope.verification?.ok !== true || !envelope.verification.receipt_sha256)) throw invalid();
     if (operation === "verify" && envelope.summary !== null) throw invalid();
     const summaryModel = envelope.summary?.model;
-    const slots = plain(summaryModel) && ["clean_output_policy_id", "clean_output_codec_id"].some(key => Object.hasOwn(summaryModel, key));
+    const selectedClean = plain(summaryModel) && ["clean_output_policy_id", "clean_output_codec_id", "regeneration_policy_id", "accepted_call_count", "rejected_call_count"].some(key => Object.hasOwn(summaryModel, key));
     // New protocol claims must enter the complete v2 validator, including when
     // a forged disclosure would otherwise skip model validation altogether.
-    if (slots && (envelope.status !== "completed"
+    if (selectedClean && (envelope.status !== "completed"
       || envelope.summary.disclosures.model_mode !== "enabled"
       || envelope.summary.disclosures.model_required !== true
       || envelope.summary.execution_policy !== "whitepaper-execution-v2")) throw invalid();
@@ -306,7 +306,7 @@ export function validateEnvelope(envelope, operation, input = {}) {
             || !["daily", "premarket", "intraday"].includes(envelope.summary.workflow_phase)) throw invalid();
         validateModelV2(model);
       } else if (envelope.status !== "completed" || envelope.summary.disclosures.model_required !== true
-        || !plain(model) || model.search_count !== 14 || model.fetch_count !== undefined || model.budget !== undefined || model.research_contract !== undefined || model.required_stages.join("|") !== stages.join("|")
+        || !plain(model) || model.call_count > 100 || model.response_ids.length > 100 || model.search_count !== 14 || model.fetch_count !== undefined || model.budget !== undefined || model.research_contract !== undefined || model.required_stages.join("|") !== stages.join("|")
         || new Set(model.response_ids).size !== model.call_count || model.response_ids.length !== model.call_count
         || Object.keys(model.stage_counts).sort().join("|") !== [...stages].sort().join("|")
         || stages.some(stage => !Number.isSafeInteger(model.stage_counts[stage]) || model.stage_counts[stage] < 1)

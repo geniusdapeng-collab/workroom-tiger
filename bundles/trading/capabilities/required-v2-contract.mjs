@@ -9,8 +9,13 @@ export const MODEL_STAGES_V2 = Object.freeze(['clean.llm_semantic', 'tech.sentim
 const LIMITS = Object.freeze({ max_chat_calls: 40, max_tokens: 300000, max_search_calls: 60, max_fetch_calls: 20, max_remote_requests: 120, max_cost_usd: 1, deadline_seconds: 2400 });
 const BUDGET_POLICY_V3 = 'tiger.budget-policy.v3';
 const LIMITS_V3 = Object.freeze({ ...LIMITS, max_tokens: 600000 });
+const BUDGET_POLICY_V4 = 'tiger.budget-policy.v4';
+const LIMITS_V4 = Object.freeze({ ...LIMITS, max_chat_calls: 160, max_tokens: 20000000, max_remote_requests: 240, max_cost_usd: 30, deadline_seconds: 7200 });
 const CLEAN_SLOTS_POLICY_V1 = 'tiger.clean-output.responses-slots.v1';
 const CLEAN_SLOTS_CODEC_V1 = 'tiger.clean-slots-wire.v1';
+const CLEAN_COMPACT_REGEN_POLICY_V1 = 'tiger.clean-output.compact-lists-regeneration.v1';
+const CLEAN_COMPACT_CODEC_V1 = 'tiger.clean-compact-lists-wire.v1';
+const CLEAN_REGENERATION_POLICY_V1 = 'tiger.model-regeneration.clean-schema.v1';
 const HASH = /^[a-f0-9]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const reject = message => { throw new Error(message); };
@@ -41,45 +46,60 @@ export function publicUrl(value) {
       || [...url.searchParams.keys()].some(key => /token|key|signature|authorization|credential|secret|password/i.test(key.replace(/[_-]/g, '')))) reject('Source URL must be public and credential free');
 }
 export function validateModelV2(model) {
-  const slots = plain(model) && (Object.hasOwn(model, 'clean_output_policy_id') || Object.hasOwn(model, 'clean_output_codec_id'));
-  exact(model, ['provider', 'model', 'release', 'required', 'research_contract', 'response_ids', 'call_count', 'required_stages', 'stage_counts', 'search_count', 'fetch_count', 'search_mode', 'all_required_completed', 'budget', ...(slots ? ['clean_output_policy_id', 'clean_output_codec_id'] : [])], 'V2 model');
-  if (slots && (model.clean_output_policy_id !== CLEAN_SLOTS_POLICY_V1 || model.clean_output_codec_id !== CLEAN_SLOTS_CODEC_V1)) reject('Unsupported clean output policy or codec');
+  const selected = plain(model) && (Object.hasOwn(model, 'clean_output_policy_id') || Object.hasOwn(model, 'clean_output_codec_id'));
+  const compact = selected && model.clean_output_policy_id === CLEAN_COMPACT_REGEN_POLICY_V1;
+  const budget = model.budget;
+  const v3 = plain(budget) && budget.schema === 'tiger.request-budget.v3';
+  const v4 = plain(budget) && budget.schema === 'tiger.request-budget.v4';
+  const versioned = v3 || v4;
+  const policyId = v4 ? BUDGET_POLICY_V4 : BUDGET_POLICY_V3;
+  const limits = v4 ? LIMITS_V4 : v3 ? LIMITS_V3 : LIMITS;
+  if (v4 && !compact) reject('Expanded budget requires the compact clean output policy');
+  exact(model, ['provider', 'model', 'release', 'required', 'research_contract', 'response_ids', 'call_count', 'required_stages', 'stage_counts', 'search_count', 'fetch_count', 'search_mode', 'all_required_completed', 'budget', ...(selected ? ['clean_output_policy_id', 'clean_output_codec_id'] : []), ...(compact ? ['regeneration_policy_id', 'accepted_call_count', 'rejected_call_count'] : [])], 'V2 model');
+  if (selected && !(model.clean_output_policy_id === CLEAN_SLOTS_POLICY_V1 && model.clean_output_codec_id === CLEAN_SLOTS_CODEC_V1
+      || compact && model.clean_output_codec_id === CLEAN_COMPACT_CODEC_V1)) reject('Unsupported clean output policy or codec');
   if (model.provider !== 'deepseek' || model.model !== 'deepseek-flash' || model.release !== 'DeepSeek-V4.1-Flash-1017' || model.required !== true || model.all_required_completed !== true || model.research_contract !== 'tiger.short-term-research.v2' || model.search_mode !== 'provider_native_search') reject('Exact completed required model is mandatory');
   if (!Array.isArray(model.required_stages) || model.required_stages.join('|') !== MODEL_STAGES_V2.join('|')) reject('All six ordered semantic stages are required');
   exact(model.stage_counts, MODEL_STAGES_V2, 'V2 stage counters');
-  for (const count of Object.values(model.stage_counts)) if (!integer(count, 1, LIMITS.max_chat_calls)) reject('Stage count is invalid');
-  if (!integer(model.call_count, 6, LIMITS.max_chat_calls) || Object.values(model.stage_counts).reduce((a, b) => a + b, 0) !== model.call_count || !integer(model.search_count, 14, LIMITS.max_search_calls) || !integer(model.fetch_count, 0, LIMITS.max_fetch_calls)) reject('Completed I/O counters are invalid');
-  ids(model.response_ids, LIMITS.max_chat_calls);
+  for (const count of Object.values(model.stage_counts)) if (!integer(count, 1, limits.max_chat_calls)) reject('Stage count is invalid');
+  if (!integer(model.call_count, 6, limits.max_chat_calls) || Object.values(model.stage_counts).reduce((a, b) => a + b, 0) !== model.call_count || !integer(model.search_count, 14, limits.max_search_calls) || !integer(model.fetch_count, 0, limits.max_fetch_calls)) reject('Completed I/O counters are invalid');
+  if (compact) {
+    const acceptedClean = model.stage_counts['clean.llm_semantic'] - model.rejected_call_count;
+    if (model.regeneration_policy_id !== CLEAN_REGENERATION_POLICY_V1
+        || !integer(model.accepted_call_count, 6, limits.max_chat_calls)
+        || !integer(model.rejected_call_count, 0, v4 ? 56 : 4)
+        || model.accepted_call_count + model.rejected_call_count !== model.call_count
+        || !integer(acceptedClean, 1, limits.max_chat_calls)
+        || model.rejected_call_count > acceptedClean) reject('Bounded clean regeneration does not reconcile');
+  }
+  ids(model.response_ids, limits.max_chat_calls);
   if (model.response_ids.length !== model.call_count) reject('Every chat needs a unique provider response');
-  const budget = model.budget;
-  const v3 = plain(budget) && budget.schema === 'tiger.request-budget.v3';
-  if (slots && !v3) reject('Clean slots require the registered v3 budget');
-  const limits = v3 ? LIMITS_V3 : LIMITS;
-  exact(budget, ['schema', 'limits', 'pricing', 'counts', 'actual_tokens', 'reserved_tokens', 'estimated_charged_usd', 'estimated_reserved_usd', 'frozen', 'records', ...(v3 ? ['policy_id'] : [])], 'Request budget');
-  if ((!v3 && budget.schema !== 'tiger.request-budget.v2') || v3 && budget.policy_id !== BUDGET_POLICY_V3 || budget.frozen !== false || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0) reject('Every paid request must have settled usage under a reviewed policy');
+  if (selected && !versioned) reject('Selected clean output requires its registered versioned budget');
+  exact(budget, ['schema', 'limits', 'pricing', 'counts', 'actual_tokens', 'reserved_tokens', 'estimated_charged_usd', 'estimated_reserved_usd', 'frozen', 'records', ...(versioned ? ['policy_id'] : [])], 'Request budget');
+  if ((!versioned && budget.schema !== 'tiger.request-budget.v2') || versioned && budget.policy_id !== policyId || budget.frozen !== false || budget.reserved_tokens !== 0 || budget.estimated_reserved_usd !== 0) reject('Every paid request must have settled usage under a reviewed policy');
   exact(budget.limits, Object.keys(limits), 'Request limits');
   if (Object.entries(limits).some(([key, value]) => budget.limits[key] !== value)) reject('Request budget differs from the reviewed policy');
   const price = budget.pricing;
   exact(price, ['observed_date', 'source', 'model', 'token_upper_usd_per_million', 'search_upper_usd_per_request', 'fetch_upper_usd_per_request', 'basis', 'invoice'], 'Budget pricing');
   if (price.observed_date !== '2026-10-27' || price.source !== 'https://api-docs.deepseek.com/quick_start/pricing/' || price.model !== 'deepseek-flash' || price.token_upper_usd_per_million !== 1.2 || price.search_upper_usd_per_request !== .00075 || price.fetch_upper_usd_per_request !== .00075 || price.invoice !== false) reject('Unreviewed budget pricing');
   plainText(price.basis, 500);
-  if (v3 && price.basis !== 'Peak output price applied to all tokens; every native request charged conservatively.') reject('Unreviewed budget pricing basis');
+  if (versioned && price.basis !== 'Peak output price applied to all tokens; every native request charged conservatively.') reject('Unreviewed budget pricing basis');
   exact(budget.counts, ['chat', 'search', 'fetch'], 'Budget counts');
   if (budget.counts.chat !== model.call_count || budget.counts.search !== model.search_count || budget.counts.fetch !== model.fetch_count) reject('Budget and model counts disagree');
-  if (!Array.isArray(budget.records) || budget.records.length !== model.call_count + model.search_count + model.fetch_count || budget.records.length > LIMITS.max_remote_requests) reject('Budget record coverage differs');
+  if (!Array.isArray(budget.records) || budget.records.length !== model.call_count + model.search_count + model.fetch_count || budget.records.length > limits.max_remote_requests) reject('Budget record coverage differs');
   let actual = 0, charged = 0; const counts = { chat: 0, search: 0, fetch: 0 }, calls = new Set();
   for (const [index, record] of budget.records.entries()) {
     exact(record, ['reservation', 'status', 'usage'], 'Budget record');
     const r = record.reservation;
-    exact(r, ['schema', 'call_id', 'kind', 'sequence', 'request_sha256', 'input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound', 'estimated_cost_upper_usd', 'counts_before', 'actual_tokens_before', 'reserved_tokens_before', ...(v3 ? ['policy_id'] : [])], 'Budget reservation');
-    if (record.status !== 'settled' || r.schema !== (v3 ? 'tiger.request-budget-reservation.v3' : 'tiger.request-budget-reservation.v2') || v3 && r.policy_id !== BUDGET_POLICY_V3 || !/^[a-f0-9]{32}$/.test(r.call_id) || calls.has(r.call_id) || !hash(r.request_sha256) || !Object.hasOwn(counts, r.kind) || r.sequence !== index + 1) reject('Unsettled or duplicate request reservation');
+    exact(r, ['schema', 'call_id', 'kind', 'sequence', 'request_sha256', 'input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound', 'estimated_cost_upper_usd', 'counts_before', 'actual_tokens_before', 'reserved_tokens_before', ...(versioned ? ['policy_id'] : [])], 'Budget reservation');
+    if (record.status !== 'settled' || r.schema !== (v4 ? 'tiger.request-budget-reservation.v4' : v3 ? 'tiger.request-budget-reservation.v3' : 'tiger.request-budget-reservation.v2') || versioned && r.policy_id !== policyId || !/^[a-f0-9]{32}$/.test(r.call_id) || calls.has(r.call_id) || !hash(r.request_sha256) || !Object.hasOwn(counts, r.kind) || r.sequence !== index + 1) reject('Unsettled or duplicate request reservation');
     calls.add(r.call_id);
     exact(r.counts_before, ['chat', 'search', 'fetch'], 'Admission counters');
     if (Object.keys(counts).some(kind => r.counts_before[kind] !== counts[kind]) || r.actual_tokens_before !== actual || r.reserved_tokens_before !== 0) reject('Admission ledger does not reconcile');
     for (const key of ['input_token_upper_bound', 'output_token_upper_bound', 'token_upper_bound']) if (!integer(r[key], 0, limits.max_tokens)) reject('Token reservation invalid');
     if (r.token_upper_bound !== r.input_token_upper_bound + r.output_token_upper_bound) reject('Token bounds do not reconcile');
     const reservationCost = r.kind === 'chat' ? r.token_upper_bound * price.token_upper_usd_per_million / 1e6 : price[`${r.kind}_upper_usd_per_request`];
-    if (!finite(r.estimated_cost_upper_usd, 0, 1) || Math.abs(r.estimated_cost_upper_usd - reservationCost) > 1e-12) reject('Reservation cost is invalid');
+    if (!finite(r.estimated_cost_upper_usd, 0, limits.max_cost_usd) || Math.abs(r.estimated_cost_upper_usd - reservationCost) > 1e-12) reject('Reservation cost is invalid');
     if (actual + r.token_upper_bound > limits.max_tokens || charged + reservationCost > limits.max_cost_usd + 1e-12
         || counts[r.kind] >= limits[`max_${r.kind}_calls`] || index >= limits.max_remote_requests) reject('Request reservation exceeds the prepaid policy');
     if (r.kind === 'chat') {

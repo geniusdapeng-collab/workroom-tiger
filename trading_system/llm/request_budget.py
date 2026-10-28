@@ -29,6 +29,7 @@ LIMITS = {
 }
 LEGACY_BUDGET_POLICY_ID = "tiger.budget-policy.v2"
 BUDGET_POLICY_V3 = "tiger.budget-policy.v3"
+BUDGET_POLICY_V4 = "tiger.budget-policy.v4"
 
 
 def policy_limits(policy_id=None) -> dict:
@@ -37,6 +38,10 @@ def policy_limits(policy_id=None) -> dict:
         return deepcopy(LIMITS)
     if type(policy_id) is str and policy_id == BUDGET_POLICY_V3:
         return {**LIMITS, "max_tokens": 600000}
+    if type(policy_id) is str and policy_id == BUDGET_POLICY_V4:
+        return {**LIMITS, "max_chat_calls": 160, "max_tokens": 20000000,
+                "max_remote_requests": 240, "max_cost_usd": 30.0,
+                "deadline_seconds": 7200}
     raise BudgetRefused("INVALID_BUDGET_POLICY")
 
 
@@ -61,10 +66,12 @@ def _canonical(value):
 
 def token_upper_bound(request: dict, *, allow_clean_function: bool = False,
                       allow_clean_responses: bool = False,
-                      allow_clean_slots: bool = False) -> tuple[int, int]:
+                      allow_clean_slots: bool = False,
+                      allow_clean_compact_regeneration: bool = False) -> tuple[int, int]:
     """Text and opted-in fixed clean protocols; no image/file/tool loops."""
     if (not isinstance(request, dict) or type(allow_clean_function) is not bool
-            or type(allow_clean_responses) is not bool or type(allow_clean_slots) is not bool):
+            or type(allow_clean_responses) is not bool or type(allow_clean_slots) is not bool
+            or type(allow_clean_compact_regeneration) is not bool):
         raise BudgetRefused("INVALID_BUDGET_REQUEST")
     if allow_clean_slots:
         from .clean_output import clean_slots_responses_request_valid
@@ -80,9 +87,12 @@ def token_upper_bound(request: dict, *, allow_clean_function: bool = False,
             raise BudgetRefused("UNBOUNDED_CHAT_REQUEST")
     messages, output = request.get("messages"), request.get("max_tokens")
     bounded_function = False
+    if allow_clean_compact_regeneration:
+        from .clean_output import clean_compact_lists_function_request_valid
+        bounded_function = clean_compact_lists_function_request_valid(request)
     if allow_clean_function:
         from .clean_output import clean_function_request_valid
-        bounded_function = clean_function_request_valid(request)
+        bounded_function = bounded_function or clean_function_request_valid(request)
     if (not isinstance(messages, list) or not messages
             or type(output) is not int or not 1 <= output <= 393216
             or any(not isinstance(m, dict) or set(m) != {"role", "content"}
@@ -102,7 +112,7 @@ class BudgetGuard:
         """Select only a reviewed version. Legacy constructors remain 300k."""
         limits = policy_limits(policy_id)
         return cls(**limits, clock=clock,
-                   _policy_id=BUDGET_POLICY_V3 if policy_id == BUDGET_POLICY_V3 else None,
+                   _policy_id=policy_id if policy_id in (BUDGET_POLICY_V3, BUDGET_POLICY_V4) else None,
                    _clean_output_policy_id=clean_output_policy_id)
 
     def __init__(self, *, max_chat_calls=40, max_tokens=300000,
@@ -112,17 +122,22 @@ class BudgetGuard:
                  _clean_output_policy_id=None):
         if _clean_output_policy_id is not None:
             from .clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                                       CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+                                       CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                       CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
             if (type(_clean_output_policy_id) is not str or _clean_output_policy_id not in
-                    (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
-                    or _policy_id != BUDGET_POLICY_V3):
+                    (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                     CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1, CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+                    or _policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+                    or _policy_id == BUDGET_POLICY_V4 and _clean_output_policy_id != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1):
                 raise BudgetRefused("INVALID_BUDGET_POLICY")
+        elif _policy_id == BUDGET_POLICY_V4:
+            raise BudgetRefused("INVALID_BUDGET_POLICY")
         configured = dict(max_chat_calls=max_chat_calls, max_tokens=max_tokens,
                           max_search_calls=max_search_calls, max_fetch_calls=max_fetch_calls,
                           max_remote_requests=max_remote_requests, max_cost_usd=max_cost_usd,
                           deadline_seconds=deadline_seconds)
         ceiling = policy_limits(_policy_id)
-        if _policy_id is not None and (_policy_id != BUDGET_POLICY_V3 or configured != ceiling):
+        if _policy_id is not None and (_policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4) or configured != ceiling):
             raise BudgetRefused("INVALID_BUDGET_LIMIT")
         for key, value in configured.items():
             if (isinstance(value, bool) or not isinstance(value, (int, float))
@@ -158,11 +173,13 @@ class BudgetGuard:
             input_bound, output_bound = token_upper_bound(request) if kind == "chat" else (0, 0)
         else:
             from .clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                                       CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+                                       CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                       CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
             input_bound, output_bound = token_upper_bound(request,
                 allow_clean_function=self.clean_output_policy_id == CLEAN_OUTPUT_POLICY_V1,
                 allow_clean_responses=self.clean_output_policy_id == CLEAN_OUTPUT_RESPONSES_POLICY_V1,
-                allow_clean_slots=self.clean_output_policy_id == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1) if kind == "chat" else (0, 0)
+                allow_clean_slots=self.clean_output_policy_id == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                allow_clean_compact_regeneration=self.clean_output_policy_id == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1) if kind == "chat" else (0, 0)
         total = input_bound + output_bound
         cost = total * PRICING["token_upper_usd_per_million"] / 1000000 if kind == "chat" else PRICING[f"{kind}_upper_usd_per_request"]
         if snapshot["actual_tokens"] + snapshot["reserved_tokens"] + total > self.limits["max_tokens"]:
@@ -170,7 +187,8 @@ class BudgetGuard:
         if snapshot["estimated_charged_usd"] + snapshot["estimated_reserved_usd"] + cost > self.limits["max_cost_usd"] + 1e-12:
             raise BudgetRefused("COST_BUDGET_LIMIT")
         reservation = {
-            "schema": "tiger.request-budget-reservation.v3" if self.policy_id else "tiger.request-budget-reservation.v2", "call_id": call_id,
+            "schema": ("tiger.request-budget-reservation.v4" if self.policy_id == BUDGET_POLICY_V4 else
+                       "tiger.request-budget-reservation.v3" if self.policy_id else "tiger.request-budget-reservation.v2"), "call_id": call_id,
             "kind": kind, "sequence": len(self._records) + 1,
             "request_sha256": request_hash,
             "input_token_upper_bound": input_bound, "output_token_upper_bound": output_bound,
@@ -227,7 +245,8 @@ class BudgetGuard:
             else:
                 reserved += reservation["token_upper_bound"]
                 reserved_cost += reservation["estimated_cost_upper_usd"]
-        return {"schema": "tiger.request-budget.v3" if self.policy_id else "tiger.request-budget.v2",
+        return {"schema": ("tiger.request-budget.v4" if self.policy_id == BUDGET_POLICY_V4 else
+                           "tiger.request-budget.v3" if self.policy_id else "tiger.request-budget.v2"),
                 **({"policy_id": self.policy_id} if self.policy_id else {}), "limits": deepcopy(self.limits),
                 "pricing": deepcopy(PRICING), "counts": counts, "actual_tokens": actual,
                 "reserved_tokens": reserved, "estimated_charged_usd": charged_cost,

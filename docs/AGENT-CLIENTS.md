@@ -42,7 +42,7 @@ node scripts/tiger-agent.mjs run --python /absolute/path/to/python \
 
 六个必须真实完成的语义阶段为 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sector.narrative`、`research.candidates`、`decision.debate`。调用次数随文档批次和实际补证变化，不能把阶段数当成固定回复数。清洗逐篇保留完整摘要、逐字引文、来源归属和时效限定；下游使用完整语义索引，不能声称再次读了原文。发行人研究每批最多 3 个目标、每源最多展示 24000 字符、每批正文总量最多 60000 字符，先按发行人公平分配，本轮 Fetch/补搜优先。来源索引保留每个目标跨实际轮次累计见过的最长前缀字符数、完整性和摘要；没展示的正文不能用于新事实或完整新闻证据。
 
-每次远端调用之前须通过统一预算预留：最多 40 次 chat、300000 实际加预留 tokens、60 次 Search、20 次 Fetch、120 次远端请求、保守估算 1 USD、2400 秒。发行人子预算另限 40 次 Search、20 次 Fetch、14 次 chat。全部预留及实际 usage 必须结算一致；未知付费结果冻结，不能自动重试或规则代答。美元数是按冻结上限费率计算的估计，不是账单承诺。详见 [官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
+每次远端调用前须通过统一预算预留。当前新v2任务选择`tiger.budget-policy.v4`：最多160次chat、20000000实际加预留tokens、60次Search、20次Fetch、240次远端请求、保守估算30 USD、7200秒。旧显式v3保留600000 tokens，旧v2保留300000 tokens，其余旧限额为40 chat/120远端/1 USD/2400秒，旧回执不变。发行人子预算另限 40 次 Search、20 次 Fetch、14 次 chat。所有来源逐篇完整清洗，只有已知用量且安全的schema拒绝可完整重新生成一次，v4整轮最多追加56次；正文、来源索引和时效门槛保留，其他错误不追加尝试。全部预留及实际usage必须结算一致；未知付费结果冻结，不能规则代答。美元数是按冻结上限费率计算的估计，不是账单承诺。详见 [官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
 
 每个目标必须有市场、板块、产业链、个股、计划五段依据，并保留入场触发、反证、风险、缺口。`technical_flow_v2` 可以没有公司利好新闻，但仍需具体量价/结构/主线与事件未知边界；`news_event_v2` 的充分证据必须有冻结接纳时刻前 7 日内、归属本发行人、实际完整展示的原始资料。不同域名不自动算独立来源；模型识别原始来源，无法识别时保持未知。空风险预警也不能自动变成风险维度满分。
 
@@ -50,7 +50,7 @@ node scripts/tiger-agent.mjs run --python /absolute/path/to/python \
 
 最终模型的 source_ids 恰好包含自己的行情 ID，至多八篇直接文档引用；发布 registry 可扩展到十六篇，以保留 thesis 的原始/日期/身份引用。watch 的仓位为 0，执行价格、止损、股数、风险、时间止损均为 null，不能变成零价订单。buy 的数值全部绑定原 TradePick，以本轮 paper NAV 为参考；`valid_for` 是下一交易日纽约 16:00。已有机会持续记录 WATCH/QUALIFIED/INTENT_PENDING/HELD/EXIT_PENDING 等状态；触价只请求重新评估，待执行意向必须重新检查新鲜报价及当前完整风险。真实持仓、现金与成交仍来自单独实际账户证据。
 
-任何模型/原生搜索不可用、401/配额错误、截断、错误模型、空输出、缺项、schema 不符、缺少真实调用或文档/阶段输出与调用不一致，均停止整个任务，不透传，不规则代答，不发布新账户或网站成功。成功只允许 `completed`；`completed_degraded` 不满足此配置。真实业务成功须通过 receipt/verify 独立重算全部阶段 I/O 和最终计划。所有自动测试里的模拟 HTTP 仅证明契约，不能算作真实模型使用。
+模型/原生搜索不可用、401/配额错误、截断、错误模型、空输出、缺少真实调用或文档/阶段输出与调用不一致，均停止整个任务；schema拒绝只允许前述明确、有界的完整重新生成，仍不通过即停止。失败任务不透传，不规则代答，不发布新账户或网站成功。成功只允许 `completed`；`completed_degraded` 不满足此配置。真实业务成功须通过 receipt/verify 独立重算全部阶段 I/O 和最终计划。所有自动测试里的模拟 HTTP 仅证明契约，不能算作真实模型使用。
 
 ## 2. CLI：提交一次，持续查询同一个身份
 
@@ -93,7 +93,7 @@ node scripts/tiger-agent.mjs verify --python /absolute/path/to/python \
 
 查询可以保持 readonly，但必须使用提交时同一个 state-root。`receipt` 独立验证证据和账户提交后才提供选股、持仓、挂单、现金、权益、日期及数据/模型限制；`verify` 提供验证结果而不重复业务动作。CLI 每次仅输出一个 JSON envelope；所有返回字段的契约在 `bundles/trading/agent-workflow.schema.json`。
 
-需要持续等待时，原 `run` 命令可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口 2460 秒；Python 业务 deadline 独立为 2400 秒。Node 单次提交/查询上限 60 秒，等待循环只轮询已有 `run_id`，不会重新提交。
+需要持续等待时，原 `run` 命令可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口7260秒；Python业务deadline按可信预算版本独立执行（当前v4为7200秒，旧版本2400秒）。显式1..3600秒选项用于较短观察，不修改业务期限。Node 单次提交/查询上限 60 秒，等待循环只轮询已有 `run_id`，不会重新提交。
 
 | 场景 | 正确行为 |
 |---|---|
@@ -185,6 +185,7 @@ TIGER_TEST_PYTHON=/absolute/path/to/python node --test \
   bundles/trading/capabilities/workflow-client.test.mjs \
   bundles/trading/capabilities/workflow-model-required.test.mjs \
   bundles/trading/capabilities/workflow-short-term-v2.test.mjs \
+  bundles/trading/capabilities/workflow-clean-regeneration.test.mjs \
   bundles/trading/capabilities/repo.test.mjs \
   scripts/tiger-agent.test.mjs scripts/tiger-agent-mcp.test.mjs \
   scripts/tiger-agent-config.test.mjs \

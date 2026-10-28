@@ -534,6 +534,9 @@ class DeepSeekRequiredClient:
         self.fetch_receipts: list[dict] = []
         self._remote_requests = 0
         self._used_call_ids: set[str] = set()
+        self._clean_operation_lock = threading.Lock()
+        self._clean_logical_calls: set[str] = set()
+        self._clean_regenerations_used = 0
         self.budget = None
         if getattr(execution, "upgrade", False):
             from .request_budget import BudgetGuard
@@ -661,12 +664,14 @@ class DeepSeekRequiredClient:
             _fail("ENDPOINT_NOT_ALLOWED")
         if len(_canonical(request)) > MAX_RESPONSE_BYTES:
             _fail("REQUEST_TOO_LARGE")
-        from .clean_output import clean_output_policy, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+        from .clean_output import (clean_output_policy, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                   CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
         # New slots policy transmits the exact canonical bytes prepaid and
         # hashed by BudgetGuard. Historical protocols retain requests' original
         # json= framing, so archived request builders and behavior stay exact.
-        canonical_slots = (path == "/responses" and
-            clean_output_policy(self.execution) == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+        output_policy = clean_output_policy(self.execution)
+        canonical_slots = ((path == "/responses" and output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+            or (path == "/beta/chat/completions" and output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1))
         body = {"data": _canonical(request)} if canonical_slots else {"json": request}
         response = None
         body_deadline = None
@@ -873,12 +878,17 @@ class DeepSeekRequiredClient:
                       reasoning_effort: str = "high") -> dict:
         stage = self._stage()
         from .clean_output import (clean_output_policy, CleanOutputInvalid,
-            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+            CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
         try:
             output_policy = clean_output_policy(self.execution)
         except CleanOutputInvalid:
             _fail("TRUSTED_CONFIGURATION_MISMATCH")
         if output_policy is not None and stage == "clean.llm_semantic":
+            if output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+                return self._complete_clean_compact(system=system, user=user, schema_hint=schema_hint,
+                    max_tokens=max_tokens, temperature=temperature, schema=schema,
+                    reasoning_effort=reasoning_effort)
             if output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1):
                 return self._complete_clean_responses(system=system, user=user, schema_hint=schema_hint,
                     max_tokens=max_tokens, temperature=temperature, schema=schema,
@@ -967,6 +977,180 @@ class DeepSeekRequiredClient:
         proof = self._record_call("model.deepseek.chat", inputs, invoke, observation=observation)
         self.receipts.append({k: v for k, v in proof.items() if k not in ("schema", "parsed", "response")})
         return proof["parsed"]
+
+    def _complete_clean_compact(self, *, system: str, user: str, schema_hint: dict,
+                                max_tokens: int, temperature: float, schema: dict,
+                                reasoning_effort: str) -> dict:
+        """One complete batch; only a sealed known schema rejection may regenerate.
+
+        The nonblocking guard serializes the entire logical operation. Every
+        generation has its own durable call_io input before paid invoke. A
+        crash/unknown result cannot resume or consume this logical call again.
+        """
+        from copy import deepcopy
+        from .clean_output import (CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1, CLEAN_COMPACT_LISTS_WIRE_V1,
+            CLEAN_REGENERATION_POLICY_V1, CLEAN_OUTPUT_FUNCTION, CLEAN_OUTPUT_PATH,
+            CleanOutputInvalid, clean_output_policy, clean_compact_lists_schema_v1,
+            clean_compact_lists_output_v1, build_clean_compact_lists_request,
+            build_clean_compact_lists_safe_response, clean_regeneration_feedback_v1,
+            clean_logical_call_sha256, clean_compact_execution_limits)
+        from .candidate_research import assessment_from_execution
+        from .request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
+        if (self.budget is None or self.budget.policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+                or self.budget.policy_id != getattr(getattr(self.execution, 'policy', None), 'budget_policy_id', None)
+                or getattr(self.execution, 'upgrade', False) is not True
+                or self._stage() != 'clean.llm_semantic'
+                or clean_output_policy(self.execution) != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+                or reasoning_effort != 'none'):
+            _fail('INVALID_CHAT_REQUEST')
+        if not self._clean_operation_lock.acquire(blocking=False):
+            _fail('INVALID_CHAT_REQUEST')
+        try:
+            schema = deepcopy(schema)
+            _check_schema(schema)
+            if _canonical(self._clean(schema)) != _canonical(schema):
+                _fail('UNSAFE_OUTPUT_SCHEMA')
+            try:
+                # Safety checks do not modify this protocol's complete input.
+                if (type(system) is not str or type(user) is not str
+                        or self._text(system) != system or self._text(user) != user
+                        or _canonical(self._clean(schema_hint)) != _canonical(schema_hint)):
+                    _fail('INVALID_CHAT_REQUEST')
+                original_request = build_clean_compact_lists_request(system=system, user=user,
+                    schema_hint=schema_hint, schema=schema, max_tokens=max_tokens, temperature=temperature)
+                local = clean_compact_lists_schema_v1(schema)
+                batch_limit, regeneration_limit = clean_compact_execution_limits(self.execution)
+                if len({name.split('__', 1)[0] for name in local['properties']}) > batch_limit:
+                    _fail('INVALID_CHAT_REQUEST')
+                logical = clean_logical_call_sha256(run_id=getattr(self.execution, 'run_id', None),
+                    assessment=assessment_from_execution(self.execution), request=original_request, schema=schema)
+            except CleanOutputInvalid:
+                _fail('INVALID_CHAT_REQUEST')
+            if logical in self._clean_logical_calls:
+                _fail('RESPONSE_IDENTITY_REUSED_OR_UNSAFE')
+            self._clean_logical_calls.add(logical)
+            previous, feedback = None, None
+            for generation in (0, 1):
+                request = (original_request if generation == 0 else
+                    build_clean_compact_lists_request(system=system, user=user, schema_hint=schema_hint,
+                        schema=schema, max_tokens=max_tokens, temperature=temperature,
+                        regeneration_feedback=feedback))
+                call_id = uuid.uuid4().hex
+                provenance = {'output_policy_id': CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
+                    'output_codec_id': CLEAN_COMPACT_LISTS_WIRE_V1,
+                    'regeneration_policy_id': CLEAN_REGENERATION_POLICY_V1,
+                    'generation_index': generation, 'logical_call_sha256': logical,
+                    'previous_rejection_sha256': previous}
+                inputs = {'schema': 'tiger.deepseek-request.v4', 'call_id': call_id,
+                    'stage': 'clean.llm_semantic', 'provider': 'deepseek', 'method': 'POST',
+                    'endpoint': BASE_URL + CLEAN_OUTPUT_PATH, 'request': request,
+                    'request_sha256': _hash(request), 'output_schema': schema,
+                    'schema_sha256': _hash(schema), 'release': RELEASE, **provenance}
+                # reserve precedes call_io, whose input capture precedes invoke.
+                self._admit_call('chat', call_id, request, inputs)
+                if generation == 1:
+                    self._clean_regenerations_used += 1
+                observation = {}
+
+                def invoke():
+                    response, body_hash = self._post_json(CLEAN_OUTPUT_PATH, request)
+                    choices = response.get('choices')
+                    observed = (choices[0].get('finish_reason') if type(choices) is list
+                        and len(choices) == 1 and type(choices[0]) is dict else None)
+                    observation['finish_reason'] = (observed if observed in
+                        ('stop', 'length', 'tool_calls', 'content_filter') else
+                        'unknown' if observed is None else 'other')
+                    usage = self._usage(response.get('usage'))
+                    self._settle_budget(call_id, usage)
+                    if response.get('model') != MODEL:
+                        _fail('RESPONSE_MODEL_MISMATCH')
+                    if response.get('object') != 'chat.completion':
+                        _fail('RESPONSE_OBJECT_MISMATCH')
+                    response_id = self._identifier(response.get('id'))
+                    if (self._text(response_id) != response_id or self._api_key in response_id
+                            or any(row['response_id'] == response_id for row in self.receipts)):
+                        _fail('RESPONSE_IDENTITY_REUSED_OR_UNSAFE')
+                    if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
+                        _fail('INVALID_CHOICES')
+                    choice, message = choices[0], choices[0].get('message')
+                    if (type(choice.get('index')) is not int or choice['index'] != 0
+                            or choice.get('finish_reason') != 'tool_calls' or type(message) is not dict
+                            or message.get('role') != 'assistant' or message.get('content') not in (None, '')
+                            or message.get('function_call') or message.get('reasoning_content')
+                            or type(message.get('tool_calls')) is not list or len(message['tool_calls']) != 1):
+                        _fail('INCOMPLETE_MODEL_RESPONSE')
+                    tool = message['tool_calls'][0]
+                    if (type(tool) is not dict or set(tool) != {'id', 'type', 'function'}
+                            or tool['type'] != 'function' or type(tool['function']) is not dict
+                            or set(tool['function']) != {'name', 'arguments'}
+                            or tool['function']['name'] != CLEAN_OUTPUT_FUNCTION):
+                        _fail('INCOMPLETE_MODEL_RESPONSE')
+                    tool_id = self._identifier(tool['id'])
+                    if (self._text(tool_id) != tool_id or self._api_key in tool_id
+                            or any(row.get('output_tool_call_id') == tool_id for row in self.receipts)):
+                        _fail('RESPONSE_IDENTITY_REUSED_OR_UNSAFE')
+                    fingerprint = response.get('system_fingerprint')
+                    if fingerprint is not None:
+                        fingerprint = self._identifier(fingerprint)
+                        if self._text(fingerprint) != fingerprint or self._api_key in fingerprint:
+                            _fail('UNSAFE_RESPONSE_FINGERPRINT')
+                    arguments = tool['function']['arguments']
+                    if type(arguments) is not str or not arguments.strip():
+                        _fail('EMPTY_MODEL_OUTPUT')
+                    try:
+                        arguments_bytes = arguments.encode('utf-8')
+                    except UnicodeError:
+                        _fail('INVALID_JSON_VALUE')
+                    if len(arguments_bytes) > MAX_RESPONSE_BYTES:
+                        _fail('RESPONSE_TOO_LARGE')
+                    # Never retain a raw schema rejection until BOTH lexical
+                    # and every decoded key/value pass sanitizer equality.
+                    if self._text(arguments) != arguments:
+                        _fail('INVALID_JSON_VALUE')
+                    parsed = _json_loads(arguments)
+                    if _canonical(self._clean(parsed)) != _canonical(parsed):
+                        _fail('INVALID_JSON_VALUE')
+                    rejection = None
+                    try:
+                        validate_schema(parsed, local)
+                        clean_compact_lists_output_v1(parsed, schema, decode=True)
+                    except RequiredModelUnavailable as error:
+                        if error.diagnostic['code'] != 'OUTPUT_SCHEMA_MISMATCH':
+                            raise
+                        rejection = error.diagnostic
+                    outcome = 'rejected' if rejection is not None else 'accepted'
+                    safe = build_clean_compact_lists_safe_response(response_id=response_id,
+                        system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id,
+                        **({'visible_arguments': arguments} if rejection is not None else {'parsed': parsed}))
+                    return {'schema': 'tiger.deepseek-call.v4', 'call_id': call_id,
+                        'stage': 'clean.llm_semantic', 'provider': 'deepseek', 'requested_model': MODEL,
+                        'response_id': response_id, 'model': MODEL, 'release': RELEASE, 'usage': usage,
+                        'finish_reason': 'tool_calls', 'output_tool_call_id': tool_id,
+                        'request_sha256': inputs['request_sha256'], 'response_sha256': _hash(safe),
+                        'transport_response_sha256': body_hash, 'schema_sha256': inputs['schema_sha256'],
+                        'response': safe, 'system_fingerprint': fingerprint, 'search_mode': SEARCH_MODE,
+                        'outcome': outcome, **provenance,
+                        **({'visible_arguments_sha256': hashlib.sha256(arguments_bytes).hexdigest(),
+                            'rejection_diagnostic': rejection} if rejection is not None else {'parsed': parsed}),
+                        **self._budget_proof(inputs)}
+
+                proof = self._record_call('model.deepseek.chat', inputs, invoke, observation=observation)
+                self.receipts.append({key: value for key, value in proof.items()
+                    if key not in ('schema', 'parsed', 'response', 'rejection_diagnostic')}
+                    | {'proof_sha256': _hash(proof)})
+                if proof['outcome'] == 'accepted':
+                    return proof['parsed']
+                if generation == 1 or self._clean_regenerations_used >= regeneration_limit:
+                    # This rejected output_ref already durably records the
+                    # real attempt. Fail the stage once, without a fake IO.
+                    diagnostic = proof['rejection_diagnostic']
+                    raise RequiredModelUnavailable('OUTPUT_SCHEMA_MISMATCH',
+                        **{key: diagnostic[key] for key in ('schema_path', 'schema_keyword') if key in diagnostic})
+                previous = _hash(proof)
+                feedback = clean_regeneration_feedback_v1(proof['rejection_diagnostic'])
+            _fail('INCOMPLETE_MODEL_RESPONSE')
+        finally:
+            self._clean_operation_lock.release()
 
     def _complete_clean_responses(self, *, system: str, user: str, schema_hint: dict,
                                   max_tokens: int, temperature: float, schema: dict,

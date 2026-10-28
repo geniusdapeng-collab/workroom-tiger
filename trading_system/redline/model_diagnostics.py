@@ -112,24 +112,29 @@ def validate_model_failure_accounting(value: object) -> dict:
         fields = fields | {"budget_policy_id"}
     if version4:
         fields = (fields - {"finish_reason"}) | {"output_policy_id", "response_status", "native_usage"}
-    token_limit = 600000 if version3 else 300000
     if (type(value) is not dict or any(type(key) is not str for key in value)
             or set(value) != fields
             or type(value["schema"]) is not str or value["schema"] != ("tiger.model-call-accounting.v4" if version4 else
                 "tiger.model-call-accounting.v3" if version3 else "tiger.model-call-accounting.v2")
-            or version3 and (type(value["budget_policy_id"]) is not str or value["budget_policy_id"] != "tiger.budget-policy.v3")
+            or version3 and (type(value["budget_policy_id"]) is not str
+                or value["budget_policy_id"] not in ("tiger.budget-policy.v3", "tiger.budget-policy.v4"))
+            or version4 and value["budget_policy_id"] != "tiger.budget-policy.v3"
             or type(value["call_id"]) is not str or re.fullmatch(r"[a-f0-9]{32}", value["call_id"]) is None
             or type(value["request_sha256"]) is not str or re.fullmatch(r"[a-f0-9]{64}", value["request_sha256"]) is None
             or type(value["kind"]) is not str or value["kind"] not in ("chat", "search", "fetch")
             or type(value["status"]) is not str or value["status"] not in ("settled", "unknown")
             or type(value["frozen"]) is not bool):
         raise invalid
+    from ..llm.request_budget import policy_limits
+    limits = policy_limits(value["budget_policy_id"] if version3 else None)
+    token_limit = limits["max_tokens"]
     counts = value["counts"]
     if (type(counts) is not dict or any(type(key) is not str for key in counts)
             or set(counts) != {"chat", "search", "fetch"}
             or any(type(counts[k]) is not int or not 0 <= counts[k] <= bound
-                   for k, bound in (("chat", 40), ("search", 60), ("fetch", 20)))
-            or sum(counts.values()) > 120 or counts[value["kind"]] < 1):
+                   for k, bound in ((kind, limits[f"max_{kind}_calls"])
+                                    for kind in ("chat", "search", "fetch")))
+            or sum(counts.values()) > limits["max_remote_requests"] or counts[value["kind"]] < 1):
         raise invalid
     for key in ("actual_tokens", "reserved_tokens"):
         if type(value[key]) is not int or not 0 <= value[key] <= token_limit:
@@ -137,10 +142,10 @@ def validate_model_failure_accounting(value: object) -> dict:
     if value["actual_tokens"] + value["reserved_tokens"] > token_limit:
         raise invalid
     for key in ("estimated_charged_usd", "estimated_reserved_usd"):
-        if (type(value[key]) not in (int, float) or not 0 <= value[key] <= 1 + 1e-12
+        if (type(value[key]) not in (int, float) or not 0 <= value[key] <= limits["max_cost_usd"] + 1e-12
                 or not math.isfinite(value[key])):
             raise invalid
-    if value["estimated_charged_usd"] + value["estimated_reserved_usd"] > 1 + 1e-12:
+    if value["estimated_charged_usd"] + value["estimated_reserved_usd"] > limits["max_cost_usd"] + 1e-12:
         raise invalid
     usage = value["usage"]
     if value["status"] == "settled" and value["kind"] == "chat":
