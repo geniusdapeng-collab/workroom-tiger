@@ -132,6 +132,10 @@ ticker、事件、产业链、ETF 列表使用逗号标量，只有原项目语�
 
 第十一次完整任务 `run-553dcd7df45c4dcea389276e79e2cfda` 使用来源 `2acab5a0aac74e90a6b729e0da2c7c25e214f117` 的 Responses slots 版本，首个原生清洗回答未通过 JSON 解析；实际输入 48741、输出 13683、合计 62424 tokens，14 Search、零 Fetch，已结算、零剩余预留、账户未提交。原无效回答未保留，具体语法原因未知。后续单独协议诊断不改写这个未知原因，也不计为完整业务成功。该新策略须由全新的完整任务及独立 receipt/verify 证明；代码、合成测试和诊断均不算真实完整成功。
 
+2026-10-28 重新读取官方 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 后，compact 入口接受响应消息中的 `content=null` 或普通字符串；官方未要求 `finish_reason=tool_calls` 时 content 必须为空。字符串须通过原值安全检查、UTF-8 及响应大小边界，并原样保留在私有安全响应中；它不参与清洗参数、语义解码或下游业务。独立回放重建并核对该字段，缺省的历史安全响应仍保持 `content=null`。模型/角色/完成原因、唯一固定函数、参数严格 JSON、本地完整 schema、来源与引文的原校验继续执行。结构失败使用固定字段级错误码，不把任意响应字段、文本或秘密写入诊断。
+
+第十二次完整任务 `run-a60339d90778460c970b03f30d2ea334` 使用来源 `70856e2da3648a93f276a7f2c6216b7590dbcd5f`，完成14次原生Search后在首个compact清洗调用以 `INCOMPLETE_MODEL_RESPONSE` 失败。该调用 `finish_reason=tool_calls`，输入10854、输出1247、合计12101 tokens均已结算，剩余预留为0，未生成成功回执。旧复合诊断没有保留精确触发字段，不能认定非空content就是此次失败原因；本次修复依据官方允许的响应形式和离线反例，同时补齐后续诊断。旧失败及其账本保持原样。
+
 ## 最终输入：`tiger.final-identity-wire.v1`
 
 最终判断仍接收完整广域摘要、claims、provenance、引文 hash/长度、公司研究、五段假设、事实证据、行情证据和研究来源索引。`final_payload_wire_v2` 在 `final_wire.identity_index` 的 `ref/id` 表中保留每个真实 ID，并在受控身份位置使用唯一 `wN`。

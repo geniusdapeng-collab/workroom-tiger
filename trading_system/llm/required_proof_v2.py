@@ -404,9 +404,21 @@ class ReplayClient:
                     _bad("unsafe_compact_identity", stage=stage)
             usage = DeepSeekRequiredClient._usage(proof["usage"])
             try:
-                text = proof["response"]["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+                message = proof["response"]["choices"][0]["message"]
+                visible_content = message["content"]
+                text = message["tool_calls"][0]["function"]["arguments"]
             except (KeyError, TypeError, IndexError):
                 _bad("compact_visible_arguments", stage=stage)
+            if visible_content is not None:
+                if type(visible_content) is not str:
+                    _bad("compact_visible_content_type", stage=stage)
+                try:
+                    content_bytes = visible_content.encode("utf-8", "strict")
+                except UnicodeError:
+                    _bad("unsafe_compact_visible_content", stage=stage)
+                if (len(content_bytes) > MAX_RESPONSE_BYTES
+                        or self._sanitizer._text(visible_content) != visible_content):
+                    _bad("unsafe_compact_visible_content", stage=stage)
             if (type(text) is not str or not text.strip() or len(text.encode("utf-8")) > MAX_RESPONSE_BYTES
                     or self._sanitizer._text(text) != text):
                 _bad("unsafe_compact_visible_arguments", stage=stage)
@@ -425,13 +437,15 @@ class ReplayClient:
                 if diagnostic is not None or not _same(proof["parsed"], parsed):
                     _bad("compact_false_acceptance", stage=stage)
                 response = build_clean_compact_lists_safe_response(response_id=response_id,
-                    system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id, parsed=parsed)
+                    system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id, parsed=parsed,
+                    visible_content=visible_content)
             else:
                 if (diagnostic is None or not _same(proof["rejection_diagnostic"], diagnostic)
                         or proof["visible_arguments_sha256"] != hashlib.sha256(text.encode("utf-8")).hexdigest()):
                     _bad("compact_false_rejection_or_diagnostic", stage=stage)
                 response = build_clean_compact_lists_safe_response(response_id=response_id,
-                    system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id, visible_arguments=text)
+                    system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id, visible_arguments=text,
+                    visible_content=visible_content)
             if (not _same(usage, proof["usage"]) or not _same(response, proof["response"])
                     or proof["response_sha256"] != _hash(response)):
                 _bad("compact_safe_response_or_usage", stage=stage)

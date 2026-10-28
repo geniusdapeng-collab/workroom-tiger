@@ -1011,16 +1011,24 @@ def clean_compact_lists_function_request_valid(request):
 
 
 def build_clean_compact_lists_safe_response(*, response_id, system_fingerprint, usage,
-                                          tool_call_id, parsed=None, visible_arguments=None):
+                                          tool_call_id, parsed=None, visible_arguments=None,
+                                          visible_content=None):
+    """Preserve validated visible content separately from semantic arguments.
+
+    Transport and independent replay validate text safety before this pure
+    projection. Historical callers retain the original null-content default.
+    """
     if (parsed is None) == (visible_arguments is None):
         _invalid()
     if parsed is not None and type(parsed) is not dict:
         _invalid()
     if visible_arguments is not None and (type(visible_arguments) is not str or not visible_arguments.strip()):
         _invalid()
+    if visible_content is not None and type(visible_content) is not str:
+        _invalid()
     arguments = visible_arguments if visible_arguments is not None else _canonical(parsed)
     return {'id': response_id, 'model': 'deepseek-flash', 'system_fingerprint': system_fingerprint,
         'choices': [{'index': 0, 'finish_reason': 'tool_calls', 'message': {
-            'role': 'assistant', 'content': None, 'tool_calls': [{'id': tool_call_id,
+            'role': 'assistant', 'content': visible_content, 'tool_calls': [{'id': tool_call_id,
                 'type': 'function', 'function': {'name': CLEAN_OUTPUT_FUNCTION, 'arguments': arguments}}]}}],
         'usage': deepcopy(usage)}

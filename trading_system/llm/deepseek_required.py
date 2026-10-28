@@ -1073,18 +1073,46 @@ class DeepSeekRequiredClient:
                     if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
                         _fail('INVALID_CHOICES')
                     choice, message = choices[0], choices[0].get('message')
-                    if (type(choice.get('index')) is not int or choice['index'] != 0
-                            or choice.get('finish_reason') != 'tool_calls' or type(message) is not dict
-                            or message.get('role') != 'assistant' or message.get('content') not in (None, '')
-                            or message.get('function_call') or message.get('reasoning_content')
-                            or type(message.get('tool_calls')) is not list or len(message['tool_calls']) != 1):
-                        _fail('INCOMPLETE_MODEL_RESPONSE')
+                    if type(choice.get('index')) is not int or choice['index'] != 0:
+                        _fail('COMPACT_INVALID_CHOICE_INDEX')
+                    if choice.get('finish_reason') != 'tool_calls':
+                        _fail('COMPACT_INVALID_FINISH_REASON')
+                    if type(message) is not dict:
+                        _fail('COMPACT_INVALID_MESSAGE_TYPE')
+                    if message.get('role') != 'assistant':
+                        _fail('COMPACT_INVALID_MESSAGE_ROLE')
+                    # Chat content may accompany a tool call. Preserve safe
+                    # visible text exactly in evidence; semantic output still
+                    # comes only from the independently validated arguments.
+                    # Official response contract checked 2026-10-28:
+                    # https://api-docs.deepseek.com/api/create-chat-completion/
+                    if 'content' not in message or (message['content'] is not None and type(message['content']) is not str):
+                        _fail('COMPACT_INVALID_CONTENT_TYPE')
+                    visible_content = message['content']
+                    if visible_content is not None:
+                        try:
+                            content_bytes = visible_content.encode('utf-8', 'strict')
+                        except UnicodeError:
+                            _fail('COMPACT_INVALID_CONTENT_UTF8')
+                        if len(content_bytes) > MAX_RESPONSE_BYTES:
+                            _fail('COMPACT_CONTENT_TOO_LARGE')
+                        if self._text(visible_content) != visible_content:
+                            _fail('COMPACT_UNSAFE_CONTENT')
+                    if message.get('function_call'):
+                        _fail('COMPACT_LEGACY_FUNCTION_PRESENT')
+                    if message.get('reasoning_content'):
+                        _fail('COMPACT_REASONING_PRESENT')
+                    if type(message.get('tool_calls')) is not list or len(message['tool_calls']) != 1:
+                        _fail('COMPACT_INVALID_TOOL_COUNT')
                     tool = message['tool_calls'][0]
-                    if (type(tool) is not dict or set(tool) != {'id', 'type', 'function'}
-                            or tool['type'] != 'function' or type(tool['function']) is not dict
-                            or set(tool['function']) != {'name', 'arguments'}
-                            or tool['function']['name'] != CLEAN_OUTPUT_FUNCTION):
-                        _fail('INCOMPLETE_MODEL_RESPONSE')
+                    if type(tool) is not dict or set(tool) != {'id', 'type', 'function'}:
+                        _fail('COMPACT_INVALID_TOOL_FIELDS')
+                    if tool['type'] != 'function':
+                        _fail('COMPACT_INVALID_TOOL_TYPE')
+                    if type(tool['function']) is not dict or set(tool['function']) != {'name', 'arguments'}:
+                        _fail('COMPACT_INVALID_FUNCTION_FIELDS')
+                    if tool['function']['name'] != CLEAN_OUTPUT_FUNCTION:
+                        _fail('COMPACT_INVALID_FUNCTION_NAME')
                     tool_id = self._identifier(tool['id'])
                     if (self._text(tool_id) != tool_id or self._api_key in tool_id
                             or any(row.get('output_tool_call_id') == tool_id for row in self.receipts)):
@@ -1121,6 +1149,7 @@ class DeepSeekRequiredClient:
                     outcome = 'rejected' if rejection is not None else 'accepted'
                     safe = build_clean_compact_lists_safe_response(response_id=response_id,
                         system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id,
+                        visible_content=visible_content,
                         **({'visible_arguments': arguments} if rejection is not None else {'parsed': parsed}))
                     return {'schema': 'tiger.deepseek-call.v4', 'call_id': call_id,
                         'stage': 'clean.llm_semantic', 'provider': 'deepseek', 'requested_model': MODEL,
