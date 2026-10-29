@@ -5,7 +5,7 @@
   "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
   "title": "白皮书短线闭环六项修复与真实评测迭代",
   "created_at": "2026-10-26T19:26:13.881Z",
-  "updated_at": "2026-10-29T08:24:18.704Z",
+  "updated_at": "2026-10-29T08:24:46.406Z",
   "baseline": {
     "audit": {
       "commit": "deab886aad743451e7f380323824950df4f825fd",
@@ -20,8 +20,8 @@
       "reverified_problem_ids": []
     },
     "acceptance": {
-      "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
-      "is_descendant_of_repair": true
+      "commit": null,
+      "is_descendant_of_repair": null
     }
   },
   "environment": {
@@ -617,7 +617,7 @@
       "level": "L3",
       "severity": "P1",
       "batch": 0,
-      "state": "open",
+      "state": "unfixed",
       "title": "盘中报价时间与批量取证不一致导致全部可动作观察失效",
       "evidence": [
         {
@@ -692,7 +692,17 @@
         "command": "python -B -m pytest -p no:cacheprovider -q tests/test_quote_validity.py tests/test_required_proof_v2.py"
       },
       "rollback": "回退本提交的报价协议改动；保留全部失败与成功取证，旧 Run 25 仍可按原协议验证。",
-      "notes": "Run 25 实际 35/35 QUOTE_TIME_UNVERIFIABLE；Run defec 在旧串行尾部超时。未成交不等于可证明持仓保护。"
+      "notes": "Run 25 实际 35/35 QUOTE_TIME_UNVERIFIABLE；Run defec 在旧串行尾部超时。未成交不等于可证明持仓保护。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "last_assertion_attempt": {
+        "actor": "/root",
+        "role": "repair",
+        "result": "running",
+        "at": "2026-10-29T08:24:46.405Z",
+        "commit": "d7e3745d87a21d852133fc7f6777e7ea51077069"
+      }
     },
     {
       "id": "MC-019",
