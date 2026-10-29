@@ -22,7 +22,7 @@ printf '%s\n' '{"profile":"us-public-model-required-paper-v1"}' | \
 
 ### 真实 DeepSeek 内层模型与原生搜索
 
-固定配置见根 `.env.example`，实际 key 存在仓库外受保护文件。运行器不自动寻找或加载 `.env`，也不读取 Codex/DSH 的登录缓存。可信启动器先将 `LLM_BACKEND=api`、`LLM_BASE_URL=https://api.deepseek.com`、`LLM_MODEL=deepseek-flash` 与非空 `LLM_API_KEY` 导出到进程环境，再执行 CLI/MCP。四项仅为 model-required 的业务子进程保留；PnL token、其他模型 key、任意 Python hook 不随之传入。请求 JSON 无权设置这些值。
+固定配置见根 `.env.example`，实际 key 存在仓库外受保护文件。运行器不自动寻找或加载 `.env`，也不读取 Codex/DSH 的登录缓存。可信启动器先将 `LLM_BACKEND=api`、`LLM_BASE_URL=https://api.deepseek.com`、`LLM_MODEL=deepseek-flash` 与非空 `LLM_API_KEY` 导出到进程环境，再执行 CLI/MCP。五个语义调用固定 JSON mode 与 `thinking: disabled`，出现非零 reasoning-token usage 即失败。四项仅为 model-required 的业务子进程保留；PnL token、其他模型 key、任意 Python hook 不随之传入。请求 JSON 无权设置这些值。
 
 ```bash
 # protected-deepseek.env 的实际内容由操作者在仓库外管理。

@@ -238,6 +238,7 @@ def test_required_policy_preserves_old_profile_serialization_and_denies_passthro
     policy = policy_manifest(REQUIRED_PROFILE)
     assert policy["strategy"] == "reviewed_source_defaults"
     assert "sector_proxy_snapshot" not in policy
+    assert policy["model_contract"]["thinking_mode"] == "disabled"
     assert policy["execution"]["search_source_names"] == ("deepseek_search",)
     assert all(not row["allow_passthrough"] for row in policy["stages"])
     assert len(policy["stages"]) == 39

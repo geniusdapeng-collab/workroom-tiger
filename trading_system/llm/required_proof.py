@@ -16,7 +16,10 @@ from ..tech_chain.agents import SentimentRow, RiskAlert
 from ..redline import LLMUnavailable
 from ..redline.execution import REQUIRED_MODEL_STAGES, RequiredModelFailed
 from ..tech_chain.universe import CHAIN_TOPICS, SECTOR_TOPICS, TECH_SUBCHAINS
-from .deepseek_required import MODEL, RELEASE, SEARCH_MODE, sanitize_url, validate_schema, DeepSeekRequiredClient
+from .deepseek_required import (
+    MODEL, RELEASE, SEARCH_MODE, THINKING_MODE, sanitize_url, validate_schema,
+    DeepSeekRequiredClient,
+)
 from .required_schemas import clean_schema, sentiment_schema, risk_schema, narrative_schema, decision_schema
 from .required import SYSTEM, TASKS, _docs, market_asof
 from .market_evidence import market_snapshots
@@ -226,14 +229,14 @@ def _verify(run, result, admission):
             ]
             expected_body = {"model": MODEL, "messages": expected_messages,
                 "max_tokens": 16384, "temperature": 0.2, "stream": False,
-                "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"},
-                "reasoning_effort": "high"}
+                "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}}
             if (request["endpoint"] != "https://api.deepseek.com/chat/completions"
                     or request["schema"] != "tiger.deepseek-request.v1"
                     or proof["schema"] != "tiger.deepseek-call.v1"
                     or request["release"] != RELEASE or body["model"] != MODEL
-                    or body["thinking"] != {"type": "enabled"} or body["reasoning_effort"] != "high"
+                    or body["thinking"] != {"type": "disabled"}
                     or body["response_format"] != {"type": "json_object"} or body["stream"] is not False
+                    or proof.get("thinking_mode") != THINKING_MODE
                     or request["output_schema"] != expected_schema
                     or request["schema_sha256"] != _hash(expected_schema)
                     or proof["schema_sha256"] != request["schema_sha256"]

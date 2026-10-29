@@ -40,10 +40,10 @@ python3 main.py --mode daily --universe extended \
 
 ```bash
 export LLM_BACKEND=api
-export LLM_BASE_URL=https://api.deepseek.com/v1   # DeepSeek/Kimi/Qwen/GLM/自部署 vLLM 均可
+export LLM_BASE_URL=https://api.deepseek.com       # OpenAI 兼容根
 export LLM_API_KEY=sk-...
-export LLM_MODEL=deepseek-chat
-# 或 Kimi 原通道：export KIMI_API_KEY=sk-...（或 ~/.kimi/agent-gw.json）
+export LLM_MODEL=deepseek-flash                    # 官方端点会强制归一为该模型
+# 兼容客户端默认非思考 JSON；Kimi 旧通道仅在显式 LLM_BACKEND=kimi 时启用
 ```
 
 **方式 b：本地 AI Coding Agent 主力模型（开发者本地零配置）**
@@ -56,7 +56,7 @@ export LLM_BACKEND=local      # 或 auto（默认，自动探测）
 # 例：显式指定：export LLM_LOCAL_URL=http://localhost:11434/v1 LLM_LOCAL_MODEL=qwen3:32b
 ```
 
-默认 `LLM_BACKEND=auto`：kimi → api → local 依次探测；全部不可用时按红线透传（报告如实标注），**系统绝不用规则伪造语义分**。
+默认 `LLM_BACKEND=auto`：DeepSeek API → local 依次探测；Kimi 不再作为隐式默认。全部不可用时按红线透传（报告如实标注），**系统绝不用规则伪造语义分**。
 
 ### 每日自动运行（cron）
 
