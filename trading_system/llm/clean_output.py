@@ -611,6 +611,8 @@ _COMPACT_QUARTET_INSTRUCTION = (
     '\nCompact claim contract: Within every claim slot, s/q/k/t must either all be nonempty '
     'and satisfy their original constraints, or all be empty strings, including claim_key k. '
     'Decide the supported statement and its own-source quote first; never prefill a key for an absent or discarded claim. '
+    'Within each claim, q is a source quote-part token such as p3, while t is time_role and only accepts '
+    'current, background or unknown; never copy q into t and never write a pN token into t. '
     'Do not invent a statement, quote or time role to complete a slot. Actual claims occupy a consecutive prefix; '
     'every unused trailing slot has all four leaves empty. Emit every key in the provider required array order: '
     'summary and provenance before claims, then statement s, quote q, claim_key k and time_role t within each claim.')
