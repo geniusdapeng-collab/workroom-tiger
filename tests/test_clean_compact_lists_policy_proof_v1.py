@@ -69,6 +69,12 @@ def test_compact_ticker_guidance_does_not_weaken_the_exact_schema():
         validate_schema(answer, wire.clean_compact_lists_schema_v1(schema))
 
 
+def test_regeneration_requires_the_complete_batch_and_claim_quartet():
+    assert "complete provider required key set for every source" in wire._COMPACT_REGEN_INSTRUCTION
+    assert "partial/delta object is invalid" in wire._COMPACT_REGEN_INSTRUCTION
+    assert "clear all four leaves together" in wire._COMPACT_REGEN_INSTRUCTION
+
+
 def pure_fixture(*, rejection=True, second_rejected=False, empty=False, invalid_kind="summary"):
     """Closed synthetic proofs with a real guard and actual deterministic rejection."""
     schema = keyed_schema(empty)

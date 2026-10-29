@@ -602,6 +602,9 @@ _COMPACT_EMPTY_TAIL = '))'
 _COMPACT_REGEN_PREFIX = '\nTiger complete-generation feedback (fixed source policy):\n'
 _COMPACT_REGEN_INSTRUCTION = (
     '\nGenerate the entire original batch again from all unchanged inputs. Return every required schema key. '
+    'The JSON object must contain exactly the complete provider required key set for every source in this batch. '
+    'Returning only the rejected keys, only one source_ref, or any partial/delta object is invalid. '
+    'If a claim leaf s/q/k/t is rejected, either provide all four leaves as valid nonempty values or clear all four leaves together. '
     'Do not repair, copy, truncate or reuse any earlier answer. The feedback contains only the trusted schema rejection; '
     'all original evidence, semantic and source constraints remain mandatory.\n')
 _COMPACT_QUARTET_INSTRUCTION = (
@@ -790,7 +793,7 @@ def clean_compact_lists_output_v1(value, keyed_schema, *, decode=False):
                         if diagnostic['code'] != 'OUTPUT_SCHEMA_MISMATCH' or 'schema_keyword' not in diagnostic:
                             raise
                         raise RequiredModelUnavailable('OUTPUT_SCHEMA_MISMATCH',
-                            schema_path=f'/d/{reference}/c/{index}/{empty}' + diagnostic['schema_path'],
+                            schema_path=f'/{reference}__c__s{index}__{empty}' + diagnostic['schema_path'],
                             schema_keyword=diagnostic['schema_keyword']) from None
                     _invalid()
                 if unused:

@@ -36,7 +36,7 @@ def complete_answer(schema, count):
 
 
 @pytest.mark.parametrize("mask", range(1, 15))
-def test_partial_quartet_still_rejects_with_precise_original_leaf_location(mask):
+def test_partial_quartet_still_rejects_with_precise_compact_leaf_location(mask):
     schema = keyed_schema()
     answer = complete_answer(schema, 1)
     fields = ("s", "q", "k", "t")
@@ -49,7 +49,7 @@ def test_partial_quartet_still_rejects_with_precise_original_leaf_location(mask)
     with pytest.raises(RequiredModelUnavailable) as caught:
         wire.clean_compact_lists_output_v1(answer, schema, decode=True)
     assert caught.value.diagnostic == {"schema": "tiger.model-failure.v1", "provider": "deepseek",
-        "code": "OUTPUT_SCHEMA_MISMATCH", "schema_path": "/d/d0/c/0/" + first,
+        "code": "OUTPUT_SCHEMA_MISMATCH", "schema_path": "/d0__c__s0__" + first,
         "schema_keyword": "minLength" if first in ("s", "k") else "enum"}
     assert answer == before
 
@@ -118,7 +118,7 @@ def test_partial_then_whole_valid_generation_preserves_full_input_charges_proof_
     seen = install_responses(client, [tool_response(bad, 1), tool_response(good, 2)])
     assert generate(client, schema) == good and len(seen) == 2
     first, second = [row["output"] for row in client.execution.records]
-    assert first["rejection_diagnostic"]["schema_path"] == "/d/d0/c/0/s"
+    assert first["rejection_diagnostic"]["schema_path"] == "/d0__c__s0__s"
     assert first["rejection_diagnostic"]["schema_keyword"] == "minLength"
     assert second["previous_rejection_sha256"] == _hash(first)
     assert seen[0][1]["messages"][1] == seen[1][1]["messages"][1]
@@ -130,6 +130,7 @@ def test_partial_then_whole_valid_generation_preserves_full_input_charges_proof_
         assert wire.clean_compact_lists_function_request_valid(request)
         assert token_upper_bound(request, allow_clean_compact_regeneration=True)[1] == 32768
         assert "synthetic_test_partial_key_lower" not in _canonical(request).decode()
+    assert '"/d0__c__s0__s"' in seen[1][1]["messages"][0]["content"]
     assert first["response"]["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] == json.dumps(bad, ensure_ascii=False)
     replay, answer = replay_captured(client, schema)
     assert answer == good and replay.receipts == client.receipts
