@@ -5,7 +5,7 @@
   "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
   "title": "白皮书短线闭环六项修复与真实评测迭代",
   "created_at": "2026-10-26T19:26:13.881Z",
-  "updated_at": "2026-10-29T08:24:46.406Z",
+  "updated_at": "2026-10-29T15:52:58.540Z",
   "baseline": {
     "audit": {
       "commit": "deab886aad743451e7f380323824950df4f825fd",
@@ -788,6 +788,93 @@
       },
       "rollback": "回退 paper.step 批量预热并恢复逐标的取数；不修改任何冻结账户或历史回执。",
       "notes": "Run defec 在 opportunity.lifecycle 开始前已超过 80 分钟并 TIMEOUT，属于旧 source 908dd 的真实失败证据。"
+    },
+    {
+      "id": "MC-020",
+      "kind": "problem",
+      "level": "L2",
+      "severity": "P1",
+      "batch": 1,
+      "state": "open",
+      "title": "必需模型阶段仍启用思考，且证明器固定旧请求协议，导致真实结果无法封存",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/llm/deepseek_required.py:560@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "4bcbd9c15530de5a6a901e270932c707a6ef3331a01173159e790da677dff25c",
+          "note": "审计基线的必需模型请求固定 thinking=enabled 和 reasoning_effort=high；v2 分支曾仅对 clean.llm_semantic 关闭思考，其他必需阶段仍继承该缺陷。"
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/llm/required_proof.py:229@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "ee723410dea3b4b1f95b5353236d8e776dce1806536d517ca664585822498d36",
+          "note": "审计基线的证明器同样强制重建 enabled/high 请求，请求事实与发布合同没有可版本化边界。"
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/agent_runtime.py:79@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "c354575d04d3520f18b51065468fe32ca4432c5bcd84e4e3f83485ad4471591d",
+          "note": "审计基线的冻结 policy model_contract 没有 thinking_mode，调度、证明和 provider 请求缺少同一个版本化契约。"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/llm/deepseek_required.py",
+        "line": 560,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "stage_thinking_mode"
+      },
+      "trigger_path": "真实 v2 任务在 clean 完成后进入 research.candidates、tech.risk 或 decision.debate；这些调用仍发送 thinking=enabled/high，新发布合同要求 disabled，导致必需模型证据无法通过封存/验证。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "当前必需模型 policy 和任意语义阶段",
+          "expect": "所有阶段都发送 thinking=disabled、不发送 reasoning_effort，并把非零 reasoning token 作为失败关闭。",
+          "command": "python -B -m pytest -p no:cacheprovider -q tests/test_model_reasoning_policy_v2.py tests/test_deepseek_required.py -k 'thinking or non_thinking or effort or required_chat'",
+          "exec": {
+            "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+            "args": [
+              "-B",
+              "-m",
+              "pytest",
+              "-p",
+              "no:cacheprovider",
+              "-q",
+              "tests/test_model_reasoning_policy_v2.py",
+              "tests/test_deepseek_required.py",
+              "-k",
+              "thinking or non_thinking or effort or required_chat"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "43 阶段 v2 离线证据包含 clean 或后续语义阶段",
+          "expect": "全新非思考请求和冻结 policy 可由证明器逐一重建，同时旧版 Run25 policy 仍可按其缺失 thinking_mode 的字节精确回放。",
+          "command": "python -B -m pytest -p no:cacheprovider -q tests/test_required_proof_v2.py tests/test_budget_policy_v4.py -k 'non_thinking or complete_semantic_replay or prior_enabled'",
+          "exec": {
+            "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+            "args": [
+              "-B",
+              "-m",
+              "pytest",
+              "-p",
+              "no:cacheprovider",
+              "-q",
+              "tests/test_required_proof_v2.py",
+              "tests/test_budget_policy_v4.py",
+              "-k",
+              "non_thinking or complete_semantic_replay or prior_enabled"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "TIGER_TEST_NODE=/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/short-term-upgrade/test-node-runtime python -B -m pytest -p no:cacheprovider -q tests/test_deepseek_required.py tests/test_llm_dual_mode.py tests/test_model_required_workflow.py tests/test_required_proof_v2.py tests/test_budget_policy_v4.py tests/test_model_reasoning_policy_v2.py tests/test_semantic_output_budget_v4.py"
+      },
+      "rollback": "回退 merge commit 28e8120 中与 thinking_mode、reasoning_tokens 和 required_proof_v2 兼容层有关的改动；不改动已封存的 Run25 或 Run26 证据。",
+      "notes": "Run run-b05e26ca9cd84ce8a13c0fe403ee6c2e 已产生成功 engine-result（43 阶段），但 supervisor 在 clean.llm_semantic 处以 EvidenceInvalid 拒绝封存，未生成 receipt，不能计为业务完成。"
     }
   ],
   "gates": [],
