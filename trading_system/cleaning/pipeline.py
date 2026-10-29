@@ -122,7 +122,7 @@ def llm_semantic_clean(docs: list[RawDocument], llm: LLMClient,
             out = llm.complete_json(
                 system=SYSTEM_ANALYST,
                 user=CLEAN_USER_TMPL.format(n=len(batch), docs=_docs_payload(batch)),
-                schema_hint=CLEAN_SCHEMA, max_tokens=2000)
+                schema_hint=CLEAN_SCHEMA)
             cleaned_all.extend(_apply_llm_annotations(batch, out))
         return cleaned_all
 

@@ -24,12 +24,28 @@ import requests
 
 from ..redline import LLMUnavailable
 from ..redline.model_diagnostics import RequiredModelUnavailable
+from .model_budget import (
+    CONTEXT_TOKENS,
+    MAX_OUTPUT_TOKENS,
+    POLICY_VERSION,
+    REGISTRY_VERSION,
+    TOKENIZER_SHA256,
+    TokenBudgetError,
+    plan_request,
+    tokenizer_receipt,
+)
+from .scene_policy import (
+    KERNEL_SCENE_MAP,
+    ScenePolicyError,
+    scene_config,
+    validate_coverage,
+)
 
 BASE_URL = "https://api.deepseek.com"
 MODEL = "deepseek-flash"
 RELEASE = "DeepSeek-V4.1-Flash-1017"
 SEARCH_MODE = "provider_native_search"
-THINKING_MODE = "disabled"
+THINKING_MODE = "scene-policy"
 MAX_RESPONSE_BYTES = 1024 * 1024
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 60.0
@@ -400,6 +416,15 @@ class DeepSeekRequiredClient:
             _fail("API_KEY_REQUIRED")
         self.execution = execution
         self._api_key = key
+        try:
+            if validate_coverage():
+                _fail("MODEL_SCENE_POLICY_INCOMPLETE")
+            self._scene_policies = {
+                stage: scene_config(scene) for stage, scene in KERNEL_SCENE_MAP.items()
+            }
+            self._tokenizer = tokenizer_receipt()
+        except (ScenePolicyError, TokenBudgetError):
+            _fail("MODEL_SCENE_POLICY_INVALID")
         self.receipts: list[dict] = []
         self.search_receipts: list[dict] = []
         self.fetch_receipts: list[dict] = []
@@ -410,6 +435,14 @@ class DeepSeekRequiredClient:
                 "model": MODEL, "version": RELEASE, "release": RELEASE,
                 "version_binding": "official-current-alias-mapping",
                 "thinking_mode": THINKING_MODE,
+                "scene_policy": {
+                    stage: {
+                        "scene": KERNEL_SCENE_MAP[stage],
+                        "thinking": cfg["thinking"],
+                    }
+                    for stage, cfg in self._scene_policies.items()
+                },
+                "budget": self._tokenizer,
                 "search": SEARCH_MODE, "remote_requests": self._remote_requests,
                 "chat_calls": len(self.receipts), "search_calls": len(self.search_receipts),
                 "fetch_calls": len(self.fetch_receipts)}
@@ -456,7 +489,7 @@ class DeepSeekRequiredClient:
         self._remote_requests += 1
         try:
             response = requests.post(
-                BASE_URL + path, json=request,
+                BASE_URL + path, data=_canonical(request),
                 headers={"Content-Type": "application/json", "Accept": "application/json",
                          "Accept-Encoding": "identity", "Authorization": "Bearer " + self._api_key},
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), allow_redirects=False, verify=True, stream=True)
@@ -513,7 +546,7 @@ class DeepSeekRequiredClient:
         return value
 
     @staticmethod
-    def _usage(value: object) -> dict:
+    def _usage(value: object, thinking_mode: str = "disabled") -> dict:
         if not isinstance(value, dict):
             _fail("USAGE_REQUIRED")
         result = {}
@@ -539,34 +572,53 @@ class DeepSeekRequiredClient:
                     n = details[child]
                     if type(n) is not int or not 0 <= n <= result[limit]:
                         _fail("INVALID_USAGE")
-                    if parent == "completion_tokens_details" and child == "reasoning_tokens" and n != 0:
+                    if (parent == "completion_tokens_details" and child == "reasoning_tokens"
+                            and thinking_mode == "disabled" and n != 0):
                         _fail("NON_THINKING_OUTPUT_REQUIRED")
                     result[parent] = {child: n}
         return result
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 16384, temperature: float = 0.2, schema: dict) -> dict:
+                      max_tokens: int | None = None, temperature: float = 0.2, schema: dict) -> dict:
         stage = self._stage()
+        if stage not in self._scene_policies:
+            _fail("UNSUPPORTED_MODEL_STAGE")
         _check_schema(schema)
         if _canonical(self._clean(schema)) != _canonical(schema):
             _fail("UNSAFE_OUTPUT_SCHEMA")
         if (not isinstance(system, str) or not system.strip() or not isinstance(user, str) or not user.strip()
-                or not isinstance(schema_hint, dict) or type(max_tokens) is not int
-                or not 1 <= max_tokens <= 393216 or not _finite_number(temperature)
+                or not isinstance(schema_hint, dict)
+                or max_tokens is not None and type(max_tokens) is not int
+                or not _finite_number(temperature)
                 or not 0 <= temperature <= 2):
             _fail("INVALID_CHAT_REQUEST")
-        request = {"model": MODEL, "messages": [
+        thinking = self._scene_policies[stage]["thinking"]
+        thinking_mode = thinking["type"]
+        effort = thinking.get("effort")
+        request_core = {"model": MODEL, "messages": [
             {"role": "system", "content": self._text(system) + "\nReturn exactly one JSON object. JSON only."},
             {"role": "user", "content": self._text(user) + "\nJSON schema:\n" +
              _canonical(schema).decode() + "\nJSON field guidance:\n" +
              _canonical(self._clean(schema_hint)).decode()}],
-            "max_tokens": max_tokens, "temperature": temperature, "stream": False,
-            "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}}
+            "stream": False, "response_format": {"type": "json_object"},
+            "thinking": {"type": thinking_mode}}
+        if thinking_mode == "enabled":
+            request_core["reasoning_effort"] = effort
+        else:
+            request_core["temperature"] = temperature
+        try:
+            request, input_token_estimate, output_ceiling = plan_request(request_core)
+        except TokenBudgetError as error:
+            _fail(error.code)
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/chat/completions",
                   "request": request, "request_sha256": _hash(request), "output_schema": schema,
-                  "schema_sha256": _hash(schema), "release": RELEASE}
+                  "schema_sha256": _hash(schema), "release": RELEASE,
+                  "scene": KERNEL_SCENE_MAP[stage], "thinking_mode": thinking_mode,
+                  "reasoning_effort": effort, "input_token_estimate": input_token_estimate,
+                  "output_ceiling": output_ceiling, "policy_version": POLICY_VERSION,
+                  "registry_version": REGISTRY_VERSION, "tokenizer_sha256": TOKENIZER_SHA256}
 
         def invoke():
             response, body_hash = self._post_json("/chat/completions", request)
@@ -587,6 +639,11 @@ class DeepSeekRequiredClient:
                     or message.get("role") != "assistant" or message.get("tool_calls")
                     or message.get("function_call")):
                 _fail("INCOMPLETE_MODEL_RESPONSE")
+            reasoning_content = message.get("reasoning_content")
+            if reasoning_content is not None and not isinstance(reasoning_content, str):
+                _fail("INVALID_REASONING_CONTENT")
+            if thinking_mode == "disabled" and (reasoning_content or "").strip():
+                _fail("NON_THINKING_REASONING_CONTENT")
             text = message.get("content")
             if not isinstance(text, str) or not text.strip():
                 _fail("EMPTY_MODEL_OUTPUT")
@@ -600,7 +657,10 @@ class DeepSeekRequiredClient:
                 fingerprint = self._identifier(fingerprint)
                 if self._api_key in fingerprint:
                     _fail("UNSAFE_RESPONSE_FINGERPRINT")
-            usage = self._usage(response.get("usage"))
+            usage = self._usage(response.get("usage"), thinking_mode)
+            if (usage["completion_tokens"] > output_ceiling
+                    or usage["total_tokens"] > CONTEXT_TOKENS):
+                _fail("MODEL_USAGE_EXCEEDS_BUDGET")
             safe_response = {
                 "id": response_id, "model": MODEL, "system_fingerprint": fingerprint,
                 "choices": [{"index": 0, "finish_reason": "stop", "message": {
@@ -610,7 +670,10 @@ class DeepSeekRequiredClient:
             return {"schema": "tiger.deepseek-call.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
                     "model": MODEL, "release": RELEASE, "usage": usage,
-                    "thinking_mode": THINKING_MODE,
+                    "scene": KERNEL_SCENE_MAP[stage], "thinking_mode": thinking_mode,
+                    "reasoning_effort": effort, "input_token_estimate": input_token_estimate,
+                    "output_ceiling": output_ceiling, "policy_version": POLICY_VERSION,
+                    "registry_version": REGISTRY_VERSION, "tokenizer_sha256": TOKENIZER_SHA256,
                     "finish_reason": "stop", "request_sha256": inputs["request_sha256"],
                     "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
                     "schema_sha256": inputs["schema_sha256"], "response": safe_response,

@@ -17,12 +17,19 @@ from ..redline import LLMUnavailable
 from ..redline.execution import REQUIRED_MODEL_STAGES, RequiredModelFailed
 from ..tech_chain.universe import CHAIN_TOPICS, SECTOR_TOPICS, TECH_SUBCHAINS
 from .deepseek_required import (
-    MODEL, RELEASE, SEARCH_MODE, THINKING_MODE, sanitize_url, validate_schema,
+    MODEL, RELEASE, SEARCH_MODE, sanitize_url, validate_schema,
     DeepSeekRequiredClient,
+)
+from .model_budget import (
+    POLICY_VERSION,
+    REGISTRY_VERSION,
+    TOKENIZER_SHA256,
+    plan_request,
 )
 from .required_schemas import clean_schema, sentiment_schema, risk_schema, narrative_schema, decision_schema
 from .required import SYSTEM, TASKS, _docs, market_asof
 from .market_evidence import market_snapshots
+from .scene_policy import KERNEL_SCENE_MAP, scene_config
 
 
 def _fail():
@@ -227,16 +234,40 @@ def _verify(run, result, admission):
                         sort_keys=True, separators=(",", ":"), allow_nan=False)
                     + "\nJSON field guidance:\n{}"},
             ]
-            expected_body = {"model": MODEL, "messages": expected_messages,
-                "max_tokens": 16384, "temperature": 0.2, "stream": False,
-                "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}}
+            thinking = scene_config(KERNEL_SCENE_MAP[stage])["thinking"]
+            thinking_mode = thinking["type"]
+            reasoning_effort = thinking.get("effort")
+            request_core = {"model": MODEL, "messages": expected_messages,
+                "stream": False, "response_format": {"type": "json_object"},
+                "thinking": {"type": thinking_mode}}
+            if thinking_mode == "enabled":
+                request_core["reasoning_effort"] = reasoning_effort
+            else:
+                request_core["temperature"] = 0.2
+            expected_body, input_token_estimate, output_ceiling = plan_request(request_core)
             if (request["endpoint"] != "https://api.deepseek.com/chat/completions"
                     or request["schema"] != "tiger.deepseek-request.v1"
                     or proof["schema"] != "tiger.deepseek-call.v1"
                     or request["release"] != RELEASE or body["model"] != MODEL
-                    or body["thinking"] != {"type": "disabled"}
+                    or request.get("scene") != KERNEL_SCENE_MAP[stage]
+                    or request.get("thinking_mode") != thinking_mode
+                    or request.get("reasoning_effort") != reasoning_effort
+                    or request.get("input_token_estimate") != input_token_estimate
+                    or request.get("output_ceiling") != output_ceiling
+                    or request.get("policy_version") != POLICY_VERSION
+                    or request.get("registry_version") != REGISTRY_VERSION
+                    or request.get("tokenizer_sha256") != TOKENIZER_SHA256
+                    or body["thinking"] != {"type": thinking_mode}
+                    or ("reasoning_effort" in body) != (thinking_mode == "enabled")
+                    or body.get("reasoning_effort") not in (None, reasoning_effort)
                     or body["response_format"] != {"type": "json_object"} or body["stream"] is not False
-                    or proof.get("thinking_mode") != THINKING_MODE
+                    or proof.get("thinking_mode") != thinking_mode
+                    or proof.get("reasoning_effort") != reasoning_effort
+                    or proof.get("input_token_estimate") != input_token_estimate
+                    or proof.get("output_ceiling") != output_ceiling
+                    or proof.get("policy_version") != POLICY_VERSION
+                    or proof.get("registry_version") != REGISTRY_VERSION
+                    or proof.get("tokenizer_sha256") != TOKENIZER_SHA256
                     or request["output_schema"] != expected_schema
                     or request["schema_sha256"] != _hash(expected_schema)
                     or proof["schema_sha256"] != request["schema_sha256"]
@@ -255,11 +286,12 @@ def _verify(run, result, admission):
                     or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", proof["response_id"])):
                 _fail()
             usage = proof["usage"]
-            if DeepSeekRequiredClient._usage(usage) != usage:
+            if DeepSeekRequiredClient._usage(usage, thinking_mode) != usage:
                 _fail()
             if (any(type(usage[key]) is not int or usage[key] <= 0 for key in
                     ("prompt_tokens", "completion_tokens", "total_tokens"))
-                    or usage["prompt_tokens"] + usage["completion_tokens"] != usage["total_tokens"]):
+                    or usage["prompt_tokens"] + usage["completion_tokens"] != usage["total_tokens"]
+                    or body["max_tokens"] <= 0 or body["max_tokens"] > output_ceiling):
                 _fail()
             validate_schema(proof["parsed"], expected_schema)
             if stage == "clean.llm_semantic":

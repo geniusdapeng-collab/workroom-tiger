@@ -15,6 +15,8 @@
 - 对每个新的 AI 研究和官网更新任务，默认必须明确选择 `us-public-model-required-paper-v1`，使用独立 state-root 和新逻辑任务幂等键；无需等操作者再次强调“真实模型”。该配置基于 `reviewed_source_defaults`，不启用 `us-public-active-paper-v1` 板块代理或主线溢出实验，不降低数据、MRS/SHS/TSS 或风险门槛。原两个 profile 只保留其明确语义和历史兼容，disabled/passthrough 结果不能充当新研究完成。
 - 固定 `LLM_BACKEND=api`、`LLM_BASE_URL=https://api.deepseek.com`、`LLM_MODEL=deepseek-flash`，仅从可信启动环境读取非空 `LLM_API_KEY`。根 `.env.example` 只是模板，不会自动加载。真实 key 放在仓库外受保护文件，由操作者的可信启动器 export 后执行 CLI/MCP；不得写进请求 JSON、源码、报告、命令参数、日志或提交。
 - `deepseek-flash` 是官方 API 别名；2026-10-26 观察的官方映射为 `DeepSeek-V4.1-Flash-1017`，不是不可变快照 ID。不得造出带日期的 API ID，亦不得替换成 Pro、chat、reasoner 或本地模型。官方依据：[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/)。
+- 请求预算使用仓库内固定的官方 DeepSeek tokenizer；每次调用对完整序列化请求计 token，并自动申请 `min(393216, 1048576 - 输入 tokens)`，不得恢复 1200/1600/2000/16384 等固定输出小预算，也不得按字符数截断证据。
+- thinking 由 `governance/bundles/trading/model-policy.yml` 的场景策略决定：清洗和舆情抽取非思考；风险与板块叙事使用 high；最终多空判断使用 max。生成与独立证明必须绑定同一场景策略，不能由调用方或环境变量改写。
 - 搜索使用同提供方原生 `POST /v1/tools/search`，将全部 14 个既有主题得到的净化真实资料供给内层 Flash。适配器支持原生 Fetch，但固定 collector 不调用 Fetch。Flash 的 Responses `web_search` 按官方矩阵会被忽略，不得将该参数当成搜索成功证据。依据：[Search & Fetch](https://api-docs.deepseek.com/guides/search/)、[Responses API](https://api-docs.deepseek.com/guides/responses_api/)。
 - `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sector.narrative`、`decision.debate` 五阶段必须各有真实、完整、schema 通过的 Flash 回复；模型最后决定选择或否决，程序仅绑定/校验既有数值与风险上限。无候选时也必须真实完成 WAIT/AVOID 判断。任何 disabled、passthrough、空答案、替代模型、规则语义回退、无效或缺失调用证据均是 `MODEL_REQUIRED_FAILED`，不得发布账户或网站新研究成功。
 - 只在独立 receipt/verify 成功且状态为 `completed` 时报告本配置完成；不得接受 `completed_degraded`。回执包含精确 response IDs、模型/发布映射、五阶段计数、原生搜索计数、可读理由和人工执行条件。不可只看保存的成功 flag 或“发过 API 请求”。

@@ -226,7 +226,7 @@ class ChainSentimentAgent:
             out = self.llm.complete_json(
                 system=SYSTEM_ANALYST,
                 user=SENTIMENT_USER_TMPL.format(docs=payload),
-                schema_hint=SENTIMENT_SCHEMA, max_tokens=2000)
+                schema_hint=SENTIMENT_SCHEMA)
             rows: dict[str, SentimentRow] = {}
             for item in out.get("chains", []):
                 cid = str(item.get("chain_id") or "")
@@ -261,7 +261,7 @@ class ChainRiskAgent:
             out = self.llm.complete_json(
                 system=SYSTEM_ANALYST,
                 user=RISK_USER_TMPL.format(docs=payload),
-                schema_hint=RISK_SCHEMA, max_tokens=2000)
+                schema_hint=RISK_SCHEMA)
             alerts: list[RiskAlert] = []
             for a in out.get("alerts", []):
                 sev = _clamp(a.get("severity"), 1, 10)
