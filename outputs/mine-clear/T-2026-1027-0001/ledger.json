@@ -16,7 +16,7 @@
       "notes": ""
     },
     "repair": {
-      "commit": null,
+      "commit": "bb2789be692ef178307c8858631e892ec7864029",
       "reverified_problem_ids": []
     },
     "acceptance": {
@@ -136,7 +136,7 @@
         "command": "python3 -m pytest -q tests/test_short_term_research_v2.py"
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
-      "fixed_by": null,
+      "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
       "verified_by": null,
       "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
     },
@@ -187,7 +187,7 @@
         "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k not evaluation"
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
-      "fixed_by": null,
+      "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
       "verified_by": null,
       "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
     },
@@ -238,7 +238,7 @@
         "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k exit or template or backtest or journal"
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
-      "fixed_by": null,
+      "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
       "verified_by": null,
       "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
     },
@@ -289,7 +289,7 @@
         "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k tranche"
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
-      "fixed_by": null,
+      "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
       "verified_by": null,
       "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
     },
@@ -340,7 +340,7 @@
         "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k snapshot or allocation or nav or risk"
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
-      "fixed_by": null,
+      "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
       "verified_by": null,
       "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
     },
@@ -391,7 +391,7 @@
         "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k evaluation"
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
-      "fixed_by": null,
+      "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
       "verified_by": null,
       "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
     }
