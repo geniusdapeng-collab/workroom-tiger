@@ -959,9 +959,22 @@ def _provider_call(run, stage, call, allowed_names, methods):
             _bad("provider_availability_request", stage=stage)
     elif (not isinstance(request, dict) or set(request) != {"provider", "method", "args", "kwargs"}
             or request["provider"] != name or request["method"] != method
-            or not isinstance(request["args"], list) or len(request["args"]) != 1
-            or not isinstance(request["args"][0], str)
-            or request["kwargs"] != ({"days": 400} if method == "ohlcv" else {})):
+            or not isinstance(request["args"], list) or len(request["args"]) != 1):
+        _bad("provider_observation_request", stage=stage)
+    elif method == "ohlcv":
+        if not isinstance(request["args"][0], str) or request["kwargs"] != {"days": 400}:
+            _bad("provider_observation_request", stage=stage)
+    elif method == "quote":
+        if not isinstance(request["args"][0], str) or request["kwargs"] != {}:
+            _bad("provider_observation_request", stage=stage)
+    elif method == "ohlcv_batch":
+        symbols = request["args"][0]
+        if (not isinstance(symbols, list) or not symbols
+                or any(not isinstance(symbol, str) or not symbol for symbol in symbols)
+                or len(set(symbols)) != len(symbols)
+                or request["kwargs"] != {"days": 400}):
+            _bad("provider_batch_observation_request", stage=stage)
+    else:
         _bad("provider_observation_request", stage=stage)
     failed = "error_ref" in call
     value = read_snapshot(run, call["error_ref" if failed else "output_ref"],
@@ -984,6 +997,7 @@ def _verify_tail(run, result, admission, inputs, outputs, ends):
     The ledger's actual pure transitions and shared numeric policy run again;
     saved flags and three mutually equal report copies are not authority.
     """
+    import math
     from zoneinfo import ZoneInfo
     from ..business_evaluation import build_business_evaluation, mature_cohorts
     from ..calendar import next_trading_day
@@ -994,6 +1008,12 @@ def _verify_tail(run, result, admission, inputs, outputs, ends):
 
     _verify_paper(run, admission, inputs, outputs)
     provider_names = inputs["daily.preflight"]["policy"]["fields"]["provider_names"]
+    lifecycle_calls = outputs["opportunity.lifecycle"]["io_calls"]
+    has_batch_quotes = any(call["method"] == "opportunity.quotes" for call in lifecycle_calls)
+    has_legacy_quotes = any(call["method"] == "opportunity.quote" for call in lifecycle_calls)
+    if has_batch_quotes and has_legacy_quotes:
+        _bad("mixed_quote_observation_protocol", stage="opportunity.lifecycle")
+    legacy_quote_protocol = not has_batch_quotes
 
     def equal(actual, expected, reason, stage="opportunity.lifecycle"):
         if not _same(actual, expected):
@@ -1001,7 +1021,8 @@ def _verify_tail(run, result, admission, inputs, outputs, ends):
 
     def io(stage, method):
         rows = []
-        allowed = ({"opportunity.load", "clock.observe", "opportunity.quote", "opportunity.save", "workflow.artifact.write"}
+        allowed = ({"opportunity.load", "clock.observe", "opportunity.quotes", "opportunity.quote",
+                    "opportunity.save", "workflow.artifact.write"}
                    if stage == "opportunity.lifecycle" else
                    {"opportunity.load", "clock.observe", "evaluation.history", "opportunity.save", "workflow.artifact.write"})
         for call in outputs[stage]["io_calls"]:
@@ -1009,7 +1030,8 @@ def _verify_tail(run, result, admission, inputs, outputs, ends):
                 _bad("unexpected_continuity_IO", stage=stage)
             if call["method"].startswith("provider."):
                 _provider_call(run, stage, call, provider_names,
-                    {"available", "quote" if stage == "opportunity.lifecycle" else "ohlcv"})
+                    {"available", "quote"} if stage == "opportunity.lifecycle"
+                    else {"available", "ohlcv"})
             if call["method"] == method:
                 if "error_ref" in call:
                     _bad("failed_required_continuity_IO", stage=stage)
@@ -1116,15 +1138,103 @@ def _verify_tail(run, result, admission, inputs, outputs, ends):
     if not admitted <= _instant(ready) <= _instant(observed):
         _bad("continuity_actual_clock_order")
     expires = datetime.combine(next_trading_day(life_result.trade_date), time(16), ZoneInfo("America/New_York")).isoformat()
-    ledger.record_research(life_result, run_id=run.name, observed_at=ready, expires_at=expires)
+    ledger.record_research(life_result, run_id=run.name, observed_at=ready,
+                           expires_at=expires, legacy_watch_scope=legacy_quote_protocol)
     ledger.sync_account(paper, snapshot_id=run.name + ":paper-after", observed_at=ready, account_kind="paper")
-    symbols = list(dict.fromkeys(row["ticker"] for row in ledger.snapshot()["opportunities"]
+    all_active_symbols = list(dict.fromkeys(row["ticker"] for row in ledger.snapshot()["opportunities"]
         if row["state"] not in {"CLOSED", "INVALIDATED", "EXPIRED", "SUPERSEDED"}))
-    quote_rows = io("opportunity.lifecycle", "opportunity.quote")
-    observations("opportunity.lifecycle", "opportunity.quote", "quote")
-    equal([request for request, _ in quote_rows], [{"symbol": symbol} for symbol in symbols], "all_active_quote_requests")
-    quotes = {symbol: value for symbol, (_, value) in zip(symbols, quote_rows)}
-    alerts = ledger.observe_quotes(quotes, observed_at=observed)
+    batch_rows = io("opportunity.lifecycle", "opportunity.quotes")
+    legacy_quote_rows = io("opportunity.lifecycle", "opportunity.quote")
+    if batch_rows and legacy_quote_rows:
+        _bad("mixed_quote_observation_protocol", stage="opportunity.lifecycle")
+    collected = workers = protection_unverified = None
+    if batch_rows:
+        if len(batch_rows) != 1:
+            _bad("continuity_IO_count_opportunity.quotes", stage="opportunity.lifecycle")
+        symbols = ledger.observation_symbols(run.name)
+        quote_request, collected = batch_rows[0]
+        equal(quote_request, {"symbols": symbols,
+            "scope": "current_research_plus_account_commitments"}, "quote_batch_scope")
+        if (not isinstance(collected, dict)
+                or set(collected) != {"quotes", "attempts", "workers"}
+                or not isinstance(collected["quotes"], dict)
+                or not isinstance(collected["attempts"], dict)
+                or set(collected["quotes"]) != set(symbols)
+                or set(collected["attempts"]) != set(symbols)):
+            _bad("quote_batch_identity", stage="opportunity.lifecycle")
+        workers = collected["workers"]
+        worker_limit = min(8, len(symbols))
+        if (type(workers) is not int
+                or (symbols and not 1 <= workers <= worker_limit)
+                or (not symbols and workers != 0)):
+            _bad("quote_batch_worker_bound", stage="opportunity.lifecycle")
+        from ..opportunity_lifecycle import aware_time
+        from ..pipeline import _action_quote_rejection
+        allowed_quote_providers = set(provider_names)
+        for symbol in symbols:
+            attempts = collected["attempts"][symbol]
+            quote_value = collected["quotes"][symbol]
+            if not isinstance(attempts, list) or not attempts:
+                _bad("quote_batch_attempts_missing", stage="opportunity.lifecycle")
+            successes = []
+            for attempt in attempts:
+                if not isinstance(attempt, dict):
+                    _bad("quote_batch_attempt_invalid", stage="opportunity.lifecycle")
+                allowed_keys = {"provider", "ok", "secs", "reason", "error_type", "fallback"}
+                if set(attempt) - allowed_keys or not {"provider", "ok", "secs"} <= set(attempt):
+                    _bad("quote_batch_attempt_shape", stage="opportunity.lifecycle")
+                name = attempt.get("provider")
+                secs = attempt.get("secs")
+                if (not isinstance(name, str) or not name
+                        or (name not in allowed_quote_providers and name != "worker")
+                        or type(attempt.get("ok")) is not bool
+                        or isinstance(secs, bool) or not isinstance(secs, (int, float))
+                        or not math.isfinite(secs) or secs < 0
+                        or attempt.get("fallback") not in (None, "sequential")
+                        or ("reason" in attempt and not (attempt["reason"] is None
+                                                         or isinstance(attempt["reason"], str)))
+                        or ("error_type" in attempt and not isinstance(attempt["error_type"], str))):
+                    _bad("quote_batch_attempt_value", stage="opportunity.lifecycle")
+                if attempt["ok"]:
+                    if (not {"provider", "ok", "reason", "secs"} <= set(attempt)
+                            or "error_type" in attempt):
+                        _bad("quote_batch_success_shape", stage="opportunity.lifecycle")
+                    successes.append(attempt)
+                elif not attempt.get("reason") and not attempt.get("error_type"):
+                    _bad("quote_batch_failure_without_reason", stage="opportunity.lifecycle")
+            if quote_value is None:
+                if successes:
+                    _bad("quote_batch_dropped_success", stage="opportunity.lifecycle")
+                continue
+            if not isinstance(quote_value, dict) or len(successes) != 1:
+                _bad("quote_batch_success_identity", stage="opportunity.lifecycle")
+            if (quote_value.get("source") != successes[0]["provider"]
+                    or _action_quote_rejection(quote_value) is not None):
+                _bad("quote_batch_value_binding", stage="opportunity.lifecycle")
+            try:
+                aware_time(quote_value.get("observed_at"))
+                aware_time(quote_value.get("ts"))
+            except ValueError:
+                _bad("quote_batch_time_binding", stage="opportunity.lifecycle")
+        quotes = collected["quotes"]
+        alerts = ledger.observe_quotes(quotes, observed_at=observed, symbols=symbols)
+        observation = next((row for row in reversed(ledger.snapshot()["observations"])
+                            if row["observed_at"] == observed), None)
+        if observation is None or observation.get("scope") != "current_research_plus_account_commitments":
+            _bad("quote_batch_observation_scope", stage="opportunity.lifecycle")
+        protection_unverified = observation.get("protection_unverified", [])
+    elif legacy_quote_rows:
+        symbols = all_active_symbols
+        observations("opportunity.lifecycle", "opportunity.quote", "quote")
+        equal([request for request, _ in legacy_quote_rows],
+              [{"symbol": symbol} for symbol in symbols], "all_active_quote_requests")
+        quotes = {symbol: value for symbol, (_, value) in zip(symbols, legacy_quote_rows)}
+        alerts = ledger.observe_quotes(quotes, observed_at=observed, legacy_shape=True)
+    elif legacy_quote_protocol and not all_active_symbols:
+        symbols, quotes = [], {}
+        alerts = ledger.observe_quotes(quotes, observed_at=observed, legacy_shape=True)
+    else:
+        _bad("missing_quote_observation_protocol", stage="opportunity.lifecycle")
     snapshot = _current_snapshot(life_result, paper)
     snapshot["frozen_at"] = observed
     approved = {pick.ticker: pick for pick in life_result.picks}
@@ -1176,12 +1286,18 @@ def _verify_tail(run, result, admission, inputs, outputs, ends):
     expected_life = {"lifecycle": after_life, "quotes": quotes, "alerts": alerts, "requalifications": rechecks,
         "current_portfolio_snapshot": snapshot, "research_ready_at": ready, "observed_at": observed,
         "artifact": str(run / "work/reports/opportunity-lifecycle.json")}
+    lifecycle_observation = {"research_ready_at": ready, "observed_at": observed, "alerts": alerts,
+        "requalifications": rechecks,
+        "execution_boundary": "Provisional paper/manual coordination only; no broker submission or invented execution."}
+    if batch_rows:
+        expected_life.update(quote_attempts=collected["attempts"], quote_workers=workers,
+                             protection_unverified=protection_unverified)
+        lifecycle_observation.update(quote_attempts=collected["attempts"], quote_workers=workers,
+            scope=symbols, protection_unverified=protection_unverified)
     equal(outputs["opportunity.lifecycle"]["value"], expected_life, "complete_continuity_pure_replay")
     artifacts("opportunity.lifecycle", {"opportunity-lifecycle.json": after_life})
     life_result.raw.update(opportunity_lifecycle=after_life, current_portfolio_snapshot=snapshot,
-        lifecycle_observation={"research_ready_at": ready, "observed_at": observed, "alerts": alerts,
-            "requalifications": rechecks,
-            "execution_boundary": "Provisional paper/manual coordination only; no broker submission or invented execution."})
+        lifecycle_observation=lifecycle_observation)
     equal(inputs["business.evaluate"], {"result": life_result, "paper_state": paper,
         "lifecycle": after_life, "run_id": run.name}, "evaluation_complete_stage_inputs", "business.evaluate")
     evaluation_load, evaluation_before = one("business.evaluate", "opportunity.load")
@@ -1232,13 +1348,12 @@ def _verify_paper(run, admission, inputs, outputs):
     transition. Only the original admitted account, model-vetted research and
     dated provider observations may determine the canonical paper transition.
     """
-    import pandas as pd
     from ..currency import require_usd_result
     from ..execution_policy import step_paper_account
-    from ..pipeline import _missing_data, _series_stale
+    from ..pipeline import _batch_frame_stale, _missing_data
     from ..redline import DEFERRED_STEPS, pipeline_registry
     from ..redline.execution import complete_daily_cutoff, market_observation
-    from ..simulator import Bar, SimEngine
+    from ..simulator import SimEngine, bar_from_frame, paper_symbols
 
     def equal(actual, expected, reason, stage="paper.step"):
         if not _same(actual, expected):
@@ -1266,69 +1381,93 @@ def _verify_paper(run, admission, inputs, outputs):
     emitted.raw["redline"] = deepcopy(trace)
     equal(inputs["paper.step"], {"state": before, "result": emitted, "run_date": day},
           "paper_original_account_and_complete_model_result")
-    symbols = {row["ticker"] for row in before["positions"] + before["pending"]}
-    symbols.update(row["ticker"] for row in before.get("entry_plans", {}).values()
-                   if row["status"] in {"pending", "partial"})
-    symbols.update(pick.ticker for pick in emitted.picks)
-    symbols.update((emitted.raw.get("execution_setups") or {}).keys())
-    sectors = {row.get("sector") for row in before["positions"]}
-    sectors.update(row.get("sector") for row in before.get("entry_plans", {}).values())
-    symbols.update(sector for sector in sectors if sector)
-    groups = []
+    symbols = paper_symbols(before, emitted)
     provider_names = inputs["daily.preflight"]["policy"]["fields"]["provider_names"]
-    for call in outputs["paper.step"]["io_calls"]:
-        name, method, request, response, failed = _provider_call(run, "paper.step", call,
-            provider_names, {"ohlcv", "available"})
-        if method == "available":
-            if not groups:
-                _bad("paper_availability_without_observation", stage="paper.step")
-            groups[-1][1].append((name, method, response, failed))
-            continue
-        symbol = request["args"][0]
-        if not groups or groups[-1][0] != symbol:
-            groups.append((symbol, []))
-        groups[-1][1].append((name, method, response, failed))
-    equal([symbol for symbol, _ in groups], sorted(symbols), "all_paper_observation_requests")
+    primary = outputs["daily.preflight"]["value"]["provider"]
+    calls = outputs["paper.step"]["io_calls"]
+    batch_mode = any(call["method"].endswith(".ohlcv_batch") for call in calls)
+    legacy_mode = any(call["method"].endswith(".ohlcv") for call in calls)
+    if batch_mode and legacy_mode:
+        _bad("mixed_paper_observation_protocol", stage="paper.step")
     bars = {}
-    for symbol, calls in groups:
-        selected = None
+    if symbols and not (batch_mode or legacy_mode):
+        _bad("missing_paper_observation_protocol", stage="paper.step")
+    if batch_mode:
+        pending = set(symbols)
+        selected = {}
         available = set()
-        for name, method, raw, failed in calls:
-            if selected is not None:
-                _bad("paper_IO_after_successful_observation", stage="paper.step")
+        for call in calls:
+            name, method, request, response, failed = _provider_call(run, "paper.step", call,
+                provider_names, {"ohlcv_batch", "available"})
             if method == "available":
-                if not failed and raw is True:
+                if not failed and response is True:
                     available.add(name)
                 continue
-            primary = outputs["daily.preflight"]["value"]["provider"]
-            if name != primary and name not in available and not (name == "stooq" and primary == "yahoo"):
-                _bad("paper_fallback_without_available_probe", stage="paper.step")
+            requested = request["args"][0]
+            if not pending or set(requested) != pending:
+                _bad("paper_batch_request_identity", stage="paper.step")
+            if name != primary and not (name == "stooq" and primary != "stooq"
+                                        and "stooq" in provider_names):
+                if name not in available:
+                    _bad("paper_fallback_without_available_probe", stage="paper.step")
             if failed:
                 continue
-            observed = market_observation(_restore(raw, native=True), run_date=day,
-                                          market_timezone="America/New_York")
-            if isinstance(observed, (pd.DataFrame, pd.Series)):
-                observed = observed[observed.index.date <= cutoff]
-            if not _missing_data(observed) and not _series_stale(observed, as_of_date=day):
-                selected = observed
-        bar = None
-        # Match main.get_bar's explicit unavailable-data path. A successful
-        # non-frame observation is not an executable bar or an invented mark.
-        if isinstance(selected, pd.DataFrame) and len(selected):
+            raw = _restore(response, native=True)
+            if not isinstance(raw, dict) or any(symbol not in pending for symbol in raw):
+                _bad("paper_batch_response_identity", stage="paper.step")
+            for symbol, frame in raw.items():
+                observed = market_observation(frame, run_date=day,
+                                              market_timezone="America/New_York")
+                if _missing_data(observed) or _batch_frame_stale(observed, as_of_date=day):
+                    continue
+                selected[symbol] = observed
+                pending.remove(symbol)
+        if pending:
+            _bad("paper_batch_missing_observations", stage="paper.step")
+        for symbol in symbols:
             try:
-                selected = selected[selected.index.date <= cutoff]
-                if len(selected):
-                    row = selected.iloc[-1]
-                    adv = (float((selected["Close"] * selected["Volume"]).tail(20).mean())
-                           if "Volume" in selected.columns else 0.)
-                    bar = Bar(open=float(row["Open"]), high=float(row["High"]),
-                              low=float(row["Low"]), close=float(row["Close"]),
-                              adv=adv, date=str(selected.index[-1].date()))
+                bars[symbol] = bar_from_frame(selected.get(symbol), cutoff)
             except (KeyError, TypeError, ValueError, IndexError, AttributeError):
-                # main.get_bar defers a malformed observation as unavailable;
-                # it must not be upgraded to a fabricated complete OHLC bar.
-                bar = None
-        bars[symbol] = bar
+                bars[symbol] = None
+    elif legacy_mode:
+        groups = []
+        for call in calls:
+            name, method, request, response, failed = _provider_call(run, "paper.step", call,
+                provider_names, {"ohlcv", "available"})
+            if method == "available":
+                if not groups:
+                    _bad("paper_availability_without_observation", stage="paper.step")
+                groups[-1][1].append((name, method, response, failed))
+                continue
+            symbol = request["args"][0]
+            if not groups or groups[-1][0] != symbol:
+                groups.append((symbol, []))
+            groups[-1][1].append((name, method, response, failed))
+        equal([symbol for symbol, _ in groups], symbols, "all_paper_observation_requests")
+        for symbol, symbol_calls in groups:
+            chosen = None
+            available = set()
+            for name, method, raw_value, failed in symbol_calls:
+                if chosen is not None:
+                    _bad("paper_IO_after_successful_observation", stage="paper.step")
+                if method == "available":
+                    if not failed and raw_value is True:
+                        available.add(name)
+                    continue
+                if name != primary and name not in available and not (
+                        name == "stooq" and primary == "yahoo"):
+                    _bad("paper_fallback_without_available_probe", stage="paper.step")
+                if failed:
+                    continue
+                observed = market_observation(_restore(raw_value, native=True), run_date=day,
+                                              market_timezone="America/New_York")
+                if (not _missing_data(observed)
+                        and not _batch_frame_stale(observed, as_of_date=day)):
+                    chosen = observed
+            try:
+                bars[symbol] = bar_from_frame(chosen, cutoff)
+            except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+                bars[symbol] = None
     report = step_paper_account(before, day.isoformat(), emitted, bars)
     state = report["state"]
     transition = {key: value for key, value in report.items() if key != "state"}

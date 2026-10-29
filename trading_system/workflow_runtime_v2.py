@@ -81,7 +81,8 @@ def _evidence_refs(execution, quote):
     return list(dict.fromkeys(refs))
 
 
-def opportunity_stage(execution, result, account_state: dict, get_quote) -> dict:
+def opportunity_stage(execution, result, account_state: dict, get_quote,
+                      get_quotes=None) -> dict:
     ledger = _load(execution)
     ready = _clock(execution, "research_result_ready")
     expires = datetime.combine(next_trading_day(result.trade_date), time(16),
@@ -89,13 +90,26 @@ def opportunity_stage(execution, result, account_state: dict, get_quote) -> dict
     ledger.record_research(result, run_id=execution.run_id, observed_at=ready, expires_at=expires)
     ledger.sync_account(account_state, snapshot_id=execution.run_id + ":paper-after",
                         observed_at=ready, account_kind="paper")
-    current = ledger.snapshot()
-    symbols = list(dict.fromkeys(row["ticker"] for row in current["opportunities"]
-        if row["state"] not in {"CLOSED", "INVALIDATED", "EXPIRED", "SUPERSEDED"}))
-    quotes = {symbol: execution.call_io("opportunity.quote", {"symbol": symbol},
-                                        lambda symbol=symbol: get_quote(symbol)) for symbol in symbols}
+    symbols = ledger.observation_symbols(execution.run_id)
+    quote_attempts, quote_workers = None, None
+    if get_quotes is not None:
+        collected = execution.call_io("opportunity.quotes", {
+            "symbols": symbols, "scope": "current_research_plus_account_commitments",
+        }, lambda: get_quotes(symbols))
+        if (not isinstance(collected, dict) or set(collected.get("quotes", {})) != set(symbols)
+                or not isinstance(collected.get("attempts"), dict)):
+            raise ValueError("Bounded quote observation returned an incomplete identity set")
+        quotes = collected["quotes"]
+        quote_attempts = collected["attempts"]
+        quote_workers = collected.get("workers")
+    else:
+        quotes = {symbol: execution.call_io("opportunity.quote", {"symbol": symbol},
+                                            lambda symbol=symbol: get_quote(symbol))
+                  for symbol in symbols}
     observed = _clock(execution, "quotes_observed_after_research")
-    alerts = ledger.observe_quotes(quotes, observed_at=observed)
+    alerts = ledger.observe_quotes(quotes, observed_at=observed, symbols=symbols)
+    observation = next((row for row in reversed(ledger.snapshot()["observations"])
+                        if row["observed_at"] == observed), None)
     snapshot = _current_snapshot(result, account_state)
     snapshot["frozen_at"] = observed
     approved = {pick.ticker: pick for pick in result.picks}
@@ -162,12 +176,18 @@ def opportunity_stage(execution, result, account_state: dict, get_quote) -> dict
     result.raw["opportunity_lifecycle"] = value
     result.raw["lifecycle_observation"] = {"research_ready_at": ready, "observed_at": observed,
         "alerts": alerts, "requalifications": rechecks,
+        "quote_attempts": quote_attempts, "quote_workers": quote_workers,
+        "scope": symbols,
+        "protection_unverified": (observation or {}).get("protection_unverified", []),
         "execution_boundary": "Provisional paper/manual coordination only; no broker submission or invented execution."}
     result.raw["current_portfolio_snapshot"] = snapshot
     artifact = _artifact(execution, "opportunity-lifecycle.json", value)
     return {"lifecycle": value, "quotes": quotes, "alerts": alerts,
             "requalifications": rechecks, "current_portfolio_snapshot": snapshot,
-            "research_ready_at": ready, "observed_at": observed, "artifact": artifact}
+            "research_ready_at": ready, "observed_at": observed,
+            "quote_attempts": quote_attempts, "quote_workers": quote_workers,
+            "protection_unverified": (observation or {}).get("protection_unverified", []),
+            "artifact": artifact}
 
 
 def evaluation_stage(execution, result, account_state: dict, get_history) -> dict:

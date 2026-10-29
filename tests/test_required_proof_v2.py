@@ -182,17 +182,24 @@ def complete_fixture(tmp_path, monkeypatch, *, held=False, empty_candidates=Fals
         from trading_system.providers.tencent import TencentProvider
         execution.policy = replace(execution.policy, provider_names=("yahoo", "tencent"))
         original_history = provider.ohlcv
+        original_batch = provider.ohlcv_batch
         def unavailable_in_paper(symbol, days=400):
             if execution._active is not None and execution._active.spec.name in {"paper.step", "business.evaluate"}:
                 raise RuntimeError("SYNTHETIC_TEST ordinary primary source unavailable")
             return original_history(symbol, days)
+        def unavailable_batch_in_paper(symbols, days=400):
+            if execution._active is not None and execution._active.spec.name in {"paper.step", "business.evaluate"}:
+                raise RuntimeError("SYNTHETIC_TEST ordinary primary batch unavailable")
+            return original_batch(symbols, days)
         def unavailable_quote(symbol):
             raise RuntimeError("SYNTHETIC_TEST ordinary primary quote unavailable")
         monkeypatch.setattr(provider, "ohlcv", unavailable_in_paper)
+        monkeypatch.setattr(provider, "ohlcv_batch", unavailable_batch_in_paper)
         monkeypatch.setattr(provider, "quote", unavailable_quote)
         monkeypatch.setattr(TencentProvider, "available", staticmethod(lambda: True))
         monkeypatch.setattr(TencentProvider, "ohlcv", lambda self, symbol, days=400: original_history(symbol, days))
-        monkeypatch.setattr(TencentProvider, "ohlcv_batch", lambda self, symbols, days=400: {})
+        monkeypatch.setattr(TencentProvider, "ohlcv_batch", lambda self, symbols, days=400:
+            {symbol: original_history(symbol, days) for symbol in symbols})
         monkeypatch.setattr(TencentProvider, "quote", lambda self, symbol: {
             "price": 100., "kind": "realtime", "ts": "2026-10-20T20:06:00+00:00"})
     if old_cohort:
@@ -410,13 +417,17 @@ def test_paper_replay_accepts_actual_available_probe_and_recorded_fallback_bars(
     end = next(row for row in execution.summary() if row["stage"] == "paper.step")
     calls = read_snapshot(root, end["output_ref"], run_id=root.name, stage="paper.step", role="output")["io_calls"]
     assert any(row["method"] == "provider.tencent.available" for row in calls)
-    assert any(row["method"] == "provider.yahoo.ohlcv" and "error_ref" in row for row in calls)
-    assert any(row["method"] == "provider.tencent.ohlcv" and "output_ref" in row for row in calls)
-    for name, method in (("opportunity.lifecycle", "quote"), ("business.evaluate", "ohlcv")):
-        end = next(row for row in execution.summary() if row["stage"] == name)
-        nested = read_snapshot(root, end["output_ref"], run_id=root.name, stage=name, role="output")["io_calls"]
-        assert any(row["method"] == "provider.tencent.available" for row in nested)
-        assert any(row["method"] == "provider.tencent." + method and "output_ref" in row for row in nested)
+    assert any(row["method"] == "provider.yahoo.ohlcv_batch" and "error_ref" in row for row in calls)
+    assert any(row["method"] == "provider.tencent.ohlcv_batch" and "output_ref" in row for row in calls)
+    lifecycle = next(row for row in execution.summary() if row["stage"] == "opportunity.lifecycle")
+    value = read_snapshot(root, lifecycle["output_ref"], run_id=root.name,
+                          stage="opportunity.lifecycle", role="output")["value"]
+    assert any(attempt["provider"] == "tencent"
+               for attempts in value["quote_attempts"].values() for attempt in attempts)
+    end = next(row for row in execution.summary() if row["stage"] == "business.evaluate")
+    nested = read_snapshot(root, end["output_ref"], run_id=root.name, stage="business.evaluate", role="output")["io_calls"]
+    assert any(row["method"] == "provider.tencent.available" for row in nested)
+    assert any(row["method"] == "provider.tencent.ohlcv" and "output_ref" in row for row in nested)
     assert module.verify_required_model_v2(root, result, admission) == result["raw"]["model"]
     assert denied == []
 
@@ -484,10 +495,16 @@ def test_rehashed_tail_requires_actual_account_observations_and_pure_business_re
             out["value"]["lifecycle"]["opportunities"][0].update(state="QUALIFIED"))
     elif tamper == "invented_quote":
         def change(_, out):
-            call = next(row for row in out["io_calls"] if row["method"] == "opportunity.quote")
+            call = next(row for row in out["io_calls"] if row["method"] == "opportunity.quotes")
             invented = {"price": 999., "kind": "realtime", "ts": "2026-10-20T20:06:00+00:00"}
-            rewrite_child(root, call, "output", lambda _: invented)
             symbol = next(iter(out["value"]["quotes"]))
+            def alter_collection(value):
+                value["quotes"][symbol] = invented
+                value["attempts"][symbol] = [{
+                    "provider": "yahoo", "ok": True, "reason": None, "secs": .01}]
+                invented["source"] = "yahoo"
+                invented["observed_at"] = "2026-10-20T20:06:00+00:00"
+            rewrite_child(root, call, "output", alter_collection)
             out["value"]["quotes"][symbol] = invented
         rewrite_stage(root, "opportunity.lifecycle", change)
     elif tamper == "clock":

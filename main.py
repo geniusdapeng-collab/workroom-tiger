@@ -156,13 +156,13 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
     from trading_system.governance_bridge import GovernanceBridge
     from trading_system.journal import Journal
     from trading_system.ledger_io import read_json_strict, write_text_atomic
-    from trading_system.pipeline import _single_with_fallback
+    from trading_system.pipeline import _batch_with_fallback, _single_with_fallback
     from trading_system.providers import get_provider
     from trading_system.providers.base import is_synthetic
     from trading_system.redline.execution import (EvidenceWriteError, ExecutionContractError,
                                                    StrictObservationError, StrictSourceSynthetic)
     from trading_system.review.chief import ReviewChief
-    from trading_system.simulator import Bar, SimEngine
+    from trading_system.simulator import Bar, SimEngine, bar_from_frame
     from trading_system.state import purge_run_state
 
     paths = execution.paths
@@ -286,30 +286,45 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
     def get_bar(ticker):
         if ticker in bar_cache:
             return bar_cache[ticker]
-        bar = None
         try:
             frame = _single_with_fallback(settle_provider, "ohlcv", ticker, days=400)
-            if frame is not None and len(frame):
-                # The frozen market date is the accounting cutoff. Source dates
-                # remain attached to the actual bar and are never relabelled.
-                frame = frame[frame.index.date <= (execution.daily_bars_cutoff if upgrade else execution.run_date)]
-                if len(frame):
-                    row = frame.iloc[-1]
-                    adv = (float((frame["Close"] * frame["Volume"]).tail(20).mean())
-                           if "Volume" in frame.columns else 0.0)
-                    bar = Bar(open=float(row["Open"]), high=float(row["High"]),
-                              low=float(row["Low"]), close=float(row["Close"]),
-                              adv=adv, date=str(frame.index[-1].date()))
+            bar = bar_from_frame(
+                frame, execution.daily_bars_cutoff if upgrade else execution.run_date)
         except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
             raise
         except Exception as error:
             log.warning("Strict paper bar unavailable for %s (%s); transition deferred",
                         ticker, type(error).__name__)
+            bar = None
         bar_cache[ticker] = bar
         return bar
 
     with execution.step("paper.step", {"state": sim.state, "result": result,
                                        "run_date": execution.run_date}) as stage:
+        if upgrade:
+            # The v2 workflow can require many account-management observations.
+            # Complete the same fallback chain in bounded batches, then feed the
+            # existing pure paper engine exactly one dated Bar per symbol.
+            from trading_system.simulator import paper_symbols
+            symbols = paper_symbols(sim.state, result)
+            try:
+                frames = _batch_with_fallback(
+                    settle_provider, symbols, 400, "paper.step",
+                    require_complete=True, as_of_date=execution.run_date)
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
+            except Exception as error:
+                log.warning("Strict paper batch unavailable (%s); transition deferred",
+                            type(error).__name__)
+                frames = {}
+            for symbol in symbols:
+                try:
+                    bar_cache[symbol] = bar_from_frame(
+                        frames.get(symbol), execution.daily_bars_cutoff)
+                except Exception as error:
+                    log.warning("Strict paper bar invalid for %s (%s); transition deferred",
+                                symbol, type(error).__name__)
+                    bar_cache[symbol] = None
         sim_out = sim.step(result.trade_date, result, get_bar)
         stage.output({"transition": sim_out, "state": sim.state, "bars": bar_cache})
 
@@ -377,12 +392,13 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
         stage.output(governance)
 
     if upgrade:
-        from trading_system.pipeline import quote_with_fallback
+        from trading_system.pipeline import quote_observation_batch
         from trading_system.workflow_runtime_v2 import opportunity_stage, evaluation_stage
         with execution.step("opportunity.lifecycle", {"result": result, "paper_state": sim.state,
                                                        "run_id": execution.run_id}) as stage:
             lifecycle = opportunity_stage(execution, result, sim.state,
-                                          lambda ticker: quote_with_fallback(settle_provider, ticker))
+                                          lambda ticker: quote_observation_batch(settle_provider, [ticker])["quotes"][ticker],
+                                          get_quotes=lambda symbols: quote_observation_batch(settle_provider, symbols))
             stage.output(lifecycle)
         with execution.step("business.evaluate", {"result": result, "paper_state": sim.state,
                                                    "lifecycle": result.raw["opportunity_lifecycle"],

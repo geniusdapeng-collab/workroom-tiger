@@ -114,6 +114,9 @@ def upgrade_fixture(tmp_path, monkeypatch, *, phase="daily", failure_stage=None,
         policy=ExecutionPolicy(UPGRADE_POLICIES[profile][0], model_mode="enabled",
             provider_names=("yahoo",), search_source_names=("deepseek_search",)),
         store=EvidenceStore(root, root.name), admitted_at_utc=admitted)
+    quote_time = (datetime.fromisoformat(ready) - timedelta(seconds=1)).isoformat()
+    monkeypatch.setattr(fixture, "quote", lambda _symbol: {
+        "price": 100.0, "ts": quote_time, "kind": "realtime"})
     args.mode, args.universe, args.universe_file, args.picks = phase, "full", None, 10
     monkeypatch.setattr("trading_system.universe.load_full_universe", lambda: (["AAA", "BBB", "CCC"], "nasdaqtrader"))
     monkeypatch.setattr("trading_system.workflow_runtime_v2.utc_now", lambda: ready)

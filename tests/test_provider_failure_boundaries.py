@@ -52,7 +52,7 @@ def _isolated_fallbacks(monkeypatch):
     monkeypatch.setattr(pipeline, "_DATA_ISSUES", [], raising=False)
     monkeypatch.setattr(pipeline, "_channel_chain", lambda: [])
     monkeypatch.setattr("trading_system.providers.stooq.StooqProvider",
-                        lambda: _Provider("stooq", result={}))
+                        lambda **_kwargs: _Provider("stooq", result={}))
 
 
 def test_initial_batch_exception_reaches_existing_fallback(monkeypatch):
@@ -179,6 +179,40 @@ def test_existing_coverage_threshold_does_not_force_extra_sources(monkeypatch, s
     result = pipeline._batch_with_fallback(primary, list("ABCDEF"), 30)
     assert result == frames
     assert len(stooq.calls) == (0 if success_at == "primary" else 1)
+
+
+def test_complete_batch_mode_fills_every_symbol_without_changing_default_threshold(monkeypatch):
+    frames = {ticker: _frame(i + 1) for i, ticker in enumerate("ABCDEF")}
+    primary = _Provider("yahoo", result={"A": frames["A"]})
+    stooq = _Provider("stooq", result={"B": frames["B"]})
+    channel = _Provider("tencent", result={"C": frames["C"], "D": frames["D"],
+                                           "E": frames["E"], "F": frames["F"]})
+    monkeypatch.setattr("trading_system.providers.stooq.StooqProvider", lambda: stooq)
+    monkeypatch.setattr(pipeline, "_channel_chain", lambda: [channel])
+
+    result = pipeline._batch_with_fallback(
+        primary, list("ABCDEF"), 30, require_complete=True)
+
+    assert result == frames
+    assert stooq.calls == [("stooq", "ohlcv_batch", ["B", "C", "D", "E", "F"], 30)]
+    assert channel.calls == [("tencent", "ohlcv_batch", ["C", "D", "E", "F"], 30)]
+
+
+def test_complete_batch_mode_rejects_stale_frame_for_prefetch(monkeypatch):
+    stale = _frame()
+    stale.index = pd.date_range(end="2026-10-01", periods=len(stale))
+    fresh = _frame(200)
+    primary = _Provider("stooq", result={"A": stale})
+    channel = _Provider("tencent", result={"A": fresh})
+    monkeypatch.setattr(pipeline, "_channel_chain", lambda: [channel])
+
+    result = pipeline._batch_with_fallback(
+        primary, ["A"], 30, require_complete=True,
+        as_of_date=pd.Timestamp.today().date())
+
+    assert result["A"] is fresh
+    assert any(issue["provider"] == "stooq" and issue["issue"] == "series_stale"
+               for issue in pipeline._DATA_ISSUES)
 
 
 @pytest.mark.parametrize("invalid", [None, pd.DataFrame(),

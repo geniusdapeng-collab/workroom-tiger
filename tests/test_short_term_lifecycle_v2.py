@@ -165,6 +165,76 @@ def test_quote_alerts_idempotent_per_evidence_and_expired_plan_cannot_enter(tmp_
     assert book.snapshot()["intents"] == []
 
 
+def test_candidate_limit_deferred_symbols_do_not_enter_active_opportunity_ledger(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    source = result()
+    source["raw"]["candidate_research"] = {
+        "coverage": {"deferred": [{"symbol": "AAA", "reason": "candidate_limit"}]},
+    }
+    book = OpportunityLedger(tmp_path / "deferred.json")
+    book.record_research(source, run_id="run-deferred", observed_at=NOW, expires_at=EXPIRES)
+    assert book.snapshot()["opportunities"] == []
+    assert book.snapshot()["research_runs"][0]["deferred_symbols"] == ["AAA"]
+
+
+def test_observation_scope_is_current_research_plus_account_commitments(tmp_path):
+    book = ledger(tmp_path)
+    newer = result()
+    newer["watchlist"][0]["ticker"] = "BBB"
+    newer["raw"]["execution_decisions"][0]["symbol"] = "BBB"
+    newer["raw"]["rejections"]["candidates"][0]["ticker"] = "BBB"
+    book.record_research(newer, run_id="run-source-2", observed_at=LATER, expires_at=EXPIRES)
+    assert book.observation_symbols("run-source-2") == ["BBB"]
+    book.sync_account({"positions": [{"ticker": "AAA", "shares": 40, "entry_price": 100.0,
+        "initial_stop": 95.0, "stop": 95.0, "entry_date": "2026-10-26"}],
+        "pending": [], "closed": []}, snapshot_id="held-scope", observed_at=LATER)
+    assert book.observation_symbols("run-source-2") == ["AAA", "BBB"]
+
+
+def test_per_symbol_observation_time_prevents_parallel_batch_from_falsifying_age(tmp_path):
+    book = ledger(tmp_path)
+    q = quote(ts="2026-10-27T14:00:00+00:00",
+              observed_at="2026-10-27T14:01:00+00:00")
+    alerts = book.observe_quotes(q, observed_at="2026-10-27T14:10:00+00:00")
+    assert [alert["kind"] for alert in alerts] == ["REQUALIFY"]
+    assert alerts[0]["observed_at"] == "2026-10-27T14:01:00+00:00"
+    assert book.snapshot()["observation_refusals"] == []
+
+
+def test_unusable_held_quote_emits_explicit_protection_unverified(tmp_path):
+    book = ledger(tmp_path)
+    book.sync_account({"positions": [{"ticker": "AAA", "shares": 40, "entry_price": 100.0,
+        "initial_stop": 95.0, "stop": 95.0, "entry_date": "2026-10-26"}],
+        "pending": [], "closed": []}, snapshot_id="held-protection", observed_at=NOW)
+    assert book.observe_quotes({"AAA": None}, observed_at=LATER) == []
+    observation = book.snapshot()["observations"][-1]
+    assert observation["protection_unverified"] == ["AAA"]
+    assert book.snapshot()["observation_refusals"][-1]["protection_unverified"] is True
+    assert any(event["kind"] == "PROTECTION_UNVERIFIED" for event in book.snapshot()["events"])
+
+
+def test_legacy_v2_replay_preserves_old_scope_and_observation_shape(tmp_path):
+    from trading_system.opportunity_lifecycle import OpportunityLedger
+    source = result()
+    source["raw"]["candidate_research"] = {
+        "coverage": {"deferred": [{"symbol": "AAA", "reason": "candidate_limit"}]},
+    }
+    book = OpportunityLedger(tmp_path / "legacy.json")
+    book.record_research(source, run_id="legacy-run", observed_at=NOW,
+                         expires_at=EXPIRES, legacy_watch_scope=True)
+    assert len(book.snapshot()["opportunities"]) == 1
+    assert "deferred_symbols" not in book.snapshot()["research_runs"][0]
+    book.observe_quotes({"AAA": {
+        "price": 100.0, "ts": "2026-10-27 14:00:00", "kind": "realtime",
+    }}, observed_at=LATER, legacy_shape=True)
+    assert book.snapshot()["observations"][-1] == {
+        "observed_at": LATER, "attempted": 1, "usable": 0,
+        "refused": 1, "alerts": 0}
+    assert book.snapshot()["observation_refusals"][-1] == {
+        "ticker": "AAA", "reason": "QUOTE_TIME_UNVERIFIABLE",
+        "observed_at": LATER}
+
+
 def test_held_stop_and_protection_survive_zero_pick_daily_refresh(tmp_path):
     book = ledger(tmp_path)
     state = {"positions": [{"ticker": "AAA", "shares": 40, "entry_price": 100.0,

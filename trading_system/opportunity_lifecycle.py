@@ -122,11 +122,15 @@ def _session_refusal(instant):
 
 def quote_refusal_reason(quote, *, observed_at: str, max_age_seconds: int = 300):
     """Shared intraday freshness guard; a provider's 'realtime' label is insufficient."""
-    now = aware_time(observed_at)
+    aware_time(observed_at)
     if type(max_age_seconds) is not int or not 1 <= max_age_seconds <= 300:
         raise ValueError("Lifecycle quote age budget invalid")
     if not isinstance(quote, dict):
         return "QUOTE_MISSING"
+    try:
+        now = aware_time(quote.get("observed_at", observed_at))
+    except ValueError:
+        return "QUOTE_OBSERVATION_UNVERIFIABLE"
     if not positive(quote.get("price")):
         return "QUOTE_PRICE_INVALID"
     if quote.get("stale"):
@@ -257,7 +261,8 @@ class OpportunityLedger:
                 cancelled.append(intent["intent_id"])
         return cancelled
 
-    def record_research(self, result, *, run_id: str, observed_at: str, expires_at: str) -> dict:
+    def record_research(self, result, *, run_id: str, observed_at: str, expires_at: str,
+                        legacy_watch_scope: bool = False) -> dict:
         _text(run_id, "source run")
         observed, expiry = aware_time(observed_at), aware_time(expires_at)
         blob = _plain(result)
@@ -276,12 +281,6 @@ class OpportunityLedger:
             "watchlist": watched, "picks": picks, "decisions": decisions,
             "rejections": rejected, "cohort_inputs": raw.get("cohort_inputs"),
             "observed_at": observed_at, "expires_at": expires_at}
-        digest = _digest(reduced)
-        existing = next((item for item in self._state["research_runs"] if item["run_id"] == run_id), None)
-        if existing:
-            if existing["body_hash"] != digest:
-                raise ValueError("Lifecycle source run collision: changed research")
-            return self.snapshot()
         by_watch = {_symbol(item.get("ticker")): item for item in watched}
         by_pick = {_symbol(item.get("ticker")): item for item in picks}
         by_decision = {_symbol(item.get("symbol") or item.get("ticker")): item for item in decisions}
@@ -289,7 +288,34 @@ class OpportunityLedger:
         if any(len(items) != len(mapping) for items, mapping in
                ((watched, by_watch), (picks, by_pick), (decisions, by_decision), (rejected, by_reject))):
             raise ValueError("Lifecycle duplicate research ticker")
+        deferred = set()
+        if not legacy_watch_scope:
+            research = raw.get("candidate_research")
+            if research is not None and not isinstance(research, dict):
+                raise ValueError("Lifecycle candidate research invalid")
+            coverage = ((research or {}).get("coverage") or {})
+            deferred_rows = coverage.get("deferred") or []
+            if not isinstance(deferred_rows, list):
+                raise ValueError("Lifecycle deferred research collection invalid")
+            for item in deferred_rows:
+                if not isinstance(item, dict):
+                    raise ValueError("Lifecycle deferred research row invalid")
+                deferred.add(_symbol(item.get("symbol") or item.get("ticker")))
+            for ticker, item in by_reject.items():
+                if "candidate_limit" in (item.get("reasons") or []):
+                    deferred.add(ticker)
+            if deferred.intersection(by_pick):
+                raise ValueError("Lifecycle deferred symbol cannot also be an approved pick")
+            reduced["deferred_symbols"] = sorted(deferred)
+        digest = _digest(reduced)
+        existing = next((item for item in self._state["research_runs"] if item["run_id"] == run_id), None)
+        if existing:
+            if existing["body_hash"] != digest:
+                raise ValueError("Lifecycle source run collision: changed research")
+            return self.snapshot()
         symbols = list(dict.fromkeys([*by_watch, *by_pick, *by_decision]))
+        if not legacy_watch_scope:
+            symbols = [ticker for ticker in symbols if ticker not in deferred]
         rows = []
         for ticker in symbols:
             candidate, pick, decision = by_watch.get(ticker, {}), by_pick.get(ticker), by_decision.get(ticker, {})
@@ -331,9 +357,12 @@ class OpportunityLedger:
                 cancelled = self._cancel_intents(old, cause="new_research", observed_at=observed_at, by_run=run_id)
                 self._event("SUPERSEDED", observed_at, old["opportunity_id"], by_run=run_id,
                             cancelled_intent_ids=cancelled)
-        self._state["research_runs"].append({"run_id": run_id, "body_hash": digest,
+        run = {"run_id": run_id, "body_hash": digest,
             "observed_at": observed_at, "signal_date": blob["trade_date"], "expires_at": expires_at,
-            "cohort_inputs": deepcopy(raw.get("cohort_inputs"))})
+            "cohort_inputs": deepcopy(raw.get("cohort_inputs"))}
+        if not legacy_watch_scope:
+            run["deferred_symbols"] = sorted(deferred)
+        self._state["research_runs"].append(run)
         self._state["opportunities"].extend(rows)
         for item in rows:
             self._event("RESEARCH_RECORDED", observed_at, item["opportunity_id"], state=item["state"])
@@ -415,7 +444,25 @@ class OpportunityLedger:
                     run_id=run_id, reasons=reasons, risk_evidence_ids=refs)
         return deepcopy(item)
 
-    def observe_quotes(self, quotes, *, observed_at: str, max_age_seconds: int = 300) -> list[dict]:
+    def observation_symbols(self, run_id: str) -> list[str]:
+        """Current research plus all account commitments; old uncommitted WATCH stays out."""
+        _text(run_id, "observation run")
+        selected = {}
+        def priority(item):
+            return 3 if item["state"] in {"HELD", "EXIT_PENDING"} else 2 if self._account_committed(item) else 1
+        for item in self._state["opportunities"]:
+            if item["state"] in _TERMINAL:
+                continue
+            if (item["state"] in {"HELD", "EXIT_PENDING"} or self._account_committed(item)
+                    or item["source_run_id"] == run_id):
+                previous = selected.get(item["ticker"])
+                if previous is None or priority(item) >= priority(previous):
+                    selected[item["ticker"]] = item
+        return sorted(selected)
+
+    def observe_quotes(self, quotes, *, observed_at: str, max_age_seconds: int = 300,
+                       symbols: list[str] | None = None,
+                       legacy_shape: bool = False) -> list[dict]:
         now = aware_time(observed_at)
         if type(max_age_seconds) is not int or not 1 <= max_age_seconds <= 300:
             raise ValueError("Lifecycle quote age budget invalid")
@@ -423,6 +470,13 @@ class OpportunityLedger:
             quotes = {item["ticker"]: item for item in quotes}
         if not isinstance(quotes, dict):
             raise ValueError("Lifecycle quotes mapping required")
+        allowed = None
+        if symbols is not None:
+            if legacy_shape:
+                raise ValueError("Legacy lifecycle shape cannot add an observation scope")
+            if not isinstance(symbols, list):
+                raise ValueError("Lifecycle observation symbols invalid")
+            allowed = {_symbol(ticker) for ticker in symbols}
         current = {}
         def priority(item):
             return 3 if item["state"] in {"HELD", "EXIT_PENDING"} else 2 if self._account_committed(item) else 1
@@ -432,7 +486,7 @@ class OpportunityLedger:
             previous = current.get(item["ticker"])
             if previous is None or priority(item) >= priority(previous):
                 current[item["ticker"]] = item
-        alerts, refused, usable = [], [], 0
+        alerts, refused, usable, protection_unverified = [], [], 0, []
         for ticker, item in current.items():
             held = item["state"] in {"HELD", "EXIT_PENDING"}
             committed = self._account_committed(item)
@@ -441,10 +495,31 @@ class OpportunityLedger:
                 cancelled = self._cancel_intents(item, cause="expiry", observed_at=observed_at)
                 self._event("EXPIRED", observed_at, item["opportunity_id"], cancelled_intent_ids=cancelled)
                 continue
+            if allowed is not None and ticker not in allowed:
+                continue
             q = quotes.get(ticker)
             reason = quote_refusal_reason(q, observed_at=observed_at, max_age_seconds=max_age_seconds)
             if reason:
-                refused.append({"ticker": ticker, "reason": reason, "observed_at": observed_at})
+                quote_observed = (q.get("observed_at", observed_at)
+                                  if isinstance(q, dict) else observed_at)
+                if legacy_shape:
+                    refused.append({"ticker": ticker, "reason": reason,
+                                    "observed_at": observed_at})
+                else:
+                    refused.append({"ticker": ticker, "reason": reason,
+                                    "observed_at": quote_observed,
+                                    "quote_at": q.get("ts") if isinstance(q, dict) else None,
+                                    "protection_unverified": held})
+                if held and not legacy_shape:
+                    protection_unverified.append(ticker)
+                    evidence_id = q.get("evidence_id") if isinstance(q, dict) else None
+                    dedup = _digest([item["opportunity_id"], "PROTECTION_UNVERIFIED",
+                                     reason, evidence_id, quote_observed])
+                    if not any(event["payload"].get("observation_key") == dedup
+                               for event in self._state["events"]):
+                        self._event("PROTECTION_UNVERIFIED", observed_at, item["opportunity_id"],
+                                    observation_key=dedup, reason=reason,
+                                    quote_observed_at=quote_observed)
                 continue
             usable += 1
             price, levels = float(q["price"]), item["levels"]
@@ -478,7 +553,8 @@ class OpportunityLedger:
             elif kind == "PROTECT":
                 item["pending_protection_stop"] = extra["proposed_stop"]
             alert = {"opportunity_id": item["opportunity_id"], "ticker": ticker, "kind": kind,
-                "price": price, "quote_at": q["ts"], "observed_at": observed_at,
+                "price": price, "quote_at": q["ts"],
+                "observed_at": q.get("observed_at", observed_at),
                 "price_kind": q["kind"], "evidence_id": evidence_id,
                 "requires_requalification": kind == "REQUALIFY", "account_kind": self.account_kind, **extra}
             self._event(kind, observed_at, item["opportunity_id"], observation_key=dedup,
@@ -489,8 +565,12 @@ class OpportunityLedger:
             if refusal not in self._state["observation_refusals"]:
                 self._state["observation_refusals"].append(refusal)
                 self._dirty = True
-        observation = {"observed_at": observed_at, "attempted": len(current), "usable": usable,
+        attempted = len(current) if allowed is None else len(current.keys() & allowed)
+        observation = {"observed_at": observed_at, "attempted": attempted, "usable": usable,
                        "refused": len(refused), "alerts": len(alerts)}
+        if not legacy_shape:
+            observation.update(protection_unverified=protection_unverified,
+                scope="current_research_plus_account_commitments")
         if observation not in self._state["observations"]:
             self._state["observations"].append(observation)
             self._dirty = True

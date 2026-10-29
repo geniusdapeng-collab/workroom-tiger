@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -153,6 +154,15 @@ def _series_stale(out, max_lag_days: int = 5, *, as_of_date=None) -> bool:
         return False
 
 
+def _batch_frame_stale(frame, *, as_of_date) -> bool:
+    """Apply the single-source freshness boundary to an OHLCV batch frame."""
+    if as_of_date is None or not isinstance(frame, pd.DataFrame) or frame.empty:
+        return False
+    if not isinstance(frame.index, pd.DatetimeIndex) or frame.index.hasnans:
+        return True
+    return (as_of_date - frame.index.max().date()).days > 5
+
+
 def _supports(provider, method: str) -> bool:
     """能力感知（v3 修复）：provider 声明 CAPABILITIES 时，不含该方法直接跳过，
     避免"必然失败的调用"污染健康分与降级时延（如 official 不承接个股 OHLCV）。"""
@@ -253,6 +263,171 @@ def _quote_stale(q: dict, max_lag_days: int = 3) -> bool:
         return True
 
 
+def _action_quote_rejection(q) -> str | None:
+    """Validate a quote used for live opportunity observation."""
+    import math
+    from numbers import Real
+
+    if not isinstance(q, dict) or not q:
+        return "missing_quote"
+    price = q.get("price")
+    if (isinstance(price, bool) or not isinstance(price, Real)
+            or not math.isfinite(price) or price <= 0):
+        return "invalid_price"
+    if q.get("stale"):
+        return "stale_quote"
+    if q.get("kind") not in {"realtime", "realtime_delayed", "delayed"}:
+        return "not_intraday_quote"
+    ts = q.get("ts")
+    if not isinstance(ts, str) or not ts.strip():
+        return "unverifiable_quote_time"
+    try:
+        parsed = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return "unverifiable_quote_time"
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return "unverifiable_quote_time"
+    return None
+
+
+def _fast_quote_source_specs(execution):
+    """Timezone-explicit, free quote sources that do not trigger Yahoo rate limits."""
+    allowed = set(execution.policy.provider_names) if execution is not None else {
+        "sina", "tencent", "eastmoney", "stooq"}
+    specs = []
+    if "sina" in allowed:
+        from .providers.sina import SinaProvider
+        try:
+            if SinaProvider.available():
+                specs.append(("sina", SinaProvider))
+        except Exception as exc:
+            logger.debug("Sina fast quote unavailable: %s", type(exc).__name__)
+    return specs
+
+
+def quote_observation_batch(provider, tickers: list[str], *, max_workers: int = 8,
+                            source_specs=None) -> dict:
+    """Collect live action quotes concurrently without crossing evidence ownership.
+
+    Provider calls run in worker threads and return plain data. The caller wraps
+    this function in one ExecutionContext IO operation on its owner thread, so
+    the ordered evidence chain still has a single writer. Only quotes with a
+    timezone-aware instant and a valid positive price may count as candidates.
+    A bounded generic fallback handles symbols that every fast source missed.
+    """
+    ordered = list(dict.fromkeys(
+        ticker for ticker in tickers if isinstance(ticker, str) and ticker.strip()))
+    if not ordered:
+        return {"quotes": {}, "attempts": {}, "workers": 0}
+    if type(max_workers) is not int or not 1 <= max_workers <= 16:
+        raise ValueError("Quote observation worker budget invalid")
+    raw_primary = getattr(provider, "_provider", provider)
+    execution = getattr(provider, "execution", None)
+    specs = list(source_specs) if source_specs is not None else _fast_quote_source_specs(execution)
+
+    def fetch(symbol):
+        attempts = []
+        for name, factory in specs:
+            started = time.monotonic()
+            try:
+                source = factory()
+                q = source.quote(symbol)
+                reason = _action_quote_rejection(q)
+                observed = datetime.now(timezone.utc).isoformat()
+                attempts.append({"provider": name, "ok": reason is None,
+                                 "reason": reason, "secs": round(time.monotonic() - started, 3)})
+                if reason is None:
+                    return symbol, {**q, "source": name, "observed_at": observed}, attempts
+            except Exception as exc:
+                attempts.append({"provider": name, "ok": False,
+                                 "error_type": type(exc).__name__,
+                                 "secs": round(time.monotonic() - started, 3)})
+        return symbol, None, attempts
+
+    fetched, attempts_by_symbol = {}, {}
+    workers = min(max_workers, len(ordered))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tiger-quote") as pool:
+        futures = {pool.submit(fetch, symbol): symbol for symbol in ordered}
+        for future in as_completed(futures):
+            symbol = futures[future]
+            try:
+                symbol, quote, attempts = future.result()
+            except Exception as exc:
+                attempts = [{"provider": "worker", "ok": False,
+                             "error_type": type(exc).__name__, "secs": 0}]
+                quote = None
+            if quote is not None:
+                fetched[symbol] = quote
+            attempts_by_symbol[symbol] = attempts
+
+    # Preserve the established quote chain exactly: primary -> Stooq -> public
+    # channels. Probe availability only when at least one fast source missed.
+    if any(symbol not in fetched for symbol in ordered):
+        fallback_sources = [raw_primary]
+        if provider.name != "stooq" and (
+                execution is None or "stooq" in execution.policy.provider_names):
+            from .providers.stooq import StooqProvider
+            fallback_sources.append(StooqProvider(allow_challenge=False))
+        for wrapped in (_channel_chain(execution) if execution is not None else _channel_chain()):
+            candidate = getattr(wrapped, "_provider", wrapped)
+            if getattr(candidate, "name", None) in {
+                    "tencent", "sina", "eastmoney", "agentgw", "ifind_gw", "tiingo",
+            } and all(candidate.name != old.name for old in fallback_sources):
+                fallback_sources.append(candidate)
+
+        for symbol in ordered:
+            if symbol in fetched:
+                continue
+            for source in fallback_sources:
+                started = time.monotonic()
+                try:
+                    quote = source.quote(symbol)
+                    reason = _action_quote_rejection(quote)
+                    observed = datetime.now(timezone.utc).isoformat()
+                    attempts_by_symbol.setdefault(symbol, []).append({
+                        "provider": source.name, "ok": reason is None,
+                        "reason": reason, "fallback": "sequential",
+                        "secs": round(time.monotonic() - started, 3)})
+                except Exception as exc:
+                    attempts_by_symbol.setdefault(symbol, []).append({
+                        "provider": source.name, "ok": False,
+                        "error_type": type(exc).__name__, "fallback": "sequential",
+                        "secs": round(time.monotonic() - started, 3)})
+                    continue
+                if reason is None:
+                    fetched[symbol] = {**quote, "source": source.name, "observed_at": observed}
+                    break
+
+    for symbol in ordered:
+        for attempt in attempts_by_symbol.get(symbol, []):
+            name = attempt.get("provider")
+            if not isinstance(name, str):
+                continue
+            if attempt.get("ok"):
+                _LINEAGE.append((f"quote({symbol})[action]", name))
+                _health_record(name, True, float(attempt.get("secs", 0)))
+            elif attempt.get("error_type"):
+                _DATA_ISSUES.append({
+                    "provider": name, "synthetic": False, "method": "quote",
+                    "symbols": [symbol], "issue": "provider_error",
+                    "error_type": attempt["error_type"],
+                })
+                _health_record(name, False, float(attempt.get("secs", 0)))
+            elif attempt.get("reason"):
+                _DATA_ISSUES.append({
+                    "provider": name, "synthetic": False, "method": "quote",
+                    "symbols": [symbol], "issue": attempt["reason"],
+                })
+
+    return {
+        "quotes": {symbol: fetched.get(symbol) for symbol in ordered},
+        # as_completed yields nondeterministic insertion order. Evidence replay
+        # and receipt hashes require the caller's exact symbol order.
+        "attempts": {symbol: attempts_by_symbol.get(symbol, []) for symbol in ordered},
+        "workers": workers,
+    }
+
+
 def quote_with_fallback(provider, ticker: str) -> dict | None:
     """当前报价降级链：provider → stooq → 服务端通道群（agentgw/ifind/tiingo）。
 
@@ -329,7 +504,8 @@ def quote_with_fallback(provider, ticker: str) -> dict | None:
 
 
 def _batch_with_fallback(provider, tickers: list[str], days: int,
-                         label: str = "batch") -> dict[str, pd.DataFrame]:
+                         label: str = "batch", *, require_complete: bool = False,
+                         as_of_date=None) -> dict[str, pd.DataFrame]:
     """批量拉取：yahoo → stooq → 服务端通道群依次补洞
     （仅真实源之间降级；生产链路绝不回退合成数据，覆盖率如实记录 data_coverage）。"""
     execution = getattr(provider, "execution", None)
@@ -358,8 +534,14 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
             logger.warning("%s 批量结果不是行情字典，跳过该环继续降级", src.name)
             return {}
         got = {t: batch[t] for t in missing if t in batch
-               and isinstance(batch[t], pd.DataFrame) and not _missing_data(batch[t])}
-        invalid = [t for t in missing if t in batch and t not in got]
+               and isinstance(batch[t], pd.DataFrame) and not _missing_data(batch[t])
+               and not _batch_frame_stale(batch[t], as_of_date=as_of_date)}
+        stale = [t for t in missing if t in batch and isinstance(batch[t], pd.DataFrame)
+                 and not _missing_data(batch[t])
+                 and _batch_frame_stale(batch[t], as_of_date=as_of_date)]
+        if stale:
+            _data_issue(src, "ohlcv_batch", stale, "series_stale", label=label)
+        invalid = [t for t in missing if t in batch and t not in got and t not in stale]
         if invalid:
             _data_issue(src, "ohlcv_batch", invalid, "invalid_data", label=label)
         if not got:
@@ -384,7 +566,9 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
     data = _fetch(provider, tickers)
     enough = max(3, len(tickers) // 3)
     _LINEAGE.append((f"{label}[{len(data)}/{len(tickers)}]", _provider_source(provider)))
-    if len(data) >= enough:
+    if len(data) >= len(tickers):
+        return _finish()
+    if not require_complete and len(data) >= enough:
         return _finish()
     if provider.name != "stooq" and (execution is None or "stooq" in execution.policy.provider_names):
         logger.warning("%s 批量拉取覆盖率不足（%d/%d），降级 stooq",
@@ -397,7 +581,9 @@ def _batch_with_fallback(provider, tickers: list[str], days: int,
         data.update(got)
         if got:
             _LINEAGE.append((f"{label}+补{len(got)}只", _provider_source(stooq)))
-        if len(data) >= enough:
+        if len(data) >= len(tickers):
+            return _finish()
+        if not require_complete and len(data) >= enough:
             return _finish()
     for alt in (_channel_chain(execution) if execution else _channel_chain()):
         missing = [t for t in tickers if t not in data]

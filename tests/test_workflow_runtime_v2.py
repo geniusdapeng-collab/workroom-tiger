@@ -77,6 +77,36 @@ def test_eod_quote_does_not_create_executable_intent_and_zero_trades_does_not_cl
     assert (tmp_path / "business-evaluation.json").exists()
 
 
+def test_bounded_quote_stage_uses_current_research_scope_and_per_quote_observation(tmp_path, monkeypatch):
+    import trading_system.workflow_runtime_v2 as runtime
+    monkeypatch.setattr(runtime, "utc_now", lambda: NOW)
+    execution, current = Execution(tmp_path), result()
+    current.watchlist.append(StockCandidate("BBB", price=100., key_level=100., stop_price=95.))
+    current.raw["execution_decisions"].append({"symbol": "BBB", "action": "watch"})
+    current.raw["rejections"]["candidates"].append({"ticker": "BBB", "reasons": ["numeric_gates_failed"]})
+    current.raw["candidate_research"] = {
+        "coverage": {"deferred": [{"symbol": "AAA", "reason": "candidate_limit"}]},
+    }
+    requested = []
+    def quotes(symbols):
+        requested.append(list(symbols))
+        return {
+            "quotes": {"BBB": {"price": 100., "ts": "2026-10-27T14:00:59+00:00",
+                               "observed_at": "2026-10-27T14:00:59+00:00",
+                               "kind": "realtime", "source": "fixture"}},
+            "attempts": {"BBB": [{"provider": "fixture", "ok": True}]},
+            "workers": 1,
+        }
+    value = opportunity_stage(execution, current, state(),
+        lambda _: pytest.fail("Per-symbol quote path must not run"),
+        get_quotes=quotes)
+    assert requested == [["BBB"]]
+    assert current.raw["lifecycle_observation"]["scope"] == ["BBB"]
+    assert current.raw["lifecycle_observation"]["quote_workers"] == 1
+    assert current.raw["lifecycle_observation"]["quote_attempts"]["BBB"][0]["provider"] == "fixture"
+    assert [alert["ticker"] for alert in value["alerts"]] == ["BBB"]
+
+
 def test_corrupt_ledger_fails_before_quotes_or_overwrite(tmp_path, monkeypatch):
     import trading_system.workflow_runtime_v2 as runtime
     monkeypatch.setattr(runtime, "utc_now", lambda: NOW)
@@ -85,3 +115,29 @@ def test_corrupt_ledger_fails_before_quotes_or_overwrite(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         opportunity_stage(Execution(tmp_path), result(), state(), lambda _: pytest.fail("No quote before ledger validation"))
     assert target.read_text() == '{"schema":"broken"}'
+
+
+def test_v2_paper_observation_scope_and_complete_bar_projection_are_shared():
+    import pandas as pd
+    from trading_system.simulator import bar_from_frame, paper_symbols
+    current = result()
+    current.picks = [SimpleNamespace(ticker="PICK")]
+    current.raw["execution_setups"] = {"SETUP": {"entry_price": 100.0}}
+    account = {
+        "positions": [{"ticker": "HELD", "sector": "XLK"}],
+        "pending": [{"ticker": "PENDING"}],
+        "entry_plans": {
+            "p1": {"ticker": "PLAN", "status": "partial"},
+            "p2": {"ticker": "DONE", "status": "filled"},
+        },
+    }
+    assert paper_symbols(account, current) == [
+        "HELD", "PENDING", "PICK", "PLAN", "SETUP", "XLK"]
+
+    frame = pd.DataFrame(
+        {"Open": [100., 101.], "High": [101., 102.], "Low": [99., 100.],
+         "Close": [100., 101.], "Volume": [1000., 1000.]},
+        index=pd.to_datetime(["2026-10-26", "2026-10-27"]),
+    )
+    bar = bar_from_frame(frame, date(2026, 10, 26))
+    assert bar.date == "2026-10-26" and bar.close == 100.0

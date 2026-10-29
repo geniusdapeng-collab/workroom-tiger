@@ -50,6 +50,35 @@ class Bar:
     date: str | None = None
 
 
+def paper_symbols(state: dict, result) -> list[str]:
+    """Return the exact symbols the v2 paper step must observe."""
+    symbols = {row["ticker"] for row in state["positions"]}
+    symbols.update(row["ticker"] for row in state["pending"])
+    symbols.update(row["ticker"] for row in state.get("entry_plans", {}).values()
+                   if row["status"] in {"pending", "partial"})
+    symbols.update(pick.ticker for pick in result.picks)
+    symbols.update((result.raw.get("execution_setups") or {}).keys())
+    sectors = {row.get("sector") for row in state["positions"]}
+    sectors.update(row.get("sector") for row in state.get("entry_plans", {}).values())
+    symbols.update(sector for sector in sectors if sector)
+    return sorted(symbols)
+
+
+def bar_from_frame(frame, cutoff: date) -> Bar | None:
+    """Project one already-observed frame to the frozen complete-bar boundary."""
+    if frame is None or not len(frame):
+        return None
+    selected = frame[frame.index.date <= cutoff]
+    if not len(selected):
+        return None
+    row = selected.iloc[-1]
+    adv = (float((selected["Close"] * selected["Volume"]).tail(20).mean())
+           if "Volume" in selected.columns else 0.0)
+    return Bar(open=float(row["Open"]), high=float(row["High"]),
+               low=float(row["Low"]), close=float(row["Close"]),
+               adv=adv, date=str(selected.index[-1].date()))
+
+
 def friction_bps(adv: float) -> float:
     """单边摩擦成本（bp）= ADV 分档滑点 + 单边佣金（v6.3，防滑点断崖）。
 
@@ -381,16 +410,8 @@ class SimEngine:
     def _step_v2(self, trade_date, result, get_bar):
         """Collect dated observations once, then atomically publish a pure step."""
         from .execution_policy import step_paper_account
-        symbols = {row["ticker"] for row in self.state["positions"]}
-        symbols.update(row["ticker"] for row in self.state["pending"])
-        symbols.update(row["ticker"] for row in self.state.get("entry_plans", {}).values()
-                       if row["status"] in {"pending", "partial"})
-        symbols.update(pick.ticker for pick in result.picks)
-        symbols.update((result.raw.get("execution_setups") or {}).keys())
-        sectors = {row.get("sector") for row in self.state["positions"]}
-        sectors.update(row.get("sector") for row in self.state.get("entry_plans", {}).values())
-        symbols.update(sector for sector in sectors if sector)
-        bars = {symbol: get_bar(symbol) for symbol in sorted(symbols)}
+        symbols = paper_symbols(self.state, result)
+        bars = {symbol: get_bar(symbol) for symbol in symbols}
         report = step_paper_account(self.state, trade_date, result, bars)
         next_state = report["state"]
         require_usd_sim_state(next_state, scope=f"模拟盘账本 {self.path}")

@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 import urllib.request
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -28,12 +30,25 @@ from .base import DataProvider
 from .cn_native import cn_native
 
 logger = logging.getLogger(__name__)
+_CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 _KLINE = ("https://stock.finance.sina.com.cn/usstock/api/jsonp.php/x/"
           "US_MinKService.getDailyK?symbol={sym}")
 _QUOTE = "https://hq.sinajs.cn/list=gb_{sym}"
 _UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
        "Referer": "https://finance.sina.com.cn"}
+
+
+def _china_quote_time(date_text: str, clock_text: str = "") -> str:
+    """Return an explicit China-time instant for Sina's timezone-less fields."""
+    text = f"{date_text.strip()}T{clock_text.strip()}" if clock_text else date_text.strip()
+    try:
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return ""
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).isoformat()
+    return parsed.replace(tzinfo=_CHINA_TZ).isoformat()
 
 
 class SinaProvider(DataProvider):
@@ -164,7 +179,9 @@ class SinaProvider(DataProvider):
                 price = float(f[3])
                 if price <= 0:
                     raise ValueError("price=0")
-                return {"price": price, "ts": "", "kind": "realtime"}
+                ts = (_china_quote_time(f[30], f[31])
+                      if len(f) > 31 else "")
+                return {"price": price, "ts": ts, "kind": "realtime"}
             except Exception as exc:
                 logger.debug("新浪 A股报价失败 %s: %s", ticker, exc)
                 return super().quote(ticker)
@@ -178,7 +195,8 @@ class SinaProvider(DataProvider):
             price = float(f[1])
             if price <= 0:
                 raise ValueError("price=0")
-            return {"price": price, "ts": f[3] if len(f) > 3 else "",
+            return {"price": price,
+                    "ts": _china_quote_time(f[3]) if len(f) > 3 else "",
                     "kind": "realtime"}
         except Exception as exc:
             logger.debug("新浪报价失败 %s: %s", ticker, exc)
