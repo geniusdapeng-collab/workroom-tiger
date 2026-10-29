@@ -81,6 +81,25 @@ test('accepted running research returns pending, resumes the existing ID, and ne
   running = false; const second = await syncResearch({ env: f.env, date: DATE, profile: PROFILE }, { invoke, publish: f.publish }); assert.equal(second.status, 'published_and_verified'); assert.equal(f.calls.filter(c => c.operation === 'run').length, 1);
 });
 
+test('terminal verification cannot consume the independent publication request window', async t => {
+  const f = await setup(t);
+  const originalNow = Date.now; const originalFetch = globalThis.fetch; let offset = 0;
+  Date.now = () => originalNow() + offset;
+  globalThis.fetch = async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  t.after(() => { Date.now = originalNow; globalThis.fetch = originalFetch; });
+  const invoke = async (operation, input, config, timeoutMs) => {
+    const value = await f.invoke(operation, input, config, timeoutMs);
+    if (operation === 'verify') offset = 600000;
+    return value;
+  };
+  const publish = async options => {
+    await options.fetcher('https://example.invalid/research', { method: 'POST' });
+    return f.publish(options);
+  };
+  const result = await syncResearch({ env: f.env, date: DATE, profile: PROFILE, observeMs: 1100 }, { invoke, publish });
+  assert.equal(result.status, 'published_and_verified');
+});
+
 test('lost website response retries the persisted identical payload without rerunning research', async t => {
   const f = await setup(t); let dropped = false;
   const publish = async options => { if (!dropped) { dropped = true; f.published.push(options); throw new TypeError('network response lost'); } return f.publish(options); };

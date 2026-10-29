@@ -15,6 +15,7 @@ const V3_BYTES = 4 * 1_048_576;
 const RUN_ID = /^run-[0-9a-f]{32}$/;
 const COMPLETE = new Set(['completed']);
 const VERIFICATION_OBSERVATION_MS = 300000;
+const PUBLICATION_OBSERVATION_MS = 20000;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 export class SyncError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const error = (code, message) => { throw new SyncError(code, message); };
@@ -197,7 +198,15 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
         if (deadline - Date.now() < 2000) return pending('OBSERVATION_TIMEOUT');
         await new Promise(accept => setTimeout(accept, Math.min(1000, Math.max(1, deadline - Date.now() - 1000))));
       }
-      const fetcher = (url, options) => { const remaining = deadline - Date.now(); if (remaining < 1) error('OBSERVATION_TIMEOUT', 'Publication observation deadline reached'); return fetch(url, { ...options, signal: AbortSignal.timeout(Math.min(20000, remaining)) }); };
+      // Verification can legitimately outlive the short run-observation window.
+      // Website publication gets a fresh bounded window so a verified payload
+      // is not stranded merely because evidence replay took longer.
+      const publicationDeadline = Date.now() + PUBLICATION_OBSERVATION_MS;
+      const fetcher = (url, options) => {
+        const remaining = publicationDeadline - Date.now();
+        if (remaining < 1) error('OBSERVATION_TIMEOUT', 'Publication observation deadline reached');
+        return fetch(url, { ...options, signal: AbortSignal.timeout(remaining) });
+      };
       // Payload is persisted before network submission, preserving exact retries after lost responses.
       const written = await publish({ baseUrl: env.TIGER_PNL_URL ?? 'https://tigerpnl.com', token: env.TIGER_PNL_WRITE_TOKEN, record: state.payload, research: true, allowLocalHttp, fetcher });
       if (written?.idempotencyKey !== state.payload.idempotencyKey || written?.payloadHash !== sha256(canonical(state.payload))) error('PUBLICATION_RECEIPT_INVALID', 'Website receipt does not match the persistent research payload');
