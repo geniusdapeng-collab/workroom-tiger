@@ -5,7 +5,7 @@
   "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
   "title": "白皮书短线闭环六项修复与真实评测迭代",
   "created_at": "2026-10-26T19:26:13.881Z",
-  "updated_at": "2026-10-29T15:53:25.467Z",
+  "updated_at": "2026-10-29T15:54:08.372Z",
   "baseline": {
     "audit": {
       "commit": "deab886aad743451e7f380323824950df4f825fd",
@@ -16,7 +16,7 @@
       "notes": ""
     },
     "repair": {
-      "commit": "bb2789be692ef178307c8858631e892ec7864029",
+      "commit": "2230f03f6674cb73940648209655fc264885ec7a",
       "reverified_problem_ids": []
     },
     "acceptance": {
@@ -795,7 +795,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 1,
-      "state": "unfixed",
+      "state": "fixed",
       "title": "必需模型阶段仍启用思考，且证明器固定旧请求协议，导致真实结果无法封存",
       "evidence": [
         {
@@ -845,7 +845,17 @@
               "thinking or non_thinking or effort or required_chat"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-020-0-1793289241538.json",
+            "sha256": "3659ee85d1c1e0c861a2e9864de028183ba0f7e9224bf99b23854744124d61ab",
+            "commit": "2230f03f6674cb73940648209655fc264885ec7a"
+          },
+          "evidence": {
+            "path": "evidence/MC-020-0-1793289241538.txt",
+            "sha256": "81edc47f51721f75d9a3173dd9c3ddf2258e8bf4f47d5e404f78cebbfda33da8",
+            "commit": "2230f03f6674cb73940648209655fc264885ec7a"
+          }
         },
         {
           "kind": "property",
@@ -867,7 +877,17 @@
               "non_thinking or complete_semantic_replay or prior_enabled"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-020-1-1793289241991.json",
+            "sha256": "c3d84eeffd230bdcd4b29e56354b98391560b4276eb6071a5a4063f29ebea0ea",
+            "commit": "2230f03f6674cb73940648209655fc264885ec7a"
+          },
+          "evidence": {
+            "path": "evidence/MC-020-1-1793289241991.txt",
+            "sha256": "f475e450824899c6f1aeedf28d2ad011a218c5bd847c62ab1de583fce39a7f98",
+            "commit": "2230f03f6674cb73940648209655fc264885ec7a"
+          }
         }
       ],
       "regression": {
@@ -881,10 +901,12 @@
       "last_assertion_attempt": {
         "actor": "/root",
         "role": "repair",
-        "result": "running",
-        "at": "2026-10-29T15:53:25.461Z",
-        "commit": "7d6f22d8c6ba046cc6d78dcba8ebea590b89b7b3"
-      }
+        "result": "pass",
+        "at": "2026-10-29T15:54:01.533Z",
+        "commit": "2230f03f6674cb73940648209655fc264885ec7a",
+        "finished_at": "2026-10-29T15:54:08.372Z"
+      },
+      "fixed_by": "/root"
     }
   ],
   "gates": [],
