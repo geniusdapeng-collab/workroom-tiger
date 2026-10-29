@@ -38,6 +38,7 @@ _UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
 
 class SinaProvider(DataProvider):
     name = "sina"
+    batch_workers = 8
 
     def __init__(self, timeout: int = 20):
         self.timeout = timeout
@@ -81,6 +82,37 @@ class SinaProvider(DataProvider):
         if len(df) < max(30, days // 3):
             raise RuntimeError(f"新浪 {ticker} 历史不足: {len(df)} 行")
         return df
+
+    def ohlcv_batch(self, tickers: list[str], days: int = 400) -> dict[str, pd.DataFrame]:
+        """Fetch the public fallback concurrently while keeping per-symbol isolation.
+
+        Yahoo can rate-limit an entire full-market batch, leaving thousands of
+        otherwise valid symbols for this provider. The base serial loop cannot
+        finish inside the existing business deadline. This bounded fan-out
+        preserves the exact per-ticker parser, split adjustment and exception
+        isolation; it only schedules those unchanged calls concurrently.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        ordered = list(dict.fromkeys(
+            ticker for ticker in tickers if isinstance(ticker, str) and ticker.strip()))
+        if not ordered:
+            return {}
+        fetched: dict[str, pd.DataFrame] = {}
+        with ThreadPoolExecutor(
+                max_workers=min(self.batch_workers, len(ordered)),
+                thread_name_prefix="sina-ohlcv") as pool:
+            futures = {pool.submit(self.ohlcv, ticker, days=days): ticker
+                       for ticker in ordered}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    frame = future.result()
+                except Exception:
+                    continue
+                if isinstance(frame, pd.DataFrame) and not frame.empty:
+                    fetched[ticker] = frame
+        return {ticker: fetched[ticker] for ticker in ordered if ticker in fetched}
 
     _CN_KLINE = ("https://quotes.sina.cn/cn/api/jsonp_v2.php/x/"
                  "CN_MarketDataService.getKLineData"
