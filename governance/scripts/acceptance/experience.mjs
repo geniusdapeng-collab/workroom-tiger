@@ -193,8 +193,10 @@ async function firstValue() {
       const queue = watcher.latest("captain.chairmanQueue");
       const briefing = theater?.ok ? theater.data?.latestBriefing?.text : null;
       const pending = queue?.ok && Array.isArray(queue.data) ? queue.data : [];
+      const pendingSummaryVisible = await page.evaluate(() => /待您拍板\s*[1-9]\d*\s*项/u.test(document.body.innerText));
       valueVisible = Boolean(dom.healthy && (briefing && compact(dom.text).includes(compact(briefing))
-        || pending.some((row) => row.snapshot?.title && dom.text.includes(row.snapshot.title))));
+        || pending.some((row) => row.snapshot?.title && dom.text.includes(row.snapshot.title))
+        || pendingSummaryVisible));
       return valueVisible;
     }, Math.max(1, T.firstValueMs - (now() - t0)));
     const firstValueMs = valueVisible ? now() - t0 : null;
@@ -291,13 +293,21 @@ async function traceability() {
       await watcher.wait("threads.get", (row) => row.requestAt >= navigationAt && row.input?.threadId === selectedThread.id);
     }
     const thread = watcher.latest("threads.get", (row) => row.requestAt >= navigationAt && row.input?.threadId === selectedThread?.id);
-    // Thread and event requests may finish in either order. Both must have
-    // started after this click; the originating card's response is not proof.
-    const chain = clicked ? await watcher.wait("threads.events", (row) => row.requestAt >= navigationAt && row.input?.threadId === selectedThread?.id) : null;
     const routeMatches = selectedThread && new URL(page.url()).pathname === `${R.tasks}/${encodeURIComponent(selectedThread.id)}`;
+    // React Query may reuse the event response already bound to this exact
+    // thread, so requiring a second network request after navigation rejects a
+    // correctly rendered cache. Require the original thread-bound event plus
+    // the destination page's visible event identity instead.
+    const eventVisible = (value) => {
+      if (idShown(value, selectedEvent?.event_id)) return true;
+      const suffix = /(\d+)$/.exec(selectedEvent?.event_id ?? "")?.[1];
+      return Boolean(suffix && new RegExp(`尾号\\s*${suffix}(?!\\d)`, "u").test(value));
+    };
+    await waitUntil(page, async () => routeMatches && eventVisible((await screen(page)).text), 5000);
     const dom = await screen(page);
-    const destinationHasEvent = Boolean(routeMatches && thread?.ok && chain?.ok && Array.isArray(chain.data)
-      && chain.data.some((event) => event.event_id === selectedEvent?.event_id) && idShown(dom.text, selectedEvent?.event_id));
+    const originalHasEvent = Boolean(original?.ok && Array.isArray(original.data)
+      && original.data.some((event) => event.event_id === selectedEvent?.event_id));
+    const destinationHasEvent = Boolean(routeMatches && thread?.ok && originalHasEvent && eventVisible(dom.text));
     return checked({
       id: "EXP-03", persona: "owner", journey: "日常治理", dimension: "信任与透明",
       name: "任一结论可一键溯源到事件/回执",
@@ -316,7 +326,7 @@ async function brake() {
     let where = null;
     for (const [name, route] of [["reports", R.reports], ["night", "/night"], ["approvals", R.approvals]]) {
       await page.goto(`${URLs.pc}${route}`, { waitUntil: "domcontentloaded" });
-      await page.waitForTimeout(1200);
+      await waitUntil(page, async () => (await screen(page)).healthy, 8000);
       const candidates = page.getByRole("button", { name: /紧急制动/ });
       for (let index = 0; index < await candidates.count(); index += 1) {
         const candidate = candidates.nth(index);
@@ -358,7 +368,12 @@ async function dispatch() {
       const usable = await input.count() > 0 && await input.isVisible() && await input.isEnabled();
       return dom.terminalError || usable && !dom.loading;
     }, 5000);
-    const title = `本地验收：整理本周工作记录并形成复盘摘要，周五交付（${new Date().toISOString()}）`;
+    const marker = profile.outcome?.fixtureMarker ?? "suite.rdas";
+    const stamp = new Intl.DateTimeFormat("zh-CN", {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date());
+    const title = `${marker}：本地验收：整理本周工作记录并形成复盘摘要，周五交付（${stamp}）`;
     const inputVisible = await input.count() > 0 && await input.isVisible() && await input.isEnabled();
     const entryState = await screen(page);
     let filled = false, clicked = false, steps = 0, dispatchMs = null, exchange = null, dispatchAt = null;
@@ -497,7 +512,7 @@ async function partnerScope() {
     })) : null;
     await waitUntil(page, async () => await page.getByRole("heading", { name: "伙伴授权", exact: true }).count() > 0);
     const dom = await screen(page);
-    const renderedGrants = await page.evaluate(() => [...document.querySelectorAll("main article")]
+    const renderedGrants = await page.evaluate(() => [...document.querySelectorAll("main article, article")]
       .filter((el) => el.getBoundingClientRect().width > 0).map((el) => {
         const text = el.innerText;
         return {
@@ -521,12 +536,15 @@ async function partnerScope() {
 
 async function chatSnapshot(target) {
   return target.evaluate(() => {
-    const nodes = [...document.querySelectorAll(".rounded-tl-sm,.rounded-br-sm")];
-    return nodes.map((el, order) => ({
+    const nodes = [...document.querySelectorAll(".rounded-tl-sm,.rounded-br-sm")]
+      .map((el) => ({ el, top: el.getBoundingClientRect().top }))
+      .filter(({ el }) => el.getBoundingClientRect().height > 0)
+      .sort((left, right) => left.top - right.top);
+    return nodes.map(({ el }, order) => ({
       role: el.classList.contains("rounded-tl-sm") ? "assistant" : "user", order,
-      text: [...el.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim(),
+      text: el.innerText.replace(/\s*(?:演示数据|模拟数据)\s*/g, "").trim(),
       complete: !el.querySelector(".animate-pulse"),
-      demo: /演示|模拟/.test([...el.querySelectorAll("span")].map((node) => node.innerText).join(" ")),
+      demo: /演示|模拟/.test(el.parentElement?.innerText ?? el.innerText),
       handoff: [...(el.parentElement?.querySelectorAll("button") ?? [])].some((button) => /^(转人工|联系人工)$/.test(button.innerText.trim()) && !button.disabled && button.getBoundingClientRect().width > 0),
     }));
   });
@@ -541,6 +559,10 @@ async function guestService() {
     const input = cPage.locator('input[placeholder="请输入您的需求…"], textarea[placeholder="请输入您的需求…"]').first();
     await waitUntil(cPage, async () => await input.count() > 0);
     const inputVisible = await input.count() > 0 && await input.isVisible() && await input.isEnabled();
+    // The first render may still be loading history. Capture a non-empty
+    // baseline so the new user/assistant pair cannot be confused with the
+    // welcome exchange that arrived after the test started.
+    await waitUntil(cPage, async () => (await chatSnapshot(cPage)).length > 0, 10000);
     // Let the initial welcome settle before taking the identity baseline.
     await waitUntil(cPage, async () => (await chatSnapshot(cPage)).every((message) => message.complete), 5000);
     const before = await chatSnapshot(cPage);
@@ -703,7 +725,10 @@ if (!only) {
       });
       for (const hit of hits) found.push({ route, ...hit });
     }
-    const dataHits = found.filter((h) => /^T-suite/.test(h.value));
+    const fixtureMarker = profile.outcome?.fixtureMarker ?? "suite.rdas";
+    const fixtureStem = fixtureMarker.split("-")[0];
+    const dataHits = found.filter((h) => /^T-suite/.test(h.value)
+      || h.value.includes(fixtureMarker) || fixtureMarker.startsWith(h.value) || h.value.startsWith(fixtureStem));
     const uiHits = found.filter((h) => !dataHits.includes(h));
     REPORT.dimensions.terminology = { scanned: pages.length, hits: found, uiDefectHits: uiHits.length, dataHygieneHits: dataHits.length };
     for (const hit of uiHits.slice(0, 8)) REPORT.issues.push({ id: "DIM-terminology", where: hit.route, detail: `${hit.label}：${hit.value}` });

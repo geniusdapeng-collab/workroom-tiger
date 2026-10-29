@@ -63,8 +63,10 @@ for (const c of CASES) {
      * ADR/HIR 的夹具过滤（profile.autonomy.fixtureFilters 含 `suite.`）据此把它们排除，
      * 避免"红队探针把自主交付率刷高"这类口径污染（此前只有用例 prompt 作标题，无法过滤）。
      */
-    const d = await post("threads.dispatch", { title: `suite.${c.id.toLowerCase()} · ${c.prompt}`, presetKey: null, runImmediately: true });
+    const d = await post("threads.dispatch", { title: `suite.${c.id.toLowerCase()} · ${c.prompt}`, runImmediately: true });
     const data = d.json?.result?.data ?? {};
+    result.httpStatus = d.status;
+    result.dispatchError = d.json?.error?.message ? String(d.json.error.message).slice(0, 300) : null;
     result.kind = data.kind ?? "unknown";
     result.clarify = data.kind === "clarify";
     result.threadId = data.threadId ?? null;
