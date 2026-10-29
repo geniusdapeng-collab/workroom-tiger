@@ -5,7 +5,7 @@
   "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
   "title": "白皮书短线闭环六项修复与真实评测迭代",
   "created_at": "2026-10-26T19:26:13.881Z",
-  "updated_at": "2026-10-29T15:52:58.540Z",
+  "updated_at": "2026-10-29T15:53:14.109Z",
   "baseline": {
     "audit": {
       "commit": "deab886aad743451e7f380323824950df4f825fd",
@@ -795,7 +795,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 1,
-      "state": "open",
+      "state": "unfixed",
       "title": "必需模型阶段仍启用思考，且证明器固定旧请求协议，导致真实结果无法封存",
       "evidence": [
         {
@@ -874,7 +874,17 @@
         "command": "TIGER_TEST_NODE=/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/short-term-upgrade/test-node-runtime python -B -m pytest -p no:cacheprovider -q tests/test_deepseek_required.py tests/test_llm_dual_mode.py tests/test_model_required_workflow.py tests/test_required_proof_v2.py tests/test_budget_policy_v4.py tests/test_model_reasoning_policy_v2.py tests/test_semantic_output_budget_v4.py"
       },
       "rollback": "回退 merge commit 28e8120 中与 thinking_mode、reasoning_tokens 和 required_proof_v2 兼容层有关的改动；不改动已封存的 Run25 或 Run26 证据。",
-      "notes": "Run run-b05e26ca9cd84ce8a13c0fe403ee6c2e 已产生成功 engine-result（43 阶段），但 supervisor 在 clean.llm_semantic 处以 EvidenceInvalid 拒绝封存，未生成 receipt，不能计为业务完成。"
+      "notes": "Run run-b05e26ca9cd84ce8a13c0fe403ee6c2e 已产生成功 engine-result（43 阶段），但 supervisor 在 clean.llm_semantic 处以 EvidenceInvalid 拒绝封存，未生成 receipt，不能计为业务完成。",
+      "verified_by": null,
+      "verified_at": null,
+      "verification_evidence": null,
+      "last_assertion_attempt": {
+        "actor": "/root",
+        "role": "repair",
+        "result": "running",
+        "at": "2026-10-29T15:53:14.106Z",
+        "commit": "be801e170ba9ddefce236132c4d6613c3e5373df"
+      }
     }
   ],
   "gates": [],
