@@ -28,11 +28,11 @@ def _chat_payload(text: str):
 def test_openai_compat_success(monkeypatch):
     seen = {}
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_post(url, data=None, headers=None, timeout=None):
         seen["url"] = url
         seen["auth"] = headers.get("Authorization")
-        seen["model"] = json["model"]
-        seen["payload"] = json
+        seen["payload"] = json.loads(data)
+        seen["model"] = seen["payload"]["model"]
         return _Resp(200, _chat_payload('{"score": 7, "reason": "ok"}'))
 
     monkeypatch.setattr("requests.post", fake_post)
@@ -45,6 +45,7 @@ def test_openai_compat_success(monkeypatch):
     assert seen["model"] == "deepseek-flash"
     assert seen["payload"]["response_format"] == {"type": "json_object"}
     assert seen["payload"]["thinking"] == {"type": "disabled"}
+    assert seen["payload"]["max_tokens"] > 300_000
 
 
 def test_openai_compat_unconfigured_raises(monkeypatch):

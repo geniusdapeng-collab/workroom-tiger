@@ -25,6 +25,7 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from ..redline import LLMUnavailable
+from .model_budget import TokenBudgetError, plan_request
 
 log = logging.getLogger("llm.client")
 
@@ -33,7 +34,7 @@ DEFAULT_MODEL = "deepseek-flash"
 
 class LLMClient(Protocol):
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 1200, temperature: float = 0.2) -> dict:
+                      max_tokens: int | None = None, temperature: float = 0.2) -> dict:
         """请求 LLM 输出 JSON（按 schema_hint 约定结构），解析后返回 dict。
         任何失败（网络/权限/解析）都必须抛 LLMUnavailable。"""
         ...
@@ -51,7 +52,7 @@ class DisabledLLMClient:
                 "attempts": self.attempts, "remote_requests": 0}
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 1200, temperature: float = 0.2) -> dict:
+                      max_tokens: int | None = None, temperature: float = 0.2) -> dict:
         self.attempts += 1
         def refuse():
             raise LLMUnavailable("Model invocation disabled by trusted public paper policy")
@@ -87,7 +88,7 @@ class KimiGatewayClient:
         return self._client
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 1200, temperature: float = 0.2) -> dict:
+                      max_tokens: int | None = None, temperature: float = 0.2) -> dict:
         prompt = (
             f"{user}\n\n"
             "严格只输出 JSON（不要 markdown 代码块、不要解释），结构遵循："
@@ -100,7 +101,8 @@ class KimiGatewayClient:
                     model=self.model,
                     messages=[{"role": "system", "content": system},
                               {"role": "user", "content": prompt}],
-                    max_tokens=max_tokens, temperature=temperature,
+                    max_tokens=max_tokens if max_tokens is not None else 1200,
+                    temperature=temperature,
                 )
                 text = self._extract_text(resp)
                 return self._parse_json(text)
@@ -184,7 +186,7 @@ class OpenAICompatClient:
         return f"openai-compat:{self.model}@{self.base_url}"
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 1200, temperature: float = 0.2) -> dict:
+                      max_tokens: int | None = None, temperature: float = 0.2) -> dict:
         import requests
         prompt = (
             f"{user}\n\n"
@@ -197,16 +199,24 @@ class OpenAICompatClient:
         payload = {"model": self.model,
                    "messages": [{"role": "system", "content": system},
                                 {"role": "user", "content": prompt}],
-                   "max_tokens": max_tokens, "temperature": temperature,
-                   "stream": False, "response_format": {"type": "json_object"}}
+                   "temperature": temperature, "stream": False,
+                   "response_format": {"type": "json_object"}}
         if self._deepseek_endpoint():
             payload["thinking"] = {"type": "disabled"}
+            try:
+                payload, _, _ = plan_request(payload)
+            except TokenBudgetError as error:
+                raise LLMUnavailable(f"模型预算失败: {error.code}") from None
+        else:
+            payload["max_tokens"] = max_tokens if max_tokens is not None else 1200
         last_err: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                r = requests.post(f"{self.base_url}/chat/completions",
-                                  json=payload, headers=headers,
-                                  timeout=self.timeout)
+                r = requests.post(
+                    f"{self.base_url}/chat/completions",
+                    data=json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":"), allow_nan=False).encode(),
+                    headers=headers, timeout=self.timeout)
                 if r.status_code != 200:
                     raise LLMUnavailable(f"端点返回 {r.status_code}")
                 text = KimiGatewayClient._extract_text(r.json())
@@ -280,7 +290,7 @@ class LocalAgentClient(OpenAICompatClient):
         base = os.environ.get("OPENAI_BASE_URL")
         if base and os.environ.get("OPENAI_MODEL"):
             c = cls._build(base.rstrip("/"), os.environ["OPENAI_MODEL"],
-                           api_key=os.environ.get("OPENAI_API_KEY"))
+                           os.environ.get("OPENAI_API_KEY"))
             cls._cache = (now, c)
             return c
 

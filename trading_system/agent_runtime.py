@@ -42,7 +42,7 @@ REQUIRED_ACCOUNT_FILES = frozenset({
     "journal.json", "sim_portfolio.json", "calibration_samples.json",
     "governance_events.jsonl",
 })
-DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
+DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML", "tokenizers")
 
 
 def policy_manifest(profile: str = PROFILE) -> dict:
@@ -76,10 +76,18 @@ def policy_manifest(profile: str = PROFILE) -> dict:
         ],
     }
     if required:
+        from .llm.scene_policy import KERNEL_SCENE_MAP, scene_config
         value["model_contract"] = {
             "provider": "deepseek", "model": "deepseek-flash",
             "release": "DeepSeek-V4.1-Flash-1017", "required": True,
-            "thinking_mode": "disabled",
+            "thinking_mode": "scene-policy",
+            "thinking_policy": {
+                stage: scene_config(scene)["thinking"]
+                for stage, scene in KERNEL_SCENE_MAP.items()
+            },
+            "context_tokens": 1_048_576,
+            "max_output_tokens": 393_216,
+            "tokenizer_sha256": "89085f12ef79460ac5f66d1119325ddfc694b4ab209d80bbd81d35f081dc9614",
             "search_mode": "provider_native_search",
             "release_binding": "official-current-alias-mapping",
             "model_mapping_url": "https://api-docs.deepseek.com/quick_start/pricing/",
@@ -89,7 +97,8 @@ def policy_manifest(profile: str = PROFILE) -> dict:
         value["limitations"][1] = "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
         value["limitations"] += [
             "deepseek-flash is a provider alias observed as V4.1-Flash-1017, not an immutable version ID.",
-            "All five semantic JSON calls explicitly disable thinking and reject nonzero reasoning-token usage.",
+            "Thinking is selected per semantic scene; deterministic extraction is non-thinking while risk, narrative and debate reasoning use explicit effort.",
+            "Every request is tokenized with the pinned official DeepSeek tokenizer and receives the complete legal remaining output window.",
             "Search uses DeepSeek native Search API collected by this application, not Flash server-hosted web_search.",
             "Numeric portfolio constraints and accounting remain deterministic; model may veto approved entries, never bypass bounds.",
         ]

@@ -160,7 +160,7 @@ def _call(llm, task: str, inputs: dict, schema: dict) -> dict:
             _fail("Mandatory model assessment may only come from frozen execution")
         payload = {"assessment": assessment_context(llm.execution), **inputs}
         out = llm.complete_json(system=SYSTEM, user=task + "\n" + _json(payload),
-                                schema_hint={}, schema=schema, max_tokens=16384)
+                                schema_hint={}, schema=schema)
         # Revalidate even injected test/client implementations; no caller can
         # turn an unchecked dictionary into a semantic result.
         validate_schema(out, schema)

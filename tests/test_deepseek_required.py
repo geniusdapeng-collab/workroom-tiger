@@ -86,7 +86,7 @@ def test_required_chat_binds_keyless_request_and_actual_response(configured, mon
     monkeypatch.setattr(requests, "post", post)
     client = DeepSeekRequiredClient(configured)
     out = client.complete_json(system="Analyze JSON only", user="public evidence",
-                               schema_hint={"score": 0}, schema=SCHEMA, max_tokens=16384)
+                               schema_hint={"score": 0}, schema=SCHEMA)
     assert out == {"score": 7, "reason": "evidence"}
     assert client.required is True
     url, kwargs = seen[0]
@@ -94,11 +94,12 @@ def test_required_chat_binds_keyless_request_and_actual_response(configured, mon
     assert kwargs["headers"]["Authorization"] == f"Bearer {KEY}"
     assert kwargs["allow_redirects"] is False and kwargs["verify"] is True
     assert kwargs["stream"] is True
-    assert kwargs["json"]["model"] == "deepseek-flash"
-    assert kwargs["json"]["response_format"] == {"type": "json_object"}
-    assert kwargs["json"]["thinking"] == {"type": "disabled"}
-    assert "reasoning_effort" not in kwargs["json"]
-    assert kwargs["json"]["stream"] is False
+    body = json.loads(kwargs["data"])
+    assert body["model"] == "deepseek-flash"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in body
+    assert body["stream"] is False
     call = configured.calls[0]
     assert call["method"] == "model.deepseek.chat"
     proof = call["output"]
@@ -114,13 +115,20 @@ def test_required_chat_binds_keyless_request_and_actual_response(configured, mon
     assert proof["schema_sha256"] == call["inputs"]["schema_sha256"]
     assert proof["request_sha256"] == call["inputs"]["request_sha256"]
     assert proof["usage"]["total_tokens"] == 50
+    assert proof["scene"] == "news-labeling"
+    assert proof["thinking_mode"] == "disabled"
+    assert proof["reasoning_effort"] is None
+    assert proof["input_token_estimate"] == call["inputs"]["input_token_estimate"]
+    assert proof["output_ceiling"] == body["max_tokens"] > 16_384
+    assert call["inputs"]["request"] == body
     assert client.receipts[0]["response_id"] == proof["response_id"]
     assert "parsed" not in client.receipts[0]
     assert "response" not in client.receipts[0]
     assert KEY not in json.dumps(configured.calls)
     assert KEY not in json.dumps(client.describe())
     assert client.describe()["remote_requests"] == 1
-    assert client.describe()["thinking_mode"] == "disabled"
+    assert client.describe()["thinking_mode"] == "scene-policy"
+    assert client.describe()["budget"]["context_tokens"] == 1_048_576
     assert response.closed
 
 
@@ -131,6 +139,33 @@ def test_nonzero_reasoning_tokens_are_rejected_for_non_thinking_calls(configured
     with pytest.raises(LLMUnavailable, match="NON_THINKING_OUTPUT_REQUIRED"):
         DeepSeekRequiredClient(configured).complete_json(
             system="s", user="u", schema_hint={}, schema=SCHEMA)
+
+
+def test_legacy_max_tokens_argument_cannot_shrink_the_complete_window(configured, monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(chat_response()))
+    client = DeepSeekRequiredClient(configured)
+    client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA, max_tokens=1)
+    assert client.receipts[0]["output_ceiling"] > 300_000
+
+
+def test_risk_scene_enables_high_thinking_and_accepts_reasoning_usage(configured, monkeypatch):
+    configured._active.spec.name = "tech.risk"
+    payload = chat_response()
+    payload["choices"][0]["message"]["reasoning_content"] = "private reasoning is not persisted"
+    payload["usage"]["completion_tokens_details"] = {"reasoning_tokens": 7}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
+    client = DeepSeekRequiredClient(configured)
+    out = client.complete_json(system="s", user="u", schema_hint={}, schema=SCHEMA)
+    assert out == {"score": 7, "reason": "evidence"}
+    body = configured.calls[0]["inputs"]["request"]
+    assert body["thinking"] == {"type": "enabled"}
+    assert body["reasoning_effort"] == "high"
+    assert "temperature" not in body
+    proof = configured.calls[0]["output"]
+    assert proof["thinking_mode"] == "enabled"
+    assert proof["reasoning_effort"] == "high"
+    assert proof["usage"]["completion_tokens_details"]["reasoning_tokens"] == 7
+    assert "private reasoning" not in json.dumps(configured.calls)
 
 
 @pytest.mark.parametrize("name,value", [
@@ -521,6 +556,7 @@ def test_transport_failure_diagnostic_never_contains_body_headers_or_exception_t
 
 
 def test_model_schema_failure_keeps_no_reasoning_content_or_unknown_key(configured, monkeypatch):
+    configured._active.spec.name = "tech.risk"
     payload = chat_response({"score": 7, "reason": "public", KEY: "secret-modeltext"})
     payload["choices"][0]["message"]["reasoning_content"] = KEY + " secret-reasoning"
     monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
