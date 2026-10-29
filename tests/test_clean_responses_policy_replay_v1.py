@@ -156,7 +156,8 @@ def test_all43_stages_replay_native_responses_and_original_other_semantic_calls(
         chats = [row for row in stage_children(root, stage) if row["method"] == "model.deepseek.chat"]
         assert chats and all(row["request"]["schema"] == "tiger.deepseek-request.v1" for row in chats)
         assert all(row["proof"]["finish_reason"] == "stop" for row in chats)
-        assert all(row["request"]["request"]["reasoning_effort"] == "high" for row in chats)
+        assert all(row["request"]["request"]["thinking"] == {"type": "disabled"}
+                   and "reasoning_effort" not in row["request"]["request"] for row in chats)
     budget = result["raw"]["model"]["budget"]
     assert budget["limits"]["max_tokens"] == 600000 and budget["reserved_tokens"] == 0
     assert budget["limits"]["max_chat_calls"] == 40 and budget["limits"]["max_remote_requests"] == 120

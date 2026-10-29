@@ -27,7 +27,7 @@ def test_absent_clean_selector_keeps_historical_five_and_six_field_serialization
                              clean_output_policy_id=None)
     assert len(old_v3["execution"]) == 6
     assert "clean_output_policy_id" not in old_v3
-    original = policy_manifest(profile, budget_policy_id=None)
+    original = policy_manifest(profile, budget_policy_id=None, thinking_mode=None)
     assert len(original["execution"]) == 5
     assert hashlib.sha256(json_bytes(original)).hexdigest() == "010c6acf5d117c3f412a27d4d2d4bdc4b6d8b79d5d9aee175ad6ed46e3af9386"
 
@@ -158,7 +158,8 @@ def test_all43_stages_strict_clean_and_original_other_stages_independently_repla
         chats = [row for row in stage_children(root, stage) if row["method"] == "model.deepseek.chat"]
         assert chats and all(row["request"]["schema"] == "tiger.deepseek-request.v1" for row in chats)
         assert all(row["proof"]["finish_reason"] == "stop" for row in chats)
-        assert all(row["request"]["request"]["reasoning_effort"] == "high" for row in chats)
+        assert all(row["request"]["request"]["thinking"] == {"type": "disabled"}
+                   and "reasoning_effort" not in row["request"]["request"] for row in chats)
     budget = result["raw"]["model"]["budget"]
     assert budget["limits"]["max_tokens"] == 600000 and budget["reserved_tokens"] == 0
     assert budget["limits"]["max_chat_calls"] == 40 and budget["limits"]["max_remote_requests"] == 120

@@ -254,7 +254,7 @@ def test_native_response_and_message_identities_cannot_be_reused(configured, mon
 
 
 @pytest.mark.parametrize("stage", ["tech.sentiment", "tech.risk", "sector.narrative", "research.candidates", "decision.debate"])
-def test_other_five_stages_keep_original_chat_high_requests(configured, monkeypatch, stage):
+def test_other_five_stages_use_non_thinking_chat_requests(configured, monkeypatch, stage):
     configured._active.spec.name = stage
     seen = []
     monkeypatch.setattr(transport.requests, "post", lambda url, **kw: (seen.append((url, kw["json"])), Response(chat_response()))[1])
@@ -262,8 +262,7 @@ def test_other_five_stages_keep_original_chat_high_requests(configured, monkeypa
     assert client.complete_json(system="SYNTHETIC_TEST", user="SYNTHETIC_TEST", schema_hint={}, schema=SCHEMA) == {
         "score": 7, "reason": "evidence"}
     assert seen == [("https://api.deepseek.com/chat/completions", transport.build_chat_request(
-        system="SYNTHETIC_TEST", user="SYNTHETIC_TEST", schema_hint={}, schema=SCHEMA,
-        reasoning_effort="high", thinking_mode="enabled"))]
+        system="SYNTHETIC_TEST", user="SYNTHETIC_TEST", schema_hint={}, schema=SCHEMA))]
     assert configured.calls[0]["output"]["schema"] == "tiger.deepseek-call.v1"
 
 

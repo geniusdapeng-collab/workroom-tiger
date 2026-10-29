@@ -208,7 +208,8 @@ def test_all43_stages_replay_native_slots_and_original_other_semantic_calls(tmp_
         chats = [row for row in stage_children(root, stage) if row["method"] == "model.deepseek.chat"]
         assert chats and all(row["request"]["schema"] == "tiger.deepseek-request.v1" for row in chats)
         assert all(row["proof"]["finish_reason"] == "stop" for row in chats)
-        assert all(row["request"]["request"]["reasoning_effort"] == "high" for row in chats)
+        assert all(row["request"]["request"]["thinking"] == {"type": "disabled"}
+                   and "reasoning_effort" not in row["request"]["request"] for row in chats)
     budget = result["raw"]["model"]["budget"]
     assert result["raw"]["model"]["clean_output_policy_id"] == RESPONSES_POLICY
     assert result["raw"]["model"]["clean_output_codec_id"] == CODEC

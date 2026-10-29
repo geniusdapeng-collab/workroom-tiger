@@ -326,7 +326,8 @@ def test_explicit_policy_does_not_change_other_stage_requests(configured, monkey
     assert client.complete_json(system="SYNTHETIC_TEST", user="SYNTHETIC_TEST", schema_hint={}, schema=SCHEMA) == {
         "score": 7, "reason": "evidence"}
     assert seen[0][0] == "https://api.deepseek.com/chat/completions"
-    assert seen[0][1]["thinking"] == {"type": "enabled"} and seen[0][1]["reasoning_effort"] == "high"
+    assert seen[0][1]["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in seen[0][1]
     assert "tools" not in seen[0][1]
 
 

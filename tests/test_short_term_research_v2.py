@@ -922,7 +922,7 @@ def test_v2_clean_accepts_bounded_machine_identifiers_without_changing_them(key)
     assert result[0].claims[0]["claim_key"] == key
 
 
-def test_v2_clean_uses_low_effort_with_explicit_identity_and_safe_quote_guidance_only():
+def test_v2_clean_passes_stage_effort_while_transport_disables_thinking():
     client = BoundedCleanClient()
     result = clean_with_wire_fixture(client, [public_document("synthetic-one"), public_document("synthetic-two")])
     request = client.requests[0]

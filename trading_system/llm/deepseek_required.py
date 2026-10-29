@@ -32,6 +32,7 @@ BASE_URL = "https://api.deepseek.com"
 MODEL = "deepseek-flash"
 RELEASE = "DeepSeek-V4.1-Flash-1017"
 SEARCH_MODE = "provider_native_search"
+THINKING_MODE = "disabled"
 MAX_RESPONSE_BYTES = 1024 * 1024
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 60.0
@@ -419,16 +420,22 @@ def _json_loads(value: bytes | str, *, finite_floats: bool = False) -> object:
 def build_chat_request(*, system: str, user: str, schema_hint: dict,
                        schema: dict, max_tokens: int = 16384,
                        temperature: float = 0.2, reasoning_effort: str = "high",
-                       thinking_mode: str = "enabled") -> dict:
+                       thinking_mode: str = THINKING_MODE) -> dict:
     """Pure exact request framing, also used by the read-only proof replay."""
-    return {"model": MODEL, "messages": [
+    if thinking_mode not in ("enabled", "disabled"):
+        _fail("INVALID_CHAT_REQUEST")
+    request = {"model": MODEL, "messages": [
         {"role": "system", "content": system + "\nReturn exactly one JSON object. JSON only."},
         {"role": "user", "content": user + "\nJSON schema:\n" +
          _canonical(schema).decode() + "\nJSON field guidance:\n" +
          _canonical(schema_hint).decode()}],
         "max_tokens": max_tokens, "temperature": temperature, "stream": False,
-        "response_format": {"type": "json_object"}, "thinking": {"type": thinking_mode},
-        "reasoning_effort": reasoning_effort}
+        "response_format": {"type": "json_object"}, "thinking": {"type": thinking_mode}}
+    if thinking_mode == "enabled":
+        if not isinstance(reasoning_effort, str) or not reasoning_effort:
+            _fail("INVALID_CHAT_REQUEST")
+        request["reasoning_effort"] = reasoning_effort
+    return request
 
 
 def stage_reasoning_effort(stage: str, *, upgrade: bool = False) -> str:
@@ -442,18 +449,14 @@ def stage_reasoning_effort(stage: str, *, upgrade: bool = False) -> str:
 
 
 def stage_thinking_mode(stage: str, *, upgrade: bool = False) -> str:
-    """tiger.clean-wire.v1 disables thinking for v2 extraction only.
+    """Current required-model requests never spend output on hidden thinking.
 
-    This still requests a complete semantic answer from the same Flash model.
-    It reserves the existing 16384 output tokens for that answer rather than
-    explicit hidden thinking. Research, risk and final judgment retain enabled
-    high thinking; the immutable v1 request default is also enabled/high.
-    Official toggle/JSON documentation checked on 2026-10-27:
-    https://api-docs.deepseek.com/guides/thinking_mode/
-    https://api-docs.deepseek.com/guides/json_mode/
-    This is a capacity policy, not evidence of improved semantic accuracy.
+    Historical verifiers reconstruct the retired enabled/high request from the
+    absence of ``model_contract.thinking_mode`` in their frozen policy. New
+    requests always use JSON mode with thinking disabled and omit the
+    incompatible reasoning-effort field.
     """
-    return "disabled" if upgrade and stage == "clean.llm_semantic" else "enabled"
+    return THINKING_MODE
 
 
 def responses_usage(value: object) -> tuple[dict, dict]:
@@ -634,6 +637,7 @@ class DeepSeekRequiredClient:
         value = {"mode": "required", "enabled": True, "provider": "deepseek",
                 "model": MODEL, "version": RELEASE, "release": RELEASE,
                 "version_binding": "official-current-alias-mapping",
+                "thinking_mode": THINKING_MODE,
                 "search": SEARCH_MODE, "remote_requests": self._remote_requests,
                 "chat_calls": len(self.receipts), "search_calls": len(self.search_receipts),
                 "fetch_calls": len(self.fetch_receipts)}
@@ -693,10 +697,13 @@ class DeepSeekRequiredClient:
         duration = RESPONSE_DEADLINE
         from .request_budget import (BUDGET_POLICY_V4, SEMANTIC_OUTPUT_STAGES,
             SEMANTIC_RESPONSE_DEADLINE_V4, BudgetRefused, policy_limits, semantic_output_tokens)
+        non_thinking = (request.get("thinking") == {"type": "disabled"}
+                        and "reasoning_effort" not in request)
+        historical_thinking = (request.get("reasoning_effort") == "high"
+                               and request.get("thinking") == {"type": "enabled"})
         if (getattr(getattr(self, "budget", None), "policy_id", None) == BUDGET_POLICY_V4
                 and path == "/chat/completions" and self._stage() in SEMANTIC_OUTPUT_STAGES
-                and request.get("reasoning_effort") == "high"
-                and request.get("thinking") == {"type": "enabled"}):
+                and (non_thinking or historical_thinking)):
             if (getattr(self.execution.policy, "budget_policy_id", None) != BUDGET_POLICY_V4
                     or type(request.get("max_tokens")) is not int
                     or request["max_tokens"] != semantic_output_tokens(self._stage(), BUDGET_POLICY_V4)):
@@ -886,7 +893,7 @@ class DeepSeekRequiredClient:
     _responses_usage = staticmethod(responses_usage)
 
     @staticmethod
-    def _usage(value: object) -> dict:
+    def _usage(value: object, *, require_non_thinking: bool = True) -> dict:
         if not isinstance(value, dict):
             _fail("USAGE_REQUIRED")
         result = {}
@@ -912,6 +919,9 @@ class DeepSeekRequiredClient:
                     n = details[child]
                     if type(n) is not int or not 0 <= n <= result[limit]:
                         _fail("INVALID_USAGE")
+                    if (require_non_thinking and parent == "completion_tokens_details"
+                            and child == "reasoning_tokens" and n != 0):
+                        _fail("NON_THINKING_OUTPUT_REQUIRED")
                     result[parent] = {child: n}
         return result
 
@@ -1016,6 +1026,7 @@ class DeepSeekRequiredClient:
             return {"schema": "tiger.deepseek-call.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
                     "model": MODEL, "release": RELEASE, "usage": usage,
+                    "thinking_mode": THINKING_MODE,
                     "finish_reason": "stop", "request_sha256": inputs["request_sha256"],
                     "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
                     "schema_sha256": inputs["schema_sha256"], "response": safe_response,

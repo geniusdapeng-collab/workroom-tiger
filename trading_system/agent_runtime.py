@@ -47,11 +47,13 @@ DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 
 _CURRENT_BUDGET_POLICY = object()
 _CURRENT_CLEAN_OUTPUT_POLICY = object()
+_CURRENT_THINKING_MODE = object()
 
 
 def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_POLICY,
                     clean_output_policy_id=_CURRENT_CLEAN_OUTPUT_POLICY,
-                    clean_instruction_revision=None) -> dict:
+                    clean_instruction_revision=None,
+                    thinking_mode=_CURRENT_THINKING_MODE) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
     upgrade = profile in UPGRADE_POLICIES
@@ -88,6 +90,9 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
             raise EvidenceInvalid("RESULT_INVALID", "Unsupported clean instruction revision")
     required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
+    selected_thinking_mode = "disabled" if thinking_mode is _CURRENT_THINKING_MODE else thinking_mode
+    if selected_thinking_mode not in (None, "disabled"):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen thinking mode")
     policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
                  else "tiger.public-active-paper-policy.v1" if active else POLICY_ID)
     execution = ExecutionPolicy(policy_id=policy_id, model_mode="enabled",
@@ -128,9 +133,19 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
             "search_documentation_url": "https://api-docs.deepseek.com/guides/search/",
             "model_mapping_observed_date": "2026-10-26",
         }
-        value["limitations"][1] = "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
+        if selected_thinking_mode == "disabled":
+            value["model_contract"]["thinking_mode"] = selected_thinking_mode
+        value["limitations"][1] = (
+            "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
+            if selected_thinking_mode is None else
+            "All required semantic stages need actual DeepSeek Flash calls; failure stops publication.")
         value["limitations"] += [
             "deepseek-flash is a provider alias observed as V4.1-Flash-1017, not an immutable version ID.",
+        ]
+        if selected_thinking_mode == "disabled":
+            value["limitations"].append(
+                "All required semantic JSON calls explicitly disable thinking and reject nonzero reasoning-token usage.")
+        value["limitations"] += [
             "Search uses DeepSeek native Search API collected by this application, not Flash server-hosted web_search.",
             "Numeric portfolio constraints and accounting remain deterministic; model may veto approved entries, never bypass bounds.",
         ]
@@ -165,7 +180,10 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
                          regeneration_policy_id=CLEAN_REGENERATION_POLICY_V1,
                          clean_regeneration_limits={"max_per_batch": 1,
                             "max_per_run": 56 if selected_budget == BUDGET_POLICY_V4 else 4})
-        value["limitations"][1] = "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
+        value["limitations"][1] = (
+            "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
+            if selected_thinking_mode is None else
+            "All six v2 semantic stages require actual non-thinking DeepSeek Flash replies and bounded native research; failures stop publication.")
         value["limitations"] += [
             "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
             "The full exchange list is requested anew; actual listing, prefilter and price coverage are disclosed, never inferred from requested universe size.",
@@ -267,7 +285,9 @@ def _policy_source_contract(run: Path) -> str | None:
     expected = policy_manifest(policy.get("profile"),
         budget_policy_id=execution.get("budget_policy_id"), clean_output_policy_id=selected,
         clean_instruction_revision=policy.get("clean_instruction_revision",
-            "v1" if selected is not None else None))
+            "v1" if selected is not None else None),
+        thinking_mode=policy.get("model_contract", {}).get("thinking_mode")
+        if isinstance(policy.get("model_contract"), dict) else None)
     if policy != strict_json(json_bytes(expected)):
         raise EvidenceInvalid("RESULT_INVALID", "Source admission policy differs")
     if selected is None:
@@ -589,7 +609,9 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
                 budget_policy_id=policy.get("execution", {}).get("budget_policy_id"),
                 clean_output_policy_id=policy.get("execution", {}).get("clean_output_policy_id"),
                 clean_instruction_revision=policy.get("clean_instruction_revision",
-                    "v1" if policy.get("execution", {}).get("clean_output_policy_id") else None))))):
+                    "v1" if policy.get("execution", {}).get("clean_output_policy_id") else None),
+                thinking_mode=policy.get("model_contract", {}).get("thinking_mode")
+                if isinstance(policy.get("model_contract"), dict) else None)))):
         raise EvidenceInvalid("RESULT_INVALID", "Admission policy or request identity differs")
     expected = {"schema_version": "tiger.agent-request/v1", "profile": request["profile"],
                 "paper_account": ACCOUNT, "idempotency_key": request.get("idempotency_key")}

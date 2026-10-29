@@ -56,10 +56,10 @@ def annotations(payload, *, filler="中"):
 
 @pytest.mark.parametrize("upgrade,stage,expected", [
     (True, "clean.llm_semantic", "disabled"),
-    (True, "research.candidates", "enabled"),
-    (True, "decision.debate", "enabled"),
-    (True, "tech.risk", "enabled"),
-    (False, "clean.llm_semantic", "enabled"),
+    (True, "research.candidates", "disabled"),
+    (True, "decision.debate", "disabled"),
+    (True, "tech.risk", "disabled"),
+    (False, "clean.llm_semantic", "disabled"),
 ])
 def test_stage_owned_thinking_policy_reaches_the_exact_paid_boundary_without_network(
         configured, monkeypatch, upgrade, stage, expected):
@@ -79,7 +79,7 @@ def test_stage_owned_thinking_policy_reaches_the_exact_paid_boundary_without_net
     assert len(captured) == 1
     assert captured[0]["thinking"] == {"type": expected}
     assert captured[0]["model"] == "deepseek-flash"
-    assert captured[0]["reasoning_effort"] == effort
+    assert "reasoning_effort" not in captured[0]
     assert configured.calls[0]["inputs"]["request"] == captured[0]
     if upgrade:
         assert client.budget.snapshot()["actual_tokens"] == 50
@@ -225,7 +225,7 @@ def test_wire_payload_inverse_rejects_noncanonical_or_ambiguous_join(mutation):
         required.clean_payload_wire_v2(wire, decode=True)
 
 
-def test_v1_required_prefix_and_pure_request_default_remain_exact():
+def test_v1_required_prefix_and_current_non_thinking_request_default_remain_exact():
     prefix = Path(required.__file__).read_bytes()[:19031]
     assert hashlib.sha256(prefix).hexdigest() == "f2cd003fbe8a87f42aa6dd5c62b7d5cbacd6ecaa6826a889f46275f3452777b1"
     request = transport.build_chat_request(system="SYNTHETIC_TEST", user="SYNTHETIC_TEST",
@@ -236,4 +236,4 @@ def test_v1_required_prefix_and_pure_request_default_remain_exact():
             json.dumps(SCHEMA, ensure_ascii=False, sort_keys=True, separators=(",", ":")) +
             "\nJSON field guidance:\n{}"}],
         "max_tokens": 16384, "temperature": .2, "stream": False,
-        "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+        "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}}

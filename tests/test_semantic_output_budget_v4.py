@@ -66,7 +66,9 @@ def test_actual_semantic_callers_and_clean_select_only_current_policy():
             assert len(client.calls) == 1
             arguments = client.calls[0]
             assert arguments["max_tokens"] == (65536 if policy == POLICIES[-1] else OLD_CAPS[stage])
-            assert build_chat_request(**arguments)["reasoning_effort"] == "high"
+            request = build_chat_request(**arguments)
+            assert request["thinking"] == {"type": "disabled"}
+            assert "reasoning_effort" not in request
     client = CaptureClient(POLICIES[-1])
     raw = RawDocument("SYNTHETIC_TEST_doc", "fixture", "SYNTHETIC_TEST", "https://example.com/a",
         "SYNTHETIC_TEST public source body", "", 1793145600., {})

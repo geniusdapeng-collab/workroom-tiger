@@ -75,20 +75,19 @@ def modules():
         "_fail", "_canonical", "_finite_number", "_json_equal", "_check_schema",
         "_matches_type", "_matches", "_schema_child_path", "_schema_mismatch", "validate_schema",
         "build_chat_request", "stage_reasoning_effort", "stage_thinking_mode"},
-        {"MODEL", "_SCHEMA_KEYS", "_TYPES"})
+            {"MODEL", "THINKING_MODE", "_SCHEMA_KEYS", "_TYPES"})
     return required, transport, schemas
 
 
-@pytest.mark.parametrize("upgrade,stage,thinking,effort", [
-    (True, "clean.llm_semantic", "disabled", "low"),
-    (True, "tech.sentiment", "enabled", "high"),
-    (True, "tech.risk", "enabled", "high"),
-    (True, "research.candidates", "enabled", "high"),
-    (True, "decision.debate", "enabled", "high"),
-    (False, "clean.llm_semantic", "enabled", "high"),
+@pytest.mark.parametrize("upgrade,stage", [
+    (True, "clean.llm_semantic"),
+    (True, "tech.sentiment"),
+    (True, "tech.risk"),
+    (True, "research.candidates"),
+    (True, "decision.debate"),
+    (False, "clean.llm_semantic"),
 ])
-def test_actual_pure_request_policy_preserves_v1_and_other_semantic_stages(
-        modules, upgrade, stage, thinking, effort):
+def test_actual_pure_request_policy_disables_thinking_for_all_stages(modules, upgrade, stage):
     _, transport, _ = modules
     kwargs = dict(system="SYNTHETIC_TEST JSON", user="SYNTHETIC_TEST", schema_hint={},
         schema={"type": "object"}, reasoning_effort=transport["stage_reasoning_effort"](stage, upgrade=upgrade))
@@ -97,8 +96,8 @@ def test_actual_pure_request_policy_preserves_v1_and_other_semantic_stages(
     if "stage_thinking_mode" in transport:
         kwargs["thinking_mode"] = transport["stage_thinking_mode"](stage, upgrade=upgrade)
     request = transport["build_chat_request"](**kwargs)
-    assert request["thinking"] == {"type": thinking}
-    assert request["reasoning_effort"] == effort
+    assert request["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in request
     assert request["max_tokens"] == 16384
     assert request["model"] == "deepseek-flash"
 
@@ -196,14 +195,22 @@ def test_wire_helpers_are_consumed_by_clean_and_both_real_and_replay_request_bui
             nested = [node.func.id for node in ast.walk(definitions[wrapper])
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
             assert original in nested, wrapper + " must retain the original codec " + original
+    def explicitly_non_thinking(frame):
+        keyword = next((row for row in frame.keywords if row.arg == "thinking_mode"), None)
+        if keyword is None:
+            return False
+        value = keyword.value
+        return ((isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                 and value.func.id == "stage_thinking_mode")
+                or (isinstance(value, ast.IfExp)
+                    and isinstance(value.body, ast.Name) and value.body.id == "THINKING_MODE")
+                or (isinstance(value, ast.Name) and value.id == "THINKING_MODE"))
     for file in ("deepseek_required.py", "required_proof_v2.py"):
         tree = ast.parse((LLM / file).read_text())
         frames = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name) and node.func.id == "build_chat_request"]
         assert frames
-        assert all(any(keyword.arg == "thinking_mode" and isinstance(keyword.value, ast.Call)
-            and isinstance(keyword.value.func, ast.Name) and keyword.value.func.id == "stage_thinking_mode"
-            for keyword in frame.keywords) for frame in frames)
+        assert all(explicitly_non_thinking(frame) for frame in frames)
 
 
 def test_v1_prefix_semantic_schema_and_budget_limits_are_preserved(modules):
@@ -224,7 +231,7 @@ def test_v1_prefix_semantic_schema_and_budget_limits_are_preserved(modules):
         "max_cost_usd": 1.0, "deadline_seconds": 2400}
     request = transport["build_chat_request"](system="SYNTHETIC_TEST", user="SYNTHETIC_TEST",
         schema_hint={}, schema={"type": "object"})
-    assert request["thinking"] == {"type": "enabled"} and request["reasoning_effort"] == "high"
+    assert request["thinking"] == {"type": "disabled"} and "reasoning_effort" not in request
     guard = budget["BudgetGuard"](clock=lambda: 0)
     call_id = "a" * 32
     reservation = guard.reserve("chat", call_id, request)

@@ -93,7 +93,7 @@ def test_explicit_v3_profile_selects_v3_from_frozen_policy(profile):
 ])
 def test_historical_policy_manifest_bytes_stay_exact(profile, expected):
     assert hashlib.sha256(json_bytes(policy_manifest(profile, budget_policy_id=None,
-        clean_output_policy_id=None))).hexdigest() == expected
+            clean_output_policy_id=None, thinking_mode=None))).hexdigest() == expected
 
 
 def test_legacy_typed_policy_omits_only_the_new_absent_field():

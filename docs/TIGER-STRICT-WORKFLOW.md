@@ -29,7 +29,7 @@ P0 为完整阶段执行、固定请求边界、独立模拟账户、持久幂�
 
 新的 AI 研究和官网更新默认必须显式选择 `us-public-model-required-paper-v2`；盘前/盘中分别为 `us-public-model-required-premarket-paper-v2` / `us-public-model-required-intraday-paper-v2`。三个 v2 profile 共用独立连续 paper 账户 `public-usd`、完整股票池、`reviewed_source_defaults` 和 `whitepaper-execution-v2`，不启用 active 实验。首次 seed 为 100000 USD，后续使用当前有日期的实际 paper NAV，不以固定本金代替估值。最多 10 个持仓是扩展上限，允许 0 个新买入，不强迫每日交易。旧 v1 三配置保留旧政策和验证器；不能在旧身份下改写语义或自动迁移旧待成交。
 
-固定内层模型 `deepseek-flash`，2026-10-27 官方映射观察为 `DeepSeek-V4.1-Flash-1017`，不是不可变快照。只从可信启动环境保留四项 LLM 配置；请求不能设置模型或 key。14 个广域 Search 主题后，发行人 research 研究最多 10 个候选及全部最多 10 个持仓的并集，每目标一次初搜、按真实缺口最多一次补搜和一次已观察 URL 的 Fetch。空搜索和未知发布日期保持未知。六阶段语义完整性与计费预算分别证明，不能以发出 HTTP 或阶段标签充当模型完成。
+固定内层模型 `deepseek-flash`，2026-10-27 官方映射观察为 `DeepSeek-V4.1-Flash-1017`，不是不可变快照。受控 policy 声明 JSON mode、`thinking: disabled` 及同提供方 `provider_native_search`，不读取 key 来生成 policy hash。实际配置仅从可信启动环境四变量取得；请求不能设置模型或 key。六个 v2 语义调用都显式关闭思考，若 usage 出现非零 reasoning tokens，响应按失败关闭。14 个广域 Search 主题后，发行人 research 研究最多 10 个候选及全部最多 10 个持仓的并集，每目标一次初搜、按真实缺口最多一次补搜和一次已观察 URL 的 Fetch。空搜索和未知发布日期保持未知。六阶段语义完整性与计费预算分别证明，不能以发出 HTTP 或阶段标签充当模型完成。官方能力和加载步骤见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)。
 
 v2 采用共享确定性执行策略：A/B/C 模板和全部数值闸门必须成立；单笔计划风险最多 NAV×0.008、单票最多 20%，在现有现金、持仓、整笔未完成计划和分组风险预约后再分配，总组合止损风险新增 3% 工程上限。40/40/20 按整数股切分；首次执行为信号后 T+1 开盘，后续分批必须有实际保存的先前完整日确认和下一开盘重查，不能用当前收盘回写当前开盘，也不摊低成本。结构止损优先于同根盈利目标；HIGH 达到 2R 后下一根生效 +0.5R 保护。第 5 日无进展或板块落后 2 个百分点退出，第 7 日硬退出；2pp 为显式工程假设，不冒充回测校准。paper、Journal 与数值回测消费同一 policy；无成交回执不生成真实交易。
 

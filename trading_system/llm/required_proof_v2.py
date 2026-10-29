@@ -20,7 +20,7 @@ from ..agent_evidence import (EvidenceInvalid, normalize, read_bytes, read_snaps
 from ..redline import LLMUnavailable
 from ..redline.execution import (ExecutionPolicy, ExecutionContractError, RequiredModelFailed, StrictObservationError, UPGRADE_MODEL_STAGES,
                                  daily_stage_contract)
-from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE,
+from .deepseek_required import (BASE_URL, MODEL, RELEASE, SEARCH_MODE, THINKING_MODE,
     DeepSeekRequiredClient, build_chat_request, sanitize_url, stage_reasoning_effort,
     stage_thinking_mode, validate_schema, responses_usage, _json_loads, MAX_RESPONSE_BYTES)
 from ..redline.model_diagnostics import RequiredModelUnavailable
@@ -81,6 +81,9 @@ class ReplayClient:
         self._clean_logical_calls, self._used_rejections = set(), set()
         self._regeneration_count = 0
         self._first_started, self._last_finished, self._clock = None, None, 0.
+        self._thinking_mode = getattr(
+            getattr(execution, "policy", None), "thinking_mode",
+            getattr(execution, "thinking_mode", None))
         self.receipts, self.search_receipts, self.fetch_receipts = [], [], []
         self.budget = BudgetGuard.for_policy(getattr(execution.policy, "budget_policy_id", None),
                                             clean_output_policy_id=clean_output_policy(execution),
@@ -265,22 +268,27 @@ class ReplayClient:
             return self._complete_clean_compact_regeneration(arguments, schema)
         if output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1):
             return self._complete_clean_responses(arguments, schema, output_policy)
+        current_thinking = self._thinking_mode == THINKING_MODE
+        historical_thinking = ("disabled" if strict_clean else
+                               "disabled" if self._stage_name == "clean.llm_semantic" else "enabled")
         body = (build_clean_request(**arguments) if strict_clean else
                 build_chat_request(**arguments, reasoning_effort=reasoning_effort,
-                    thinking_mode=stage_thinking_mode(self._stage_name, upgrade=True)))
+                    thinking_mode=(THINKING_MODE if current_thinking else historical_thinking)))
         request, proof = self._consume("model.deepseek.chat", body,
             "tiger.deepseek-request.v2" if strict_clean else "tiger.deepseek-request.v1",
             "tiger.deepseek-call.v2" if strict_clean else "tiger.deepseek-call.v1",
             {"output_schema", "schema_sha256", "release"} | ({"output_policy_id"} if strict_clean else set()),
             {"requested_model", "response_id", "model", "release", "usage", "finish_reason", "response_sha256",
              "schema_sha256", "response", "system_fingerprint", "search_mode", "parsed"}
-             | ({"output_policy_id", "output_tool_call_id"} if strict_clean else set()),
+             | ({"output_policy_id", "output_tool_call_id"} if strict_clean else set())
+             | ({"thinking_mode"} if current_thinking and not strict_clean else set()),
             endpoint_path=CLEAN_OUTPUT_PATH if strict_clean else None)
         if (request["release"] != RELEASE or proof["release"] != RELEASE
                 or proof["model"] != MODEL or proof["requested_model"] != MODEL
                 or proof["finish_reason"] != ("tool_calls" if strict_clean else "stop")
                 or strict_clean and (request["output_policy_id"] != output_policy or proof["output_policy_id"] != output_policy)
                 or proof["search_mode"] != SEARCH_MODE
+                or current_thinking and not strict_clean and proof.get("thinking_mode") != THINKING_MODE
                 or not _same(request["output_schema"], schema)
                 or request["schema_sha256"] != _hash(schema) or proof["schema_sha256"] != request["schema_sha256"]):
             _bad("chat_contract", stage=self._stage_name)
@@ -293,7 +301,8 @@ class ReplayClient:
         fingerprint = proof["system_fingerprint"]
         if fingerprint is not None:
             DeepSeekRequiredClient._identifier(fingerprint)
-        usage = DeepSeekRequiredClient._usage(proof["usage"])
+        usage = DeepSeekRequiredClient._usage(
+            proof["usage"], require_non_thinking=current_thinking)
         if strict_clean:
             tool_call_id = DeepSeekRequiredClient._identifier(proof["output_tool_call_id"])
             if tool_call_id in self._tool_call_ids:
@@ -636,19 +645,30 @@ def _frozen_execution_policy(run, admission, preflight):
     if len(profiles) != 1:
         _bad("frozen_execution_policy_profile", stage="daily.preflight")
     policy_file = safe_path(run, "policy.json", must_exist=False)
+    thinking_mode = None
     if (policy_file.exists() or execution.budget_policy_id is not None
             or execution.clean_output_policy_id is not None or "policy_sha256" in admission):
         frozen = read_json(run, "policy.json")
         clean_revision = frozen.get("clean_instruction_revision", "v1") \
             if execution.clean_output_policy_id is not None else None
+        model_contract = frozen.get("model_contract")
+        thinking_mode = (model_contract.get("thinking_mode")
+                         if isinstance(model_contract, dict) else None)
         expected = policy_manifest(profiles[0], budget_policy_id=execution.budget_policy_id,
                                    clean_output_policy_id=execution.clean_output_policy_id,
-                                   clean_instruction_revision=clean_revision)
+                                   clean_instruction_revision=clean_revision,
+                                   thinking_mode=thinking_mode)
         if (admission.get("policy_sha256") != digest(json_bytes(frozen))
                 or not _same(frozen, expected)
                 or not _same(frozen["execution"], execution.to_dict())):
             _bad("frozen_budget_policy_binding", stage="daily.preflight")
         object.__setattr__(execution, "clean_instruction_revision", clean_revision)
+    else:
+        # Minimal synthetic/offline fixtures without a frozen policy are built
+        # from today's reviewed request contract. Sealed historical policies
+        # still select their original mode from the branch above.
+        thinking_mode = THINKING_MODE
+    object.__setattr__(execution, "thinking_mode", thinking_mode)
     if "source_sha256" in admission:
         from ..source_contract_v1 import STRICT_SOURCE_CONTRACT_V1
         verify_source(run, required_source_contract=(STRICT_SOURCE_CONTRACT_V1

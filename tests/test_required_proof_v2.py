@@ -115,7 +115,6 @@ def reasoning_record(stage, effort):
     kwargs = {"system": "SYNTHETIC_TEST system", "user": "SYNTHETIC_TEST input",
               "schema_hint": {}, "schema": schema, "max_tokens": 256, "temperature": .2}
     body = build_chat_request(**kwargs, thinking_mode=stage_thinking_mode(stage, upgrade=True))
-    body["reasoning_effort"] = effort
     identity = "2" * 32
     guard = BudgetGuard(**LIMITS, clock=lambda: 0.)
     reservation = guard.reserve("chat", identity, body)
@@ -135,11 +134,12 @@ def reasoning_record(stage, effort):
         "release": RELEASE, "usage": usage, "finish_reason": "stop", "request_sha256": h(body),
         "transport_response_sha256": "a" * 64, "response_sha256": h(response),
         "schema_sha256": h(schema), "response": response, "parsed": parsed,
+        "thinking_mode": stage_thinking_mode(stage, upgrade=True),
         "system_fingerprint": None, "search_mode": SEARCH_MODE, "budget_reservation": reservation,
         "budget_after": guard.snapshot(), "started_at_utc": START, "finished_at_utc": FINISH,
         "elapsed_ms": 1000.}
     module = importlib.import_module("trading_system.llm.required_proof_v2")
-    execution = SimpleNamespace(run_date=date(2026, 10, 27),
+    execution = SimpleNamespace(run_date=date(2026, 10, 27), thinking_mode=stage_thinking_mode(stage, upgrade=True),
         policy=SimpleNamespace(market_timezone="America/New_York"), admitted_at_utc=ADMITTED)
     replay = module.ReplayClient(execution, {stage: [{"method": "model.deepseek.chat",
                                                     "request": request, "proof": proof}]})
@@ -147,9 +147,12 @@ def reasoning_record(stage, effort):
     return replay, kwargs, proof
 
 
-def test_offline_clean_replay_uses_exact_low_effort_request_and_settled_budget():
+def test_offline_clean_replay_uses_exact_non_thinking_request_and_settled_budget():
     replay, kwargs, proof = reasoning_record("clean.llm_semantic", "low")
     assert replay.complete_json(**kwargs, reasoning_effort="low") == {"status": "SYNTHETIC_TEST"}
+    request = replay._calls["clean.llm_semantic"][0]["request"]["request"]
+    assert request["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in request
     replay.finish()
     assert replay.budget.snapshot() == proof["budget_after"]
 
@@ -162,7 +165,7 @@ def test_offline_replay_rejects_effort_outside_the_same_production_stage_policy(
         replay.complete_json(**kwargs, reasoning_effort=effort)
 
 
-def test_offline_other_stage_keeps_the_default_high_effort_request():
+def test_offline_other_stage_also_uses_non_thinking_request():
     replay, kwargs, _ = reasoning_record("decision.debate", "high")
     assert replay.complete_json(**kwargs) == {"status": "SYNTHETIC_TEST"}
     replay.finish()
@@ -592,7 +595,7 @@ def test_rehashed_semantic_mutations_fail_even_with_valid_event_chain(tmp_path, 
             request_blob = read_json(root, call["input_ref"]["path"])
             request = request_blob["value"]
             if tamper == "reasoning_effort":
-                assert request["request"]["reasoning_effort"] == "low"
+                assert "reasoning_effort" not in request["request"]
                 request["request"]["reasoning_effort"] = "high"
             elif tamper == "thinking_mode":
                 assert request["request"]["thinking"] == {"type": "disabled"}

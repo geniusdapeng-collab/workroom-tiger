@@ -266,7 +266,8 @@ def replay_inputs(root, records, monkeypatch):
         for key in ("provider_names", "search_source_names")}}
     execution = SimpleNamespace(**{key: state[key] for key in
         ("run_id", "admitted_at_utc", "deadline_at_utc")},
-        run_date=date.fromisoformat(state["run_date"]), policy=ExecutionPolicy(**policy), upgrade=True)
+        run_date=date.fromisoformat(state["run_date"]), policy=ExecutionPolicy(**policy),
+        thinking_mode="disabled", upgrade=True)
     context = _restore(inputs["context"], native=True)
     replay = ReplayClient(execution, records)
     replay.set_stage(STAGES[0])
@@ -294,8 +295,9 @@ def test_two_real_stages_bind_v4_guide_schema_receipts_and_independent_replay(re
         assert request["schema_sha256"] == proof["schema_sha256"] == h(schema)
         assert request["request_sha256"] == proof["request_sha256"] == h(request["request"])
         assert request["request"]["max_tokens"] == proof["budget_reservation"]["output_token_upper_bound"] == 65536
-        assert request["request"]["reasoning_effort"] == "high"
-        assert request["request"]["thinking"] == {"type": "enabled"}
+        assert "reasoning_effort" not in request["request"]
+        assert request["request"]["thinking"] == {"type": "disabled"}
+        assert proof["thinking_mode"] == "disabled"
         assert "contains" in canonical(schema)
         if row["request"]["stage"] == STAGES[1]:
             assert proof["parsed"]["decisions"][0]["thesis"] == {"reuse_thesis": "AAA"}
@@ -347,7 +349,8 @@ def test_two_real_stages_bind_v4_guide_schema_receipts_and_independent_replay(re
     write(root / "replay-observation.json", {"synthetic": True, "activated": False,
         "replay_equal": True, "phases": phases, "actual_http_transport_calls": 0,
         "mock_http_calls": len(receipts["mock_http"]), "budget": replay.budget.snapshot(),
-        "clean_control": {"max_tokens": clean["max_tokens"], "reasoning_effort": clean["reasoning_effort"]}})
+        "clean_control": {"max_tokens": clean["max_tokens"],
+                          "reasoning_effort": clean["reasoning_effort"]}})
 
 
 @pytest.mark.parametrize("recorded_v4", [{"ownership_growth": True}], indirect=True)

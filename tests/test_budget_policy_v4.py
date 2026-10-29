@@ -40,6 +40,18 @@ def test_current_compact_selects_only_exact_expanded_policy(profile):
         policy_manifest(profile, clean_instruction_revision="future")
 
 
+@pytest.mark.parametrize("profile", list(UPGRADE_POLICIES))
+def test_frozen_policy_can_still_replay_the_prior_enabled_thinking_manifest(profile):
+    current = policy_manifest(profile)
+    assert current["model_contract"]["thinking_mode"] == "disabled"
+    historical = policy_manifest(profile, thinking_mode=None)
+    assert "thinking_mode" not in historical["model_contract"]
+    assert historical["limitations"][1] == (
+        "All six semantic stages require actual DeepSeek Flash replies and bounded native research; "
+        "failures stop publication.")
+    assert all("explicitly disable thinking" not in row for row in historical["limitations"])
+
+
 @pytest.mark.parametrize("clean", [None, "tiger.clean-output.strict-function.v1",
     "tiger.clean-output.responses-schema.v1", "tiger.clean-output.responses-slots.v1"])
 def test_expanded_policy_cannot_be_reused_for_historical_protocol(clean):
