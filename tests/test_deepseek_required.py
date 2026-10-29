@@ -60,7 +60,7 @@ def chat_response(parsed=None, **overrides):
                      "message": {"role": "assistant", "content": json.dumps(
                          parsed if parsed is not None else {"score": 7, "reason": "evidence"})}}],
         "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50,
-                  "completion_tokens_details": {"reasoning_tokens": 5}},
+                  "completion_tokens_details": {"reasoning_tokens": 0}},
     }
     payload.update(overrides)
     return payload
@@ -96,8 +96,8 @@ def test_required_chat_binds_keyless_request_and_actual_response(configured, mon
     assert kwargs["stream"] is True
     assert kwargs["json"]["model"] == "deepseek-flash"
     assert kwargs["json"]["response_format"] == {"type": "json_object"}
-    assert kwargs["json"]["thinking"] == {"type": "enabled"}
-    assert kwargs["json"]["reasoning_effort"] == "high"
+    assert kwargs["json"]["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in kwargs["json"]
     assert kwargs["json"]["stream"] is False
     call = configured.calls[0]
     assert call["method"] == "model.deepseek.chat"
@@ -120,7 +120,17 @@ def test_required_chat_binds_keyless_request_and_actual_response(configured, mon
     assert KEY not in json.dumps(configured.calls)
     assert KEY not in json.dumps(client.describe())
     assert client.describe()["remote_requests"] == 1
+    assert client.describe()["thinking_mode"] == "disabled"
     assert response.closed
+
+
+def test_nonzero_reasoning_tokens_are_rejected_for_non_thinking_calls(configured, monkeypatch):
+    payload = chat_response()
+    payload["usage"]["completion_tokens_details"] = {"reasoning_tokens": 1}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: Response(payload))
+    with pytest.raises(LLMUnavailable, match="NON_THINKING_OUTPUT_REQUIRED"):
+        DeepSeekRequiredClient(configured).complete_json(
+            system="s", user="u", schema_hint={}, schema=SCHEMA)
 
 
 @pytest.mark.parametrize("name,value", [

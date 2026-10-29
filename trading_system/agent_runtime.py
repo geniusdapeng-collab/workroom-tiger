@@ -79,6 +79,7 @@ def policy_manifest(profile: str = PROFILE) -> dict:
         value["model_contract"] = {
             "provider": "deepseek", "model": "deepseek-flash",
             "release": "DeepSeek-V4.1-Flash-1017", "required": True,
+            "thinking_mode": "disabled",
             "search_mode": "provider_native_search",
             "release_binding": "official-current-alias-mapping",
             "model_mapping_url": "https://api-docs.deepseek.com/quick_start/pricing/",
@@ -88,6 +89,7 @@ def policy_manifest(profile: str = PROFILE) -> dict:
         value["limitations"][1] = "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
         value["limitations"] += [
             "deepseek-flash is a provider alias observed as V4.1-Flash-1017, not an immutable version ID.",
+            "All five semantic JSON calls explicitly disable thinking and reject nonzero reasoning-token usage.",
             "Search uses DeepSeek native Search API collected by this application, not Flash server-hosted web_search.",
             "Numeric portfolio constraints and accounting remain deterministic; model may veto approved entries, never bypass bounds.",
         ]

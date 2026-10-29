@@ -9,7 +9,7 @@
     模型端点（LLM_LOCAL_URL → Ollama :11434 → LM Studio :1234 →
     OPENAI_BASE_URL），开发者本地运行零配置接入。
   - default_client()：LLM_BACKEND=kimi|api|local|auto（默认 auto：
-    kimi → api → local 依次探测，均不可用则 LLMUnavailable）。
+    DeepSeek API → local 依次探测，均不可用则 LLMUnavailable；Kimi 只接受显式选择）。
 
 红线 2：本模块没有、也不允许有任何"规则回退"实现（例如关键词打分、
 正则情感分析）。LLM 不可用的唯一出路是抛 LLMUnavailable。
@@ -22,12 +22,13 @@ import logging
 import os
 import re
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from ..redline import LLMUnavailable
 
 log = logging.getLogger("llm.client")
 
-DEFAULT_MODEL = os.environ.get("KIMI_CHAT_MODEL", "kimi-k2.5")
+DEFAULT_MODEL = "deepseek-flash"
 
 
 class LLMClient(Protocol):
@@ -154,21 +155,30 @@ class OpenAICompatClient:
     环境变量：
       LLM_BASE_URL  如 https://api.deepseek.com/v1 或 http://localhost:11434/v1
       LLM_API_KEY   端点密钥（本地端点可填任意非空值，如 ollama）
-      LLM_MODEL     模型名（如 deepseek-chat / kimi-k2.5 / qwen-plus）
+      LLM_MODEL     模型名；DeepSeek 官方端点固定归一为 deepseek-flash
     """
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None,
                  model: str | None = None, timeout: float = 60.0,
                  max_retries: int = 2, name: str = "api"):
-        self.base_url = (base_url or os.environ.get("LLM_BASE_URL") or "").rstrip("/")
+        raw_base = (base_url or os.environ.get("LLM_BASE_URL") or "").rstrip("/")
+        self.base_url = re.sub(r"/anthropic$", "", raw_base, flags=re.IGNORECASE)
         self.api_key = api_key or os.environ.get("LLM_API_KEY") or ""
-        self.model = model or os.environ.get("LLM_MODEL") or ""
+        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
+        if self._deepseek_endpoint():
+            self.model = DEFAULT_MODEL
         self.timeout = timeout
         self.max_retries = max_retries
         self.name = name
         if not self.base_url or not self.model:
             raise LLMUnavailable(
                 "OpenAI 兼容端点未配置（需要 LLM_BASE_URL 与 LLM_MODEL）")
+
+    def _deepseek_endpoint(self) -> bool:
+        try:
+            return urlsplit(self.base_url).hostname == "api.deepseek.com"
+        except ValueError:
+            return False
 
     def describe(self) -> str:
         return f"openai-compat:{self.model}@{self.base_url}"
@@ -188,7 +198,9 @@ class OpenAICompatClient:
                    "messages": [{"role": "system", "content": system},
                                 {"role": "user", "content": prompt}],
                    "max_tokens": max_tokens, "temperature": temperature,
-                   "stream": False}
+                   "stream": False, "response_format": {"type": "json_object"}}
+        if self._deepseek_endpoint():
+            payload["thinking"] = {"type": "disabled"}
         last_err: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -196,7 +208,7 @@ class OpenAICompatClient:
                                   json=payload, headers=headers,
                                   timeout=self.timeout)
                 if r.status_code != 200:
-                    raise LLMUnavailable(f"端点返回 {r.status_code}: {r.text[:200]}")
+                    raise LLMUnavailable(f"端点返回 {r.status_code}")
                 text = KimiGatewayClient._extract_text(r.json())
                 return KimiGatewayClient._parse_json(text)
             except LLMUnavailable:
@@ -286,7 +298,8 @@ class LocalAgentClient(OpenAICompatClient):
 def default_client() -> LLMClient:
     """生产默认客户端（双模驱动）。调用方必须捕获 LLMUnavailable → 红线透传。
 
-    LLM_BACKEND=kimi|api|local|auto（默认 auto：kimi → api → local）。
+    LLM_BACKEND=kimi|api|local|auto（默认 auto：DeepSeek API → local）。
+    Kimi 只在显式设置 LLM_BACKEND=kimi 时使用。
     """
     backend = (os.environ.get("LLM_BACKEND") or "auto").lower()
     if backend == "kimi":
@@ -295,17 +308,15 @@ def default_client() -> LLMClient:
         return OpenAICompatClient()
     if backend == "local":
         return LocalAgentClient.detect()
-    # auto：kimi（SDK 可用）→ api（已配置）→ local（可探测）
-    try:
-        c = KimiGatewayClient()
-        c._gw()  # 触发一次初始化探测（无 key/SDK 即 LLMUnavailable）
-        return c
-    except LLMUnavailable:
-        pass
-    if os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL"):
+    # auto：DeepSeek/OpenAI-compatible API（已配置）→ local（可探测）。
+    # Kimi SDK 不再作为隐式默认，避免历史 Kimi 配置被自动实际调用。
+    if os.environ.get("LLM_BASE_URL"):
         return OpenAICompatClient()
     try:
         return LocalAgentClient.detect()
     except LLMUnavailable:
         pass
-    return KimiGatewayClient()  # 最终走原路径，由其抛出标准 LLMUnavailable
+    # Legacy demo/research callers still need a client object so deterministic
+    # stages can run and semantic stages disclose passthrough honestly. Never
+    # instantiate Kimi merely because no new DeepSeek configuration exists.
+    return DisabledLLMClient()

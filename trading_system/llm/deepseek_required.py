@@ -29,6 +29,7 @@ BASE_URL = "https://api.deepseek.com"
 MODEL = "deepseek-flash"
 RELEASE = "DeepSeek-V4.1-Flash-1017"
 SEARCH_MODE = "provider_native_search"
+THINKING_MODE = "disabled"
 MAX_RESPONSE_BYTES = 1024 * 1024
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 60.0
@@ -408,6 +409,7 @@ class DeepSeekRequiredClient:
         return {"mode": "required", "enabled": True, "provider": "deepseek",
                 "model": MODEL, "version": RELEASE, "release": RELEASE,
                 "version_binding": "official-current-alias-mapping",
+                "thinking_mode": THINKING_MODE,
                 "search": SEARCH_MODE, "remote_requests": self._remote_requests,
                 "chat_calls": len(self.receipts), "search_calls": len(self.search_receipts),
                 "fetch_calls": len(self.fetch_receipts)}
@@ -537,6 +539,8 @@ class DeepSeekRequiredClient:
                     n = details[child]
                     if type(n) is not int or not 0 <= n <= result[limit]:
                         _fail("INVALID_USAGE")
+                    if parent == "completion_tokens_details" and child == "reasoning_tokens" and n != 0:
+                        _fail("NON_THINKING_OUTPUT_REQUIRED")
                     result[parent] = {child: n}
         return result
 
@@ -557,8 +561,7 @@ class DeepSeekRequiredClient:
              _canonical(schema).decode() + "\nJSON field guidance:\n" +
              _canonical(self._clean(schema_hint)).decode()}],
             "max_tokens": max_tokens, "temperature": temperature, "stream": False,
-            "response_format": {"type": "json_object"}, "thinking": {"type": "enabled"},
-            "reasoning_effort": "high"}
+            "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}}
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/chat/completions",
@@ -607,6 +610,7 @@ class DeepSeekRequiredClient:
             return {"schema": "tiger.deepseek-call.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
                     "model": MODEL, "release": RELEASE, "usage": usage,
+                    "thinking_mode": THINKING_MODE,
                     "finish_reason": "stop", "request_sha256": inputs["request_sha256"],
                     "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
                     "schema_sha256": inputs["schema_sha256"], "response": safe_response,
