@@ -369,9 +369,10 @@ export function startupOptions(options = {}) {
 }
 
 export function observationTimeoutMs(operation) {
-  // Full receipt/verify replay can legitimately exceed one minute for a large
-  // v2 evidence graph. Submission and status remain on the short observation bound.
-  return operation === "receipt" || operation === "verify"
+  // New v2 submission stages and verifies its committed parent before launching
+  // the worker. Full run admission and receipt/verify replay can each legitimately
+  // exceed one minute for a large evidence graph; status remains short.
+  return operation === "run" || operation === "receipt" || operation === "verify"
     ? LIMITS.verificationRequestMs : LIMITS.requestMs;
 }
 

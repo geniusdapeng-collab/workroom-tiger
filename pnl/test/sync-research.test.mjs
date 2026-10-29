@@ -57,7 +57,7 @@ test('verified sync calls the controlled six operations, publishes research only
   const f = await setup(t);
   const result = await syncResearch({ env: f.env, date: DATE, profile: PROFILE }, { invoke: f.invoke, publish: f.publish });
   assert.equal(result.status, 'published_and_verified'); assert.deepEqual(f.calls.map(c => c.operation), ['doctor', 'describe', 'run', 'status', 'receipt', 'verify']);
-  assert.deepEqual(f.observationTimeouts.filter(row => ['receipt', 'verify'].includes(row.operation)).map(row => [row.operation, row.timeoutMs]), [['receipt', 300000], ['verify', 300000]]);
+  assert.deepEqual(f.observationTimeouts.filter(row => ['run', 'receipt', 'verify'].includes(row.operation)).map(row => [row.operation, row.timeoutMs]), [['run', 300000], ['receipt', 300000], ['verify', 300000]]);
   const payload = f.published[0].record; assert.equal(payload.decisions[0].action, 'buy'); assert.equal(payload.decisions[0].targetWeight, 0.1); assert.equal(payload.executionDecisions[0].thesis.status, 'sufficient');
   assert.equal(payload.dataAsOf, '2026-01-02'); assert.equal(payload.asOf, '2026-01-03T20:01:30.123Z'); assert.equal(payload.modelMode, 'enabled');
   assert.equal(Object.hasOwn(payload, 'positions'), false); assert.equal(Object.hasOwn(payload, 'account'), false); assert.equal(Object.hasOwn(payload, 'trades'), false);

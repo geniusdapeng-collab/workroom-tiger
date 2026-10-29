@@ -110,7 +110,7 @@ test("N06: accepted/recovered identity and status are distinct from verified rec
 
 test("Verified receipt replay has a bounded five-minute observation window", () => {
   assert.equal(observationTimeoutMs("doctor"), 60000);
-  assert.equal(observationTimeoutMs("run"), 60000);
+  assert.equal(observationTimeoutMs("run"), 300000);
   assert.equal(observationTimeoutMs("status"), 60000);
   assert.equal(observationTimeoutMs("receipt"), 300000);
   assert.equal(observationTimeoutMs("verify"), 300000);

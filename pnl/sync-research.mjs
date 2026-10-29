@@ -14,7 +14,7 @@ const PROFILES = new Set([MODEL_PROFILE, ...UPGRADE_PROFILES]);
 const V3_BYTES = 4 * 1_048_576;
 const RUN_ID = /^run-[0-9a-f]{32}$/;
 const COMPLETE = new Set(['completed']);
-const VERIFICATION_OBSERVATION_MS = 300000;
+const DURABLE_OPERATION_OBSERVATION_MS = 300000;
 const PUBLICATION_OBSERVATION_MS = 20000;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 export class SyncError extends Error { constructor(code, message) { super(message); this.code = code; } }
@@ -171,7 +171,9 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
       if (description.data.profile.execution?.model_mode !== 'enabled' || modelContract?.required !== true || modelContract.provider !== 'deepseek' || modelContract.model !== 'deepseek-flash' || modelContract.release !== 'DeepSeek-V4.1-Flash-1017' || modelContract.search_mode !== 'provider_native_search') error('MODEL_REQUIRED', 'Controlled Tiger describe did not advertise the exact required DeepSeek policy');
       if (!state.runId) {
         if (env.LLM_BACKEND !== 'api' || env.LLM_BASE_URL !== 'https://api.deepseek.com' || env.LLM_MODEL !== 'deepseek-flash' || typeof env.LLM_API_KEY !== 'string' || !env.LLM_API_KEY.length || env.LLM_API_KEY.length > 4096 || /[^\x21-\x7e]/.test(env.LLM_API_KEY)) error('MODEL_CONFIGURATION_REQUIRED', 'Load the protected fixed DeepSeek configuration before starting a new run');
-        const accepted = await call('run', state.request);
+        // Admission verifies the committed parent before launching the worker.
+        const accepted = await invoke('run', state.request, config,
+          DURABLE_OPERATION_OBSERVATION_MS);
         if (accepted.run_id && RUN_ID.test(accepted.run_id)) { state.runId = accepted.run_id; state.phase = 'accepted'; await saveState(file, state, env); }
         if (!accepted.operation_ok) {
           if (['TIMEOUT', 'INTERRUPTED', 'CANCELLED', 'ACCOUNT_BUSY'].includes(accepted.error?.code)) return pending(accepted.error.code);
@@ -188,9 +190,9 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
           // Give each independent verifier the same bounded 5-minute budget as
           // the controlled CLI; neither operation can mutate the run.
           const receipt = await invoke('receipt', { run_id: state.runId }, config,
-            VERIFICATION_OBSERVATION_MS);
+            DURABLE_OPERATION_OBSERVATION_MS);
           const verification = await invoke('verify', { run_id: state.runId }, config,
-            VERIFICATION_OBSERVATION_MS);
+            DURABLE_OPERATION_OBSERVATION_MS);
           const built = await buildResearch({ receipt, verification, stateRoot: config.stateRoot, profile, idempotencyKey: `pnl-${identity}`, expectedRequest: state.request });
           state.payload = built.record; state.evidence = built.evidence; state.request = built.originalRequest; state.phase = 'verified'; await saveState(file, state, env); break;
         }

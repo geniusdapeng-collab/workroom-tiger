@@ -95,7 +95,7 @@ node scripts/tiger-agent.mjs verify --python /absolute/path/to/python \
 
 查询可以保持 readonly，但必须使用提交时同一个 state-root。`receipt` 独立验证证据和账户提交后才提供选股、持仓、挂单、现金、权益、日期及数据/模型限制；`verify` 提供验证结果而不重复业务动作。CLI 每次仅输出一个 JSON envelope；所有返回字段的契约在 `bundles/trading/agent-workflow.schema.json`。
 
-需要持续等待时，原 `run` 命令可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口7260秒；Python业务deadline按可信预算版本独立执行（当前v4为7200秒，旧版本2400秒）。显式1..3600秒选项用于较短观察，不修改业务期限。Node 的提交、status 等普通操作单次观察上限为 60 秒；`receipt`/`verify` 要完整重建较大的 v2 证据图，单次上限为 300 秒。等待循环只轮询已有 `run_id`，不会重新提交。
+需要持续等待时，原 `run` 命令可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口7260秒；Python业务deadline按可信预算版本独立执行（当前v4为7200秒，旧版本2400秒）。显式1..3600秒选项用于较短观察，不修改业务期限。Node 的 status 等轻量查询单次观察上限为 60 秒；v2 `run` 在启动前要完整验证已提交父 run，`receipt`/`verify` 要重建较大的证据图，这三项单次上限为 300 秒。等待循环只轮询已有 `run_id`，不会重新提交。
 
 | 场景 | 正确行为 |
 |---|---|
