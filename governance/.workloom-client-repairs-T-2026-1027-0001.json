@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "workloom.tiger-client-repairs/v1",
+  "repository": "geniusdapeng-collab/workroom-tiger",
+  "taskId": "T-2026-1027-0001",
+  "authorization": {
+    "basis": "user-requested-repository-repair",
+    "issue": "https://github.com/geniusdapeng-collab/workroom-tiger/issues/39",
+    "pullRequest": "https://github.com/geniusdapeng-collab/workroom-tiger/pull/40"
+  },
+  "base": {
+    "version": "0.1.17",
+    "sourceCommit": "91610daf0962a6c24bc7b8cde6c802662eb8b2f7",
+    "stateSha256": "3f505fddc21c63d0a7ece0aaa473e503b3fc4b65955e0f03b315bd99179cca1a",
+    "verifierSha256": "fa1bb091d6b0b0e925367352837d817b59d4374a6c01c3183acba638ee8b0c31"
+  },
+  "repairs": [
+    {
+      "path": "apps/web/index.html",
+      "card": "MC-055",
+      "upstreamSha256": "ac4734f030587b91b9064ebbbbb30a7970ac5411a41f0ad9918857f2906fea6e",
+      "repairedSha256": "e09a1c7f1a8477c9b5f76db5713a461b6854ecbcb54fcf5a38cdd620f441274c",
+      "sourceCommit": "e6ffaf9e21a65dc1ad7a33d0dbc2716d5bd1f4c6",
+      "reason": "Load the existing external font stylesheet without blocking first render, while retaining a no-script fallback and the original typography."
+    },
+    {
+      "path": "apps/web/src/shell/Bridge.tsx",
+      "card": "MC-056",
+      "upstreamSha256": "7f8d670a2a559052defe61e37684bfda5182f1c8aac552ae7bc359004e4ee99c",
+      "repairedSha256": "05118994ce00270864b953d647b646cd37d8a9ca98dcb97aecb3273fc4430b96",
+      "sourceCommit": "48fd15267c6880baf6c9541b6b4029cd94cf14a1",
+      "reason": "Connect the existing top-bar emergency brake to the controlled night-shift pause route, preserving disabled, busy and two-step confirmation states."
+    }
+  ],
+  "testAdditions": [
+    {
+      "path": "scripts/acceptance/lib/session.test.mjs",
+      "card": "MC-055",
+      "sha256": "c5f363f547f9d1153c936f374d4d92efe18f8a890e0a418ae32ffb97a5d55b57"
+    },
+    {
+      "path": "scripts/acceptance/lib/bridge-emergency-brake.test.mjs",
+      "card": "MC-056",
+      "sha256": "58cf54b808ce154f471c7cfb55e590302aeaacb0e3d8927b76bca1410e50dfbe"
+    }
+  ]
+}
