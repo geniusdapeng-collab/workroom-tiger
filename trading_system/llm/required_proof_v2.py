@@ -639,12 +639,16 @@ def _frozen_execution_policy(run, admission, preflight):
     if (policy_file.exists() or execution.budget_policy_id is not None
             or execution.clean_output_policy_id is not None or "policy_sha256" in admission):
         frozen = read_json(run, "policy.json")
+        clean_revision = frozen.get("clean_instruction_revision", "v1") \
+            if execution.clean_output_policy_id is not None else None
         expected = policy_manifest(profiles[0], budget_policy_id=execution.budget_policy_id,
-                                   clean_output_policy_id=execution.clean_output_policy_id)
+                                   clean_output_policy_id=execution.clean_output_policy_id,
+                                   clean_instruction_revision=clean_revision)
         if (admission.get("policy_sha256") != digest(json_bytes(frozen))
                 or not _same(frozen, expected)
                 or not _same(frozen["execution"], execution.to_dict())):
             _bad("frozen_budget_policy_binding", stage="daily.preflight")
+        object.__setattr__(execution, "clean_instruction_revision", clean_revision)
     if "source_sha256" in admission:
         from ..source_contract_v1 import STRICT_SOURCE_CONTRACT_V1
         verify_source(run, required_source_contract=(STRICT_SOURCE_CONTRACT_V1

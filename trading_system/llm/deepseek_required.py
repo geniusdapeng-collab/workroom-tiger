@@ -1065,7 +1065,8 @@ class DeepSeekRequiredClient:
                         or _canonical(self._clean(schema_hint)) != _canonical(schema_hint)):
                     _fail('INVALID_CHAT_REQUEST')
                 original_request = build_clean_compact_lists_request(system=system, user=user,
-                    schema_hint=schema_hint, schema=schema, max_tokens=max_tokens, temperature=temperature)
+                    schema_hint=schema_hint, schema=schema, max_tokens=max_tokens, temperature=temperature,
+                    instruction_revision=getattr(self.execution, 'clean_instruction_revision', 'v1'))
                 local = clean_compact_lists_schema_v1(schema)
                 batch_limit, regeneration_limit = clean_compact_execution_limits(self.execution)
                 if len({name.split('__', 1)[0] for name in local['properties']}) > batch_limit:
@@ -1082,7 +1083,8 @@ class DeepSeekRequiredClient:
                 request = (original_request if generation == 0 else
                     build_clean_compact_lists_request(system=system, user=user, schema_hint=schema_hint,
                         schema=schema, max_tokens=max_tokens, temperature=temperature,
-                        regeneration_feedback=feedback))
+                        regeneration_feedback=feedback,
+                        instruction_revision=getattr(self.execution, 'clean_instruction_revision', 'v1')))
                 call_id = uuid.uuid4().hex
                 provenance = {'output_policy_id': CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
                     'output_codec_id': CLEAN_COMPACT_LISTS_WIRE_V1,

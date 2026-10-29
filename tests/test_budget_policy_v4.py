@@ -30,10 +30,14 @@ def test_current_compact_selects_only_exact_expanded_policy(profile):
     assert policy["request_budget"] == policy_limits(BUDGET_POLICY_V4) == V4_LIMITS
     assert policy["business_deadline_seconds"] == 7200
     assert policy["clean_regeneration_limits"] == {"max_per_batch": 1, "max_per_run": 56}
+    assert policy["clean_instruction_revision"] == "v2"
     old = policy_manifest(profile, budget_policy_id=BUDGET_POLICY_V3)
     assert old["business_deadline_seconds"] == 2400
     assert old["clean_regeneration_limits"]["max_per_run"] == 4
     assert old["request_budget"]["max_tokens"] == 600000
+    assert "clean_instruction_revision" not in old
+    with pytest.raises(EvidenceInvalid):
+        policy_manifest(profile, clean_instruction_revision="future")
 
 
 @pytest.mark.parametrize("clean", [None, "tiger.clean-output.strict-function.v1",

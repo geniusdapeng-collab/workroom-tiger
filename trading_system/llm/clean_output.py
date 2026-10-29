@@ -25,6 +25,8 @@ CLEAN_OUTPUT_RESPONSES_POLICY_V1 = "tiger.clean-output.responses-schema.v1"
 CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1 = "tiger.clean-output.responses-slots.v1"
 CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1 = "tiger.clean-output.compact-lists-regeneration.v1"
 CLEAN_COMPACT_LISTS_WIRE_V1 = "tiger.clean-compact-lists-wire.v1"
+CLEAN_INSTRUCTION_REVISION_V1 = "v1"
+CLEAN_INSTRUCTION_REVISION_V2 = "v2"
 CLEAN_REGENERATION_POLICY_V1 = "tiger.model-regeneration.clean-schema.v1"
 CLEAN_OUTPUT_RESPONSES_PATH = "/responses"
 CLEAN_OUTPUT_FUNCTION = "emit_tiger_clean_v2"
@@ -607,7 +609,14 @@ _COMPACT_REGEN_INSTRUCTION = (
     'If a claim leaf s/q/k/t is rejected, either provide all four leaves as valid nonempty values or clear all four leaves together. '
     'Do not repair, copy, truncate or reuse any earlier answer. The feedback contains only the trusted schema rejection; '
     'all original evidence, semantic and source constraints remain mandatory.\n')
-_COMPACT_QUARTET_INSTRUCTION = (
+_COMPACT_QUARTET_INSTRUCTION_V1 = (
+    '\nCompact claim contract: Within every claim slot, s/q/k/t must either all be nonempty '
+    'and satisfy their original constraints, or all be empty strings, including claim_key k. '
+    'Decide the supported statement and its own-source quote first; never prefill a key for an absent or discarded claim. '
+    'Do not invent a statement, quote or time role to complete a slot. Actual claims occupy a consecutive prefix; '
+    'every unused trailing slot has all four leaves empty. Emit every key in the provider required array order: '
+    'summary and provenance before claims, then statement s, quote q, claim_key k and time_role t within each claim.')
+_COMPACT_QUARTET_INSTRUCTION_V2 = (
     '\nCompact claim contract: Within every claim slot, s/q/k/t must either all be nonempty '
     'and satisfy their original constraints, or all be empty strings, including claim_key k. '
     'Decide the supported statement and its own-source quote first; never prefill a key for an absent or discarded claim. '
@@ -996,18 +1005,25 @@ def clean_logical_call_sha256(*, run_id, assessment, request, schema):
 
 
 def build_clean_compact_lists_request(*, system, user, schema_hint, schema,
-                                     max_tokens=32768, temperature=0.2, regeneration_feedback=None):
+                                     max_tokens=32768, temperature=0.2, regeneration_feedback=None,
+                                     instruction_revision=CLEAN_INSTRUCTION_REVISION_V1):
     if (type(system) is not str or not system.strip() or type(user) is not str or not user.strip()
             or type(schema_hint) is not dict or schema_hint
             or type(max_tokens) is not int or max_tokens != 32768
             or type(temperature) not in (int, float) or temperature != 0.2):
         _invalid()
     parameters = clean_compact_lists_provider_schema_v1(schema)
+    instructions = {
+        CLEAN_INSTRUCTION_REVISION_V1: _COMPACT_QUARTET_INSTRUCTION_V1,
+        CLEAN_INSTRUCTION_REVISION_V2: _COMPACT_QUARTET_INSTRUCTION_V2,
+    }
+    if instruction_revision not in instructions:
+        _invalid()
     sources = {name.split('__', 1)[0] for name in parameters['properties']}
     if len(sources) > 4:
         _invalid()
     return {'model': 'deepseek-flash', 'messages': [
-        {'role': 'system', 'content': system + _COMPACT_QUARTET_INSTRUCTION + CLEAN_OUTPUT_INSTRUCTION + _compact_feedback_suffix(regeneration_feedback)},
+        {'role': 'system', 'content': system + instructions[instruction_revision] + CLEAN_OUTPUT_INSTRUCTION + _compact_feedback_suffix(regeneration_feedback)},
         {'role': 'user', 'content': user}], 'max_tokens': 32768, 'temperature': 0.2, 'stream': False,
         'thinking': {'type': 'disabled'}, 'reasoning_effort': 'none',
         'tools': [{'type': 'function', 'function': {'name': CLEAN_OUTPUT_FUNCTION, 'strict': True,
@@ -1034,16 +1050,19 @@ def clean_compact_lists_function_request_valid(request):
                     or message['role'] != role or type(message['content']) is not str or not message['content'].strip()):
                 return False
         system = request['messages'][0]['content']
+        quartets = (_COMPACT_QUARTET_INSTRUCTION_V1, _COMPACT_QUARTET_INSTRUCTION_V2)
+        def quartet_valid(base):
+            return any(base.endswith(quartet + CLEAN_OUTPUT_INSTRUCTION) for quartet in quartets)
         if _COMPACT_REGEN_PREFIX in system:
             base, feedback = system.rsplit(_COMPACT_REGEN_PREFIX, 1)
-            if (not base.endswith(_COMPACT_QUARTET_INSTRUCTION + CLEAN_OUTPUT_INSTRUCTION) or not feedback.startswith(_COMPACT_REGEN_INSTRUCTION)):
+            if not quartet_valid(base) or not feedback.startswith(_COMPACT_REGEN_INSTRUCTION):
                 return False
             encoded = feedback[len(_COMPACT_REGEN_INSTRUCTION):]
             from .deepseek_required import _json_loads
             decoded = _json_loads(encoded)
             if _compact_feedback_suffix(decoded) != _COMPACT_REGEN_PREFIX + feedback:
                 return False
-        elif not system.endswith(_COMPACT_QUARTET_INSTRUCTION + CLEAN_OUTPUT_INSTRUCTION):
+        elif not quartet_valid(system):
             return False
         tool = request['tools'][0]
         if type(tool) is not dict or set(tool) != {'type', 'function'} or tool['type'] != 'function':

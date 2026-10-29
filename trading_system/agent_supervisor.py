@@ -583,6 +583,7 @@ def engine(run: Path) -> int:
             store=EvidenceStore(run, run.name),
             admitted_at_utc=admission["clock"]["admitted_at_utc"],
         )
+        execution.clean_instruction_revision = policy.get("clean_instruction_revision", "v1")
         main_file = run / "source" / "main.py"
         spec = importlib.util.spec_from_file_location("tiger_frozen_main", main_file)
         if spec is None or spec.loader is None:

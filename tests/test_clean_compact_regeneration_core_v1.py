@@ -374,10 +374,17 @@ def test_nonblocking_reentry_and_same_logical_reconsumption_fail_before_another_
 
 def test_logical_identity_binds_run_and_full_admission_but_generation_user_input_stays_exact():
     schema, _ = contract(); request = wire.build_clean_compact_lists_request(system='SYNTHETIC_TEST', user='complete input', schema_hint={}, schema=schema)
-    system = request['messages'][0]['content']
-    assert 'q is a source quote-part token such as p3' in system
-    assert 't is time_role and only accepts current, background or unknown' in system
-    assert 'never copy q into t and never write a pN token into t' in system
+    old_system = request['messages'][0]['content']
+    assert 'q is a source quote-part token such as p3' not in old_system
+    current = wire.build_clean_compact_lists_request(system='SYNTHETIC_TEST', user='complete input',
+        schema_hint={}, schema=schema, instruction_revision='v2')
+    current_system = current['messages'][0]['content']
+    assert 'q is a source quote-part token such as p3' in current_system
+    assert 't is time_role and only accepts current, background or unknown' in current_system
+    assert 'never copy q into t and never write a pN token into t' in current_system
+    with pytest.raises(wire.CleanOutputInvalid):
+        wire.build_clean_compact_lists_request(system='SYNTHETIC_TEST', user='complete input',
+            schema_hint={}, schema=schema, instruction_revision='future')
     assessment = {'run_date': '2026-10-27', 'market_timezone': 'America/New_York', 'admitted_at_utc': '2026-10-27T16:00:00+00:00'}
     first = wire.clean_logical_call_sha256(run_id='synthetic_run_a', assessment=assessment, request=request, schema=schema)
     assert first != wire.clean_logical_call_sha256(run_id='synthetic_run_b', assessment=assessment, request=request, schema=schema)

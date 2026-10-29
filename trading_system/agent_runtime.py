@@ -50,14 +50,16 @@ _CURRENT_CLEAN_OUTPUT_POLICY = object()
 
 
 def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_POLICY,
-                    clean_output_policy_id=_CURRENT_CLEAN_OUTPUT_POLICY) -> dict:
+                    clean_output_policy_id=_CURRENT_CLEAN_OUTPUT_POLICY,
+                    clean_instruction_revision=None) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
     upgrade = profile in UPGRADE_POLICIES
     from .llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4, policy_limits
     from .llm.clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
                                    CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
-                                   CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+                                   CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
+                                   CLEAN_INSTRUCTION_REVISION_V1, CLEAN_INSTRUCTION_REVISION_V2)
     # Explicit historical clean selectors continue to select their original
     # budget. Only the current compact path admits the expanded source policy.
     current_compact = clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY or clean_output_policy_id == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
@@ -75,6 +77,15 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
         raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen clean output policy")
     if selected_budget == BUDGET_POLICY_V4 and selected_clean != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
         raise EvidenceInvalid("RESULT_INVALID", "Expanded budget requires the compact clean output policy")
+    selected_revision = None
+    if selected_clean == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+        selected_revision = ((CLEAN_INSTRUCTION_REVISION_V2
+                              if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY
+                              and budget_policy_id is _CURRENT_BUDGET_POLICY
+                              else CLEAN_INSTRUCTION_REVISION_V1)
+                             if clean_instruction_revision is None else clean_instruction_revision)
+        if selected_revision not in (CLEAN_INSTRUCTION_REVISION_V1, CLEAN_INSTRUCTION_REVISION_V2):
+            raise EvidenceInvalid("RESULT_INVALID", "Unsupported clean instruction revision")
     required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
     policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
@@ -105,6 +116,8 @@ def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_
             "Local cooperative processes; no hostile same-user or external rollback anchoring guarantee.",
         ],
     }
+    if selected_revision == CLEAN_INSTRUCTION_REVISION_V2:
+        value["clean_instruction_revision"] = selected_revision
     if required:
         value["model_contract"] = {
             "provider": "deepseek", "model": "deepseek-flash",
@@ -252,7 +265,9 @@ def _policy_source_contract(run: Path) -> str | None:
     execution = policy["execution"]
     selected = execution.get("clean_output_policy_id")
     expected = policy_manifest(policy.get("profile"),
-        budget_policy_id=execution.get("budget_policy_id"), clean_output_policy_id=selected)
+        budget_policy_id=execution.get("budget_policy_id"), clean_output_policy_id=selected,
+        clean_instruction_revision=policy.get("clean_instruction_revision",
+            "v1" if selected is not None else None))
     if policy != strict_json(json_bytes(expected)):
         raise EvidenceInvalid("RESULT_INVALID", "Source admission policy differs")
     if selected is None:
@@ -572,7 +587,9 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
             or request.get("profile") not in SUPPORTED_PROFILES
             or policy != strict_json(json_bytes(policy_manifest(request["profile"],
                 budget_policy_id=policy.get("execution", {}).get("budget_policy_id"),
-                clean_output_policy_id=policy.get("execution", {}).get("clean_output_policy_id"))))):
+                clean_output_policy_id=policy.get("execution", {}).get("clean_output_policy_id"),
+                clean_instruction_revision=policy.get("clean_instruction_revision",
+                    "v1" if policy.get("execution", {}).get("clean_output_policy_id") else None))))):
         raise EvidenceInvalid("RESULT_INVALID", "Admission policy or request identity differs")
     expected = {"schema_version": "tiger.agent-request/v1", "profile": request["profile"],
                 "paper_account": ACCOUNT, "idempotency_key": request.get("idempotency_key")}
