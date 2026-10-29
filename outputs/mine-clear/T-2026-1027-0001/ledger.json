@@ -5,7 +5,7 @@
   "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
   "title": "白皮书短线闭环六项修复与真实评测迭代",
   "created_at": "2026-10-26T19:26:13.881Z",
-  "updated_at": "2026-10-29T06:43:54.134Z",
+  "updated_at": "2026-10-29T08:24:18.704Z",
   "baseline": {
     "audit": {
       "commit": "deab886aad743451e7f380323824950df4f825fd",
@@ -610,6 +610,174 @@
           }
         ]
       }
+    },
+    {
+      "id": "MC-017",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 0,
+      "state": "open",
+      "title": "盘中报价时间与批量取证不一致导致全部可动作观察失效",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "trading_system/providers/sina.py:149@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "2be04d2de9b40c5272c9f95412da3ac996852468a78d718a05e70b5803c3054f",
+          "note": "审计基线直接返回供应商无时区时间；真实响应同时带 EDT 字段，证明其主时间字段是北京时间。"
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:256@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "5fec2c08c33f8ce2532815a71e3b2f5ccfb3fff5ebf7d7d93d6f5469526d6efe",
+          "note": "审计基线的逐票报价链会先接受无时区价格，随后生命周期才拒绝，且每个标的分开串行取证。"
+        },
+        {
+          "type": "code",
+          "ref": "main.py:305@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "d08926c159127ab28ffb60156f3d5b4fa85ac006b46524699f467c9587bbeb6e",
+          "note": "审计基线的 paper.step 逐个调用 get_bar，遇到上游限流时同样放大尾部耗时。"
+        }
+      ],
+      "root_cause": {
+        "file": "trading_system/providers/sina.py",
+        "line": 149,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "SinaProvider.quote"
+      },
+      "trigger_path": "NY 盘中批量观察多个标的时，Sina 无时区时间被标错或被长时间串行回退拖延；生命周期随后拒绝全部报价，持仓 STOP/PROTECT 不可用。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "混合合法/无时区报价、并发完成乱序和无可用快速源",
+          "expect": "仅带时区的正价可接受，尝试按输入顺序落证据，快速源不可用时不触网。",
+          "command": "python -B -m pytest -p no:cacheprovider -q tests/test_quote_validity.py tests/test_v62_multisource.py tests/test_short_term_lifecycle_v2.py",
+          "exec": {
+            "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+            "args": [
+              "-B",
+              "-m",
+              "pytest",
+              "-p",
+              "no:cacheprovider",
+              "-q",
+              "tests/test_quote_validity.py",
+              "tests/test_v62_multisource.py",
+              "tests/test_short_term_lifecycle_v2.py"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "新的批量报价证据和旧 Run 25 逐标的报价证据",
+          "expect": "证明器分别按实际协议重放，篡改报价、时钟或尝试绑定都会失败。",
+          "command": "python -B -m pytest -p no:cacheprovider -q tests/test_required_proof_v2.py",
+          "exec": {
+            "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+            "args": [
+              "-B",
+              "-m",
+              "pytest",
+              "-p",
+              "no:cacheprovider",
+              "-q",
+              "tests/test_required_proof_v2.py"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python -B -m pytest -p no:cacheprovider -q tests/test_quote_validity.py tests/test_required_proof_v2.py"
+      },
+      "rollback": "回退本提交的报价协议改动；保留全部失败与成功取证，旧 Run 25 仍可按原协议验证。",
+      "notes": "Run 25 实际 35/35 QUOTE_TIME_UNVERIFIABLE；Run defec 在旧串行尾部超时。未成交不等于可证明持仓保护。"
+    },
+    {
+      "id": "MC-019",
+      "kind": "problem",
+      "level": "L3",
+      "severity": "P1",
+      "batch": 0,
+      "state": "open",
+      "title": "paper.step 逐标的串行补数导致真实任务在尾部超时",
+      "evidence": [
+        {
+          "type": "code",
+          "ref": "main.py:305@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "d08926c159127ab28ffb60156f3d5b4fa85ac006b46524699f467c9587bbeb6e",
+          "note": "审计基线的 paper.step 依赖逐标的 get_bar；每个缺失行情都会重新走完整串行回退链。"
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/pipeline.py:331@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "5fec2c08c33f8ce2532815a71e3b2f5ccfb3fff5ebf7d7d93d6f5469526d6efe",
+          "note": "审计基线的批量接口命中三分之一即返回，不能用于必须保证每个管理标的都有日期 Bar 的执行阶段。"
+        },
+        {
+          "type": "code",
+          "ref": "trading_system/simulator.py:109@deab886aad743451e7f380323824950df4f825fd",
+          "sha256": "a725900f947d2b4c69d508c33b998ecceee1e04a66e6dd529d9bd09687b2a78e",
+          "note": "纸面引擎按单 Bar 回调执行；其交易规则不是问题，缺少执行前的完整有界取数才是根因。"
+        }
+      ],
+      "root_cause": {
+        "file": "main.py",
+        "line": 305,
+        "commit": "deab886aad743451e7f380323824950df4f825fd",
+        "symbol": "_daily_strict"
+      },
+      "trigger_path": "Yahoo 全市场限流后，paper.step 对每个持仓/计划/候选依次经历 Yahoo→Stooq→Sina；35 个以上标的超过 40 分钟业务预算。",
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "主源只补部分标的、Stooq 只补部分标的、剩余标的由后续通道提供",
+          "expect": "完整模式补满所有身份；默认模式仍保留原覆盖率阈值，且陈旧帧被拒绝。",
+          "command": "python -B -m pytest -p no:cacheprovider -q tests/test_provider_failure_boundaries.py -k 'complete_batch or coverage_threshold'",
+          "exec": {
+            "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+            "args": [
+              "-B",
+              "-m",
+              "pytest",
+              "-p",
+              "no:cacheprovider",
+              "-q",
+              "tests/test_provider_failure_boundaries.py",
+              "-k",
+              "complete_batch or coverage_threshold"
+            ]
+          },
+          "last_result": "not-run"
+        },
+        {
+          "kind": "property",
+          "given": "43 阶段 v2 工作流使用离线主源回退",
+          "expect": "证明器从实际批量行情重建同一 Bar、纸面状态和最终报告。",
+          "command": "python -B -m pytest -p no:cacheprovider -q tests/test_required_proof_v2.py -k 'paper_replay or all43'",
+          "exec": {
+            "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+            "args": [
+              "-B",
+              "-m",
+              "pytest",
+              "-p",
+              "no:cacheprovider",
+              "-q",
+              "tests/test_required_proof_v2.py",
+              "-k",
+              "paper_replay or all43"
+            ]
+          },
+          "last_result": "not-run"
+        }
+      ],
+      "regression": {
+        "command": "python -B -m pytest -p no:cacheprovider -q tests/test_provider_failure_boundaries.py tests/test_required_proof_v2.py tests/test_short_term_core_v2.py"
+      },
+      "rollback": "回退 paper.step 批量预热并恢复逐标的取数；不修改任何冻结账户或历史回执。",
+      "notes": "Run defec 在 opportunity.lifecycle 开始前已超过 80 分钟并 TIMEOUT，属于旧 source 908dd 的真实失败证据。"
     }
   ],
   "gates": [],
