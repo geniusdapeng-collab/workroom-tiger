@@ -50,6 +50,35 @@ class Bar:
     date: str | None = None
 
 
+def paper_symbols(state: dict, result) -> list[str]:
+    """Return the exact symbols the v2 paper step must observe."""
+    symbols = {row["ticker"] for row in state["positions"]}
+    symbols.update(row["ticker"] for row in state["pending"])
+    symbols.update(row["ticker"] for row in state.get("entry_plans", {}).values()
+                   if row["status"] in {"pending", "partial"})
+    symbols.update(pick.ticker for pick in result.picks)
+    symbols.update((result.raw.get("execution_setups") or {}).keys())
+    sectors = {row.get("sector") for row in state["positions"]}
+    sectors.update(row.get("sector") for row in state.get("entry_plans", {}).values())
+    symbols.update(sector for sector in sectors if sector)
+    return sorted(symbols)
+
+
+def bar_from_frame(frame, cutoff: date) -> Bar | None:
+    """Project one already-observed frame to the frozen complete-bar boundary."""
+    if frame is None or not len(frame):
+        return None
+    selected = frame[frame.index.date <= cutoff]
+    if not len(selected):
+        return None
+    row = selected.iloc[-1]
+    adv = (float((selected["Close"] * selected["Volume"]).tail(20).mean())
+           if "Volume" in selected.columns else 0.0)
+    return Bar(open=float(row["Open"]), high=float(row["High"]),
+               low=float(row["Low"]), close=float(row["Close"]),
+               adv=adv, date=str(selected.index[-1].date()))
+
+
 def friction_bps(adv: float) -> float:
     """单边摩擦成本（bp）= ADV 分档滑点 + 单边佣金（v6.3，防滑点断崖）。
 
@@ -116,6 +145,8 @@ class SimEngine:
         # 两项检查都先于 started/现金/持仓/行情调用，失败保留内存与原账本。
         require_usd_result(result, scope="模拟盘输入")
         require_usd_sim_state(self.state, scope=f"模拟盘账本 {self.path}")
+        if getattr(result, "raw", {}).get("execution_policy") == "whitepaper-execution-v2":
+            return self._step_v2(trade_date, result, get_bar)
         s = self.state
         s["started"] = s["started"] or trade_date
         ops: list[str] = []
@@ -375,6 +406,19 @@ class SimEngine:
         self.save()
         return {"equity": equity, "ops": ops, "marks": marks,
                 **({"fill_checks": fill_checks} if budgeted else {})}
+
+    def _step_v2(self, trade_date, result, get_bar):
+        """Collect dated observations once, then atomically publish a pure step."""
+        from .execution_policy import step_paper_account
+        symbols = paper_symbols(self.state, result)
+        bars = {symbol: get_bar(symbol) for symbol in symbols}
+        report = step_paper_account(self.state, trade_date, result, bars)
+        next_state = report["state"]
+        require_usd_sim_state(next_state, scope=f"模拟盘账本 {self.path}")
+        # I/O failure preserves both self.state and the previously published file.
+        write_json_atomic(self.path, next_state, indent=1)
+        self.state = next_state
+        return {key: value for key, value in report.items() if key != "state"}
 
     # ---------------------------------------------------------------- 统计
     def stats(self) -> dict:

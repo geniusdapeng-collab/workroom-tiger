@@ -60,7 +60,7 @@ def _isolated_quote_sources(monkeypatch):
     monkeypatch.setattr(pipeline, "_DATA_ISSUES", [])
     monkeypatch.setattr(pipeline, "_channel_chain", lambda: [])
     monkeypatch.setattr("trading_system.providers.stooq.StooqProvider",
-                        lambda: _Provider())
+                        lambda **_kwargs: _Provider())
 
 
 @pytest.mark.parametrize("kind", ["realtime", "realtime_delayed", "eod_close"])
@@ -184,6 +184,87 @@ def test_stale_result_is_disclosed_without_mutating_source_payload(monkeypatch):
     assert result == {**first, "stale": True}
     assert "stale" not in first and "stale" not in second
     assert pipeline._LINEAGE == [("quote(XYZ)[stale]", "STALE")]
+
+
+def test_quote_observation_batch_requires_aware_time_and_preserves_symbol_order(monkeypatch):
+    class _BatchSource:
+        def quote(self, ticker):
+            if ticker == "NAIVE":
+                return {"price": 100.0, "ts": "2026-10-20 11:59:00", "kind": "realtime"}
+            return {"price": 101.0, "ts": "2026-10-20T11:59:00+00:00", "kind": "realtime"}
+
+    provider = _Provider("yahoo", None)
+    value = pipeline.quote_observation_batch(
+        provider, ["BBB", "NAIVE", "AAA"], max_workers=3,
+        source_specs=[("fixture", _BatchSource)],
+    )
+    assert list(value["quotes"]) == ["BBB", "NAIVE", "AAA"]
+    assert value["quotes"]["BBB"]["source"] == "fixture"
+    assert value["quotes"]["NAIVE"] is None
+    assert value["quotes"]["AAA"]["observed_at"].endswith("+00:00")
+    assert value["attempts"]["NAIVE"][0]["reason"] == "unverifiable_quote_time"
+    assert value["workers"] == 3
+
+
+def test_quote_observation_batch_uses_bounded_parallel_source_calls():
+    import threading
+
+    class _ConcurrentSource:
+        gate = threading.Barrier(3, timeout=3)
+
+        def quote(self, ticker):
+            self.gate.wait()
+            return {"price": 100.0, "ts": "2026-10-20T11:59:00+00:00", "kind": "realtime"}
+
+    value = pipeline.quote_observation_batch(
+        _Provider("yahoo", _quote()), ["AAA", "BBB", "CCC"], max_workers=3,
+        source_specs=[("fixture", _ConcurrentSource)],
+    )
+    assert set(value["quotes"]) == {"AAA", "BBB", "CCC"}
+    assert all(value["quotes"][ticker]["source"] == "fixture" for ticker in value["quotes"])
+
+
+def test_quote_observation_attempts_are_deterministic_in_input_order():
+    import time
+
+    class _OutOfOrderSource:
+        def quote(self, ticker):
+            time.sleep({"AAA": .04, "BBB": .02, "CCC": 0}[ticker])
+            return {"price": 100.0, "ts": "2026-10-20T11:59:00+00:00", "kind": "realtime"}
+
+    value = pipeline.quote_observation_batch(
+        _Provider("yahoo", None), ["AAA", "BBB", "CCC"], max_workers=3,
+        source_specs=[("fixture", _OutOfOrderSource)],
+    )
+    assert list(value["attempts"]) == ["AAA", "BBB", "CCC"]
+
+
+def test_all_fast_quotes_do_not_probe_fallback_channels(monkeypatch):
+    class _Source:
+        def quote(self, ticker):
+            return {"price": 100.0, "ts": "2026-10-20T11:59:00+00:00", "kind": "realtime"}
+
+    monkeypatch.setattr(pipeline, "_channel_chain", lambda: pytest.fail("unused fallback probed"))
+    value = pipeline.quote_observation_batch(
+        _Provider("yahoo", None), ["AAA"], source_specs=[("fixture", _Source)])
+    assert value["quotes"]["AAA"]["source"] == "fixture"
+
+
+def test_quote_observation_preserves_primary_stooq_channel_order(monkeypatch):
+    calls = []
+    primary = _Provider("yahoo", None, calls=calls)
+    stooq = _Provider("stooq", None, calls=calls)
+    fresh = _Provider("tencent", _quote(price=101.0), calls=calls)
+    monkeypatch.setattr("trading_system.providers.stooq.StooqProvider", lambda **_kwargs: stooq)
+    monkeypatch.setattr(pipeline, "_channel_chain", lambda: [fresh])
+
+    value = pipeline.quote_observation_batch(
+        primary, ["AAA"], max_workers=1, source_specs=[])
+
+    assert value["quotes"]["AAA"]["source"] == "tencent"
+    assert [row["provider"] for row in value["attempts"]["AAA"]] == [
+        "yahoo", "stooq", "tencent"]
+    assert calls == [("yahoo", "AAA"), ("stooq", "AAA"), ("tencent", "AAA")]
 
 
 def test_primary_success_does_not_probe_other_providers(monkeypatch):

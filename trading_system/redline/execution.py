@@ -7,13 +7,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, time
 from pathlib import Path
 from threading import get_ident
 from time import perf_counter
 from typing import Any, Callable, Mapping, Protocol
 
-from .model_diagnostics import MODEL_IO_METHODS, model_failure_diagnostic
+from .model_diagnostics import (MODEL_IO_METHODS, model_failure_diagnostic,
+                                model_failure_accounting)
 
 
 class EvidenceWriteError(RuntimeError):
@@ -48,6 +49,41 @@ REQUIRED_PROFILE = "us-public-model-required-paper-v1"
 REQUIRED_POLICY_ID = "tiger.public-model-required-paper-policy.v1"
 REQUIRED_MODEL_STAGES = ("clean.llm_semantic", "tech.sentiment", "tech.risk",
                          "sector.narrative", "decision.debate")
+UPGRADE_PROFILE = "us-public-model-required-paper-v2"
+PREMARKET_PROFILE = "us-public-model-required-premarket-paper-v2"
+INTRADAY_PROFILE = "us-public-model-required-intraday-paper-v2"
+UPGRADE_POLICY_ID = "tiger.public-model-required-paper-policy.v2"
+UPGRADE_POLICIES = {
+    UPGRADE_PROFILE: (UPGRADE_POLICY_ID, "daily"),
+    PREMARKET_PROFILE: ("tiger.public-model-required-premarket-paper-policy.v2", "premarket"),
+    INTRADAY_PROFILE: ("tiger.public-model-required-intraday-paper-policy.v2", "intraday"),
+}
+UPGRADE_POLICY_IDS = frozenset(row[0] for row in UPGRADE_POLICIES.values())
+MODEL_POLICY_IDS = UPGRADE_POLICY_IDS | {REQUIRED_POLICY_ID}
+UPGRADE_MODEL_STAGES = REQUIRED_MODEL_STAGES[:-1] + ("research.candidates", "decision.debate")
+
+
+def complete_daily_cutoff(run_date: date, admitted_at_utc: str,
+                          market_timezone: str = "America/New_York") -> date:
+    """Conservative known-at daily boundary, shared by engine and verifier."""
+    from zoneinfo import ZoneInfo
+    from ..calendar import is_trading_day, prev_trading_day
+    try:
+        if market_timezone != "America/New_York":
+            raise ValueError("Market timezone differs")
+        instant = datetime.fromisoformat(admitted_at_utc)
+        if instant.utcoffset() is None:
+            raise ValueError("Admission clock is naive")
+        local = instant.astimezone(ZoneInfo(market_timezone))
+        if local.date() != run_date:
+            raise ValueError("Admission clock differs")
+    except (TypeError, ValueError) as exc:
+        raise ExecutionContractError("Upgrade requires its exact aware admission clock") from exc
+    cutoff = run_date
+    # Early closes are treated conservatively: regular 16:00 is the boundary.
+    if is_trading_day(cutoff) and local.time() < time(16):
+        cutoff -= timedelta(days=1)
+    return prev_trading_day(cutoff)
 
 
 PUBLIC_PROVIDER_NAMES = ("yahoo", "stooq", "official", "tencent", "sina", "eastmoney")
@@ -64,9 +100,35 @@ class ExecutionPolicy:
     provider_names: tuple[str, ...] = PUBLIC_PROVIDER_NAMES
     search_source_names: tuple[str, ...] = PUBLIC_SEARCH_SOURCE_NAMES
     market_timezone: str = "America/New_York"
+    budget_policy_id: str | None = None
+    clean_output_policy_id: str | None = None
 
     def __post_init__(self):
-        required = self.policy_id == REQUIRED_POLICY_ID
+        if self.budget_policy_id is not None:
+            from ..llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
+            if (type(self.budget_policy_id) is not str or self.policy_id not in UPGRADE_POLICY_IDS
+                    or self.budget_policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)):
+                raise ExecutionContractError("Unsupported versioned request budget policy")
+            if self.budget_policy_id == BUDGET_POLICY_V4:
+                from ..llm.clean_output import CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+                if self.clean_output_policy_id != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+                    raise ExecutionContractError("Expanded budget requires the compact clean output policy")
+        if self.clean_output_policy_id is not None:
+            from ..llm.clean_output import (CLEAN_OUTPUT_POLICY_V1,
+                                           CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                           CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                           CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+            from ..llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
+            if (type(self.clean_output_policy_id) is not str
+                    or self.policy_id not in UPGRADE_POLICY_IDS
+                    or self.clean_output_policy_id not in (CLEAN_OUTPUT_POLICY_V1,
+                                                          CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                                          CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                                          CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+                    or self.budget_policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+                    or self.budget_policy_id == BUDGET_POLICY_V4 and self.clean_output_policy_id != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1):
+                raise ExecutionContractError("Unsupported versioned clean output policy")
+        required = self.policy_id in MODEL_POLICY_IDS
         if not self.policy_id or self.model_mode != ("enabled" if required else "disabled"):
             raise ExecutionContractError("Strict public paper requires a disabled model policy")
         if self.market_timezone != "America/New_York":
@@ -78,6 +140,15 @@ class ExecutionPolicy:
             if (not values or len(set(values)) != len(values)
                     or any(name not in allowed for name in values)):
                 raise ExecutionContractError(f"Invalid public {label} allowlist")
+
+    def to_dict(self):
+        """Omit absent selectors to preserve exact historical policy bytes."""
+        value = asdict(self)
+        if self.budget_policy_id is None:
+            value.pop("budget_policy_id")
+        if self.clean_output_policy_id is None:
+            value.pop("clean_output_policy_id")
+        return value
 
 
 @dataclass(frozen=True)
@@ -113,16 +184,16 @@ class DailyStageSpec:
     allow_passthrough: bool = False
 
 
-def daily_stage_specs(model_required: bool = False) -> tuple[DailyStageSpec, ...]:
+def daily_stage_specs(model_required: bool = False, upgrade: bool = False) -> tuple[DailyStageSpec, ...]:
     """The sole strict daily order: 3 setup + 20 registered pipeline + 16 tail."""
-    from . import DEFERRED_STEPS, STEP_REGISTRY
+    from . import DEFERRED_STEPS, pipeline_registry
     setup = (
         DailyStageSpec("daily.preflight", "rules", "main"),
         DailyStageSpec("state.reset", "rules", "state"),
         DailyStageSpec("pipeline.prepare", "rules", "pipeline"),
     )
     pipeline = tuple(DailyStageSpec(s.name, s.driver, s.owner, s.driver == "llm" and not model_required)
-                     for s in STEP_REGISTRY if s.name not in DEFERRED_STEPS)
+                     for s in pipeline_registry(upgrade) if s.name not in DEFERRED_STEPS)
     tail = tuple(DailyStageSpec(name, "rules", owner) for name, owner in (
         ("accounting.validate", "main"), ("report.initial", "report"),
         ("journal.log", "journal"), ("journal.settle", "journal"),
@@ -133,11 +204,21 @@ def daily_stage_specs(model_required: bool = False) -> tuple[DailyStageSpec, ...
         ("report.plan", "triggers"), ("report.markdown", "report"),
         ("report.html", "report_html"), ("daily.result", "main"),
     ))
+    if upgrade:
+        expanded = []
+        for spec in tail:
+            expanded.append(spec)
+            if spec.name == "paper.persist":
+                expanded.append(DailyStageSpec("journal.execution_sync", "rules", "journal"))
+            if spec.name == "governance.verify":
+                expanded += [DailyStageSpec("opportunity.lifecycle", "rules", "opportunity_lifecycle"),
+                             DailyStageSpec("business.evaluate", "rules", "business_evaluation")]
+        tail = tuple(expanded)
     return setup + pipeline + tail
 
 
-def daily_stage_contract(model_required: bool = False) -> list[dict]:
-    return [asdict(spec) for spec in daily_stage_specs(model_required)]
+def daily_stage_contract(model_required: bool = False, upgrade: bool = False) -> list[dict]:
+    return [asdict(spec) for spec in daily_stage_specs(model_required, upgrade)]
 
 
 class EvidenceStore(Protocol):
@@ -211,15 +292,24 @@ class StageScope:
 
 class ExecutionContext:
     def __init__(self, *, run_id: str, run_date: date, paths: RuntimePaths,
-                 policy: ExecutionPolicy, store: EvidenceStore):
+                 policy: ExecutionPolicy, store: EvidenceStore,
+                 admitted_at_utc: str | None = None):
         if not isinstance(run_id, str) or not run_id:
             raise ExecutionContractError("run_id is required")
         if not isinstance(run_date, date) or isinstance(run_date, datetime):
             raise ExecutionContractError("run_date must be the frozen admission-market date")
         self.run_id, self.run_date = run_id, run_date
         self.paths, self.policy, self.store = paths, policy, store
-        self.model_required = policy.policy_id == REQUIRED_POLICY_ID
-        self._specs = daily_stage_specs(self.model_required)
+        self.model_required = policy.policy_id in MODEL_POLICY_IDS
+        self.upgrade = policy.policy_id in UPGRADE_POLICY_IDS
+        self.admitted_at_utc = admitted_at_utc
+        self.workflow_phase = next((row[1] for row in UPGRADE_POLICIES.values()
+                                    if row[0] == policy.policy_id), "daily")
+        self.daily_bars_cutoff = run_date
+        if self.upgrade:
+            self.daily_bars_cutoff = complete_daily_cutoff(run_date, admitted_at_utc,
+                                                         policy.market_timezone)
+        self._specs = daily_stage_specs(self.model_required, self.upgrade)
         self._cursor = 0
         self._sequence = 0
         self._owner_thread = get_ident()
@@ -369,6 +459,10 @@ class ExecutionContext:
             diagnostic = model_failure_diagnostic(error)
             if diagnostic is not None:
                 value["diagnostic"] = diagnostic
+                if self.upgrade:
+                    accounting = model_failure_accounting(error)
+                    if accounting is not None:
+                        value["accounting"] = accounting
         ref = self._snapshot(scope.spec.name, "output", value)
         scope.io_calls.append({"index": handle.index, "method": handle.method,
                                "input_ref": handle.input_ref,
@@ -394,8 +488,8 @@ class ExecutionContext:
         self._active.passthrough(reason)
 
     def assert_pipeline_complete(self) -> None:
-        from . import DEFERRED_STEPS, STEP_REGISTRY
-        required = [s.name for s in STEP_REGISTRY if s.name not in DEFERRED_STEPS]
+        from . import DEFERRED_STEPS, pipeline_registry
+        required = [s.name for s in pipeline_registry(self.upgrade) if s.name not in DEFERRED_STEPS]
         actual = [r["stage"] for r in self._records if r["stage"] in required]
         if self._failed or actual != required:
             self._reject("Pipeline subsequence is incomplete")
@@ -470,8 +564,18 @@ class RecordingProvider:
                 lambda: value(*args, **kwargs),
             )
             try:
-                return market_observation(raw, run_date=self.execution.run_date,
-                                          market_timezone=self.execution.policy.market_timezone)
+                observed = market_observation(raw, run_date=self.execution.run_date,
+                                              market_timezone=self.execution.policy.market_timezone)
+                if self.execution.upgrade:
+                    import pandas as pd
+                    def completed_daily(value):
+                        if isinstance(value, (pd.DataFrame, pd.Series)):
+                            return value[value.index.date <= self.execution.daily_bars_cutoff]
+                        if isinstance(value, dict):
+                            return {key: completed_daily(item) for key, item in value.items()}
+                        return value
+                    return completed_daily(observed)
+                return observed
             except StrictObservationError as error:
                 # A caught boundary violation still poisons this stage before
                 # another provider, ledger write, or output can be started.

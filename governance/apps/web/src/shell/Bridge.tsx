@@ -9,10 +9,12 @@
 import { Icon, Overlay, TopContextBar } from "@workloom/ui";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { EmergencyBrake, NightStatusPill } from "../components/hud";
 import { SimBanner } from "../components/SimBanner";
 import { SkillDistBanner } from "../components/SkillDistBanner";
 import { COMMON_STATUS_TEXT, dictText, shortId } from "../lib/display";
+import { trpc } from "../lib/trpc";
 import { PlanSwitcher } from "./PlanSwitcher";
 
 /** 星野背景（氛围层；永不遮挡信息、不影响 G10 首屏口径——§7 动效纪律） */
@@ -82,6 +84,8 @@ export function Bridge({
   const [rightVisible, setRightVisible] = useState(true);
   const [leftWidth, setLeftWidth] = useState(() => Number(localStorage.getItem("workloom.pc.panel.left-width")) || 236);
   const [rightWidth, setRightWidth] = useState(() => Number(localStorage.getItem("workloom.pc.panel.right-width")) || 264);
+  const [brakeBusy, setBrakeBusy] = useState(false);
+  const navigate = useNavigate();
   // ResizeObserver 首次回报前按最窄安全布局渲染，避免在嵌套工作区中先塞入
   // 512px 固定侧栏、下一帧再收起所造成的首帧横向溢出与视觉闪动。
   const [containerWidth, setContainerWidth] = useState(0);
@@ -192,6 +196,20 @@ export function Bridge({
     if (compact) setDrawer("right");
     else setRightVisible((visible) => !visible);
   };
+  const pauseNightShift = async () => {
+    if (brakeBusy) return;
+    setBrakeBusy(true);
+    try {
+      const current = await trpc.nightShift.current.query() as { configured: boolean; run?: { id: string } };
+      if (!current.configured || !current.run) {
+        navigate("/night");
+        return;
+      }
+      await trpc.nightShift.pause.mutate({ runId: current.run.id });
+    } finally {
+      setBrakeBusy(false);
+    }
+  };
   return (
     <div className="wl-bridge-viewport min-h-screen min-w-0 w-full overflow-x-clip bg-bg950">
       <StarField />
@@ -217,7 +235,7 @@ export function Bridge({
                 </button>
                 <PlanSwitcher onPlan={setPlan} />
                 {!community && <NightStatusPill />}
-                {!community && <EmergencyBrake />}
+                {!community && <EmergencyBrake onConfirm={() => void pauseNightShift()} busy={brakeBusy} />}
               </>
             )}
           />

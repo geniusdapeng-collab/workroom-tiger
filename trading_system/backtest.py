@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field, replace
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -64,6 +65,9 @@ class GateParams:
     profit_protect_r: float = config.PROFIT_PROTECT_R
     cost_bps: float = config.COST_BPS    # v6.0：交易成本（净口径回测/调参）
     use_ics: bool = True                 # False → 产业链加成消融
+    execution_policy: str = "legacy-execution-v1"
+    initial_cash: float = 100_000.0
+    max_positions: int = config.MAX_POSITIONS_V2
 
 
 @dataclass
@@ -78,6 +82,9 @@ class CandidateSnap:
     template: str
     entry_ref: float
     stop: float
+    key_level: float | None = None
+    adv_usd: float = 0.0
+    time_stop_days: int = 0
 
 
 @dataclass
@@ -294,6 +301,7 @@ def collect_day_frames(provider, universe: list[str], days: int = 460,
     logger.info("回测数据就绪: 股票 %d/%d", len(stock_data), len(all_tickers))
 
     panel = _Panel(stock_data, spy)
+    panel.sector_data = sector_etfs  # actual dated references for v2 relative exits
     tnx = tnx.reindex(panel.dates).ffill()
     vix = vix.reindex(panel.dates).ffill()
     vix9d = vix9d.reindex(panel.dates).ffill() if vix9d is not None else None
@@ -382,7 +390,10 @@ def collect_day_frames(provider, universe: list[str], days: int = 460,
                 ticker=t, tss_raw=c.tss, bonus=bonus, c_liq=c.c_liq,
                 sector_etf=etf, chain_id=cid or "", chain_hot=bool(ch and ch.hot),
                 template=c.entry_template, entry_ref=row["price"],
-                stop=stop_extract(c),
+                stop=stop_extract(c), key_level=c.key_level,
+                adv_usd=c.adv_usd,
+                time_stop_days=next((d for cap_atr, d in config.TIME_STOP_BY_ATR
+                    if float(panel.atr14[t].iloc[i]) / row["price"] < cap_atr), config.TIME_STOP_DAYS[1]),
             ))
 
         frames.append(DayFrame(
@@ -506,6 +517,7 @@ def _gate_day(frame: DayFrame, params: GateParams) -> list[tuple[CandidateSnap, 
     shs_map = {s.etf: s.shs for s in frame.sectors}
 
     out = []
+    breadth_map = {s.etf: s.breadth for s in frame.sectors}
     for snap in frame.candidates:
         tss_final = min(10.0, snap.tss_raw * (snap.bonus if params.use_ics else 1.0))
         shs = shs_map.get(snap.sector_etf, config.NEUTRAL_SCORE) if snap.sector_etf else config.NEUTRAL_SCORE
@@ -518,6 +530,14 @@ def _gate_day(frame: DayFrame, params: GateParams) -> list[tuple[CandidateSnap, 
             mrs_light_lo=params.mrs_light_lo)
         if not decision.passed:
             continue
+        if params.execution_policy == "whitepaper-execution-v2":
+            from .execution_policy import entry_gate_reasons
+            setup = _bt_setup(frame, snap, params, main, sub, shs_map, breadth_map,
+                              standard=decision.standard)
+            if entry_gate_reasons(setup):
+                continue
+        elif params.execution_policy != "legacy-execution-v1":
+            raise ValueError("Unknown backtest execution policy")
         tos = frame.mrs_star * shs * tss_final * snap.c_liq / 100
         out.append((snap, "标准做多" if decision.standard else "轻仓试错", tos))
     out.sort(key=lambda x: x[2], reverse=True)
@@ -528,6 +548,10 @@ def run_backtest(frames: list[DayFrame], panel: _Panel,
                  params: GateParams | None = None) -> dict:
     """闸门回放 + 交易仿真 + 指标汇总。"""
     params = params or GateParams()
+    if params.execution_policy == "whitepaper-execution-v2":
+        return _run_v2_backtest(frames, panel, params)
+    if params.execution_policy != "legacy-execution-v1":
+        raise ValueError("Unknown backtest execution policy")
     col_of = {t: j for j, t in enumerate(panel.tickers)}
     date_i = {d: i for i, d in enumerate(panel.dates)}
 
@@ -589,6 +613,8 @@ def run_backtest(frames: list[DayFrame], panel: _Panel,
 
     return {
         "params": params,
+        "execution_policy": "legacy-execution-v1",
+        "evidence_scope": "legacy-numeric-trade-replay-not-current-v2",
         "n_days": len(frames),
         "n_trades": len(trades),
         "trades": trades,
@@ -605,6 +631,162 @@ def run_backtest(frames: list[DayFrame], panel: _Panel,
                             "avg_r": round(float(np.mean(v)), 3)}
                         for k, v in sorted(by_template.items())},
     }
+
+
+def _bt_setup(frame, snap, params, main=None, sub=None, shs_map=None,
+              breadth_map=None, *, standard=None):
+    from .activity import risk_group
+    from .gate import main_pool_eligible, pass_gates, sub_pool_eligible
+    if main is None:
+        main = {s.etf for s in sorted(frame.sectors, key=lambda s: s.shs, reverse=True)
+                if main_pool_eligible(s.shs, s.breadth, shs_main=max(params.shs_main, config.SHS_MAIN_POOL))}
+        main = set(list(sorted(main, key=lambda etf: next(s.shs for s in frame.sectors if s.etf == etf), reverse=True))[:config.MAIN_POOL_MAX])
+        sub = {s.etf for s in frame.sectors if s.etf not in main and sub_pool_eligible(s.shs)}
+        shs_map = {s.etf: s.shs for s in frame.sectors}
+        breadth_map = {s.etf: s.breadth for s in frame.sectors}
+    tss = min(10., snap.tss_raw * (snap.bonus if params.use_ics else 1.))
+    shs = shs_map.get(snap.sector_etf, config.NEUTRAL_SCORE)
+    if standard is None:
+        standard = pass_gates(frame.mrs_star, shs, tss, snap.sector_etf in main,
+                              snap.sector_etf in sub, snap.chain_hot).standard
+    breadth = breadth_map.get(snap.sector_etf)
+    return {"schema": "tiger.entry-setup.v2", "symbol": snap.ticker,
+            "known_at": str(frame.date.date()), "entry_template": snap.template,
+            "entry_price": snap.entry_ref, "stop_price": snap.stop,
+            "key_level": snap.key_level, "mrs_star": frame.mrs_star,
+            "shs": shs, "tss_final": tss, "in_main": snap.sector_etf in main,
+            "in_sub": snap.sector_etf in sub, "chain_hot": snap.chain_hot,
+            "breadth": breadth if breadth is not None and math.isfinite(breadth) else None,
+            "allow_new_positions": frame.mrs_star >= config.MRS_GATE_BLOCK,
+            "shock": False, "risk_group": risk_group(snap.chain_id, snap.sector_etf),
+            "sector": snap.sector_etf, "size_ratio": 1. if standard else min(params.light_size, max(config.LIGHT_PROBE["size_ratio"])),
+            "signal_adv_usd": snap.adv_usd, "execution_mode": "paper"}
+
+
+def _run_v2_backtest(frames, panel, params):
+    """Replay the exact paper account, integer fills/reservations and net costs.
+
+    Historical frames contain numeric observations only. This does not recreate
+    historical required-model evidence or establish the alpha of that profile.
+    WFA filters can tighten the live hard gates; allocation never loosens them.
+    """
+    from .data_models import MRSResult, PipelineResult, TradePick
+    from .execution_policy import POLICY_ID, allocate_entry, portfolio_snapshot, step_paper_account
+    if (isinstance(params.initial_cash, bool) or not isinstance(params.initial_cash, (int, float))
+            or not math.isfinite(params.initial_cash) or params.initial_cash <= 0
+            or type(params.max_positions) is not int or not 1 <= params.max_positions <= config.MAX_POSITIONS_V2):
+        raise ValueError("Invalid v2 backtest account")
+    state = {"started": None, "initial_cash": params.initial_cash, "account_currency": "USD",
+             "cash": params.initial_cash, "positions": [], "pending": [], "entry_plans": {},
+             "closed": [], "equity_curve": [], "ops_log": []}
+    by_date = {frame.date: frame for frame in frames}
+    active_dates = [day for day in panel.dates if frames and day >= min(by_date)]
+    fill_receipts, rejection_receipts = [], []
+    previous_equity = params.initial_cash
+    port_returns = []
+    for day in active_dates:
+        day_text = str(day.date())
+        bars = {}
+        for ticker in panel.tickers:
+            values = [float(getattr(panel, key).loc[day, ticker]) for key in ("open", "high", "low", "close")]
+            if any(not math.isfinite(value) or value <= 0 for value in values):
+                continue
+            # ADV must use <=signal data; opening fills use their frozen tier.
+            volume = panel.vol[ticker].loc[:day]
+            closes = panel.close[ticker].loc[:day]
+            adv = float((volume * closes).tail(20).mean())
+            bars[ticker] = dict(zip(("open", "high", "low", "close"), values)) | {"date": day_text, "adv": adv}
+        for etf, data in getattr(panel, "sector_data", {}).items():
+            if day in data.index:
+                row = data.loc[day]
+                bars[etf] = {key.lower(): float(row[key]) for key in ("Open", "High", "Low", "Close")}
+                bars[etf].update(date=day_text, adv=0.)
+        frame = by_date.get(day)
+        score = frame.mrs_star if frame else 0.
+        cap = next((row[3] for row in config.MRS_POSITION_CAP if row[0] <= score < row[1]), .1)
+        result = PipelineResult(day_text, "historical-numeric-replay", action="WAIT",
+            mrs=MRSResult(score, 0., 1., score, position_cap=(0., cap),
+                          allow_new_positions=score >= config.MRS_GATE_BLOCK),
+            raw={"execution_policy": POLICY_ID, "execution_setups": {}})
+        # Settle that opening/exits before sizing today's closing signal.
+        first = step_paper_account(state, day_text, result, bars)
+        state = first["state"]
+        fill_receipts.extend(first["fills"])
+        rejection_receipts.extend(first["refusals"])
+        if frame is not None:
+            setups = {snap.ticker: _bt_setup(frame, snap, params) for snap in frame.candidates}
+            result.raw["execution_setups"] = setups
+            marks = {ticker: {"date": day_text, "price": bar["close"]} for ticker, bar in bars.items()}
+            # Temporary reservations ensure sequential candidates cannot spend
+            # the same cash/risk/slot; the pure step then performs the same check.
+            signal_state = deepcopy(state)
+            for snap, mode, tos in _gate_day(frame, params):
+                setup = setups[snap.ticker]
+                snapshot = portfolio_snapshot(signal_state, marks, day_text)
+                budget = {"schema": "tiger.entry-budget.v2", "execution_policy": POLICY_ID,
+                    "known_at": day_text, "snapshot_hash": snapshot["state_hash"],
+                    "gross_cap": cap, "single_cap": config.MAX_SINGLE_POSITION_PCT,
+                    "risk_pct": config.RISK_R_PCT * setup["size_ratio"],
+                    "group_risk_pct": config.MAX_CHAIN_RISK_PCT,
+                    "portfolio_risk_pct": config.MAX_PORTFOLIO_RISK_PCT_V2,
+                    "max_positions": params.max_positions}
+                allocation = allocate_entry(snapshot, setup, budget)
+                if not allocation["shares"]:
+                    rejection_receipts.append({"ticker": snap.ticker, "date": day_text, **allocation})
+                    continue
+                pick = TradePick(snap.ticker, setup["tss_final"], tos, snap.template,
+                    snap.entry_ref, snap.stop, allocation["shares"], allocation["position_pct"],
+                    allocation["risk_usd"], chain=snap.chain_id, sector=snap.sector_etf,
+                    time_stop_days=snap.time_stop_days or params.time_stop)
+                result.picks.append(pick)
+                result.action = "BUY"
+                # Each pending row is a complete signal commitment at this stage.
+                signal_state["pending"].append({"ticker": snap.ticker, "shares": pick.shares,
+                    "entry_ref": pick.entry_price, "stop_price": pick.stop_price,
+                    "risk_group": setup["risk_group"], "signal_date": day_text})
+            # Ceilings are common; each actual plan gets its own rebound snapshot.
+            base_snapshot = portfolio_snapshot(state, marks, day_text)
+            result.raw["entry_budget"] = {"schema": "tiger.entry-budget.v2", "execution_policy": POLICY_ID,
+                "known_at": day_text, "snapshot_hash": base_snapshot["state_hash"], "gross_cap": cap,
+                "single_cap": config.MAX_SINGLE_POSITION_PCT, "risk_pct": config.RISK_R_PCT,
+                "group_risk_pct": config.MAX_CHAIN_RISK_PCT,
+                "portfolio_risk_pct": config.MAX_PORTFOLIO_RISK_PCT_V2,
+                "max_positions": params.max_positions}
+            second = step_paper_account(state, day_text, result, bars)
+            state = second["state"]
+            fill_receipts.extend(second["fills"])
+            rejection_receipts.extend(second["refusals"])
+        equity = state["equity_curve"][-1]["equity"]
+        port_returns.append(equity / previous_equity - 1)
+        previous_equity = equity
+    trades = []
+    date_index = {str(day.date()): i for i, day in enumerate(panel.dates)}
+    for closed in state["closed"]:
+        plan = state["entry_plans"][closed["plan_id"]]
+        trades.append(Trade(plan["signal_date"], closed["entry_date"], closed["exit_date"],
+            closed["ticker"], plan["entry_template"], "标准做多" if plan["setup"]["size_ratio"] == 1 else "轻仓试错",
+            closed["entry_raw"], closed["initial_stop"], closed["exit"], closed["r_multiple"],
+            closed["shares"] * closed["entry"] / params.initial_cash,
+            date_index[closed["entry_date"]], date_index[closed["exit_date"]]))
+    rs = [trade.r for trade in trades]
+    wins, losses = [r for r in rs if r > 0], [r for r in rs if r <= 0]
+    by_template = {}
+    for trade in trades: by_template.setdefault(trade.template, []).append(trade.r)
+    curve = [params.initial_cash] + [row["equity"] for row in state["equity_curve"]]
+    return {"params": params, "execution_policy": POLICY_ID, "n_days": len(active_dates),
+            "n_trades": len(trades), "trades": trades, "win_rate": len(wins) / len(rs) if rs else 0.,
+            "avg_r": float(np.mean(rs)) if rs else 0., "expectancy_r": float(np.mean(rs)) if rs else 0.,
+            "profit_factor": sum(wins) / abs(sum(losses)) if losses and sum(losses) else None,
+            "total_r": sum(rs), "port_total_return": curve[-1] / params.initial_cash - 1,
+            "port_sharpe": annualized_sharpe(port_returns), "port_max_dd": max_drawdown(curve),
+            "port_returns": port_returns, "by_template": {key: {"n": len(values),
+                "win_rate": sum(value > 0 for value in values) / len(values),
+                "avg_r": sum(values) / len(values)} for key, values in by_template.items()},
+            "paper_state": state, "fills": fill_receipts, "refusals": rejection_receipts,
+            "evidence_scope": "numeric-paper-replay-not-historical-required-model-alpha",
+            "limitations": ["No historical issuer/model evidence is reconstructed",
+                "Missing actual sector reference means relative-progress check unavailable",
+                "V2 parameter filters cannot relax live allocation hard gates"]}
 
 
 # ============================================================

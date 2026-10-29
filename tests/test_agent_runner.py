@@ -248,8 +248,8 @@ def test_guardian_kills_stopped_engine_after_supervisor_sigkill(tmp_path):
 def test_deadline_failure_has_timeout_code_and_no_publication(tmp_path, monkeypatch):
     source = fixture_source(tmp_path / "source", mode="hang")
     state = tmp_path / "state"
-    monkeypatch.setattr(runner, "frozen_clock", lambda: frozen_clock(
-        datetime.now(timezone.utc) - timedelta(seconds=2398)))
+    monkeypatch.setattr(runner, "frozen_clock", lambda *, budget_policy_id=None: frozen_clock(
+        datetime.now(timezone.utc) - timedelta(seconds=2398), budget_policy_id=budget_policy_id))
     accepted = runner.submit(state, REQUEST, source=source)
     run_id = accepted["run_id"]
     terminal = wait_terminal(state, run_id, seconds=10)

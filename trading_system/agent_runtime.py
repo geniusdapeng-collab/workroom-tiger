@@ -27,11 +27,11 @@ from .agent_evidence import (
     verify_ref,
 )
 from .redline.execution import (ExecutionPolicy, daily_stage_contract, REQUIRED_PROFILE,
-                                REQUIRED_POLICY_ID)
+                                REQUIRED_POLICY_ID, UPGRADE_PROFILE, UPGRADE_POLICIES)
 
 PROFILE = "us-public-paper-v1"
 ACTIVE_PROFILE = "us-public-active-paper-v1"
-SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE, REQUIRED_PROFILE})
+SUPPORTED_PROFILES = frozenset({PROFILE, ACTIVE_PROFILE, REQUIRED_PROFILE, *UPGRADE_POLICIES})
 ACCOUNT = "public-usd"
 POLICY_ID = "tiger.public-paper-policy.v1"
 RUN_RE = re.compile(r"run-[0-9a-f]{32}\Z")
@@ -45,28 +45,74 @@ REQUIRED_ACCOUNT_FILES = frozenset({
 DEPENDENCIES = ("pandas", "numpy", "yfinance", "requests", "PyYAML")
 
 
-def policy_manifest(profile: str = PROFILE) -> dict:
+_CURRENT_BUDGET_POLICY = object()
+_CURRENT_CLEAN_OUTPUT_POLICY = object()
+_CURRENT_THINKING_MODE = object()
+
+
+def policy_manifest(profile: str = PROFILE, *, budget_policy_id=_CURRENT_BUDGET_POLICY,
+                    clean_output_policy_id=_CURRENT_CLEAN_OUTPUT_POLICY,
+                    clean_instruction_revision=None,
+                    thinking_mode=_CURRENT_THINKING_MODE) -> dict:
     if not isinstance(profile, str) or profile not in SUPPORTED_PROFILES:
         raise EvidenceInvalid("INVALID_REQUEST", "Unsupported workflow profile")
-    required = profile == REQUIRED_PROFILE
+    upgrade = profile in UPGRADE_POLICIES
+    from .llm.request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4, policy_limits
+    from .llm.clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                   CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                   CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
+                                   CLEAN_INSTRUCTION_REVISION_V1, CLEAN_INSTRUCTION_REVISION_V2)
+    # Explicit historical clean selectors continue to select their original
+    # budget. Only the current compact path admits the expanded source policy.
+    current_compact = clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY or clean_output_policy_id == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+    selected_budget = ((BUDGET_POLICY_V4 if current_compact else BUDGET_POLICY_V3) if upgrade else None) if budget_policy_id is _CURRENT_BUDGET_POLICY else budget_policy_id
+    if selected_budget is not None and (not upgrade or selected_budget not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen budget policy")
+    selected_clean = ((CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1 if upgrade and selected_budget in (BUDGET_POLICY_V3, BUDGET_POLICY_V4) else None)
+                      if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY else clean_output_policy_id)
+    if selected_clean is not None and (type(selected_clean) is not str or not upgrade
+            or selected_clean not in (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_RESPONSES_POLICY_V1,
+                                      CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                      CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+            or selected_budget not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+            or selected_budget == BUDGET_POLICY_V4 and selected_clean != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen clean output policy")
+    if selected_budget == BUDGET_POLICY_V4 and selected_clean != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+        raise EvidenceInvalid("RESULT_INVALID", "Expanded budget requires the compact clean output policy")
+    selected_revision = None
+    if selected_clean == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+        selected_revision = ((CLEAN_INSTRUCTION_REVISION_V2
+                              if clean_output_policy_id is _CURRENT_CLEAN_OUTPUT_POLICY
+                              and budget_policy_id is _CURRENT_BUDGET_POLICY
+                              else CLEAN_INSTRUCTION_REVISION_V1)
+                             if clean_instruction_revision is None else clean_instruction_revision)
+        if selected_revision not in (CLEAN_INSTRUCTION_REVISION_V1, CLEAN_INSTRUCTION_REVISION_V2):
+            raise EvidenceInvalid("RESULT_INVALID", "Unsupported clean instruction revision")
+    required = profile == REQUIRED_PROFILE or upgrade
     active = profile == ACTIVE_PROFILE
-    policy_id = REQUIRED_POLICY_ID if required else "tiger.public-active-paper-policy.v1" if active else POLICY_ID
+    selected_thinking_mode = "disabled" if thinking_mode is _CURRENT_THINKING_MODE else thinking_mode
+    if selected_thinking_mode not in (None, "disabled"):
+        raise EvidenceInvalid("RESULT_INVALID", "Unsupported frozen thinking mode")
+    policy_id = (UPGRADE_POLICIES[profile][0] if upgrade else REQUIRED_POLICY_ID if required
+                 else "tiger.public-active-paper-policy.v1" if active else POLICY_ID)
     execution = ExecutionPolicy(policy_id=policy_id, model_mode="enabled",
-                                search_source_names=("deepseek_search",)) if required else ExecutionPolicy(policy_id=policy_id)
+                                search_source_names=("deepseek_search",),
+                                budget_policy_id=selected_budget,
+                                clean_output_policy_id=selected_clean) if required else ExecutionPolicy(policy_id=policy_id)
     value = {
         "schema": "tiger.policy.v1", "profile": profile,
         "paper_account": ACCOUNT, "execution_mode": "paper",
         "initial_cash_usd": 100000.0, "market": "us",
         "universe": "extended", "strategy": "evidence-complete-active-v1" if active else "reviewed_source_defaults",
         "use_tuned": False, "real_broker": False,
-        "execution": asdict(execution),
+        "execution": execution.to_dict(),
         "market_timezone": "America/New_York",
         "date_basis": "admission instant in market timezone",
         "search_collection_budget_seconds": 45.0,
         "search_cleanup_budget_seconds": 15.0,
-        "business_deadline_seconds": DEADLINE_SECONDS,
+        "business_deadline_seconds": policy_limits(selected_budget)["deadline_seconds"],
         "access_challenges": "refuse",
-        "stages": daily_stage_contract(required),
+        "stages": daily_stage_contract(required, upgrade),
         "limitations": [
             "Public market data with a local paper account; no broker orders.",
             "Inner semantic models are disabled; legal passthrough is disclosed.",
@@ -75,21 +121,31 @@ def policy_manifest(profile: str = PROFILE) -> dict:
             "Local cooperative processes; no hostile same-user or external rollback anchoring guarantee.",
         ],
     }
+    if selected_revision == CLEAN_INSTRUCTION_REVISION_V2:
+        value["clean_instruction_revision"] = selected_revision
     if required:
         value["model_contract"] = {
             "provider": "deepseek", "model": "deepseek-flash",
             "release": "DeepSeek-V4.1-Flash-1017", "required": True,
-            "thinking_mode": "disabled",
             "search_mode": "provider_native_search",
             "release_binding": "official-current-alias-mapping",
             "model_mapping_url": "https://api-docs.deepseek.com/quick_start/pricing/",
             "search_documentation_url": "https://api-docs.deepseek.com/guides/search/",
             "model_mapping_observed_date": "2026-10-26",
         }
-        value["limitations"][1] = "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
+        if selected_thinking_mode == "disabled":
+            value["model_contract"]["thinking_mode"] = selected_thinking_mode
+        value["limitations"][1] = (
+            "All five semantic stages require actual DeepSeek Flash calls; failure stops publication."
+            if selected_thinking_mode is None else
+            "All required semantic stages need actual DeepSeek Flash calls; failure stops publication.")
         value["limitations"] += [
             "deepseek-flash is a provider alias observed as V4.1-Flash-1017, not an immutable version ID.",
-            "All five semantic JSON calls explicitly disable thinking and reject nonzero reasoning-token usage.",
+        ]
+        if selected_thinking_mode == "disabled":
+            value["limitations"].append(
+                "All required semantic JSON calls explicitly disable thinking and reject nonzero reasoning-token usage.")
+        value["limitations"] += [
             "Search uses DeepSeek native Search API collected by this application, not Flash server-hosted web_search.",
             "Numeric portfolio constraints and accounting remain deterministic; model may veto approved entries, never bypass bounds.",
         ]
@@ -102,10 +158,44 @@ def policy_manifest(profile: str = PROFILE) -> dict:
             "Activity repairs retain all score/data/risk thresholds; more utilization can still increase realized risk.",
             "Fallback sectors are frozen NASDAQ vendor proxies, not GICS membership or historical point-in-time classifications.",
         ]
+    if upgrade:
+        from .llm.request_budget import PRICING
+        value.update(workflow_phase=UPGRADE_POLICIES[profile][1], universe="full",
+                     strategy="whitepaper-evidence-execution-v2",
+                     execution_policy="whitepaper-execution-v2", max_positions=10,
+                     request_budget=policy_limits(selected_budget), request_pricing=dict(PRICING),
+                     accounting_state_usage="Risk constraints, execution continuity and report-only cohorts; never historical semantic scores.")
+        value["model_contract"].update(research_contract="tiger.candidate-research.v2",
+                                       model_mapping_observed_date="2026-10-27")
+        if selected_budget is not None:
+            value["request_budget_policy_id"] = selected_budget
+        if selected_clean is not None:
+            value["clean_output_policy_id"] = selected_clean
+        if selected_clean == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1:
+            from .llm.required import CLEAN_SLOTS_WIRE_V1
+            value["clean_output_codec_id"] = CLEAN_SLOTS_WIRE_V1
+        if selected_clean == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+            from .llm.clean_output import CLEAN_COMPACT_LISTS_WIRE_V1, CLEAN_REGENERATION_POLICY_V1
+            value.update(clean_output_codec_id=CLEAN_COMPACT_LISTS_WIRE_V1,
+                         regeneration_policy_id=CLEAN_REGENERATION_POLICY_V1,
+                         clean_regeneration_limits={"max_per_batch": 1,
+                            "max_per_run": 56 if selected_budget == BUDGET_POLICY_V4 else 4})
+        value["limitations"][1] = (
+            "All six semantic stages require actual DeepSeek Flash replies and bounded native research; failures stop publication."
+            if selected_thinking_mode is None else
+            "All six v2 semantic stages require actual non-thinking DeepSeek Flash replies and bounded native research; failures stop publication.")
+        value["limitations"] += [
+            "Position count is zero to the explicit ceiling of ten, never a trade quota; original score and per-entry risk limits remain.",
+            "The full exchange list is requested anew; actual listing, prefilter and price coverage are disclosed, never inferred from requested universe size.",
+            "Complete daily candles are conservatively available after 16:00 New York even on early close days; fresh quotes are separate observations.",
+            "Paper fills and cohort counterfactuals are distinct from the manually evidenced real account and do not prove realized profitability.",
+        ]
     return value
 
 
-def frozen_clock(instant: datetime | None = None) -> dict:
+def frozen_clock(instant: datetime | None = None, *, budget_policy_id=None) -> dict:
+    from .llm.request_budget import policy_limits
+    deadline_seconds = policy_limits(budget_policy_id)["deadline_seconds"]
     instant = instant or datetime.now().astimezone()
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise EvidenceInvalid("RESULT_INVALID", "Admission requires an aware timestamp")
@@ -117,15 +207,15 @@ def frozen_clock(instant: datetime | None = None) -> dict:
             "market_timezone": "America/New_York",
             "market_timestamp": market.isoformat(), "run_date": market.date().isoformat(),
             "deadline_at_utc": datetime.fromtimestamp(
-                utc.timestamp() + DEADLINE_SECONDS, timezone.utc).isoformat()}
+                utc.timestamp() + deadline_seconds, timezone.utc).isoformat()}
 
 
-def validate_clock(clock: dict) -> None:
+def validate_clock(clock: dict, *, budget_policy_id=None) -> None:
     if not isinstance(clock, dict):
         raise EvidenceInvalid("RESULT_INVALID", "Missing admission clock")
     try:
         host = datetime.fromisoformat(clock["host_timestamp"])
-        expected = frozen_clock(host)
+        expected = frozen_clock(host, budget_policy_id=budget_policy_id)
     except (TypeError, ValueError, KeyError) as exc:
         raise EvidenceInvalid("RESULT_INVALID", "Invalid admission clock") from exc
     if clock != expected:
@@ -162,6 +252,7 @@ def executable_files(root: Path) -> list[str]:
                      if not p.name.endswith((".test.mjs", "-test-support.mjs")))
     for optional in ("events_calendar.json",
                      "bundles/trading/capabilities/workflow-client.mjs",
+                     "bundles/trading/capabilities/required-v2-contract.mjs",
                      "bundles/trading/agent-workflow.schema.json"):
         if (root / optional).exists():
             paths.add(optional)
@@ -176,8 +267,51 @@ def source_tree_hash(files: list[dict]) -> str:
     return digest(json_bytes(files))
 
 
+def _policy_source_contract(run: Path) -> str | None:
+    """Select the source closure from the trusted fixed policy, never a manifest.
+
+    Absent policies retain their historical contract. The exact registered
+    strict-function and registered Responses selectors require the entire reviewed
+    release closure. A malformed selector cannot silently choose legacy.
+    """
+    policy_file = safe_path(run, "policy.json", must_exist=False)
+    if not policy_file.exists():
+        return None
+    policy = read_json(run, "policy.json")
+    if not isinstance(policy, dict) or not isinstance(policy.get("execution"), dict):
+        raise EvidenceInvalid("RESULT_INVALID", "Invalid source admission policy")
+    execution = policy["execution"]
+    selected = execution.get("clean_output_policy_id")
+    expected = policy_manifest(policy.get("profile"),
+        budget_policy_id=execution.get("budget_policy_id"), clean_output_policy_id=selected,
+        clean_instruction_revision=policy.get("clean_instruction_revision",
+            "v1" if selected is not None else None),
+        thinking_mode=policy.get("model_contract", {}).get("thinking_mode")
+        if isinstance(policy.get("model_contract"), dict) else None)
+    if policy != strict_json(json_bytes(expected)):
+        raise EvidenceInvalid("RESULT_INVALID", "Source admission policy differs")
+    if selected is None:
+        return None
+    from .source_contract_v1 import STRICT_SOURCE_CONTRACT_V1
+    return STRICT_SOURCE_CONTRACT_V1
+
+
+def _verify_source_contract(files: list[dict], contract_id: str | None) -> None:
+    if contract_id is None:
+        return
+    from .source_contract_v1 import validate_source_paths
+    try:
+        validate_source_paths([ref["path"] for ref in files], contract_id=contract_id)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EvidenceInvalid("RESULT_INVALID", "Strict source inventory differs from registered release") from exc
+
+
 def freeze_source(run: Path, source: Path = SOURCE_ROOT) -> dict:
+    source_contract = _policy_source_contract(run)
     before = source_inventory(source)
+    # The exact trusted path set is checked before any source copy, worker or
+    # paid model operation. It is not inferred from this possibly pruned tree.
+    _verify_source_contract(before, source_contract)
     for ref in before:
         atomic_bytes(run, "source/" + ref["path"], verify_ref(source, ref), exclusive=True)
     after = source_inventory(source)
@@ -199,17 +333,27 @@ def freeze_source(run: Path, source: Path = SOURCE_ROOT) -> dict:
     manifest = {"schema": "tiger.source.v1", "git_commit": revision,
                 "git_worktree_dirty": dirty, "tree_sha256": source_tree_hash(before),
                 "files": before, "dependencies": dependency_identity()}
+    if source_contract is not None:
+        manifest["source_contract_id"] = source_contract
     atomic_json(run, "source-manifest.json", manifest, exclusive=True)
-    verify_source(run)
+    verify_source(run, required_source_contract=source_contract)
     return manifest
 
 
-def verify_source(run: Path) -> dict:
+def verify_source(run: Path, *, required_source_contract: str | None = None) -> dict:
+    source_contract = _policy_source_contract(run)
+    if required_source_contract is not None:
+        if source_contract is not None and source_contract != required_source_contract:
+            raise EvidenceInvalid("RESULT_INVALID", "Strict source contract selection differs")
+        source_contract = required_source_contract
     manifest = read_json(run, "source-manifest.json")
     if (not isinstance(manifest, dict) or manifest.get("schema") != "tiger.source.v1"
             or not isinstance(manifest.get("files"), list)
             or source_tree_hash(manifest["files"]) != manifest.get("tree_sha256")):
         raise EvidenceInvalid("RESULT_INVALID", "Invalid source manifest")
+    if source_contract is not None and manifest.get("source_contract_id") != source_contract:
+        raise EvidenceInvalid("RESULT_INVALID", "Strict source contract identity differs")
+    _verify_source_contract(manifest["files"], source_contract)
     frozen = checked_root(run / "source")
     for ref in manifest["files"]:
         verify_ref(frozen, ref, schema="application/source")
@@ -337,7 +481,7 @@ def committed_pointer(state: Path, target: str) -> dict | None:
 
 
 def allowed_account_path(name: str) -> bool:
-    return name in REQUIRED_ACCOUNT_FILES or (
+    return name in REQUIRED_ACCOUNT_FILES or name == "opportunity_ledger.json" or (
         isinstance(name, str)
         and name.startswith(("options_hist/", "review_proposals/"))
         and name.endswith(".json"))
@@ -386,6 +530,8 @@ def stage_account(state: Path, run: Path, parent: dict | None) -> dict:
 
 def account_files(reports: Path) -> list[dict]:
     names = set(REQUIRED_ACCOUNT_FILES)
+    if (reports / "opportunity_ledger.json").exists():
+        names.add("opportunity_ledger.json")
     for folder in ("options_hist", "review_proposals"):
         directory = reports / folder
         if directory.exists():
@@ -452,20 +598,27 @@ def validate_admission(run: Path) -> tuple[dict, dict, dict]:
     if (not isinstance(admission, dict) or set(admission) != {
             "schema", "run_id", "clock", "parent", "request_sha256", "policy_sha256", "source_sha256"}
             or not isinstance(request, dict) or not isinstance(policy, dict)
+            or not isinstance(policy.get("execution"), dict)
             or admission.get("schema") != "tiger.admission.v1"
             or admission.get("run_id") != run.name or not RUN_RE.fullmatch(run.name)
             or admission.get("request_sha256") != digest(json_bytes(request))
             or admission.get("policy_sha256") != digest(json_bytes(policy))
             or not isinstance(request.get("profile"), str)
             or request.get("profile") not in SUPPORTED_PROFILES
-            or policy != strict_json(json_bytes(policy_manifest(request["profile"])))):
+            or policy != strict_json(json_bytes(policy_manifest(request["profile"],
+                budget_policy_id=policy.get("execution", {}).get("budget_policy_id"),
+                clean_output_policy_id=policy.get("execution", {}).get("clean_output_policy_id"),
+                clean_instruction_revision=policy.get("clean_instruction_revision",
+                    "v1" if policy.get("execution", {}).get("clean_output_policy_id") else None),
+                thinking_mode=policy.get("model_contract", {}).get("thinking_mode")
+                if isinstance(policy.get("model_contract"), dict) else None)))):
         raise EvidenceInvalid("RESULT_INVALID", "Admission policy or request identity differs")
     expected = {"schema_version": "tiger.agent-request/v1", "profile": request["profile"],
                 "paper_account": ACCOUNT, "idempotency_key": request.get("idempotency_key")}
     if (request != expected or not isinstance(request.get("idempotency_key"), str)
             or not KEY_RE.fullmatch(request["idempotency_key"])):
         raise EvidenceInvalid("RESULT_INVALID", "Stored request differs from fixed profile")
-    validate_clock(admission["clock"])
+    validate_clock(admission["clock"], budget_policy_id=policy["execution"].get("budget_policy_id"))
     source = verify_source(run)
     if admission.get("source_sha256") != digest(read_bytes(run, "source-manifest.json")):
         raise EvidenceInvalid("EVIDENCE_HASH_MISMATCH", "Admission source identity differs")
@@ -518,6 +671,8 @@ class _ReportStructure(HTMLParser):
 
 def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
     date = admission["clock"]["run_date"]
+    selected_profile = read_json(run, "request.json")["profile"]
+    upgrade = selected_profile in UPGRADE_POLICIES
     compact = date.replace("-", "")
     required = {
         f"work/reports/result_{compact}.json",
@@ -576,6 +731,13 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
         raise EvidenceInvalid("RESULT_INVALID", "Invalid benchmark date") from exc
     from .calendar import prev_trading_day
     expected_date = prev_trading_day(datetime.fromisoformat(date).date())
+    if upgrade:
+        from .redline.execution import complete_daily_cutoff
+        expected_date = complete_daily_cutoff(datetime.fromisoformat(date).date(),
+                                              admission["clock"]["admitted_at_utc"])
+        if (raw.get("daily_bars_cutoff") != expected_date.isoformat()
+                or raw.get("workflow_phase") != UPGRADE_POLICIES[selected_profile][1]):
+            raise EvidenceInvalid("RESULT_INVALID", "Upgrade market phase or complete-bar cutoff differs")
     if freshness["benchmark_lag_days"] != (expected_date - benchmark_date).days:
         raise EvidenceInvalid("RESULT_INVALID", "Benchmark lag and frozen market date disagree")
     from .currency import require_usd_sim_state
@@ -628,7 +790,7 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
         "cash_usd": sim["cash"], "market_value_usd": round(value, 2),
         "equity_usd": actual_equity, "action": result.get("action"),
         "market_view": result.get("market_view"),
-        "watchlist": result.get("watchlist", [])[:5],
+        "watchlist": result.get("watchlist", [])[:(10 if read_json(run, "request.json")["profile"] in UPGRADE_POLICIES else 5)],
         "as_of": {"market_date": date, "market_timezone": "America/New_York",
                   "admitted_at_utc": admission["clock"]["admitted_at_utc"],
                   "benchmark_last_bar": raw.get("freshness", {}).get("benchmark_last_bar"),
@@ -642,12 +804,28 @@ def business_summary(run: Path, admission: dict, artifacts: list[dict]) -> dict:
                         "redline": raw.get("redline", []),
                         "account_origin": "independent USD paper account, initially 100000"},
     }
-    if read_json(run, "request.json")["profile"] == REQUIRED_PROFILE:
+    if selected_profile == REQUIRED_PROFILE or selected_profile in UPGRADE_POLICIES:
         from .llm.required_proof import verify_required_model
         summary["model"] = verify_required_model(run, result, admission)
         summary["action_summary"] = raw["action_summary"]
         summary["execution_decisions"] = raw["execution_decisions"]
         summary["disclosures"].update(model_mode="enabled", model_required=True)
+        if selected_profile in UPGRADE_POLICIES:
+            for key in ("candidate_research", "opportunity_lifecycle", "business_evaluation",
+                        "portfolio_snapshot", "entry_budget", "execution_policy", "cohort_inputs",
+                        "current_portfolio_snapshot", "universe_coverage", "workflow_phase",
+                        "lifecycle_observation", "numeric_approved_count", "policy_identity"):
+                if key not in raw:
+                    raise EvidenceInvalid("RESULT_INVALID", "Upgrade business artifacts are incomplete")
+            if (read_json(run, "work/reports/opportunity-lifecycle.json") != raw["opportunity_lifecycle"]
+                    or read_json(run, "work/reports/business-evaluation.json") != raw["business_evaluation"]
+                    or read_json(run, "work/reports/opportunity_ledger.json") != raw["opportunity_lifecycle"]):
+                raise EvidenceInvalid("RESULT_INVALID", "Upgrade lifecycle/evaluation artifact binding differs")
+            from .publication_projection_v2 import public_pending, public_upgrade_summary
+            summary["pending"] = public_pending(sim["pending"])
+            summary.update(public_upgrade_summary(raw, run.name))
+            summary["disclosures"].update(workflow_phase=policy_manifest(selected_profile)["workflow_phase"],
+                                          daily_bars_cutoff=raw.get("daily_bars_cutoff"))
     return summary
 
 
@@ -874,4 +1052,30 @@ def seal_and_publish(state: Path, run: Path, *, deadline: float | None = None) -
         # Publication already happened. A read-only verifier explicitly reports
         # missing durability confirmation instead of inventing a rollback.
         pass
-    return verify_run(state, run.name, current_source=None)
+    # The prepared verification already recomputed the complete event graph,
+    # account arithmetic and receipt. Re-running that expensive replay after
+    # the pointer becomes visible can cross the business deadline and falsely
+    # rewrite a committed run as failed. Prove the publication by its exact
+    # pointer readback and retain the prepared evidence summary.
+    limitations = list(prepared["limitations"])
+    durability_file = run / "publication-durability.json"
+    if not durability_file.exists():
+        limitations.append(
+            "Account publication is visible; post-publication durability confirmation is unavailable.")
+    else:
+        durability = read_json(run, "publication-durability.json")
+        if (not isinstance(durability, dict) or set(durability) != {
+                "schema", "run_id", "pointer", "directory_fsync_confirmed"}
+                or durability["schema"] != "tiger.publication-durability.v1"
+                or durability["run_id"] != run.name or durability["pointer"] != prepared["pointer"]
+                or not isinstance(durability["directory_fsync_confirmed"], bool)):
+            raise EvidenceInvalid("RESULT_INVALID", "Publication durability record differs")
+        if not durability["directory_fsync_confirmed"]:
+            limitations.append(
+                "Account publication is visible; its directory fsync reported an error.")
+    verification = dict(prepared["verification"])
+    verification["checks"] = [
+        check for check in verification["checks"]
+        if check != "prepared-unpublished-account"
+    ] + ["published-account-pointer-readback"]
+    return {**prepared, "limitations": limitations, "verification": verification}

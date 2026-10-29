@@ -7,13 +7,23 @@ import { request as rawRequest } from 'node:http';
 import { createPnlServer } from '../server.mjs';
 import { publishRecord } from '../publish.mjs';
 import { digest } from '../lib/schema.mjs';
-import { modelResearchFixture } from './model-fixture.mjs';
+import { researchV3Fixture as modelResearchFixture } from './short-term-fixture.mjs';
 
 const TEST_TOKEN = 'test-only-token-never-a-real-secret-00000000';
 function fixture() {
   return { schemaVersion: 1, idempotencyKey: 'http-test-record-0001', asOf: '2026-01-02T21:00:00Z', account: { label: 'HTTP TEST ONLY PRIVATE', currency: 'USD', nav: 100000, cash: 100000 }, positions: [], trades: [], decisions: [], netExternalFlow: 0, provenance: { kind: 'operator_attested', evidenceSha256: digest('HTTP UNIT TEST FIXTURE NOT REAL'), sourceRef: 'http-unit-test-private-ref', attestedBy: 'http-unit-test-private-attestor' } };
 }
-function researchFixture() { return modelResearchFixture({ idempotencyKey: 'http-research-test-0001', runId: 'unit-test-research-run-1' }); }
+function researchFixture() { return modelResearchFixture({ idempotencyKey: 'http-research-test-0001' }); }
+
+function declaredLimit(baseUrl, path, bytes) {
+  // An oversized Content-Length is rejected before the server reads a body.
+  // Observe that HTTP response directly; fetch may surface the intentional
+  // connection close as EPIPE while still uploading a deliberately huge body.
+  return new Promise((accept, reject) => {
+    const req = rawRequest(`${baseUrl}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${TEST_TOKEN}`, 'Content-Type': 'application/json', 'Content-Length': bytes } }, response => { response.resume(); response.on('end', () => accept(response.statusCode)); });
+    req.on('error', reject); req.end();
+  });
+}
 
 async function setup(t) {
   const path = await mkdtemp(join(tmpdir(), 'tiger-pnl-http-')); const publicDir = join(path, 'public');
@@ -51,7 +61,7 @@ test('HTTP validates content type, key mismatch, invalid JSON, sensitive fields 
   assert.equal((await post('{"invalid":')).status, 400);
   assert.equal((await post({ ...fixture(), accountNumber: 'private-not-supported' })).status, 422);
   assert.equal((await post(JSON.stringify(fixture()).replace('100000', 'NaN'))).status, 400);
-  assert.equal((await post(' '.repeat(1_048_577))).status, 413);
+  assert.equal(await declaredLimit(baseUrl, '/api/v1/records', 1_048_577), 413);
   assert.equal((await post(fixture(), { 'Content-Encoding': 'gzip' })).status, 415);
   const chunked = await new Promise((accept, reject) => {
     const req = rawRequest(`${baseUrl}/api/v1/records`, { method: 'POST', headers: { Authorization: `Bearer ${TEST_TOKEN}`, 'Content-Type': 'application/json' } }, response => { let body = ''; response.on('data', chunk => { body += chunk; }); response.on('end', () => accept({ status: response.statusCode, body: JSON.parse(body) })); });
@@ -110,6 +120,7 @@ test('independent research publishes without creating or advancing a real accoun
   assert.equal(JSON.stringify(result.research).includes('idempotencyKey'), false);
   await post(fixture());
   const next = { ...research, idempotencyKey: 'http-research-test-0002', runId: 'unit-test-research-run-2', asOf: '2026-01-04T21:00:00Z', decisions: [], executionDecisions: [] };
+  next.business_evaluation = { ...next.business_evaluation, run_id: next.runId };
   await publishRecord({ baseUrl, token: TEST_TOKEN, record: next, research: true, allowLocalHttp: true });
   result = await (await fetch(`${baseUrl}/api/public/dashboard`)).json();
   assert.equal(result.latest.asOf, fixture().asOf); assert.equal(result.history.length, 1); assert.equal(result.latest.account.nav, 100000);
@@ -126,4 +137,19 @@ test('research rejects failed runs, invented holdings and conflicting retries', 
   assert.equal((await postResearch({ ...original, summary: 'Changed test summary' })).status, 409);
   const duplicate = await postResearch({ ...original, idempotencyKey: 'research-new-key-same-run', asOf: '2026-01-04T21:00:00Z' });
   assert.equal(duplicate.status, 409); assert.equal((await duplicate.json()).error.code, 'DUPLICATE_RESEARCH_RUN');
+});
+
+test('only schema3 research can use the bounded 4MiB channel; legacy and real account stay at 1MiB', async t => {
+  const { baseUrl, post } = await setup(t);
+  const r = researchFixture();
+  r.business_evaluation.latency.synthetic_contract_padding = Array(30).fill('SYNTHETIC ONLY '.repeat(3000));
+  assert.ok(Buffer.byteLength(JSON.stringify(r)) > 1_048_576);
+  const response = await fetch(`${baseUrl}/api/v1/research`, { method: 'POST', headers: { Authorization: `Bearer ${TEST_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
+  assert.equal(response.status, 201);
+  assert.equal((await (await fetch(`${baseUrl}/healthz`)).json()).records, 0);
+  assert.equal(await declaredLimit(baseUrl, '/api/v1/records', 1_048_577), 413);
+  assert.equal(await declaredLimit(baseUrl, '/api/v1/research', 4 * 1_048_576 + 1), 413);
+  const legacy = { schemaVersion: 2, text: 'x'.repeat(1_048_576) };
+  const legacyResponse = await fetch(`${baseUrl}/api/v1/research`, { method: 'POST', headers: { Authorization: `Bearer ${TEST_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(legacy) });
+  assert.equal(legacyResponse.status, 413);
 });

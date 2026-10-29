@@ -7,39 +7,58 @@ import { join } from 'node:path';
 import { buildResearch, invokeAgent, parseArgs, syncResearch, SyncError } from '../sync-research.mjs';
 import { canonical } from '../lib/schema.mjs';
 import { modelFixture, instructionFixture } from './model-fixture.mjs';
+import { researchV3Fixture } from './short-term-fixture.mjs';
 
-const DATE = '2026-01-03'; const PROFILE = 'us-public-model-required-paper-v1'; const RUN = `run-${'a'.repeat(32)}`;
+const DATE = '2026-01-03'; const PROFILE = 'us-public-model-required-paper-v2'; const RUN = `run-${'a'.repeat(32)}`;
 const TEST_TOKEN = 'SYNC-UNIT-TEST-ONLY-NEVER-A-REAL-SECRET';
 const hash = value => createHash('sha256').update(value).digest('hex');
 function envelope(operation, changes = {}) { return { schema_version: 'tiger.agent-result/v1', operation, operation_ok: true, run_id: RUN, status: 'completed', execution_mode: 'paper', data: {}, summary: null, verification: null, limitations: [], evidence_refs: [], error: null, ...changes }; }
-async function setup(t) {
+async function setup(t, profile = PROFILE) {
   const path = await mkdtemp(join(tmpdir(), 'tiger-pnl-sync-test-')); t.after(() => rm(path, { recursive: true, force: true }));
   const stateRoot = join(path, 'agent'); const runDir = join(stateRoot, 'runs', RUN); await mkdir(runDir, { recursive: true });
-  const originalRequest = { schema_version: 'tiger.agent-request/v1', profile: PROFILE, paper_account: 'public-usd', idempotency_key: `tigerpnl-research-${PROFILE}-${DATE}` };
-  const raw = { schema: 'tiger.receipt.v1', run_id: RUN, profile: PROFILE, paper_account: 'public-usd', status: 'completed', sealed_at_utc: '2026-01-03T20:01:30.123456+00:00' };
+  const originalRequest = { schema_version: 'tiger.agent-request/v1', profile, paper_account: 'public-usd', idempotency_key: `tigerpnl-research-${profile}-${DATE}` };
+  const raw = { schema: 'tiger.receipt.v1', run_id: RUN, profile, paper_account: 'public-usd', status: 'completed', sealed_at_utc: '2026-01-03T20:01:30.123456+00:00' };
   const refs = [];
   const summary = { picks: [{ ticker: 'AAPL', position_pct: 0.1, card: 'TEST RESEARCH ONLY\nPrice < 120; watch risk.' }], watchlist: [{ ticker: 'MSFT', evidence: ['TEST observation only'], stop_plan: 'TEST research risk' }], positions: [{ ticker: 'FAKE', shares: 999999 }], pending: [{ ticker: 'FAKE' }], cash_usd: 987654321, equity_usd: 987654321, market_value_usd: 987654321, action: 'TRADE', market_view: 'UNIT TEST RESEARCH FIXTURE ONLY', as_of: { market_date: DATE, market_timezone: 'America/New_York', admitted_at_utc: '2026-01-03T20:00:00Z', benchmark_last_bar: '2026-01-02', freshness: {} }, disclosures: { synthetic: false, execution_mode: 'paper', model_mode: 'enabled', model_required: true, data_coverage: '9/10', scan_stats: { universe_size: 10 } } };
-  summary.model = modelFixture();
-  summary.action_summary = 'UNIT TEST ONLY: reviewed model instructions, never a real business result.';
-  summary.execution_decisions = [instructionFixture({ action: 'buy' }), instructionFixture({ symbol: 'MSFT' })];
+  if (profile.endsWith('-v2')) {
+    const fixture = researchV3Fixture();
+    fixture.business_evaluation.run_id = RUN;
+    fixture.business_evaluation.as_of = '2026-01-03T20:01:00Z';
+    fixture.candidate_research.assessment.admitted_at_utc = summary.as_of.admitted_at_utc;
+    summary.model = fixture.model;
+    summary.action_summary = fixture.summary;
+    summary.execution_decisions = fixture.executionDecisions;
+    for (const key of ['candidate_research', 'opportunity_lifecycle', 'business_evaluation', 'portfolio_snapshot', 'execution_policy', 'workflow_phase', 'universe_coverage']) summary[key] = fixture[key];
+  } else {
+    summary.model = modelFixture();
+    summary.action_summary = 'UNIT TEST ONLY: reviewed model instructions, never a real business result.';
+    summary.execution_decisions = [instructionFixture({ action: 'buy' }), instructionFixture({ symbol: 'MSFT' })];
+  }
+  const source = { schema: 'tiger.source-manifest.v1', tree_sha256: 'b'.repeat(64), files: [] };
+  const sourceBytes = Buffer.from(JSON.stringify(source));
+  const sourceRef = { path: 'source-manifest.json', sha256: hash(sourceBytes), bytes: sourceBytes.length, schema: source.schema };
+  await writeFile(join(runDir, sourceRef.path), sourceBytes);
+  raw.source = sourceRef;
   raw.summary = structuredClone(summary);
   for (const [name, object] of [['receipt.json', raw], ['request.json', originalRequest]]) { const bytes = Buffer.from(JSON.stringify(object)); await writeFile(join(runDir, name), bytes); refs.push({ path: name, sha256: hash(bytes), bytes: bytes.length, schema: name === 'receipt.json' ? 'tiger.receipt.v1' : 'tiger.agent-request/v1' }); }
+  refs.push(sourceRef);
   const verified = { ok: true, receipt_sha256: refs[0].sha256, evidence_count: 42, checks: ['fixture-only-check'] };
   const receipt = envelope('receipt', { summary, verification: verified, evidence_refs: refs });
   const verification = envelope('verify', { verification: verified, evidence_refs: refs, data: { source: { tree_sha256: 'b'.repeat(64) } } });
   const env = { TIGER_AGENT_PYTHON: '/test/trusted/python', TIGER_AGENT_STATE_ROOT: stateRoot, TIGER_AGENT_PERMISSION: 'paper', TIGER_PNL_SYNC_STATE_DIR: join(path, 'sync'), TIGER_PNL_WRITE_TOKEN: TEST_TOKEN, TIGER_PNL_URL: 'https://example.com', LLM_BACKEND: 'api', LLM_BASE_URL: 'https://api.deepseek.com', LLM_MODEL: 'deepseek-flash', LLM_API_KEY: 'SYNC-UNIT-TEST-ONLY-MODEL-KEY' };
-  const calls = []; const published = [];
-  const invoke = async (operation, input) => { calls.push({ operation, input }); if (operation === 'doctor') return envelope(operation, { status: 'ready', data: { access_mode: 'paper' } }); if (operation === 'describe') return envelope(operation, { status: 'ready', data: { profile: { profile: input.profile, execution: { model_mode: 'enabled' }, model_contract: { provider: 'deepseek', model: 'deepseek-flash', release: 'DeepSeek-V4.1-Flash-1017', required: true, search_mode: 'provider_native_search' } }, access_mode: 'paper' } }); if (operation === 'run') return envelope(operation, { status: 'accepted' }); if (operation === 'status') return envelope(operation); if (operation === 'receipt') return receipt; if (operation === 'verify') return verification; throw new Error('Unexpected operation'); };
+  const calls = []; const published = []; const observationTimeouts = [];
+  const invoke = async (operation, input, _config, timeoutMs) => { calls.push({ operation, input }); observationTimeouts.push({ operation, timeoutMs }); if (operation === 'doctor') return envelope(operation, { status: 'ready', data: { access_mode: 'paper' } }); if (operation === 'describe') return envelope(operation, { status: 'ready', data: { profile: { profile: input.profile, execution: { model_mode: 'enabled' }, model_contract: { provider: 'deepseek', model: 'deepseek-flash', release: 'DeepSeek-V4.1-Flash-1017', required: true, search_mode: 'provider_native_search' } }, access_mode: 'paper' } }); if (operation === 'run') return envelope(operation, { status: 'accepted' }); if (operation === 'status') return envelope(operation); if (operation === 'receipt') return receipt; if (operation === 'verify') return verification; throw new Error('Unexpected operation'); };
   const publish = async options => { published.push(options); return { idempotencyKey: options.record.idempotencyKey, payloadHash: hash(canonical(options.record)), hash: 'c'.repeat(64), sequence: 1 }; };
-  const stateFile = join(env.TIGER_PNL_SYNC_STATE_DIR, `${PROFILE}-${DATE}.json`);
-  return { path, env, originalRequest, raw, runDir, receipt, verification, calls, published, invoke, publish, stateFile };
+  const stateFile = join(env.TIGER_PNL_SYNC_STATE_DIR, `${profile}-${DATE}.json`);
+  return { path, env, originalRequest, raw, runDir, receipt, verification, calls, observationTimeouts, published, invoke, publish, stateFile };
 }
 
 test('verified sync calls the controlled six operations, publishes research only, and persists no token or paper holdings', async t => {
   const f = await setup(t);
   const result = await syncResearch({ env: f.env, date: DATE, profile: PROFILE }, { invoke: f.invoke, publish: f.publish });
   assert.equal(result.status, 'published_and_verified'); assert.deepEqual(f.calls.map(c => c.operation), ['doctor', 'describe', 'run', 'status', 'receipt', 'verify']);
-  const payload = f.published[0].record; assert.equal(payload.decisions[0].action, 'buy'); assert.equal(payload.decisions[0].targetWeight, 0.1); assert.equal(payload.decisions[1].action, 'watch');
+  assert.deepEqual(f.observationTimeouts.filter(row => ['run', 'receipt', 'verify'].includes(row.operation)).map(row => [row.operation, row.timeoutMs]), [['run', 300000], ['receipt', 300000], ['verify', 300000]]);
+  const payload = f.published[0].record; assert.equal(payload.decisions[0].action, 'buy'); assert.equal(payload.decisions[0].targetWeight, 0.1); assert.equal(payload.executionDecisions[0].thesis.status, 'sufficient');
   assert.equal(payload.dataAsOf, '2026-01-02'); assert.equal(payload.asOf, '2026-01-03T20:01:30.123Z'); assert.equal(payload.modelMode, 'enabled');
   assert.equal(Object.hasOwn(payload, 'positions'), false); assert.equal(Object.hasOwn(payload, 'account'), false); assert.equal(Object.hasOwn(payload, 'trades'), false);
   const saved = await readFile(f.stateFile, 'utf8'); for (const forbidden of [TEST_TOKEN, '987654321', 'FAKE', 'cash_usd', 'positions', 'pending']) assert.equal(saved.includes(forbidden), false, forbidden);
@@ -60,6 +79,25 @@ test('accepted running research returns pending, resumes the existing ID, and ne
   const invoke = async (operation, input, ...rest) => operation === 'status' && running ? envelope('status', { status: 'running' }) : f.invoke(operation, input, ...rest);
   const first = await syncResearch({ env: f.env, date: DATE, profile: PROFILE, observeMs: 1100 }, { invoke, publish: f.publish }); assert.equal(first.status, 'pending'); assert.equal(first.runId, RUN); assert.equal(f.published.length, 0);
   running = false; const second = await syncResearch({ env: f.env, date: DATE, profile: PROFILE }, { invoke, publish: f.publish }); assert.equal(second.status, 'published_and_verified'); assert.equal(f.calls.filter(c => c.operation === 'run').length, 1);
+});
+
+test('terminal verification cannot consume the independent publication request window', async t => {
+  const f = await setup(t);
+  const originalNow = Date.now; const originalFetch = globalThis.fetch; let offset = 0;
+  Date.now = () => originalNow() + offset;
+  globalThis.fetch = async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  t.after(() => { Date.now = originalNow; globalThis.fetch = originalFetch; });
+  const invoke = async (operation, input, config, timeoutMs) => {
+    const value = await f.invoke(operation, input, config, timeoutMs);
+    if (operation === 'verify') offset = 600000;
+    return value;
+  };
+  const publish = async options => {
+    await options.fetcher('https://example.invalid/research', { method: 'POST' });
+    return f.publish(options);
+  };
+  const result = await syncResearch({ env: f.env, date: DATE, profile: PROFILE, observeMs: 1100 }, { invoke, publish });
+  assert.equal(result.status, 'published_and_verified');
 });
 
 test('lost website response retries the persisted identical payload without rerunning research', async t => {
@@ -137,7 +175,7 @@ test('summary must match its original hash-bound receipt and legacy rule profile
 test('model-generated plain instructions and provider identities are preserved exactly without metric concatenation', async t => {
   const f = await setup(t);
   const built = await buildResearch({ receipt: f.receipt, verification: f.verification, stateRoot: f.env.TIGER_AGENT_STATE_ROOT, profile: PROFILE, idempotencyKey: 'exact-model-contract-test' });
-  assert.equal(built.record.schemaVersion, 2);
+  assert.equal(built.record.schemaVersion, 3);
   assert.deepEqual(built.record.model, f.raw.summary.model);
   assert.deepEqual(built.record.executionDecisions, f.raw.summary.execution_decisions);
   assert.equal(built.record.summary, f.raw.summary.action_summary);
@@ -192,4 +230,15 @@ printf '%s\n' '${JSON.stringify(envelope('run', { status: 'accepted', data: { sy
   const result = await invokeAgent('run', f.originalRequest, { python, stateRoot: f.env.TIGER_AGENT_STATE_ROOT, env: { ...process.env, ...f.env } }, 10000);
   assert.equal(result.status, 'accepted'); assert.equal(result.data.model_environment_present, true);
   assert.equal(result.data.website_token_absent, true); assert.equal(JSON.stringify(result).includes(f.env.LLM_API_KEY), false);
+});
+
+
+test('historical five-stage schema2 receipt still builds without changing its hash-bound instructions', async t => {
+  const legacyProfile = 'us-public-model-required-paper-v1';
+  const f = await setup(t, legacyProfile);
+  const built = await buildResearch({ receipt: f.receipt, verification: f.verification, stateRoot: f.env.TIGER_AGENT_STATE_ROOT, profile: legacyProfile, idempotencyKey: 'historical-five-stage-import-only' });
+  assert.equal(built.record.schemaVersion, 2);
+  assert.deepEqual(built.record.model, f.raw.summary.model);
+  assert.deepEqual(built.record.executionDecisions, f.raw.summary.execution_decisions);
+  assert.equal(f.calls.length, 0);
 });

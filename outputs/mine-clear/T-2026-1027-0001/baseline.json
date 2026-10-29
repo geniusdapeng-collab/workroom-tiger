@@ -1,0 +1,22 @@
+{
+  "schema": "workloom.mine-clear/baseline@1",
+  "task_id": "T-2026-1027-0001",
+  "repo": "tiger-source",
+  "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
+  "remote": "origin",
+  "audit": {
+    "commit": "deab886aad743451e7f380323824950df4f825fd",
+    "branch": "task/T-2026-1027-0001",
+    "remote": "origin",
+    "remote_main": "deab886aad743451e7f380323824950df4f825fd",
+    "fetched_at": null,
+    "fetch_status": "skipped",
+    "dirty_count": 0,
+    "notes": []
+  },
+  "smoke": {
+    "status": "not-run",
+    "notes": "M0 冒烟：健康检查 + 一条核心业务链路，跑完回填这里"
+  },
+  "created_at": "2026-10-26T19:26:13.877Z"
+}

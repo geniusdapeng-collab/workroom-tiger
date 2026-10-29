@@ -60,6 +60,20 @@ class CleanDocument:
 
 
 @dataclass
+class CleanDocumentV2(CleanDocument):
+    """Versioned semantic provenance without changing archived v1 snapshots.
+
+    Tags, source attribution and claims are model judgments, never inferred
+    from keyword counts or publisher-host diversity. Quotes and identities are
+    subsequently checked against the exact text supplied to that model call.
+    """
+    chain_ids: list[str] = field(default_factory=list)
+    sector_etfs: list[str] = field(default_factory=list)
+    provenance: dict = field(default_factory=dict)
+    claims: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class SearchBatch:
     """一次搜索任务的产出。"""
     query: str

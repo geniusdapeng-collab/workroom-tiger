@@ -480,11 +480,12 @@ def supervisor(state: Path, run_id: str, *, account_fd: int, run_fd: int,
                      - datetime.now(timezone.utc)).total_seconds()
         if remaining <= 0:
             raise TimeoutError("Admission deadline elapsed")
-        deadline = time.monotonic() + min(remaining, 2400)
+        admitted_seconds = _policy["business_deadline_seconds"]
+        deadline = time.monotonic() + min(remaining, admitted_seconds)
         def timed_out(_signum, _frame):
             raise TimeoutError("Business deadline elapsed")
         signal.signal(signal.SIGALRM, timed_out)
-        signal.setitimer(signal.ITIMER_REAL, min(remaining, 2400))
+        signal.setitimer(signal.ITIMER_REAL, min(remaining, admitted_seconds))
         timer_started = True
         atomic_json(run, "processes.json", {"supervisor_pid": os.getpid(),
                                           "supervisor_process_group": os.getpgrp()},
@@ -580,7 +581,9 @@ def engine(run: Path) -> int:
             run_id=run.name, run_date=date.fromisoformat(admission["clock"]["run_date"]),
             paths=paths, policy=ExecutionPolicy(**policy_args),
             store=EvidenceStore(run, run.name),
+            admitted_at_utc=admission["clock"]["admitted_at_utc"],
         )
+        execution.clean_instruction_revision = policy.get("clean_instruction_revision", "v1")
         main_file = run / "source" / "main.py"
         spec = importlib.util.spec_from_file_location("tiger_frozen_main", main_file)
         if spec is None or spec.loader is None:
@@ -590,9 +593,10 @@ def engine(run: Path) -> int:
         spec.loader.exec_module(module)
         from trading_system import config
         args = argparse.Namespace(
-            mode="daily", market="us", universe="extended", universe_file=None,
-            top=config.SCAN_TOP_N, picks=config.MAX_PICKS_DEFAULT,
-            account=100000.0, use_tuned=False, html=True, quiet=True,
+            mode=policy.get("workflow_phase", "daily"), market="us",
+            universe=policy["universe"], universe_file=None,
+            top=config.SCAN_TOP_N, picks=policy.get("max_positions", config.MAX_PICKS_DEFAULT),
+            account=policy["initial_cash_usd"], use_tuned=False, html=True, quiet=True,
             demo=False, out=str(paths.reports_dir),
         )
         logging.basicConfig(level=logging.WARNING,

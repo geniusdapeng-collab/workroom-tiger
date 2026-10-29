@@ -3,15 +3,19 @@ import { mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/p
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { exitCode, parseJson, runtimeEnvironment, safeEvidencePath, sanitizeMessage, validateEnvelope, validateRequest } from '../bundles/trading/capabilities/workflow-client.mjs';
-import { canonical, MODEL_PROFILE, validateResearch } from './lib/schema.mjs';
+import { exitCode, parseJson, runtimeEnvironment, safeEvidencePath, sanitizeMessage, validateEnvelope, validateRequest, modelRequiredProfile } from '../bundles/trading/capabilities/workflow-client.mjs';
+import { canonical, MODEL_PROFILE, DEFAULT_MODEL_PROFILE, UPGRADE_PROFILES, validateResearch } from './lib/schema.mjs';
 import { isCliEntry } from './lib/cli.mjs';
 import { publishRecord } from './publish.mjs';
+import { publicResearchExtras } from './lib/projection.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROFILES = new Set([MODEL_PROFILE]);
+const PROFILES = new Set([MODEL_PROFILE, ...UPGRADE_PROFILES]);
+const V3_BYTES = 4 * 1_048_576;
 const RUN_ID = /^run-[0-9a-f]{32}$/;
 const COMPLETE = new Set(['completed']);
+const DURABLE_OPERATION_OBSERVATION_MS = 300000;
+const PUBLICATION_OBSERVATION_MS = 20000;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 export class SyncError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const error = (code, message) => { throw new SyncError(code, message); };
@@ -49,25 +53,26 @@ export function invokeAgent(operation, input, config, timeoutMs) {
   validateRequest(operation, input);
   return new Promise((accept, reject) => {
     const args = [resolve(ROOT, 'scripts/tiger-agent.mjs'), operation, '--python', config.python, '--state-root', config.stateRoot, '--mode', 'paper', '--input-file', '-'];
-    const child = spawn(process.execPath, args, { cwd: ROOT, env: runtimeEnvironment(config.env, operation === 'run' && input.profile === MODEL_PROFILE), stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, args, { cwd: ROOT, env: runtimeEnvironment(config.env, operation === 'run' && modelRequiredProfile(input.profile)), stdio: ['pipe', 'pipe', 'pipe'] });
+    const maximum = UPGRADE_PROFILES.includes(config.profile ?? input.profile) ? V3_BYTES : 1_048_576;
     const chunks = []; let stdoutBytes = 0; let stderrBytes = 0; let failure; let forced;
     const stop = value => { failure ??= value; child.kill('SIGTERM'); forced ??= setTimeout(() => child.kill('SIGKILL'), 750); };
     const timer = setTimeout(() => stop(new SyncError('OBSERVATION_TIMEOUT', 'Observation stopped; accepted workers continue independently')), Math.max(1, timeoutMs));
-    child.stdout.on('data', chunk => { stdoutBytes += chunk.length; if (stdoutBytes > 1_048_576) stop(new SyncError('RESULT_INVALID', 'Controlled CLI output exceeded limit')); else chunks.push(chunk); });
+    child.stdout.on('data', chunk => { stdoutBytes += chunk.length; if (stdoutBytes > maximum) stop(new SyncError('RESULT_INVALID', 'Controlled CLI output exceeded limit')); else chunks.push(chunk); });
     child.stderr.on('data', chunk => { stderrBytes += chunk.length; if (stderrBytes > 65536) stop(new SyncError('RESULT_INVALID', 'Controlled CLI diagnostics exceeded limit')); });
     child.stdin.on('error', cause => { if (cause.code !== 'EPIPE') stop(new SyncError('RUNNER_FAILED', 'Unable to deliver controlled request')); });
     child.on('error', () => { clearTimeout(timer); clearTimeout(forced); reject(new SyncError('RUNNER_FAILED', 'Unable to start the controlled Tiger CLI')); });
     child.on('close', code => {
       clearTimeout(timer); clearTimeout(forced);
       if (failure) { reject(failure); return; }
-      try { const envelope = validateEnvelope(parseJson(Buffer.concat(chunks), 1_048_576), operation, input); if (code !== exitCode(envelope)) error('RESULT_INVALID', 'Controlled CLI exit code disagrees with its envelope'); accept(envelope); }
+      try { const envelope = validateEnvelope(parseJson(Buffer.concat(chunks), maximum), operation, input); if (code !== exitCode(envelope)) error('RESULT_INVALID', 'Controlled CLI exit code disagrees with its envelope'); accept(envelope); }
       catch { reject(new SyncError('RESULT_INVALID', 'Controlled CLI did not return a valid envelope')); }
     });
     child.stdin.end(`${JSON.stringify(input)}\n`);
   });
 }
 
-async function evidenceFile(stateRoot, runId, name, refs) {
+async function evidenceFile(stateRoot, runId, name, refs, maximum = 1_048_576) {
   const matches = refs.filter(ref => ref.path === name); const reference = matches[0];
   if (matches.length !== 1 || !reference || !safeEvidencePath(reference.path) || !/^[a-f0-9]{64}$/.test(reference.sha256)) error('EVIDENCE_MISSING', 'Required unique verified artifact reference is missing');
   const trustedRoot = await realpath(stateRoot); const root = await realpath(resolve(trustedRoot, 'runs', runId));
@@ -75,19 +80,21 @@ async function evidenceFile(stateRoot, runId, name, refs) {
   const file = await realpath(resolve(root, name));
   if (!file.startsWith(`${root}${sep}`)) error('EVIDENCE_INVALID', 'Verified artifact escapes its run directory');
   const info = await stat(file);
-  if (!info.isFile() || info.size !== reference.bytes || info.size > 1_048_576) error('EVIDENCE_INVALID', 'Verified artifact size differs');
+  if (!info.isFile() || info.size !== reference.bytes || info.size > maximum) error('EVIDENCE_INVALID', 'Verified artifact size differs');
   const bytes = await readFile(file);
   if (sha256(bytes) !== reference.sha256) error('EVIDENCE_HASH_MISMATCH', 'Verified artifact hash differs');
-  return parseJson(bytes, 1_048_576);
+  return parseJson(bytes, maximum);
 }
 
 export async function buildResearch({ receipt, verification, stateRoot, profile, idempotencyKey, expectedRequest = null }) {
-  if (profile !== MODEL_PROFILE) error('MODEL_REQUIRED', 'New publication requires the reviewed model-required profile');
+  if (!PROFILES.has(profile)) error('MODEL_REQUIRED', 'Publication requires a reviewed required-model profile');
+  const upgrade = UPGRADE_PROFILES.includes(profile);
+  const maximum = upgrade ? V3_BYTES : 1_048_576;
   if (!receipt?.run_id || !RUN_ID.test(receipt.run_id)) error('EVIDENCE_INVALID', 'Verified run identity is missing');
   const runId = receipt.run_id;
   validateEnvelope(receipt, 'receipt', { run_id: runId }); validateEnvelope(verification, 'verify', { run_id: runId });
   if (!receipt.operation_ok || !verification.operation_ok || !COMPLETE.has(receipt.status) || receipt.status !== verification.status || receipt.verification?.ok !== true || verification.verification?.ok !== true || receipt.verification.receipt_sha256 !== verification.verification.receipt_sha256) error('EVIDENCE_INVALID', 'Receipt and independent verification must both pass for the same completed run');
-  const raw = await evidenceFile(stateRoot, runId, 'receipt.json', verification.evidence_refs);
+  const raw = await evidenceFile(stateRoot, runId, 'receipt.json', verification.evidence_refs, maximum);
   if (raw.schema !== 'tiger.receipt.v1' || raw.run_id !== runId || raw.profile !== profile || raw.paper_account !== 'public-usd' || raw.status !== receipt.status) error('EVIDENCE_INVALID', 'Verified original receipt identity differs');
   const original = await evidenceFile(stateRoot, runId, 'request.json', verification.evidence_refs);
   validateRequest('run', original);
@@ -105,38 +112,52 @@ export async function buildResearch({ receipt, verification, stateRoot, profile,
   const decisions = summary.execution_decisions.map(item => ({ id: `${runId}-${item.action}-${item.symbol}`, symbol: item.symbol, action: item.action, targetWeight: item.target_weight, thesis: item.action_summary, decidedAt: asOf, runId }));
   const universeSize = disclosures.scan_stats?.universe_size;
   if (!Number.isSafeInteger(universeSize) || universeSize < 0) error('EVIDENCE_INVALID', 'Verified research universe size is missing');
-  const record = { schemaVersion: 2, idempotencyKey, asOf, runId, receiptHash: receipt.verification.receipt_sha256, dataAsOf: summary.as_of?.benchmark_last_bar, executionMode: 'paper', modelMode: 'enabled', status: receipt.status, universeSize, summary: summary.action_summary, decisions, model: summary.model, executionDecisions: summary.execution_decisions };
+  const record = { schemaVersion: upgrade ? 3 : 2, idempotencyKey, asOf, runId, receiptHash: receipt.verification.receipt_sha256, dataAsOf: summary.as_of?.benchmark_last_bar, executionMode: 'paper', modelMode: 'enabled', status: receipt.status, universeSize, summary: summary.action_summary, decisions, model: summary.model, executionDecisions: summary.execution_decisions };
+  if (upgrade) {
+    const phase = profile === UPGRADE_PROFILES[0] ? 'daily' : profile === UPGRADE_PROFILES[1] ? 'premarket' : 'intraday';
+    if (summary.workflow_phase !== phase || summary.execution_policy !== 'whitepaper-execution-v2') error('EVIDENCE_INVALID', 'Verified business workflow phase or execution policy differs');
+    if (!raw.source || !safeEvidencePath(raw.source.path)) error('EVIDENCE_INVALID', 'Verified frozen source reference is missing');
+    const source = await evidenceFile(stateRoot, runId, raw.source.path, verification.evidence_refs, maximum);
+    const sourceRef = verification.evidence_refs.find(ref => ref.path === raw.source.path);
+    if (raw.source.sha256 !== sourceRef.sha256 || raw.source.bytes !== sourceRef.bytes || !/^[a-f0-9]{64}$/.test(source.tree_sha256 ?? '')
+        || source.tree_sha256 !== verification.data?.source?.tree_sha256) error('EVIDENCE_INVALID', 'Independent verification does not bind the exact frozen source manifest');
+    Object.assign(record, publicResearchExtras(summary, runId));
+  }
   validateResearch(record);
   return { record, originalRequest: original, evidence: { runId, receiptHash: record.receiptHash, sourceTreeHash: verification.data?.source?.tree_sha256 ?? null, status: record.status, evidenceCount: verification.verification.evidence_count, checks: verification.verification.checks } };
 }
 
-export async function syncResearch({ env = process.env, date = marketDate(), profile = env.TIGER_PNL_RESEARCH_PROFILE ?? MODEL_PROFILE, runId = null, observeMs = 50000, allowLocalHttp = false } = {}, { invoke = invokeAgent, publish = publishRecord } = {}) {
+export async function syncResearch({ env = process.env, date = marketDate(), profile = env.TIGER_PNL_RESEARCH_PROFILE ?? DEFAULT_MODEL_PROFILE, runId = null, slot = null, observeMs = 50000, allowLocalHttp = false } = {}, { invoke = invokeAgent, publish = publishRecord } = {}) {
   if (!PROFILES.has(profile) || !validDate(date) || (runId !== null && !RUN_ID.test(runId))) error('INVALID_SYNC_REQUEST', 'Use a reviewed profile, ISO date and valid optional run ID');
+  if (slot !== null && (!UPGRADE_PROFILES.includes(profile) || typeof slot !== 'string' || !/^(?:[01][0-9]|2[0-3])[0-5][0-9]$/.test(slot))) error('INVALID_SYNC_REQUEST', 'Optional slot must be a New York HHmm scheduled time for a v2 profile');
+  if (slot !== null && profile === UPGRADE_PROFILES[2] && (slot < '0930' || slot >= '1600')) error('INVALID_SYNC_REQUEST', 'Intraday slots use the regular 0930-1559 New York scheduling window');
   if (env.TIGER_AGENT_PERMISSION !== 'paper' || !isAbsolute(env.TIGER_AGENT_PYTHON ?? '') || !isAbsolute(env.TIGER_AGENT_STATE_ROOT ?? '') || !isAbsolute(env.TIGER_PNL_SYNC_STATE_DIR ?? '')) error('INVALID_TRUSTED_CONFIGURATION', 'Trusted paper permission and absolute Python, agent-state and sync-state paths are required');
   if (typeof env.TIGER_PNL_WRITE_TOKEN !== 'string' || env.TIGER_PNL_WRITE_TOKEN.length < 32 || env.TIGER_PNL_WRITE_TOKEN.length > 512 || /\s/.test(env.TIGER_PNL_WRITE_TOKEN)) error('INVALID_TRUSTED_CONFIGURATION', 'A protected valid website write token is required');
   if (!Number.isInteger(observeMs) || observeMs < 1 || observeMs > 50000) error('INVALID_SYNC_REQUEST', 'Observation must be 1-50000 milliseconds');
-  const config = { python: env.TIGER_AGENT_PYTHON, stateRoot: resolve(env.TIGER_AGENT_STATE_ROOT), env };
+  const config = { python: env.TIGER_AGENT_PYTHON, stateRoot: resolve(env.TIGER_AGENT_STATE_ROOT), profile, env };
   await mkdir(config.stateRoot, { recursive: true, mode: 0o700 }); config.stateRoot = await realpath(config.stateRoot);
   let directory = resolve(env.TIGER_PNL_SYNC_STATE_DIR); await mkdir(directory, { recursive: true, mode: 0o700 }); directory = await realpath(directory);
   const source = await realpath(ROOT);
   if (directory === source || directory.startsWith(`${source}${sep}`)) error('INVALID_TRUSTED_CONFIGURATION', 'Sync state must be outside the source tree');
-  const identity = `${profile}-${date}`; const file = resolve(directory, `${identity}.json`); const lockPath = `${file}.lock`; const lock = await acquireLock(lockPath);
+  const identity = `${profile}-${date}${slot === null ? '' : `-${slot}`}`; const file = resolve(directory, `${identity}.json`); const lockPath = `${file}.lock`; const lock = await acquireLock(lockPath);
   try {
     await lock.writeFile(JSON.stringify({ pid: process.pid })); await lock.sync();
     let state;
-    try { const info = await stat(file); if (!info.isFile() || info.size > 1_100_000) error('SYNC_STATE_INVALID', 'Persistent sync state is invalid'); state = JSON.parse(await readFile(file, 'utf8')); }
+    try { const info = await stat(file); if (!info.isFile() || info.size > (UPGRADE_PROFILES.includes(profile) ? V3_BYTES + 65536 : 1_100_000)) error('SYNC_STATE_INVALID', 'Persistent sync state is invalid'); state = JSON.parse(await readFile(file, 'utf8')); }
     catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
     const request = { schema_version: 'tiger.agent-request/v1', profile, paper_account: 'public-usd', idempotency_key: `tigerpnl-research-${identity}` };
     if (state) {
-      if (state.schemaVersion !== 1 || state.profile !== profile || state.date !== date || state.runnerStateRoot !== config.stateRoot || state.python !== config.python || (runId && state.runId !== runId) || (state.runId !== null && !RUN_ID.test(state.runId)) || !['prepared', 'accepted', 'verified', 'published', 'failed'].includes(state.phase)) error('SYNC_STATE_CONFLICT', 'Persistent date/profile identity or trusted configuration differs');
+      if (state.schemaVersion !== 1 || (state.slot ?? null) !== slot || state.profile !== profile || state.date !== date || state.runnerStateRoot !== config.stateRoot || state.python !== config.python || (runId && state.runId !== runId) || (state.runId !== null && !RUN_ID.test(state.runId)) || !['prepared', 'accepted', 'verified', 'published', 'failed'].includes(state.phase)) error('SYNC_STATE_CONFLICT', 'Persistent date/profile identity or trusted configuration differs');
       if (!state.imported && canonical(state.request) !== canonical(request)) error('SYNC_STATE_CONFLICT', 'Persistent original request differs');
       if (state.payload) { validateResearch(state.payload); if (state.payload.runId !== state.runId || state.payload.idempotencyKey !== `pnl-${identity}`) error('SYNC_STATE_CONFLICT', 'Persistent publication identity differs'); }
       if (['verified', 'published'].includes(state.phase) && (!state.payload || state.evidence?.receiptHash !== state.payload.receiptHash || state.evidence?.runId !== state.runId)) error('SYNC_STATE_CONFLICT', 'Persistent verified evidence is missing or differs');
       if (state.phase === 'published' && (state.websiteReceipt?.idempotencyKey !== state.payload.idempotencyKey || state.websiteReceipt?.payloadHash !== sha256(canonical(state.payload)) || !/^[a-f0-9]{64}$/.test(state.websiteReceipt?.hash ?? '') || !Number.isSafeInteger(state.websiteReceipt?.sequence) || state.websiteReceipt.sequence < 1)) error('SYNC_STATE_CONFLICT', 'Persistent published receipt is missing or differs');
     } else {
-      state = { schemaVersion: 1, date, profile, python: config.python, runnerStateRoot: config.stateRoot, request: runId ? null : request, imported: Boolean(runId), runId, phase: 'prepared', payload: null, evidence: null, websiteReceipt: null };
+      if (!UPGRADE_PROFILES.includes(profile)) error('MODEL_REQUIRED', 'Historical required-model profiles may only retry an already persisted publication; new research uses whitepaper v2');
+      state = { schemaVersion: 1, date, profile, ...(slot === null ? {} : { slot }), python: config.python, runnerStateRoot: config.stateRoot, request: runId ? null : request, imported: Boolean(runId), runId, phase: 'prepared', payload: null, evidence: null, websiteReceipt: null };
       await saveState(file, state, env);
     }
+    if (!UPGRADE_PROFILES.includes(profile) && !state.payload) error('MODEL_REQUIRED', 'Historical required-model profiles may only retry an already persisted publication; new research uses whitepaper v2');
     if (state.phase === 'published') return { status: 'already_published', runId: state.runId, receipt: state.websiteReceipt };
     const deadline = Date.now() + observeMs;
     const pending = async reason => { await saveState(file, state, env); return { status: 'pending', reason, phase: state.phase, runId: state.runId, idempotencyKey: state.request?.idempotency_key ?? null, observationStopped: true, workerCancellationRequested: false }; };
@@ -150,7 +171,9 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
       if (description.data.profile.execution?.model_mode !== 'enabled' || modelContract?.required !== true || modelContract.provider !== 'deepseek' || modelContract.model !== 'deepseek-flash' || modelContract.release !== 'DeepSeek-V4.1-Flash-1017' || modelContract.search_mode !== 'provider_native_search') error('MODEL_REQUIRED', 'Controlled Tiger describe did not advertise the exact required DeepSeek policy');
       if (!state.runId) {
         if (env.LLM_BACKEND !== 'api' || env.LLM_BASE_URL !== 'https://api.deepseek.com' || env.LLM_MODEL !== 'deepseek-flash' || typeof env.LLM_API_KEY !== 'string' || !env.LLM_API_KEY.length || env.LLM_API_KEY.length > 4096 || /[^\x21-\x7e]/.test(env.LLM_API_KEY)) error('MODEL_CONFIGURATION_REQUIRED', 'Load the protected fixed DeepSeek configuration before starting a new run');
-        const accepted = await call('run', state.request);
+        // Admission verifies the committed parent before launching the worker.
+        const accepted = await invoke('run', state.request, config,
+          DURABLE_OPERATION_OBSERVATION_MS);
         if (accepted.run_id && RUN_ID.test(accepted.run_id)) { state.runId = accepted.run_id; state.phase = 'accepted'; await saveState(file, state, env); }
         if (!accepted.operation_ok) {
           if (['TIMEOUT', 'INTERRUPTED', 'CANCELLED', 'ACCOUNT_BUSY'].includes(accepted.error?.code)) return pending(accepted.error.code);
@@ -162,8 +185,14 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
         const observed = await call('status', { run_id: state.runId });
         if (observed.run_id !== state.runId || !observed.operation_ok) error(observed.error?.code ?? 'RESULT_INVALID', 'Unable to inspect the existing run identity');
         if (COMPLETE.has(observed.status)) {
-          const receipt = await call('receipt', { run_id: state.runId });
-          const verification = await call('verify', { run_id: state.runId });
+          // Terminal verification rebuilds the complete evidence graph and can
+          // legitimately exceed the short 50-second run-observation window.
+          // Give each independent verifier the same bounded 5-minute budget as
+          // the controlled CLI; neither operation can mutate the run.
+          const receipt = await invoke('receipt', { run_id: state.runId }, config,
+            DURABLE_OPERATION_OBSERVATION_MS);
+          const verification = await invoke('verify', { run_id: state.runId }, config,
+            DURABLE_OPERATION_OBSERVATION_MS);
           const built = await buildResearch({ receipt, verification, stateRoot: config.stateRoot, profile, idempotencyKey: `pnl-${identity}`, expectedRequest: state.request });
           state.payload = built.record; state.evidence = built.evidence; state.request = built.originalRequest; state.phase = 'verified'; await saveState(file, state, env); break;
         }
@@ -171,7 +200,15 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
         if (deadline - Date.now() < 2000) return pending('OBSERVATION_TIMEOUT');
         await new Promise(accept => setTimeout(accept, Math.min(1000, Math.max(1, deadline - Date.now() - 1000))));
       }
-      const fetcher = (url, options) => { const remaining = deadline - Date.now(); if (remaining < 1) error('OBSERVATION_TIMEOUT', 'Publication observation deadline reached'); return fetch(url, { ...options, signal: AbortSignal.timeout(Math.min(20000, remaining)) }); };
+      // Verification can legitimately outlive the short run-observation window.
+      // Website publication gets a fresh bounded window so a verified payload
+      // is not stranded merely because evidence replay took longer.
+      const publicationDeadline = Date.now() + PUBLICATION_OBSERVATION_MS;
+      const fetcher = (url, options) => {
+        const remaining = publicationDeadline - Date.now();
+        if (remaining < 1) error('OBSERVATION_TIMEOUT', 'Publication observation deadline reached');
+        return fetch(url, { ...options, signal: AbortSignal.timeout(remaining) });
+      };
       // Payload is persisted before network submission, preserving exact retries after lost responses.
       const written = await publish({ baseUrl: env.TIGER_PNL_URL ?? 'https://tigerpnl.com', token: env.TIGER_PNL_WRITE_TOKEN, record: state.payload, research: true, allowLocalHttp, fetcher });
       if (written?.idempotencyKey !== state.payload.idempotencyKey || written?.payloadHash !== sha256(canonical(state.payload))) error('PUBLICATION_RECEIPT_INVALID', 'Website receipt does not match the persistent research payload');
@@ -189,8 +226,8 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
 }
 
 export function parseArgs(args) {
-  const options = {}; const allowed = new Map([['--date', 'date'], ['--profile', 'profile'], ['--run-id', 'runId']]);
-  for (let i = 0; i < args.length; i++) { const name = allowed.get(args[i]); if (!name || Object.hasOwn(options, name) || !args[i + 1] || args[i + 1].startsWith('--')) error('INVALID_SYNC_REQUEST', 'Use only --date, --profile and optional --run-id once each'); options[name] = args[++i]; }
+  const options = {}; const allowed = new Map([['--date', 'date'], ['--profile', 'profile'], ['--run-id', 'runId'], ['--slot', 'slot']]);
+  for (let i = 0; i < args.length; i++) { const name = allowed.get(args[i]); if (!name || Object.hasOwn(options, name) || !args[i + 1] || args[i + 1].startsWith('--')) error('INVALID_SYNC_REQUEST', 'Use only --date, --profile, optional --run-id and optional --slot HHmm once each'); options[name] = args[++i]; }
   return options;
 }
 try { if (await isCliEntry(import.meta.url)) console.log(JSON.stringify(await syncResearch(parseArgs(process.argv.slice(2))))); }

@@ -464,3 +464,125 @@ SHS 叙事兑现维度（EPS 修正/指引语气）自 v5.0 由 NarrativeAgent L
 - 中文：财神爷AI炒股系统（财神爷）；英文：Caishen AI Trading System。
 - 落地：报告标题/页脚、README、main.py、GitHub 仓库 description、技能包
   caishen-trading-v1（全新包名）。
+
+---
+
+## 十一、短线 v2：研究、连续管理与统一执行合同（2026-10-27）
+
+任务：[T-2026-1027-0001 / issue 39](https://github.com/geniusdapeng-collab/workroom-tiger/issues/39)。本节记录当前代码合同；上文各日期的演示、测试数字与旧策略说明保留其历史身份。本节不以本机测试代替 main 集成、实际模型运行、生产部署或盈利证明，实际验收须关联每次源提交、run_id、receipt/verify 和公开读回。
+
+### 11.1 保留的交易理念与显式版本边界
+
+继续执行白皮书的市场许可→资金主线→产业链→个股结构→风险预算；不预测必涨、不追求每天凑足股票、不放松 MRS/SHS/TSS、流动性、A/B/C 模板、单笔 0.8% 风险或单票 20% 上限。模型负责语义研究和最终选择/否决，数值计划由共享确定性代码给出。足够的技术/资金结构不统一要求公司利好；真正新闻事件型仍需要及时、归属明确的原始证据。
+
+三项新增设计必须按工程假设披露：
+
+| 配置 | v2 取值与依据边界 |
+|---|---|
+| `MAX_POSITIONS_V2` | 10 个持仓/完整预约名额上限，是本次显式扩展；原 `MAX_PICKS_DEFAULT=7` 和旧 v1 回执语义保留。10 不是每天必须买入的数量。 |
+| `MAX_PORTFOLIO_RISK_PCT_V2` | 全账户已持仓加未完成整笔计划的止损风险最多 NAV×3%，为本次更严格的工程风险上限，不宣称由历史优化证明。 |
+| `SECTOR_UNDERPERFORMANCE_V2` | 第 5 日后相对实际所属板块落后 2 个百分点触发时间退出，是明确工程假设，不冒充白皮书精确原参数或收益校准。 |
+
+配置源为 `trading_system/config.py`。新 policy 为 `whitepaper-execution-v2`；旧 `legacy-execution-v1` 保留旧记录的读取及验证，不通过改名将旧成交解释成新版成交。盘前/盘中 v2 必须在同一独立 v2 paper 账户连续运行，不从旧 v1 账户复制状态冒充迁移。
+
+### 11.2 六项业务修复的落地位置
+
+| 问题 | 当前行为与实现位置 |
+|---|---|
+| 广域搜索与候选个股脱节、理由只复述行情 | `llm/candidate_research.py` 在广域 14 主题之后，对最多 10 个候选和全部最多 10 个持仓的去重并集定向研究；市场/板块/产业链/个股/计划五段假设与具体证据、反证、缺口一起保留。 |
+| 日报后无人继续跟踪、零买入时已有持仓被忽略 | `opportunity_lifecycle.py`、`workflow_runtime_v2.py` 持续记录 WATCH、重新评估、paper 待执行、持仓、退出与失效；报价触发只请求重新评估，不能替代完整当前模型和风险批准。 |
+| paper、Journal、回测的保护/时间退出漂移 | `exit_engine.py` 为唯一 v2 出场规则：结构止损优先，跳空按实际开盘，HIGH 达到 2R 后下一根生效 +0.5R 保护，5 日无进展或显著跑输实际板块退出，7 日硬退出。 |
+| 口头 40/40/20、实际一次买满 | `execution_policy.py` 保存整笔预约与整数股三段计划、唯一意向和 paper 成交回执；首次 T+1，后续加仓须有先前完整行情确认和当前开盘重查，不摊低成本，不用今天收盘回填今天开盘。 |
+| 反复按固定十万美元配仓 | `RiskManagerAgent._execute_v2`、`portfolio_snapshot` 按已知日期的真实 paper NAV、现金、持仓及全部未完成预约计算，缺少估值失败关闭；首次 seed 不等于后续参考本金。 |
+| 跑完程序被当成有效投资、漏失机会无法归因 | `business_evaluation.py` 保存漏斗、占资、成本、成熟队列与逐候选数值反事实；未成熟的捕获率/召回率保持未知，不能把多个候选的假想盈亏相加成组合收益。 |
+
+### 11.3 三阶段研究、预算与证据
+
+新任务默认 `us-public-model-required-paper-v2`；盘前与盘中分别为 `us-public-model-required-premarket-paper-v2`、`us-public-model-required-intraday-paper-v2`。三者均执行 43 个有序阶段，六个语义阶段为清洗、链舆情、链风险、板块叙事、发行人研究、最终判断。37 岗角色目录不等于每轮执行了 37 次独立模型。
+
+固定 `deepseek-flash`，2026-10-27 官方映射观察为 `DeepSeek-V4.1-Flash-1017`，属于可变别名。原生 Search/Fetch 由真实 I/O 回执证明；不是给 Responses 参数就算搜索成功。来源时间未知保持未知，Fetch 抓取时间不作为发布日期，不同主机也不作为独立原始报道证明。依据：[官方定价与模型](https://api-docs.deepseek.com/quick_start/pricing/)、[Search & Fetch](https://api-docs.deepseek.com/guides/search/)。
+
+每个目标一次初搜，模型提出真实缺口时至多一次补搜和一次已观察 URL 的 Fetch。正文每源最多 24000 字符、每三目标批次最多 60000 字符，公平分配并优先本轮补证；覆盖索引保留每个目标跨实际轮次见过的最长前缀。补证后不遗忘初评已经核实的引用/反证，也不能把没展示过的尾部说成通读全文。最终模型只能保留真实已读范围和原 claim，不以默认长度扩大证据。
+
+统一 `request_budget.py` 在付费 I/O 前按完整序列化请求预留。原隐式政策与默认守卫为 300000 实际加预留 tokens；此前v2-profile接纳显式选择`tiger.budget-policy.v3`，扩为600000；当前v4的扩大额度见下文。两版同为最多 40 chat、60 Search、20 Fetch、120 远端请求、保守估算 1 USD、2400 秒。新版 snapshot/reservation 使用 v3 和精确 policy_id，旧 v2 形状与历史验证保留；接纳、preflight、pipeline.prepare 的完整策略和独立重放必须一致，不能靠修改计数或上限选择政策。按冻结上界 1.2 USD/百万 tokens 及每原生调用 0.00075 USD，600000 tokens 加全部 80 次 Search/Fetch 为 0.78 USD，费用上限继续独立执行。这是显式工程预算调整，不是实际完成率或模型质量证明。未知付费结果冻结；不自动补跑、切提供方、降模型或规则代写语义。成功要求真实模型身份、schema、六阶段、实际 usage、所有预留和预算结算一致。`required_proof_v2.py` 只读取冻结证据重放，不能为了验证而重新调用网络或模型。
+
+2026-10-27 的前三次真实 v2 任务均在清洗阶段受控拒绝，保留原运行身份及失败证据，不以换键重跑掩盖：
+
+1. `run-8f5074a9555b4f71945c0326d0a56742` 留有 `INCOMPLETE_MODEL_RESPONSE`，没有足以判断具体停止原因的记录。
+2. `run-c1a5529338094e78bc6d15b566d8b4bd` 的首个四篇批次明确 `finish_reason=stop`，实际用量 29633 tokens，但 `claim_key` 未通过 pattern 校验。
+3. `run-a6db0a0251884e50943ab2eccb9e78c1` 在两个四篇批次收到完整、schema 合法回复，实际共用 45446 tokens；其中一条 151 字符引文与该篇已展示原文有一个 Unicode 字符差异，逐字归属校验失败。程序没有改字、删掉该事实或提交账户。
+
+第四次 `run-1d97db0e82724ee4a621c6fba75e8f87` 使用后述结构引用版本，在 14 次原生 Search 结算后，首个 Chat 记录 `TRANSPORT_FAILURE`；没有成功 Chat 回执，实际模型用量未知，93650 tokens 的原预留保持冻结，账户未提交。旧记录没有保留足以确定传输原因的字段，不能凭耗时把这次失败断言为超时。
+
+随后本机纯回环 HTTP 测试复现了传输边界缺口：直接读取 urllib3 原始响应抛出的超时被归入笼统错误；Chat 在原 180 秒窗口内也受原生搜索的 60 秒空闲限额约束；仅循环前后查时钟无法及时中断阻塞正文。当前修复保留 10 秒连接、原生 Search/Fetch 60 秒空闲及 180 秒响应接纳窗口，为 Chat 使用该窗口，并以剩余期限中断已持有的响应正文；底层超时/协议/TLS 采用闭合安全类别，取消并等待中断器后再清理响应。未知用量、请求数、全任务预算和不自动重试保持原合同。DNS 与慢响应头不具有全局绝对 180 秒保证，最外层 2400 秒进程期限继续有效。此复现不是第四次实际根因的证明，也不是完整真实任务通过；下一次任务须继续记录原失败、具体修复及新来源提交。依据：[官方保活](https://api-docs.deepseek.com/quick_start/rate_limit/)、[urllib3 期限边界](https://urllib3.readthedocs.io/en/stable/reference/urllib3.util.html#urllib3.util.Timeout)。
+
+四篇批量是上述修复过程中的历史设置。后续历史结构将清洗改为每批最多 8 篇；本节末的新compact在budget v4下为一篇，旧显式v3为四篇。八篇版本：每篇完整规则清洗正文仅展示一次，机械切成顺序固定、每段最多 600 字符的 `content_parts`，拼接后与原 `source_view` 完全一致，并保留全部来源的 id、标题、URL 和日期索引。原生文章完整性仍由供应商字符数和覆盖标记单独说明。模型仍负责逐篇解释、事实含义、来源归属、时效与反证，只返回本篇可引用的 `quote_part_id`；程序按来源和编号取回原片段，私有 `CleanDocumentV2` 及封存证据保留完整逐字引文。不可引用的格式片段仍供阅读，标记不代表来源可信；不允许借用邻篇片段、近似匹配、隐藏删事实或由规则代写语义。
+
+下游舆情、风险、叙事及最终判断保留全部来源、完整摘要、每条事实 statement、claim_key、来源与时间限定，使用显式 `columns`/`rows` 编码。嵌套列名按实际字段集合的字典序固定，避免封存 JSON 的键顺序变化破坏合法重放。重复引文文本改为父文档 id 绑定的 `quote_ref`，只含原引文 SHA256 与字符数；全局交付说明明确本次没有重读引文或正文。最终公司引文仍只能来自发行人研究实际展示并绑定的资料，广域哈希引用不能扩张已读范围或新增公司原文事实。
+
+第五次 `run-855809304c2b46409e64664ca99d20f0` 以来源 `ae0509ded31457e8fee2428431c794512d6f4fae` 执行，在首个八篇清洗批次收到 `finish_reason=length`，实际 prompt 19582、completion 16384、合计 35966 tokens，流程按 `INCOMPLETE_MODEL_RESPONSE` 失败，账户未提交。没有完整接纳的响应证明，因此不能推断第五次的显式 JSON 与 thinking 各消耗多少；它也不改变前四次失败身份和未知用量记录。
+
+当时的容量修复采用可逆 `tiger.clean-wire.v1`：每次仍提供全部真实来源索引、逐篇完整正文片段与所有覆盖元数据，只连接重复元数据、缩写字段名和受控来源 ID。逆变换后再次执行原完整 schema，摘要、来源说明、逐事实及引文归属的上限和必要校验不缩减。仅 v2 `clean.llm_semantic` 显式请求 `thinking.type=disabled`、`reasoning_effort=low`；舆情、风险、叙事、发行人研究及最终选择仍为 enabled/high，v1 默认请求保持原样。关闭清洗 thinking 的目的在于容纳结构化语义答案，质量和真实完成率仍须实际检验。依据：[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)、[JSON Output](https://api-docs.deepseek.com/guides/json_mode/)。
+
+最终输入使用完整真实 ID 索引缩写明确的身份字段；自然语言、claim_key/claim_id、引文 hash 和不同父来源不合并。最终模型可以完整修改 thesis，或明确引用同股票本轮已完成并已展示的原模型 thesis；后者逐字展开并在 `model_reference_usage` 披露，不计作重新撰写。最终选择/否决和五个人工执行理由仍由 high thinking 的真实响应产生，原 schema、研究充分性、来源与事实集合、数值风险权限均继续检查。独立回放从真实上游重建请求与展开结果，不能仅凭重算后的自包含 hash 接受修改。
+
+第六次 `run-49f53effdcea461f8832fe4a98f99db1` 以来源 `9f5c68c41d4acceef3e38503dca5fce3efcfd6db` 执行，14 次原生 Search 后首个 Chat 已 `stop`，实际 prompt 19664、completion 4931、合计 24595 tokens；回答未通过 `/d/0` 的 `allOf`，账户未提交。该旧诊断没有保留具体违规字段，不能推断是哪个字段或把模型输出补成合法答案。后续历史版本新增 `tiger.clean-keyed-wire.v1` 将 `d` 数组改为按本批精确来源键闭合的对象，公共语义规则只声明一次，各来源引文编号仍局部绑定。原短字段编码器和完整语义 schema、逐篇覆盖及逐字引文校验保留；仅格式示例不含语义答案。新安全诊断可指出受控来源键下失败路径，但不保存违规值、正文或原响应。
+
+该历史 JSON/keyed 版本的8篇批量、16384输出和对应版本整轮预算同时生效；当前compact在budget v4下为一篇/32768，旧显式v3保留四篇/32768，分别由可信选择器规定。容量检查按实际调用顺序重放同一预算守卫，展示每次预留前缀和首次拒绝；300k 与 600k 必须分列，合成摘要/事实长度与假设 usage 必须显式列出。长资料、20 个研究目标或原字段极值仍可能在付费前被预算拒绝，不能从某个单次可接纳请求推导整轮保证。完整约定与条件见 [CLEAN-WIRE-POLICY-V2.md](CLEAN-WIRE-POLICY-V2.md)。`claim_key` 仍为最多 160 字符的小写 ASCII 标识；严格文本格式与原有语义约束保持。上述代码、本机测试和合成容量条件不构成真实完整通过或盈利证明；实际后续成功须另按来源提交、run_id、receipt/verify 记录。
+
+第七次 `run-8772c5d1b10d484885b7f660c1c701a4` 使用来源 `0b51984d1ce4d9e883af3bae1ce33fdfde6ccd11` 和显式 600k 策略。第一批八篇回答通过，第二批自然结束 stop 后在 `/d/d11/c/1/q` 的枚举校验失败；两次 Chat 共 43480 tokens，14 Search、0 Fetch、零剩余预留，估算 0.062676 USD，账户未提交。独立复核重建了输入与来源局部限制；违规值没有保留，不能把一个不可引用的已知片段编号当成实际错误值。
+
+针对当时重复的格式失败，该历史新准入显式冻结 `tiger.clean-output.strict-function.v1`。仅清洗阶段向官方 Beta 端点强制一次 `strict=true` 的固定输出函数，以 disabled/none 返回完整来源键答案；不执行函数、不续接或自动重试，其他五个语义阶段保留 high/JSON。原 keyed schema 展开为提供方可支持的闭合来源键和本篇 q 枚举；提供方不支持的字符串长度、数组数量及未声明支持的唯一性限制仍由原完整本地 schema 强制执行，不修补回答或截断事实。完整工具 schema 和最大输出进入原预算预留，新 I/O 如实记录 tool_calls、工具身份和参数；冻结策略、源码与独立回放共同绑定，旧 300k/600k JSON 证据保持原形。供应商严格格式不能替代语义质量和新的真实完整成功。实现与官方依据见 [清洗输出约定](CLEAN-WIRE-POLICY-V2.md)。
+
+严格协议同时固定源码闭包 `tiger.strict-source-inventory.v1`。独立合成审查曾发现，若把完整冻结源码和 manifest 一起裁为七个数值模块、同步重算摘要，原严格回放会误接受；原红证据保留。这次修复以可信静态路径注册表规定必需执行文件，显式可选日历另行绑定，并在付费前源码冻结、准入及独立回放检查相同闭包。自包含清单不能自行声明完整。该检查适用于新 strict 合同，历史无字段证据不改写；本地权限和远端签名边界仍按维护文档披露。
+
+第八次 `run-4b2c28ca6e5b4165b8cfb2867e942fb9` 使用干净来源 `1ba9cbbfb7e9e8b6a38e84a36ef6ed6ac6ff4a09`。14 Search 之后首个 strict Beta 请求收到 HTTP400，没有成功模型响应或本地答案校验结果；具体提供方拒绝原因未保留、保持未知。未知用量的 106849 tokens 预留仍冻结，账户未提交，receipt/verify 均为 RUN_INCOMPLETE。该源的本机及真实云端 CI 通过不等于这次真实模型任务通过。
+
+当时新增的显式 `tiger.clean-output.responses-schema.v1` 只为清洗改用官方原生 Responses `text.format.json_schema`，发送现有完整 keyed output_schema，保留 allOf、来源局部 q 与全部原 bounds，以及原正文、codec 和本地完整验收。原生 reasoning.effort=none，其他五阶段仍 high/Chat；不使用工具、续轮、自动重试、语义回退或答案修补。新私有 I/O/回放使用原生 completed status、message 身份、native usage 和完整请求预留，不伪造 stop。HTTP400/422 只记录有界固定类别，不把未知旧原因改成已知。原 JSON、strict-function、300k/600k 的既有证据与版本分支保留。官方文档列明该结构化输出通道，但当前具体 schema 和真实完整任务是否成功仍须新 run 的完整账户提交与 receipt/verify 证明。[Responses API](https://api-docs.deepseek.com/api/create-response/)、[Responses guide](https://api-docs.deepseek.com/guides/responses_api/)
+
+第九次 `run-599239fa6ea24998a88c2aec5d3a2b0f` 使用来源 `2cfce1c82c347f9fc439492d562a8d21d9c0fe96`，14 Search 后首个 Responses 请求已返回原生 completed 和有效用量：输入17941、输出14923、合计32864 tokens，均已结算，无剩余预留；本地原生响应形状检查以通用 `INCOMPLETE_MODEL_RESPONSE` 拒绝，尚未进入答案 schema 校验或账户提交。原回答没有保留，因此具体拒绝字段仍未知，不能写成服务端 schema 不支持或第九次已成功。
+
+为缩小适配边界，另执行了一次有明确预算的合成协议诊断，单请求、最大输出64、完整请求预留不超过10000 tokens/0.012 USD，仅保存字段类型/数量、状态和用量，不保存回答或推理正文。这次真实诊断返回116 tokens，观测到消息含 `phase` 字段、文本项含 `logprobs` 字段，原 exact-key 检查必然拒绝该形状；它未保存 phase 的值和 logprobs 的数量，也不是第九次原回答的证据。当前最小兼容修复只允许文档支持的最终答案/空元数据，保持原安全投影、完整本地 schema、来源归属和风险权限；细分固定原生错误码。合成协议诊断不计作真实完整任务或投资能力证明。
+
+最小兼容修复在来源 `37ebb0d552a1ca9897f79767c2e336e53b438dbe` 后另做了一次真实生产适配器的合成资料诊断：单调用、3144 tokens，观测到 `phase=final_answer`、空 `logprobs`，完整清洗与 typed 文档构造通过。它与上一诊断、第九次业务任务是三个不同证据时刻，不能补写旧未知字段，也不计为完整业务成功。
+
+第十次完整任务 `run-b2d2c452ad484675afa37a7684193950` 使用该干净来源，前四个八篇清洗批次、共32篇通过；第五批原生 completed 后在 `/d/d35/t` 违反 `maxItems`，即 ticker 标签超过原八个上限。五次 Chat 共116914 tokens、14 Search、0 Fetch，已结算、零剩余预留、估算0.1507968 USD，账户未提交。无效回答未保留，具体多出几个标签未知。
+
+后续历史版本据此引入独立 `tiger.clean-output.responses-slots.v1` 和 `tiger.clean-slots-wire.v1`，统一处理 ticker、事件、产业链、ETF 和 claims 的全部有界列表。每类原上限派生固定必需的可空槽位；非空值保持模型原顺序并连续占据前缀，null 只表示未使用。提供方每篇 schema 直接闭合字段与本篇 q 枚举，解码后仍执行原完整 keyed/语义 schema、覆盖和引文归属；超限、洞、重复或非法语义均拒绝，没有截断、补值或自动修复。至多八个 ticker 是相关实体标注容量，不是风险阈值或穷尽实体保证；必要事实继续保留在原摘要与 claims。新 policy、codec、完整实际请求、原生答案、预算和可信源码闭包共同绑定；旧 JSON、strict-function 与 Responses-schema 分支保留原行为。此升级本身尚不证明新真实完整任务成功，实际验收必须另记录新的账户提交与独立 receipt/verify。
+
+## 当前清洗：compact lists 与有界完整重新生成
+
+三个 v2 profile 的新准入显式冻结 `tiger.clean-output.compact-lists-regeneration.v1`、`tiger.clean-compact-lists-wire.v1` 和 `tiger.model-regeneration.clean-schema.v1`。当前budget v4每批一篇，每来源28个必需标量；旧显式budget v3仍每批最多四篇。历史八篇协议保留原builder、请求、证明和语义。逐篇分配只减少同时输出的结构，不删除来源、正文、事实字段、来源索引或时效检查。仅清洗使用固定 `/beta/chat/completions`、一个强制 `strict=true` 的 `emit_tiger_clean_v2` 输出函数、disabled/none、`max_tokens=32768`。输出函数不执行业务动作。其余五个语义阶段继续原 high/JSON 通道。
+
+ticker、事件、产业链、ETF 列表使用逗号标量，只有原项目语法能证明分隔符和空项目不可能出现时才可编译。空串仅表示空列表，逆变换保留原顺序，不 trim、排序、去重、截断或补值。四个 claims 槽的空字符串仅表示尾部未使用；洞、部分空字段、重复或本篇 q 违规仍拒绝。完整原 keyed schema、原语义 schema、覆盖、逐字引文与 typed 文档构造继续执行。摘要原 800 上限不放宽；提示中的 200–450 字符是表达建议，不是必要事实删减权限或新验收下界。
+
+全部正文分片、全局来源索引、assessment、覆盖和本篇引用绑定精确保留。提供方以规范 `$def/$ref` 共享相同叶 schema，严格展开必须等于本地完整标量投影；外部、循环、悬空、链式、未用或非规范引用拒绝。仅投影文档未支持的长度 keyword，其原上界仍由注册 pattern 和完整本地合同执行。固定字段映射只有一份；请求与预算绑定完整 canonical UTF-8 bytes。官方通道依据：[Tool Calls / strict Mode](https://api-docs.deepseek.com/guides/tool_calls/)。该文档不能证明服务端必定执行每个约束，本地完整验收始终必需。
+
+只有以下条件同时成立才允许新的完整生成：实际响应完整、模型/响应/工具身份合法且唯一、`finish_reason=tool_calls`、标准 usage 已知并已结算、严格 JSON 没有重复键或非有限值、原文与全部解码键值的安全脱敏结果均与原值相同，随后完整 schema/逆变换以固定 `OUTPUT_SCHEMA_MISMATCH` 拒绝。每来源最多追加一次，budget v4每完整任务最多追加56次；旧显式v3仍每批一次、整轮最多四次。第二次拒绝、额度不足或预算不准入即失败。语法、重复键、秘密、身份、HTTP、超时、长度终止和未知结果均终止，不触发重新生成；未知用量继续冻结。安全检查不通过的原拒绝文本不封存。
+
+新生成仍使用相同完整 user 输入和 schema；只有固定 system 后缀加入从前次拒绝派生的闭合反馈。不发送旧答案、任意异常文字或语义提示，不修补已经返回的答案。非阻塞逻辑调用锁阻止重入；generation1 的输入和前次拒绝摘要须在付费 I/O 前持久记录，不提供崩溃后模型调用恢复或第二控制器自动重跑。
+
+私有 request/call v4 记录 accepted/rejected 的有序并集、实际参数、安全响应、真实用量、预算、generation_index、logical_call_sha256 和 previous_rejection_sha256。拒绝是已完成的模型 I/O，但不进入语义管线；终止传输/安全错误仍走原 error_ref。独立回放从真实上游重建请求，重新解析并复现原答案被拒绝，核对同一批紧邻且只消费一次的新生成；有效答案谎报拒绝、遗漏已付费调用、重复身份、换输入、改反馈或连贯重算外层 hash 均不能替代可信采集锚点。只有接纳值进入后续阶段。
+
+完成汇总的 call_count、response_ids、stage_counts 计入全部真实尝试；增加精确的 regeneration_policy_id、accepted_call_count、rejected_call_count，后两者之和等于 call_count，拒绝数随可信预算版本分别为v4的0..56、v3的0..4，且不得超过已接纳的clean逻辑调用数。六阶段仍各需接纳答案，Node、受控回执和公开研究投影按同一闭合合同检查；旧/disabled/非 upgrade 形状不能夹带这些字段。安全响应及其原拒绝文本仅留私有证明，不公开。哈希与回放提供相对可信源码/采集/准入锚点的本地完整性证据，不是提供方签名，也不能排除所有锚点均被替换的完整伪造。
+
+当前新任务显式使用 `tiger.budget-policy.v4`：160 chat、20000000 实际加预留 tokens、60 Search、20 Fetch、240 远端请求、保守估算 30 USD、7200 秒；逐次先预留后调用，全部尝试共享同一账本。最多56篇逐篇清洗的结构上界为 56 clean + 56 重新生成 + 14 发行人调用 + 4 其他语义调用 = 130 chat，另最多54 Search和20 Fetch，总计204次远端调用。旧显式v3仍为四篇一批、最多四次追加，40 chat/600000 tokens/120远端/1 USD/2400秒，旧回执不变。这些是容量上限，不是真实费用或成功率承诺。新的 `allow_clean_compact_regeneration` 只从可信 selector 派生，旧各协议 allowlist 不扩大。
+
+第十一次完整任务 `run-553dcd7df45c4dcea389276e79e2cfda` 使用来源 `2acab5a0aac74e90a6b729e0da2c7c25e214f117` 的 Responses slots 版本，首个原生清洗回答未通过 JSON 解析；实际输入 48741、输出 13683、合计 62424 tokens，14 Search、零 Fetch，已结算、零剩余预留、账户未提交。原无效回答未保留，具体语法原因未知。后续单独协议诊断不改写这个未知原因，也不计为完整业务成功。该新策略须由全新的完整任务及独立 receipt/verify 证明；代码、合成测试和诊断均不算真实完整成功。
+
+### 11.4 回测、发布与复核
+
+普通数值回测 CLI 默认使用共享 v2 policy，显式选择方式如下；命令来自当前 `main.py` 参数定义：
+
+```bash
+python3 main.py --backtest --bt-days 260 --account 100000 --picks 10 --bt-execution-policy whitepaper-execution-v2
+python3 main.py --backtest --bt-days 260 --bt-execution-policy legacy-execution-v1
+```
+
+新版结果披露 `execution_policy` 和 `numeric-paper-replay-not-historical-required-model-alpha`；它没有重建当时未知的完整模型/发行人新闻，不得当成新版模型策略的历史超额收益。WFA/`--tune` 仍使用显式旧 policy，不自动推广新版调参。既有无未来函数、成本、风险与共享执行测试仍是回归要求。
+
+官网新研究为 schemaVersion 3，仅发布白名单五段理由、来源覆盖、当前运行及所有活跃机会、当前 paper 资金和成熟度测量；文章全文、私有路径、完整账户回放和模型调用正文不公开。研究 v3 最大 4 MiB，真实账户和旧研究仍为 1 MiB，Nginx 仅精确 `/api/v1/research` 有 4 MiB 例外。旧 v1/v2 记录保留原字节、摘要与精确重试身份，不追加新旧版研究来绕过要求。
+
+sync 的 `--slot HHmm` 仅是实际纽约调度标签；同日期/profile/slot 严格恢复原请求/run，不能换 slot 隐藏失败。实际接纳 UTC、日线已完成边界和来源日期独立留证。说明与操作命令分别见 [AGENT-CLIENTS.md](AGENT-CLIENTS.md)、[TIGER-STRICT-WORKFLOW.md](TIGER-STRICT-WORKFLOW.md)、[PnL 合同](../pnl/README.md)。
+
+验收必须分别提供有限夹具回归、真实完整任务、独立业务目标审核、发现问题后的再升级及真实重跑、准确候选 CI/main SHA 和生产读回。几轮同日任务可检验可靠性、覆盖与延迟，不能产生几天独立收益；没有成熟样本就如实保持盈利能力未建立。真实账户业绩只来自单独账户证据和真实人工成交回报。

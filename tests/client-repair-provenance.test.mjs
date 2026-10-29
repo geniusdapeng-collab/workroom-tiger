@@ -33,13 +33,18 @@ const settingsRaceRegression = "apps/web/src/components/loommate/LoomMate.settin
 const taskPage = "apps/web/src/pages/p2/P2.tsx";
 const taskPlanRegression = "scripts/acceptance/lib/task-plan-visibility.test.mjs";
 const manifestFile = ".workloom-client-repairs.json";
+const currentManifestFile = ".workloom-client-repairs-T-2026-1027-0001.json";
+const webIndex = "apps/web/index.html";
+const shellBridge = "apps/web/src/shell/Bridge.tsx";
+const fontRegression = "scripts/acceptance/lib/session.test.mjs";
+const bridgeRegression = "scripts/acceptance/lib/bridge-emergency-brake.test.mjs";
 const write = (root, path, content) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); };
 
 function fixture(t, repaired = true) {
   const root = mkdtempSync(join(tmpdir(), "tiger-client-repairs-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const g = join(root, "governance");
-  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball, levelBadge, profilePage, loomMate, skillBanner, skillsPage, taskPage];
+  const entries = ["apps/web/src/main.tsx", "apps/webb/src/main.tsx", "apps/webc/src/main.tsx", "apps/webc/public/service-front.config.json", star, api, consumer, onboarding, banner, ball, levelBadge, profilePage, loomMate, skillBanner, skillsPage, taskPage, webIndex, shellBridge];
   for (const path of entries) write(g, path, `original:${path}\n`);
   write(g, ".workloom-ui.json", JSON.stringify({ version: "0.1.17" }));
   const state = {
@@ -77,6 +82,47 @@ function fixture(t, repaired = true) {
   return { root, g, manifest, state, save: () => write(g, manifestFile, JSON.stringify(manifest)) };
 }
 
+function addCurrentManifest(f) {
+  const manifest = {
+    schemaVersion: "workloom.tiger-client-repairs/v1",
+    repository: "geniusdapeng-collab/workroom-tiger",
+    taskId: "T-2026-1027-0001",
+    authorization: {
+      basis: "user-requested-repository-repair",
+      issue: "https://github.com/geniusdapeng-collab/workroom-tiger/issues/39",
+      pullRequest: "https://github.com/geniusdapeng-collab/workroom-tiger/pull/40",
+    },
+    base: {
+      version: f.state.version,
+      sourceCommit: f.state.sourceCommit,
+      stateSha256: digest(readFileSync(join(f.g, ".workloom-client-foundation.json"))),
+      verifierSha256: digest(readFileSync(join(f.g, "scripts/verify-client-foundation-consumer.mjs"))),
+    },
+    repairs: [],
+    testAdditions: [],
+  };
+  for (const [path, card, sourceCommit] of [
+    [webIndex, "MC-055", "e".repeat(40)],
+    [shellBridge, "MC-056", "f".repeat(40)],
+  ]) {
+    write(f.g, path, `reviewed current repair:${path}\n`);
+    manifest.repairs.push({
+      path,
+      card,
+      upstreamSha256: f.state.managedFiles[path].sha256,
+      repairedSha256: digest(readFileSync(join(f.g, path))),
+      sourceCommit,
+      reason: "Reviewed startup or emergency-control repair with exact focused regression coverage.",
+    });
+  }
+  for (const [path, card] of [[fontRegression, "MC-055"], [bridgeRegression, "MC-056"]]) {
+    write(f.g, path, `test('current repair ${card}', () => {});\n`);
+    manifest.testAdditions.push({ path, card, sha256: digest(readFileSync(join(f.g, path))) });
+  }
+  write(f.g, currentManifestFile, JSON.stringify(manifest));
+  return manifest;
+}
+
 test("an unchanged upstream consumer retains the strict gate without a local manifest", (t) => {
   assert.deepEqual(verifyTigerClientRepairs(fixture(t, false).root), []);
 });
@@ -84,6 +130,22 @@ test("exact reviewed repairs and the bound regression file pass without rewritin
   const f = fixture(t); const before = readFileSync(join(f.g, ".workloom-client-foundation.json"));
   assert.deepEqual(verifyTigerClientRepairs(f.root), []);
   assert.deepEqual(readFileSync(join(f.g, ".workloom-client-foundation.json")), before);
+});
+test("a second exact reviewed task manifest removes only its registered drift", (t) => {
+  const f = fixture(t);
+  addCurrentManifest(f);
+  assert.deepEqual(verifyTigerClientRepairs(f.root), []);
+});
+test("current task authorization and emergency-brake regression remain exact", (t) => {
+  const f = fixture(t);
+  const current = addCurrentManifest(f);
+  current.authorization.issue = "https://github.com/geniusdapeng-collab/workroom-tiger/issues/24";
+  write(f.g, currentManifestFile, JSON.stringify(current));
+  assert.ok(verifyTigerClientRepairs(f.root).length > 0);
+  current.authorization.issue = "https://github.com/geniusdapeng-collab/workroom-tiger/issues/39";
+  write(f.g, currentManifestFile, JSON.stringify(current));
+  write(f.g, bridgeRegression, "changed after review\n");
+  assert.ok(verifyTigerClientRepairs(f.root).length > 0);
 });
 test("a repair manifest is required for modified managed sources", (t) => {
   const f = fixture(t); rmSync(join(f.g, manifestFile));

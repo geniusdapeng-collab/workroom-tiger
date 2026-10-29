@@ -238,14 +238,22 @@ class TestZeroBaselinePurge:
         report = purge_run_state(base_dir=str(tmp_path))
         assert report["cache/credibility"] == "absent"
 
-    def test_whitelist_untouched_by_new_targets(self):
-        """新缓存不得进入白名单（会计台账仅五个：journal/小G/调优/校准/治理事件账）。"""
-        from trading_system.state import PURGE_TARGETS, WHITELIST
+    def test_whitelist_untouched_by_new_targets(self, tmp_path):
+        """缓存不进白名单；v2机会账同五本原账跨轮保留，不清空执行连续性。"""
+        from trading_system.state import PURGE_TARGETS, WHITELIST, purge_run_state
         assert "cache/credibility" in PURGE_TARGETS
         assert set(WHITELIST) == {"journal.json", "sim_portfolio.json",
                                   "tuned_params.json", "calibration_samples.json",
                                   # S5：治理五元事件账（哈希链留痕旁路，跨轮累计，不进决策输入）
-                                  "governance_events.jsonl"}
+                                  "governance_events.jsonl", "opportunity_ledger.json"}
+        reports = tmp_path / "reports"
+        reports.mkdir()
+        for name in WHITELIST:
+            (reports / name).write_text("SYNTHETIC_TEST preserve accounting " + name)
+        for _ in range(2):
+            purge_run_state(str(tmp_path), strict=True)
+            assert all((reports / name).read_text() == "SYNTHETIC_TEST preserve accounting " + name
+                       for name in WHITELIST)
 
 
 # ---------------------------------------------------------------- ⑥ AH 主题开关

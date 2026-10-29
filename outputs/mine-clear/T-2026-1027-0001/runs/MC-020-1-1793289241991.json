@@ -1,0 +1,44 @@
+{
+  "schema": "workloom.evidence-run/v1",
+  "id": "MC-020-1-1793289241991",
+  "command": "python -B -m pytest -p no:cacheprovider -q tests/test_required_proof_v2.py tests/test_budget_policy_v4.py -k 'non_thinking or complete_semantic_replay or prior_enabled'",
+  "exec": {
+    "file": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/research-run/venv/bin/python",
+    "args": [
+      "-B",
+      "-m",
+      "pytest",
+      "-p",
+      "no:cacheprovider",
+      "-q",
+      "tests/test_required_proof_v2.py",
+      "tests/test_budget_policy_v4.py",
+      "-k",
+      "non_thinking or complete_semantic_replay or prior_enabled"
+    ]
+  },
+  "actor": "/root",
+  "role": "repair",
+  "subject": {
+    "card_id": "MC-020",
+    "assertion_index": 1
+  },
+  "commit": "2230f03f6674cb73940648209655fc264885ec7a",
+  "working_tree_dirty": false,
+  "started_at": "2026-10-29T15:54:01.991Z",
+  "finished_at": "2026-10-29T15:54:08.334Z",
+  "exit_code": 0,
+  "signal": null,
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "result": "pass",
+  "outputs": [
+    {
+      "path": "evidence/MC-020-1-1793289241991.txt",
+      "sha256": "f475e450824899c6f1aeedf28d2ad011a218c5bd847c62ab1de583fce39a7f98",
+      "commit": "2230f03f6674cb73940648209655fc264885ec7a"
+    }
+  ]
+}

@@ -1,0 +1,325 @@
+{
+  "schema": "workloom.mine-clear/handoff@1",
+  "task_id": "T-2026-1027-0001",
+  "repo": "tiger-source",
+  "generated_at": "2026-10-29T06:43:54.134Z",
+  "audit_baseline": "deab886aad743451e7f380323824950df4f825fd",
+  "repair_baseline": "bb2789be692ef178307c8858631e892ec7864029",
+  "acceptance_baseline": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+  "environment_claim": "client-runtime",
+  "invariants": [
+    {
+      "id": "INV-1",
+      "text": "租户边界覆盖数据库 RLS、运行时上下文、事件、缓存和外部连接器。",
+      "source": "AGENTS.md#4.1"
+    },
+    {
+      "id": "INV-2",
+      "text": "经营事件、审批和关键回执只增不改；纠正通过新事件表达，不静默覆盖证据。",
+      "source": "AGENTS.md#4.2"
+    },
+    {
+      "id": "INV-3",
+      "text": "所有外部或变更性动作及其子调用，统一经过权限、PII、围栏和审批链路。",
+      "source": "AGENTS.md#4.3"
+    },
+    {
+      "id": "INV-4",
+      "text": "涉钱、敏感数据、群发、公开发布、交易和破坏性变更必须按高风险处理并由人审批。",
+      "source": "AGENTS.md#4.4"
+    },
+    {
+      "id": "INV-5",
+      "text": "没有真实回执就不能标记完成；mock、模拟和体验模式在数据结构与界面上都要明确区分。",
+      "source": "AGENTS.md#4.5"
+    },
+    {
+      "id": "INV-6",
+      "text": "客户原始经营数据不得上行；蜂群只接受白名单化、最小化、匿名化且可审计的元数据或派生经验。",
+      "source": "AGENTS.md#4.6"
+    },
+    {
+      "id": "INV-7",
+      "text": "租户覆盖层只能收紧围栏，不能放宽平台不可变红线。",
+      "source": "AGENTS.md#4.7"
+    },
+    {
+      "id": "INV-8",
+      "text": "模型、提示词、技能、bundle、策略和热更新必须先评测再灰度，且始终可回滚。",
+      "source": "AGENTS.md#4.8"
+    },
+    {
+      "id": "INV-9",
+      "text": "platform-ops、平台账户运营和平台秘密只属于 Andromeda。",
+      "source": "AGENTS.md#4.9"
+    },
+    {
+      "id": "INV-10",
+      "text": "Tiger 在获得单独的合规审查和用户明确授权前，只能模拟或纸面交易。",
+      "source": "AGENTS.md#4.10"
+    },
+    {
+      "id": "INV-11",
+      "text": "令牌、密码、API key、私钥、客户凭证和私密客户数据不得进入源码、文档、上下文、提示词、日志或提交。",
+      "source": "AGENTS.md#4.11"
+    },
+    {
+      "id": "INV-12",
+      "text": "个性化与行业扩展不得形成公共机制的第二事实源。",
+      "source": "AGENTS.md#4.12"
+    }
+  ],
+  "closed_problems": [
+    {
+      "id": "MC-001",
+      "title": "候选扫描后没有逐个发行人补证与完整交易假设",
+      "verified_by": "mcd_acceptance_retry",
+      "verified_at": "2026-10-29T06:43:40.490Z",
+      "verification_evidence": {
+        "path": "runs/MC-001-0-1793256219308.json",
+        "sha256": "485469915655603d21e080ba7079b3e37b6a0509375f1085b369e937a984a2d9",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_research_v2.py",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_research_v2.py"
+            ]
+          },
+          "last_result": "pass",
+          "evidence": {
+            "path": "evidence/MC-001-0-1793256219308.txt",
+            "sha256": "c2567f6c0347e10109fea3ad357b3658eb44c658f7eb9255391ea44df9742f7f",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "run": {
+            "path": "runs/MC-001-0-1793256219308.json",
+            "sha256": "485469915655603d21e080ba7079b3e37b6a0509375f1085b369e937a984a2d9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MC-002",
+      "title": "WATCH与持仓缺少持续复核到执行回报的状态链",
+      "verified_by": "mcd_acceptance_retry",
+      "verified_at": "2026-10-29T06:43:41.413Z",
+      "verification_evidence": {
+        "path": "runs/MC-002-0-1793256220620.json",
+        "sha256": "422bf106849ffdcd59d14975b937c03e360426e7577f3b0c89a8ee184da0003c",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k not evaluation",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_lifecycle_v2.py",
+              "-k",
+              "not evaluation"
+            ]
+          },
+          "last_result": "pass",
+          "evidence": {
+            "path": "evidence/MC-002-0-1793256220620.txt",
+            "sha256": "5939f399a1793ba634c81fa9711dba6b4a2dde8d07d5beaa7f48e1690839f182",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "run": {
+            "path": "runs/MC-002-0-1793256220620.json",
+            "sha256": "422bf106849ffdcd59d14975b937c03e360426e7577f3b0c89a8ee184da0003c",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MC-003",
+      "title": "信号结算与模拟账户及回测的入场退出口径不同",
+      "verified_by": "mcd_acceptance_retry",
+      "verified_at": "2026-10-29T06:43:42.062Z",
+      "verification_evidence": {
+        "path": "runs/MC-003-0-1793256221560.json",
+        "sha256": "e8f324b2adfd325603b7e7295d479438556e565224a5ca02e1bc1db605b2daf9",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k exit or template or backtest or journal",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_execution_v2.py",
+              "-k",
+              "exit or template or backtest or journal"
+            ]
+          },
+          "last_result": "pass",
+          "evidence": {
+            "path": "evidence/MC-003-0-1793256221560.txt",
+            "sha256": "acdeeda254b7f1777e8ad73cce3948714cd04fde11aadf9576cc92069cae44d6",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "run": {
+            "path": "runs/MC-003-0-1793256221560.json",
+            "sha256": "e8f324b2adfd325603b7e7295d479438556e565224a5ca02e1bc1db605b2daf9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MC-004",
+      "title": "分批建仓只有文字而没有分批执行与风险预留",
+      "verified_by": "mcd_acceptance_retry",
+      "verified_at": "2026-10-29T06:43:42.659Z",
+      "verification_evidence": {
+        "path": "runs/MC-004-0-1793256222216.json",
+        "sha256": "aaecf77cb059d5537ca5a89e1097aa5b61a1382757eabd5b75cf0e37d0e1b5b9",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k tranche",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_execution_v2.py",
+              "-k",
+              "tranche"
+            ]
+          },
+          "last_result": "pass",
+          "evidence": {
+            "path": "evidence/MC-004-0-1793256222216.txt",
+            "sha256": "923da6517f8bb152a136440494c4953d9e7dcc3f92b4c2380401bf39a92d0dbb",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "run": {
+            "path": "runs/MC-004-0-1793256222216.json",
+            "sha256": "aaecf77cb059d5537ca5a89e1097aa5b61a1382757eabd5b75cf0e37d0e1b5b9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MC-005",
+      "title": "信号固定参考资金未完整冻结净值与账户承诺风险",
+      "verified_by": "mcd_acceptance_retry",
+      "verified_at": "2026-10-29T06:43:43.232Z",
+      "verification_evidence": {
+        "path": "runs/MC-005-0-1793256222782.json",
+        "sha256": "d67ad0dc1a160eb2102362f30247eb0b51382945a0b468a7675705fa4d77e437",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_execution_v2.py -k snapshot or allocation or nav or risk",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_execution_v2.py",
+              "-k",
+              "snapshot or allocation or nav or risk"
+            ]
+          },
+          "last_result": "pass",
+          "evidence": {
+            "path": "evidence/MC-005-0-1793256222782.txt",
+            "sha256": "e749212a9fe2c782ef685d475ec05c0d2fb200264e5eab89e31d76fb7a758b13",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "run": {
+            "path": "runs/MC-005-0-1793256222782.json",
+            "sha256": "d67ad0dc1a160eb2102362f30247eb0b51382945a0b468a7675705fa4d77e437",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MC-006",
+      "title": "缺少冻结机会队列与资金周转及净损益评估",
+      "verified_by": "mcd_acceptance_retry",
+      "verified_at": "2026-10-29T06:43:43.605Z",
+      "verification_evidence": {
+        "path": "runs/MC-006-0-1793256223356.json",
+        "sha256": "e727c3cd6f971adf9fa5a9d19c2a8bf5d4dcdf097e67bb51e9cf12a888714071",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "assertions": [
+        {
+          "kind": "property",
+          "given": "对应完整交易路径的正常、边界和拒绝输入；只用离线受控夹具，不发送实际订单",
+          "expect": "所有所选行为断言通过且测试实际收集执行；无跳过和伪造成功",
+          "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k evaluation",
+          "exec": {
+            "file": "python3",
+            "args": [
+              "-m",
+              "pytest",
+              "-q",
+              "tests/test_short_term_lifecycle_v2.py",
+              "-k",
+              "evaluation"
+            ]
+          },
+          "last_result": "pass",
+          "evidence": {
+            "path": "evidence/MC-006-0-1793256223356.txt",
+            "sha256": "0d3ce835cd5c6986298e52470163d66522fbd481f8d3204cd9d5f95237123f39",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "run": {
+            "path": "runs/MC-006-0-1793256223356.json",
+            "sha256": "e727c3cd6f971adf9fa5a9d19c2a8bf5d4dcdf097e67bb51e9cf12a888714071",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        }
+      ]
+    }
+  ],
+  "open_problems": [],
+  "acceptance_commands": [
+    "pnpm acceptance:profile:check",
+    "node scripts/acceptance/fleet-run.mjs --repo tiger-source --env client-runtime",
+    "node scripts/acceptance/fleet-run.mjs --repo tiger-source --env client-runtime --live-only   # 生产最小侵入档"
+  ],
+  "notes": "交接前确认验收基线是修复基线的后代：git merge-base --is-ancestor <修复commit> <验收commit>"
+}

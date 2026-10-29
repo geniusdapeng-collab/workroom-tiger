@@ -6,9 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyClientFoundationConsumer } from "../../governance/scripts/verify-client-foundation-consumer.mjs";
 
-const MANIFEST = ".workloom-client-repairs.json";
 const REPOSITORY = "geniusdapeng-collab/workroom-tiger";
-const TASK = "T-2026-1020-0901";
 // Deliberately not a general extension allowlist or an upstream rollout policy.
 const REPAIR_PATHS = new Map([
   ["apps/web/src/components/star-ring/StarRing.tsx", "MC-012"],
@@ -59,6 +57,42 @@ const TEST_PATHS = new Map([
     card: "MC-054", repairs: ["apps/web/src/components/loommate/LoomMate.tsx"],
   }],
 ]);
+const CURRENT_REPAIR_PATHS = new Map([
+  ["apps/web/index.html", "MC-055"],
+  ["apps/web/src/shell/Bridge.tsx", "MC-056"],
+]);
+const CURRENT_TEST_PATHS = new Map([
+  ["scripts/acceptance/lib/session.test.mjs", {
+    card: "MC-055", repairs: ["apps/web/index.html"],
+  }],
+  ["scripts/acceptance/lib/bridge-emergency-brake.test.mjs", {
+    card: "MC-056", repairs: ["apps/web/src/shell/Bridge.tsx"],
+  }],
+]);
+const REPAIR_MANIFESTS = [
+  {
+    manifest: ".workloom-client-repairs.json",
+    taskId: "T-2026-1020-0901",
+    authorization: {
+      basis: "user-requested-repository-repair",
+      issue: `https://github.com/${REPOSITORY}/issues/24`,
+      pullRequest: `https://github.com/${REPOSITORY}/pull/25`,
+    },
+    repairPaths: REPAIR_PATHS,
+    testPaths: TEST_PATHS,
+  },
+  {
+    manifest: ".workloom-client-repairs-T-2026-1027-0001.json",
+    taskId: "T-2026-1027-0001",
+    authorization: {
+      basis: "user-requested-repository-repair",
+      issue: `https://github.com/${REPOSITORY}/issues/39`,
+      pullRequest: `https://github.com/${REPOSITORY}/pull/40`,
+    },
+    repairPaths: CURRENT_REPAIR_PATHS,
+    testPaths: CURRENT_TEST_PATHS,
+  },
+];
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT = /^[a-f0-9]{40}$/;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -83,56 +117,65 @@ export function verifyTigerClientRepairs(repoRoot) {
   let original;
   try { original = verifyClientFoundationConsumer(root); }
   catch (error) { return [`客户端基座校验失败：${error.message}`]; }
-  if (!existsSync(join(root, MANIFEST))) return original;
+  const manifests = REPAIR_MANIFESTS.filter((config) => existsSync(join(root, config.manifest)));
+  if (!manifests.length) return original;
   const registered = new Set();
-  try {
-    const manifestPath = regularFile(root, MANIFEST);
-    if (lstatSync(manifestPath).size > 65536) throw new Error("修复登记超过大小限制");
-    const doc = JSON.parse(readFileSync(manifestPath, "utf8"));
-    const statePath = regularFile(root, ".workloom-client-foundation.json");
-    const stateBytes = readFileSync(statePath);
-    const state = JSON.parse(stateBytes);
-    if (doc?.schemaVersion !== "workloom.tiger-client-repairs/v1" || doc.repository !== REPOSITORY || doc.taskId !== TASK) {
-      throw new Error("修复登记的 schema、仓库或任务不匹配");
+  for (const config of manifests) {
+    try {
+      const manifestPath = regularFile(root, config.manifest);
+      if (lstatSync(manifestPath).size > 65536) throw new Error("修复登记超过大小限制");
+      const doc = JSON.parse(readFileSync(manifestPath, "utf8"));
+      const statePath = regularFile(root, ".workloom-client-foundation.json");
+      const stateBytes = readFileSync(statePath);
+      const state = JSON.parse(stateBytes);
+      if (doc?.schemaVersion !== "workloom.tiger-client-repairs/v1"
+        || doc.repository !== REPOSITORY || doc.taskId !== config.taskId) {
+        throw new Error("修复登记的 schema、仓库或任务不匹配");
+      }
+      if (doc.authorization?.basis !== config.authorization.basis
+        || doc.authorization.issue !== config.authorization.issue
+        || doc.authorization.pullRequest !== config.authorization.pullRequest) {
+        throw new Error("修复登记缺少本任务的授权来源与审查入口");
+      }
+      if (doc.base?.version !== state.version || doc.base.sourceCommit !== state.sourceCommit
+        || !COMMIT.test(doc.base.sourceCommit) || doc.base.stateSha256 !== hash(stateBytes)
+        || doc.base.verifierSha256 !== hash(readFileSync(regularFile(root, "scripts/verify-client-foundation-consumer.mjs")))) {
+        throw new Error("修复登记与原基座版本、state 或原始校验器摘要不一致");
+      }
+      if (!Array.isArray(doc.repairs) || doc.repairs.length < 1
+        || doc.repairs.length > config.repairPaths.size) throw new Error("修复文件数非法");
+      const seen = new Set();
+      for (const repair of doc.repairs) {
+        if (!repair || !config.repairPaths.has(repair.path)
+          || config.repairPaths.get(repair.path) !== repair.card
+          || seen.has(repair.path)) throw new Error("修复路径未授权、卡号错误或重复");
+        seen.add(repair.path);
+        if (!SHA256.test(repair.upstreamSha256) || !SHA256.test(repair.repairedSha256)
+          || repair.upstreamSha256 === repair.repairedSha256 || !COMMIT.test(repair.sourceCommit)
+          || typeof repair.reason !== "string" || repair.reason.trim().length < 20) throw new Error(`修复登记字段不完整：${repair.path}`);
+        if (state.managedFiles?.[repair.path]?.sha256 !== repair.upstreamSha256) throw new Error(`原基座文件摘要不匹配：${repair.path}`);
+        if (hash(readFileSync(regularFile(root, repair.path))) !== repair.repairedSha256) throw new Error(`已审查修复摘要不匹配：${repair.path}`);
+        registered.add(`受管客户端文件指纹漂移：${repair.path}`);
+      }
+      const requiredTests = new Set([...config.testPaths]
+        .filter(([, binding]) => binding.repairs.some((path) => seen.has(path)))
+        .map(([path]) => path));
+      if (!Array.isArray(doc.testAdditions) || doc.testAdditions.length !== requiredTests.size) {
+        throw new Error("客户端修复必须绑定对应的精确回归测试文件");
+      }
+      const seenTests = new Set();
+      for (const test of doc.testAdditions) {
+        if (!test || !requiredTests.has(test.path) || seenTests.has(test.path)
+          || test.card !== config.testPaths.get(test.path)?.card || !SHA256.test(test.sha256)
+          || state.managedFiles?.[test.path]) throw new Error("回归测试登记路径、卡号或摘要非法");
+        seenTests.add(test.path);
+        const file = regularFile(root, test.path);
+        if (hash(readFileSync(file)) !== test.sha256 || (lstatSync(file).mode & 0o111)) throw new Error("回归测试文件摘要或模式不匹配");
+        registered.add(`客户端根存在非白名单行业文件：${test.path}`);
+      }
+    } catch (error) {
+      errors.push(`Tiger 本仓修复登记无效：${error.message}`);
     }
-    if (doc.authorization?.basis !== "user-requested-repository-repair"
-      || doc.authorization.issue !== `https://github.com/${REPOSITORY}/issues/24`
-      || doc.authorization.pullRequest !== `https://github.com/${REPOSITORY}/pull/25`) {
-      throw new Error("修复登记缺少本任务的授权来源与审查入口");
-    }
-    if (doc.base?.version !== state.version || doc.base.sourceCommit !== state.sourceCommit
-      || !COMMIT.test(doc.base.sourceCommit) || doc.base.stateSha256 !== hash(stateBytes)
-      || doc.base.verifierSha256 !== hash(readFileSync(regularFile(root, "scripts/verify-client-foundation-consumer.mjs")))) {
-      throw new Error("修复登记与原基座版本、state 或原始校验器摘要不一致");
-    }
-    if (!Array.isArray(doc.repairs) || doc.repairs.length < 1 || doc.repairs.length > REPAIR_PATHS.size) throw new Error("修复文件数非法");
-    const seen = new Set();
-    for (const repair of doc.repairs) {
-      if (!repair || !REPAIR_PATHS.has(repair.path) || REPAIR_PATHS.get(repair.path) !== repair.card || seen.has(repair.path)) throw new Error("修复路径未授权、卡号错误或重复");
-      seen.add(repair.path);
-      if (!SHA256.test(repair.upstreamSha256) || !SHA256.test(repair.repairedSha256)
-        || repair.upstreamSha256 === repair.repairedSha256 || !COMMIT.test(repair.sourceCommit)
-        || typeof repair.reason !== "string" || repair.reason.trim().length < 20) throw new Error(`修复登记字段不完整：${repair.path}`);
-      if (state.managedFiles?.[repair.path]?.sha256 !== repair.upstreamSha256) throw new Error(`原基座文件摘要不匹配：${repair.path}`);
-      if (hash(readFileSync(regularFile(root, repair.path))) !== repair.repairedSha256) throw new Error(`已审查修复摘要不匹配：${repair.path}`);
-      registered.add(`受管客户端文件指纹漂移：${repair.path}`);
-    }
-    const requiredTests = new Set([...TEST_PATHS].filter(([, binding]) => binding.repairs.some((path) => seen.has(path))).map(([path]) => path));
-    if (!Array.isArray(doc.testAdditions) || doc.testAdditions.length !== requiredTests.size) {
-      throw new Error("客户端修复必须绑定对应的精确回归测试文件");
-    }
-    const seenTests = new Set();
-    for (const test of doc.testAdditions) {
-      if (!test || !requiredTests.has(test.path) || seenTests.has(test.path)
-        || test.card !== TEST_PATHS.get(test.path)?.card || !SHA256.test(test.sha256)
-        || state.managedFiles?.[test.path]) throw new Error("回归测试登记路径、卡号或摘要非法");
-      seenTests.add(test.path);
-      const file = regularFile(root, test.path);
-      if (hash(readFileSync(file)) !== test.sha256 || (lstatSync(file).mode & 0o111)) throw new Error("回归测试文件摘要或模式不匹配");
-      registered.add(`客户端根存在非白名单行业文件：${test.path}`);
-    }
-  } catch (error) {
-    errors.push(`Tiger 本仓修复登记无效：${error.message}`);
   }
   // Only the exact, hash-bound source/test differences above may be accepted. Missing files,
   // modes, versions, symlinks and every other original gate error remain failures.
@@ -144,7 +187,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   if (errors.length) {
     for (const error of errors) console.error(error);
     process.exitCode = 1;
-  } else if (existsSync(resolve("governance", MANIFEST))) {
+  } else if (REPAIR_MANIFESTS.some((config) => existsSync(resolve("governance", config.manifest)))) {
     console.log("✅ 原客户端基座与校验器摘要保留；本任务登记的客户端修复及对应回归测试已逐文件核验，其余受管文件零漂移");
   } else console.log("✅ Tiger 客户端原基座严格校验通过；无本仓修复登记");
 }

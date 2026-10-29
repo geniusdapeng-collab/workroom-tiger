@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
@@ -65,6 +66,8 @@ class Journal:
 
         require_usd_result(result, scope="信号日记输入")
         require_usd_records(self.records, scope=f"信号日记 {self.path}")
+        if getattr(result, "raw", {}).get("execution_policy") == "whitepaper-execution-v2":
+            return self._log_v2(result)
         source = source_label(getattr(result, "provider", ""))   # v6.5 来源留痕
         existing = {(r["date"], r["ticker"]) for r in self.records}
         added = 0
@@ -108,7 +111,7 @@ class Journal:
         changed = False
         self.last_failed: list[str] = []     # v6.1：行情缺失导致无法结算的标的（披露用）
         for rec in self.records:
-            if rec["status"] != "open":
+            if rec.get("execution_policy") == "whitepaper-execution-v2" or rec["status"] != "open":
                 continue
             sig_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
             age = (today - sig_date).days
@@ -205,6 +208,95 @@ class Journal:
         rec["protected"] = bool(res.protected)
         rec["entry_net"] = round(cost_adj_buy(entry_raw), 2)   # 含成本入场参考
 
+    def _log_v2(self, result):
+        """Research is a pending proposal. Only execution receipts can fill it."""
+        from .execution_policy import _compact_plan_budget
+        records = deepcopy(self.records)
+        existing = {(row["date"], row["ticker"]) for row in records}
+        added = 0
+        for pick in result.picks:
+            key = (result.trade_date, pick.ticker)
+            if key in existing:
+                continue
+            records.append({"date": result.trade_date, "ticker": pick.ticker,
+                "account_currency": ACCOUNT_CURRENCY, "quote_currency": ACCOUNT_CURRENCY,
+                "execution_policy": "whitepaper-execution-v2", "account_kind": "paper",
+                "template": pick.entry_template, "sector": pick.sector, "chain": pick.chain,
+                "entry_ref": pick.entry_price, "stop": pick.stop_price,
+                "tss_final": pick.tss_final, "tos": pick.tos,
+                "mrs_star": result.mrs.mrs_star if result.mrs else None,
+                "time_stop_days": pick.time_stop_days, "action": result.action,
+                "source": result.provider, "status": "pending", "entry": None,
+                "entry_date": None, "exit": None, "exit_date": None, "r": None,
+                "win": None, "proposed_shares": pick.shares,
+                "entry_budget": _compact_plan_budget(result.raw.get("entry_budget"))})
+            existing.add(key)
+            added += 1
+        if added:
+            require_usd_records(records, scope=f"信号日记 {self.path}")
+            write_json_atomic(self.path, records)
+            self.records = records
+        return added
+
+    def sync_execution(self, sim_state: dict, *, as_of: str) -> int:
+        """Mirror authoritative paper plans/fills/closes; never invent a fill."""
+        from .currency import require_usd_sim_state
+        from .execution_policy import POLICY_ID
+        require_usd_sim_state(sim_state, scope="信号日记纸盘回执")
+        datetime.strptime(as_of, "%Y-%m-%d")
+        records = deepcopy(self.records)
+        changed = 0
+        for identity, plan in sim_state.get("entry_plans", {}).items():
+            if plan.get("policy") != POLICY_ID:
+                continue
+            key = (plan["signal_date"], plan["ticker"])
+            rec = next((row for row in records if (row["date"], row["ticker"]) == key), None)
+            if rec is None:
+                rec = {"date": key[0], "ticker": key[1], "status": "pending",
+                       "execution_policy": POLICY_ID, "account_kind": "paper",
+                       "account_currency": ACCOUNT_CURRENCY, "quote_currency": ACCOUNT_CURRENCY,
+                       "template": plan["entry_template"], "entry_ref": plan["entry_ref"],
+                       "stop": plan["initial_stop"], "entry": None, "entry_date": None,
+                       "exit": None, "exit_date": None, "r": None, "win": None}
+                records.append(rec)
+            if rec.get("execution_policy") != POLICY_ID:
+                raise ValueError("Legacy journal row cannot be silently overwritten by v2")
+            previous = deepcopy(rec)
+            rec.update(plan_id=identity, fill_receipts=deepcopy(plan["fill_receipts"]),
+                       execution_policy=POLICY_ID, initial_stop=plan["initial_stop"])
+            pos = next((row for row in sim_state["positions"] if row.get("plan_id") == identity), None)
+            closes = [row for row in sim_state["closed"] if row.get("plan_id") == identity]
+            if len(closes) > 1:
+                raise ValueError("Duplicate paper close receipt")
+            if closes:
+                closed = closes[0]
+                if closed["exit_date"] > as_of:
+                    raise ValueError("Future paper close receipt")
+                if not math.isclose(closed["gross_pnl"] - closed["friction_cost"], closed["pnl_usd"], abs_tol=.011):
+                    raise ValueError("Paper cost identity does not reconcile")
+                rec.update(status="closed", entry=closed["entry"], entry_date=closed["entry_date"],
+                    exit=closed["exit"], exit_date=closed["exit_date"], shares=closed["shares"],
+                    pnl_usd=closed["pnl_usd"], gross_pnl=closed["gross_pnl"],
+                    friction_cost=closed["friction_cost"], r=closed["r_multiple"],
+                    win=closed["pnl_usd"] > 0, note=closed["reason"],
+                    initial_risk_usd=closed["initial_risk_usd"])
+            elif pos is not None:
+                if pos["entry_date"] > as_of:
+                    raise ValueError("Future paper fill receipt")
+                rec.update(status="open", entry=pos["entry_price"], entry_date=pos["entry_date"],
+                           shares=pos["shares"], protected=pos.get("protected", False),
+                           current_stop=pos["stop"], initial_risk_usd=pos["initial_risk_usd"])
+            elif plan["status"] in {"cancelled", "closed"}:
+                rec.update(status="void", note=plan.get("terminal_reason", "paper_plan_cancelled"))
+            else:
+                rec["status"] = "pending"
+            changed += rec != previous
+        if records != self.records:
+            require_usd_records(records, scope=f"信号日记 {self.path}")
+            write_json_atomic(self.path, records)
+            self.records = records
+        return changed
+
     # ------------------------------------------------------------
 
     def stats(self) -> dict:
@@ -227,6 +319,7 @@ class Journal:
             by_template.setdefault(r.get("template") or "无", []).append(r["r"])
         return {
             "closed": len(closed), "open": open_n,
+            "pending": sum(1 for r in self.records if r["status"] == "pending"),
             "win_rate": round(len(wins) / len(rs), 3) if rs else 0.0,
             "expectancy_r": round(float(np.mean(rs)), 3) if rs else 0.0,
             "profit_factor": round(sum(wins) / abs(sum(losses)), 2)

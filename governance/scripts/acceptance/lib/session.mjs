@@ -18,6 +18,17 @@ export function productIdOf(repoRoot) {
   }
 }
 
+export const EXTERNAL_FONT_ROUTE = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\//u;
+
+/**
+ * Local acceptance must not treat an unreachable third-party font CDN as an app
+ * navigation failure. Abort only those render-blocking font assets and let the
+ * product use its declared local fallback fonts.
+ */
+export async function blockExternalFontCdn(page) {
+  await page.route(EXTERNAL_FONT_ROUTE, (route) => route.abort("blockedbyclient"));
+}
+
 export async function loginAsMember(page, { urls, workspaceSlug, memberNo = "MEM-001", productId = "workloom-im" }) {
   const res = await page.request.post(`${urls.api}/trpc/auth.loginAs`, {
     data: { workspaceSlug, memberNo },
@@ -26,6 +37,7 @@ export async function loginAsMember(page, { urls, workspaceSlug, memberNo = "MEM
   const token = json?.result?.data?.token;
   if (!token) throw new Error(`登录失败（loginAs）：${JSON.stringify(json).slice(0, 200)}`);
 
+  await blockExternalFontCdn(page);
   await page.goto(`${urls.pc}/login`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(400);
   await page.evaluate(({ t, pid, slug }) => {

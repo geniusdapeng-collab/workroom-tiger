@@ -8,7 +8,7 @@
 
 ```bash
 node scripts/tiger-agent.mjs doctor --python /absolute/path/to/python
-printf '%s\n' '{"profile":"us-public-model-required-paper-v1"}' | \
+printf '%s\n' '{"profile":"us-public-model-required-paper-v2"}' | \
   node scripts/tiger-agent.mjs describe --python /absolute/path/to/python --input-file -
 ```
 
@@ -16,7 +16,9 @@ printf '%s\n' '{"profile":"us-public-model-required-paper-v1"}' | \
 
 默认 `--mode readonly`。执行完整 paper 工作流必须由操作者在启动参数或项目部署配置中显式选择 `--mode paper`。请求 JSON 不能改变 mode、解释器、state-root、阶段或策略。
 
-当前开放三个显式 profile。新的 AI 研究和官网更新的操作默认是必须明确选择 `us-public-model-required-paper-v1`，按下一节配置，无需用户再次强调真实模型。CLI 兼容函数默认仍为 `us-public-paper-v1`，仅保留旧调用/历史语义；操作默认与兼容函数默认不同。原 `us-public-paper-v1` 和 `us-public-active-paper-v1` 保留内层 disabled 与合法 passthrough 语义，用于其明确的历史/实验用途，不能作为新研究完成。所有配置仍为美股公开数据、USD 本地 paper 账户 `public-usd`、独立初始资金 100000 USD，不连接真实券商、不执行真实资金订单。外层宿主模型不会自动接入内层模型。
+当前开放六个固定 profile。新 AI 研究和官网更新默认必须显式选择 `us-public-model-required-paper-v2`；盘前和盘中分别选择 `us-public-model-required-premarket-paper-v2`、`us-public-model-required-intraday-paper-v2`。三个 v2 profile 共用 `whitepaper-execution-v2`，研究时段不同但均执行相同完整 43 阶段，使用 `full` 股票池，最多 10 个持仓名额，不把上限当每日配额。三者在同一独立 v2 state-root 内保持连续 paper 账户。
+
+旧 `us-public-model-required-paper-v1` 保留原五阶段模型证据和验证语义；旧 `us-public-paper-v1`、`us-public-active-paper-v1` 保留禁用/透传及实验语义，不能创建新官网研究。CLI 兼容函数默认仍是旧 `us-public-paper-v1`，所以新任务必须明确写 v2。首次账户 seed 为 100000 USD；后续仓位使用真实保存的 paper NAV、现金、持仓和整笔未完成计划预约，不再反复使用固定 100000 参考资金。外层宿主模型不等于内层模型，没有真实券商自动下单。
 
 可选 active 实验的回退板块是冻结的 NASDAQ 供应商分类代理，不是 GICS、真实 ETF 成分或历史时点分类；第三条达标主线保留为次池。更高资金使用率会改变实际风险，不能把“上限不变”解释为“收益或回撤不变”。该实验不会随 model-required 配置启用。运行和评测边界见 [TIGER-ACTIVITY-EVALUATION.md](TIGER-ACTIVITY-EVALUATION.md)。
 
@@ -34,23 +36,23 @@ node scripts/tiger-agent.mjs run --python /absolute/path/to/python \
   --input-file model-required-request.json --wait
 ```
 
-`model-required-request.json` 使用下文同一四字段结构，将 profile 设为 `us-public-model-required-paper-v1`。此配置沿用原策略和已通用的时序/预算正确性修复，activity 实验保持关闭。模型只能选择/否决数值风险闸门已批准的买入，不得新增、扩大或绕过任何风险限制；无合格买入也必须由实际模型生成等待理由。
+`model-required-request.json` 使用下文四字段结构。v2 基于 `reviewed_source_defaults`，不启用 active 板块代理或主线溢出实验。模型只能选择或否决数值风险已批准的买入，不得新增或扩大。没有合格买入时也必须完成真实 WAIT/AVOID 推理，并研究已有持仓。
 
-当前官方 API ID 为 `deepseek-flash`，2026-10-26 观察的 [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 映射是 `DeepSeek-V4.1-Flash-1017`。这是别名观察，不保证未来自动固定到同一发布；回执记录请求别名、实际 response.model、release 观察、response IDs 与 usage，不能虚构不可变日期 ID。
+固定 API ID 为 `deepseek-flash`，2026-10-27 复核的 [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 映射为 `DeepSeek-V4.1-Flash-1017`。它是可变别名，回执保存实际 response.model、response IDs、release 观察和 usage，不虚构不可变日期 ID。原生 [Search & Fetch](https://api-docs.deepseek.com/guides/search/) 使用同一提供方与 key。14 个广域主题后，对最多 10 个候选及全部最多 10 个持仓的去重并集逐发行人初搜；每个发行人可按初评的真实缺口再补搜一次并 Fetch 一个已观察、归属该目标的 URL。Fetch 可为零，不为凑次数调用；空 Search 结果和未知发布日期如实保留。
 
-应用调用同提供方 [Search & Fetch](https://api-docs.deepseek.com/guides/search/) 的原生 Search API，收集既有六条产业链与八类板块主题，将净化文档送入 Flash。适配器支持原生 Fetch，固定 collector 当前没有调用它。Flash 的 Responses `web_search` 在 [官方矩阵](https://api-docs.deepseek.com/guides/responses_api/) 中会被忽略，因此这里准确披露为 `provider_native_search`，不宣称 Flash 自带托管 web_search 已执行。来源 URL 中的凭据、token、签名等在持久化和送模型之前排除；原始响应只保留摘要，回执保留可重算的安全响应。
+六个必须真实完成的语义阶段为 `clean.llm_semantic`、`tech.sentiment`、`tech.risk`、`sector.narrative`、`research.candidates`、`decision.debate`。调用次数随文档批次和实际补证变化，不能把阶段数当成固定回复数。清洗逐篇保留完整摘要、逐字引文、来源归属和时效限定；下游使用完整语义索引，不能声称再次读了原文。发行人研究每批最多 3 个目标、每源最多展示 24000 字符、每批正文总量最多 60000 字符，先按发行人公平分配，本轮 Fetch/补搜优先。来源索引保留每个目标跨实际轮次累计见过的最长前缀字符数、完整性和摘要；没展示的正文不能用于新事实或完整新闻证据。
 
-五个语义阶段必须各有完整真实回复，清洗逐篇、舆情六链、叙事各 ETF 的覆盖均被验证；有效的无风险 `alerts=[]` 仍必须有真实风险评估。最终 `decision.debate` 始终调用模型，给出普通人能读懂的关注理由、时机、入场条件、失效条件、风险和来源。数值计划由原 TradePick 绑定，参考资金明确为纸面 100000 USD，`valid_for` 为下一交易日纽约 16:00 的 ISO 时刻。现有静态日历不含提前收市或临时特殊休市，日期限制随运行证据披露。
+每次远端调用前须通过统一预算预留。当前新v2任务选择`tiger.budget-policy.v4`：最多160次chat、20000000实际加预留tokens、60次Search、20次Fetch、240次远端请求、保守估算30 USD、7200秒。旧显式v3保留600000 tokens，旧v2保留300000 tokens，其余旧限额为40 chat/120远端/1 USD/2400秒，旧回执不变。发行人子预算另限 40 次 Search、20 次 Fetch、14 次 chat。所有来源逐篇完整清洗，只有已知用量且安全的schema拒绝可完整重新生成一次，v4整轮最多追加56次；正文、来源索引和时效门槛保留，其他错误不追加尝试。全部预留及实际usage必须结算一致；未知付费结果冻结，不能规则代答。美元数是按冻结上限费率计算的估计，不是账单承诺。详见 [官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
 
-每个语义请求都显式携带 admission 冻结的研究日期和纽约市场时区。最终判断另携带实际观察到的基准、候选股票及板块 ETF 末根日线日期；独立证明从 admission 和 `data.prepare` 快照重建这些值。来源发布时间未知或较旧时，模型必须披露时效不确定性，不能单独把它当作当前交易催化；日线日期不代表实时价格。
+当前v4在清洗之外的五个语义阶段（`tech.sentiment`、`tech.risk`、`sector.narrative`、`research.candidates`、`decision.debate`）统一显式请求 `max_tokens=65536`，保留 high 推理；清洗继续为 32768、disabled/none。该选择来自 `request_budget.semantic_output_tokens`，发行人初评/补证终评共同消费冻结 `plan.limits.max_output_tokens`，独立验证重建同一请求与预留。旧隐式/v2/v3 请求上限保持 8192/12288/16384 的原阶段值，不回写历史。只对上述v4普通 Chat 的高推理请求，响应窗口取 900 秒、预算单调时钟剩余、准入时刻加 7200 秒的绝对剩余三者最小值；无剩余时间时不发起 HTTP。旧政策、清洗、Search/Fetch 保留原窗口，响应正文仍限 1 MiB；未知结果冻结且不自动重试。900秒是源代码约束的网络窗口，不是从既有证明时间戳重新测出的单次耗时；独立证明继续核验整轮/绝对期限。65536 是上限，不承诺使用量、输出完整或任务成功。2026-10-28 核对的 [官方 Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/) 将 thinking 默认额度列为 64K，仍须以本任务的真实完成状态、usage 和独立回执判断。
 
-最终每个 buy/watch 都必须引用该股票自己的真实行情快照：`market_evidence` 恰好一项，仅有 `id`、`symbol`、`as_of`、`close`、`series_sha256` 五个字段。日期和收盘价来自该股票实际末根日线；完整标准化日线表的规范 JSON 计算 SHA-256，标识为 `md_<symbol>_<YYYYMMDD>_<摘要前24位>`。独立证明从冻结的 `data.prepare` 重建该项并核对模型请求、引用和最终输出；日期不得晚于冻结研究日，允许与基准末根日期不同。这里的 close 是所标日期的行情参考，不是获准入场价或已成交价。
+每个目标必须有市场、板块、产业链、个股、计划五段依据，并保留入场触发、反证、风险、缺口。`technical_flow_v2` 可以没有公司利好新闻，但仍需具体量价/结构/主线与事件未知边界；`news_event_v2` 的充分证据必须有冻结接纳时刻前 7 日内、归属本发行人、实际完整展示的原始资料。不同域名不自动算独立来源；模型识别原始来源，无法识别时保持未知。空风险预警也不能自动变成风险维度满分。
 
-模型 `source_ids` 必须恰好包含一次本股票的行情标识，不得借用其他股票快照。watch 允许不引用公司新闻，此时模型须明确说明新闻证据缺口和不确定性；不会强迫填入无关链接。buy 仍须另引用至少一篇、最多八篇原生搜索文档，行情不能代替买入新闻证据。发布计划的 `sources` 只放原生文章，`market_evidence` 单独保留行情事实；两类证据不互相冒充。空的候选集合仍须由模型给出顶层 WAIT/AVOID 解释。
+每个 buy/watch 恰好绑定自己的真实 `market_evidence`：`{id,symbol,as_of,close,series_sha256}`，由冻结完整日线重建；ID 为 `md_<symbol>_<YYYYMMDD>_<摘要前24位>`。`close` 仅是其日期收盘参考，不是获准入场或成交价格。盘前/盘中在纽约 16:00 之前只使用前一完整交易日日线；提前收市仍保守等待 16:00。交易日历不保证覆盖临时特殊休市；官方常规/提前时段见 [NYSE Hours & Calendars](https://www.nyse.com/markets/hours-calendars)。
 
-模型还须将同一原始报道的跨站转载视作一个来源，并明确区分 AI 评论、第三方断言与公司公告。该提示约束不会改变既有交叉验证阈值；按域名计数的规则本身不能证明不同网站一定具有独立报道来源，实际来源质量仍须随研究证据复核。Node 的返回 schema 校验字段形状，另由 enabled 模式的语义检查核对行情归属、有效日期、正价格及计划边界；JSON schema 单独通过不等于完整业务验证。
+最终模型的 source_ids 恰好包含自己的行情 ID，至多八篇直接文档引用；发布 registry 可扩展到十六篇，以保留 thesis 的原始/日期/身份引用。watch 的仓位为 0，执行价格、止损、股数、风险、时间止损均为 null，不能变成零价订单。buy 的数值全部绑定原 TradePick，以本轮 paper NAV 为参考；`valid_for` 是下一交易日纽约 16:00。已有机会持续记录 WATCH/QUALIFIED/INTENT_PENDING/HELD/EXIT_PENDING 等状态；触价只请求重新评估，待执行意向必须重新检查新鲜报价及当前完整风险。真实持仓、现金与成交仍来自单独实际账户证据。
 
-任何模型/原生搜索不可用、401/配额错误、截断、错误模型、空输出、缺项、schema 不符、缺少真实调用或文档/阶段输出与调用不一致，均停止整个任务，不透传，不规则代答，不发布新账户或网站成功。成功只允许 `completed`；`completed_degraded` 不满足此配置。真实业务成功须通过 receipt/verify 独立重算全部阶段 I/O 和最终计划。所有自动测试里的模拟 HTTP 仅证明契约，不能算作真实模型使用。
+模型/原生搜索不可用、401/配额错误、截断、错误模型、空输出、缺少真实调用或文档/阶段输出与调用不一致，均停止整个任务；schema拒绝只允许前述明确、有界的完整重新生成，仍不通过即停止。失败任务不透传，不规则代答，不发布新账户或网站成功。成功只允许 `completed`；`completed_degraded` 不满足此配置。真实业务成功须通过 receipt/verify 独立重算全部阶段 I/O 和最终计划。所有自动测试里的模拟 HTTP 仅证明契约，不能算作真实模型使用。
 
 ## 2. CLI：提交一次，持续查询同一个身份
 
@@ -61,7 +63,7 @@ node scripts/tiger-agent.mjs run --python /absolute/path/to/python \
 ```json
 {
   "schema_version": "tiger.agent-request/v1",
-  "profile": "us-public-model-required-paper-v1",
+  "profile": "us-public-model-required-paper-v2",
   "paper_account": "public-usd",
   "idempotency_key": "operator-task-20261021-001"
 }
@@ -74,7 +76,7 @@ node scripts/tiger-agent.mjs run \
   --mode paper --input-file request.json
 ```
 
-如需单独运行已授权的 active 实验，将请求中的 `profile` 明确改为 `us-public-active-paper-v1`，使用新的逻辑幂等键和独立 state-root；兼容旧调用须明确使用 `us-public-paper-v1`，不作为新 AI 研究完成。`describe` 可用 `--input-file` 读取对应 profile 的对象返回其 policy。三个 profile 不应在同一个账户历史中混用；切换时应新建独立 state-root，不复制待成交/净值来冒充迁移。
+如需单独运行已授权的 active 实验，将请求中的 `profile` 明确改为 `us-public-active-paper-v1`，使用新的逻辑幂等键和独立 state-root；兼容旧调用须明确使用 `us-public-paper-v1`，不作为新 AI 研究完成。`describe` 可用 `--input-file` 读取对应 profile 的对象返回其 policy。旧 v1 与新 v2 账户不可混用；首次建立独立 v2 state-root，不复制旧待成交/净值冒充迁移。三个 v2 阶段保留同一账户连续历史。
 
 成功提交返回 `run_id` 和 `status=accepted` 或 `running`。这只表示请求身份被接纳，不能报告分析或账户处理完成。将实际 `run_id` 写入查询文件：
 
@@ -93,7 +95,7 @@ node scripts/tiger-agent.mjs verify --python /absolute/path/to/python \
 
 查询可以保持 readonly，但必须使用提交时同一个 state-root。`receipt` 独立验证证据和账户提交后才提供选股、持仓、挂单、现金、权益、日期及数据/模型限制；`verify` 提供验证结果而不重复业务动作。CLI 每次仅输出一个 JSON envelope；所有返回字段的契约在 `bundles/trading/agent-workflow.schema.json`。
 
-需要持续等待时，原 `run` 命令可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口 2460 秒；Python 业务 deadline 独立为 2400 秒。Node 单次提交/查询上限 60 秒，等待循环只轮询已有 `run_id`，不会重新提交。
+需要持续等待时，原 `run` 命令可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口7260秒；Python业务deadline按可信预算版本独立执行（当前v4为7200秒，旧版本2400秒）。显式1..3600秒选项用于较短观察，不修改业务期限。Node 的 status 等轻量查询单次观察上限为 60 秒；v2 `run` 在启动前要完整验证已提交父 run，`receipt`/`verify` 要重建较大的证据图，这三项单次上限为 300 秒。等待循环只轮询已有 `run_id`，不会重新提交。
 
 | 场景 | 正确行为 |
 |---|---|
@@ -184,13 +186,15 @@ printf '%s' '{}' | node scripts/workloom-agent.mjs invoke trading.repo.status --
 TIGER_TEST_PYTHON=/absolute/path/to/python node --test \
   bundles/trading/capabilities/workflow-client.test.mjs \
   bundles/trading/capabilities/workflow-model-required.test.mjs \
+  bundles/trading/capabilities/workflow-short-term-v2.test.mjs \
+  bundles/trading/capabilities/workflow-clean-regeneration.test.mjs \
   bundles/trading/capabilities/repo.test.mjs \
   scripts/tiger-agent.test.mjs scripts/tiger-agent-mcp.test.mjs \
   scripts/tiger-agent-config.test.mjs \
   scripts/agent-capabilities.test.mjs governance/scripts/agent-capabilities.test.mjs
 ```
 
-这些 Node 测试包含确定性传输夹具，不能证明公开行情调用、39 阶段执行或 paper 账户提交成功。完整验收还需要真实 Python 集成、故障/并发/证据篡改测试，以及通过当前宿主 CLI 或工具取得的实际公开数据 paper 回执。任何 completion 声明须关联源代码身份、run_id、receipt hash、验证结果及限制。
+这些 Node 测试包含确定性传输夹具，不能证明公开行情调用、v2 的 43 阶段执行或 paper 账户提交成功。完整验收还需要真实 Python 集成、故障/并发/证据篡改测试，以及通过当前宿主 CLI 或工具取得的实际公开数据 paper 回执。任何 completion 声明须关联源代码身份、run_id、receipt hash、验证结果及限制。
 
 | 错误或现象 | 处理 |
 |---|---|

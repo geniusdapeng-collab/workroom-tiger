@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 import {
-  LIMITS, RESULT_SCHEMA, WorkflowError, exitCode, invokeWorkflow, parseJson, readRequestInput,
+  LIMITS, RESULT_SCHEMA, WorkflowError, exitCode, invokeWorkflow, observationTimeoutMs, parseJson, readRequestInput,
   runtimeEnvironment, safeEvidencePath, startupOptions, validateEnvelope, validateRequest, validateSchemaDefinition, waitForReceipt,
 } from "./workflow-client.mjs";
 import { REQUEST, ROOT, RUN_ID, eventually, result, runnerFixture } from "../../../scripts/tiger-agent-test-support.mjs";
@@ -106,6 +106,15 @@ test("N06: accepted/recovered identity and status are distinct from verified rec
   assert.deepEqual((await fixture.calls()).map((call) => call.operation), ["run", "status", "receipt"]);
   for (const operation of ["run", "status", "doctor", "describe"]) assert.throws(() => validateEnvelope(result(operation, { summary: {} }), operation), { code: "RESULT_INVALID" });
   assert.throws(() => validateEnvelope(result("receipt", { verification: null }), "receipt"), { code: "RESULT_INVALID" });
+});
+
+test("Verified receipt replay has a bounded five-minute observation window", () => {
+  assert.equal(observationTimeoutMs("doctor"), 60000);
+  assert.equal(observationTimeoutMs("run"), 300000);
+  assert.equal(observationTimeoutMs("status"), 60000);
+  assert.equal(observationTimeoutMs("receipt"), 300000);
+  assert.equal(observationTimeoutMs("verify"), 300000);
+  assert.equal(LIMITS.verificationRequestMs, 300000);
 });
 
 test("E04/E05: exit0 fake business failure and nonzero success cannot become success", async (t) => {

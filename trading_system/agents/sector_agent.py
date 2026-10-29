@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -23,6 +24,12 @@ from ..indicators import (
     sma, tnx_trend_label,
 )
 from .base import BaseAgent
+
+
+@dataclass
+class SectorEvidenceScore(SectorScore):
+    """Versioned full narrative evidence without changing v1 dataclass bytes."""
+    semantic_evidence: dict = field(default_factory=dict)
 
 
 class SectorAgent(BaseAgent):
@@ -118,7 +125,21 @@ class SectorAgent(BaseAgent):
         #    LLM 不可用 → None 剔除再归一化，红线禁止规则估算）
         narr_llm = context.get("narrative_llm") or {}
         s_narr = None
-        if etf in narr_llm:
+        version2 = context.get("research_contract_version") == 2
+        semantic = {}
+        if version2:
+            semantic = dict(narr_llm.get(etf) or {})
+            score = semantic.get("score")
+            if score is not None:
+                if type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 10:
+                    raise ValueError("Invalid v2 narrative score")
+                s_narr = round(score, 1)
+            explanation = semantic.get("evidence", "本轮没有该板块的语义产出；未知不能视为中性。")
+            evidence.append(
+                f"{etf} 叙事兑现: {'未知，数值维缺失' if s_narr is None else f'LLM 评分 {s_narr}'}"
+                f"（EPS修正 {semantic.get('bias', 'unknown')}, 指引 {semantic.get('tone', 'unknown')}; {explanation}）"
+            )
+        elif etf in narr_llm:
             s_narr = round(float(narr_llm[etf]["score"]), 1)
             evidence.append(
                 f"{etf} 叙事兑现: LLM 评分 {s_narr}（EPS修正 {narr_llm[etf].get('bias')}, "
@@ -139,8 +160,10 @@ class SectorAgent(BaseAgent):
             f"{etf} SHS = {shs}（macro {s_macro if s_macro is not None else '缺失'}/flow {s_flow}/"
             f"narr {s_narr if s_narr is not None else '缺失'}/micro 缺失，再归一化）")
 
-        return SectorScore(
+        result_type = SectorEvidenceScore if version2 else SectorScore
+        return result_type(
             etf=etf, shs=shs,
             factors={"macro": s_macro, "flow": s_flow, "narr": s_narr, "micro": s_micro},
             breadth=breadth, rs_slope_q=q, r20=r20, evidence=evidence,
+            **({"semantic_evidence": semantic} if version2 else {}),
         )

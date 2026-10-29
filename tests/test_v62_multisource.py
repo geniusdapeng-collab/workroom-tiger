@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pandas as pd
 import pytest
 
@@ -166,7 +168,64 @@ def test_sina_kline_parsing():
 
 def test_sina_quote_parsing():
     q = _SinaFake().quote("AAPL")
-    assert q["price"] == 319.70 and q["ts"] == "2026-08-29 06:32:33"
+    assert q["price"] == 319.70 and q["ts"] == "2026-08-29T06:32:33+08:00"
+
+
+def test_sina_a_share_quote_parsing_uses_explicit_china_timezone(monkeypatch):
+    fields = [""] * 32
+    fields[3] = "1354.000"
+    fields[30] = "2026-10-29"
+    fields[31] = "15:10:15"
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return ("var hq_str_sh600519=\"" + ",".join(fields) + "\"").encode("gbk")
+
+    monkeypatch.setattr(
+        "trading_system.providers.sina.urllib.request.urlopen",
+        lambda *_args, **_kwargs: _Response(),
+    )
+    q = SinaProvider().quote("600519.SS")
+    assert q == {"price": 1354.0, "ts": "2026-10-29T15:10:15+08:00", "kind": "realtime"}
+
+
+def test_sina_full_market_batch_is_bounded_concurrent_and_preserves_order():
+    class _Concurrent(SinaProvider):
+        def __init__(self):
+            super().__init__()
+            self.gate = threading.Barrier(8, timeout=3)
+            self.lock = threading.Lock()
+            self.active = 0
+            self.maximum_active = 0
+
+        def ohlcv(self, ticker, days=400):
+            with self.lock:
+                self.active += 1
+                self.maximum_active = max(self.maximum_active, self.active)
+            try:
+                self.gate.wait()
+                if ticker == "BAD":
+                    raise RuntimeError("symbol-specific failure")
+                index = pd.to_datetime(["2026-10-28"])
+                return pd.DataFrame(
+                    {"Open": [1.0], "High": [1.0], "Low": [1.0],
+                     "Close": [1.0], "Volume": [1.0]}, index=index)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    symbols = ["D", "B", "BAD", "A", "C", "G", "F", "E"]
+    provider = _Concurrent()
+    result = provider.ohlcv_batch(symbols, days=30)
+    assert provider.maximum_active == provider.batch_workers == 8
+    assert list(result) == [symbol for symbol in symbols if symbol != "BAD"]
+    assert provider.ohlcv_batch([], days=30) == {}
 
 
 # ---------------------------------------------------------------- 东财解析

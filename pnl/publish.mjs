@@ -23,8 +23,9 @@ export async function publishRecord({ baseUrl, token, record, research = false, 
 async function main() {
   const args = process.argv.slice(2); const allowLocalHttp = args.includes('--allow-local-http'); const research = args.includes('--research'); const files = args.filter(arg => !['--allow-local-http', '--research'].includes(arg));
   if (files.length !== 1 || files[0].startsWith('--')) throw new Error('Usage: node pnl/publish.mjs /private/path/snapshot.json [--research] [--allow-local-http]');
-  const info = await stat(files[0]); if (!info.isFile() || info.size > 1_048_576) throw new Error('Snapshot must be a JSON file of at most 1 MiB');
+  const info = await stat(files[0]); if (!info.isFile() || info.size > 4 * 1_048_576) throw new Error('Snapshot must be a JSON file of at most 4 MiB (schema3 research only above 1 MiB)');
   const record = JSON.parse(await readFile(files[0], 'utf8'));
+  if ((!research || record.schemaVersion !== 3) && info.size > 1_048_576) throw new Error('Legacy and real-account snapshots retain the 1 MiB limit');
   const receipt = await publishRecord({ baseUrl: process.env.TIGER_PNL_URL ?? 'https://tigerpnl.com', token: process.env.TIGER_PNL_WRITE_TOKEN, record, research, allowLocalHttp });
   console.log(JSON.stringify({ status: 'published_and_verified', receipt }, null, 2));
 }

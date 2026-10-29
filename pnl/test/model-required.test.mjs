@@ -7,6 +7,7 @@ import { canonical, digest, validateResearch } from '../lib/schema.mjs';
 import { ResearchLedger } from '../lib/ledger.mjs';
 import { createPnlServer } from '../server.mjs';
 import { modelResearchFixture, instructionFixture } from './model-fixture.mjs';
+import { researchV3Fixture } from './short-term-fixture.mjs';
 
 const TOKEN = 'MODEL-REQUIRED-UNIT-TEST-ONLY-NOT-A-REAL-SECRET';
 function legacyFixture(overrides = {}) {
@@ -130,7 +131,7 @@ test('historical disabled chains still load unchanged while every new disabled a
     assert.deepEqual(store.entries[0].record, old);
     await assert.rejects(store.append(legacyFixture({ idempotencyKey: 'new-disabled-must-fail', asOf: '2026-01-03T21:00:00Z', runId: 'new-disabled-run' })), { code: 'MODEL_REQUIRED' });
     assert.equal(store.entries.length, 1);
-    const accepted = await store.append(modelResearchFixture());
+    const accepted = await store.append(researchV3Fixture());
     assert.equal(accepted.sequence, 2); assert.equal(accepted.previousHash, entry.hash);
   } finally { await store.close(); }
   const restored = await ResearchLedger.open(path);
@@ -153,12 +154,12 @@ test('HTTP publishes model execution instructions without inventing account fill
     const invalid = marketResearch({ market_evidence: [marketSnapshot({ symbol: 'MSFT' })], sources: [] });
     assert.equal((await post(invalid)).status, 422);
     assert.equal((await (await fetch(`${base}/healthz`)).json()).research, 0);
-    const input = marketResearch({ sources: [] }); const accepted = await post(input); assert.equal(accepted.status, 201);
+    const input = researchV3Fixture(); const accepted = await post(input); assert.equal(accepted.status, 201);
     const output = await (await fetch(`${base}/api/public/dashboard`)).json();
     assert.equal(output.latest, null); assert.deepEqual(output.records, []);
     assert.deepEqual(output.research.latest.model, input.model);
     assert.deepEqual(output.research.latest.executionDecisions, input.executionDecisions);
-    assert.equal(output.research.latest.schemaVersion, 2);
+    assert.equal(output.research.latest.schemaVersion, 3);
     assert.equal(JSON.stringify(output).includes(TOKEN), false);
     const document = await fetch(`${base}/whitepaper/tiger-trading-20260730.pdf`);
     assert.equal(document.status, 200); assert.match(document.headers.get('content-type'), /^application\/pdf/);

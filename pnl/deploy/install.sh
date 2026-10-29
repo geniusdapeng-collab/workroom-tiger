@@ -33,15 +33,18 @@ if [[ -e "$release" ]]; then
   echo 'Release already exists; verify its receipt before reusing it.' >&2
   exit 2
 fi
-# Validate paths before extracting the verified package. Only the independent website is deployed.
+# Validate the website and the single shared, read-only model contract closure.
 python3 - "$archive" <<'PY'
 import pathlib,sys,tarfile
+shared='bundles/trading/capabilities/required-v2-contract.mjs'
+parents={'bundles','bundles/trading','bundles/trading/capabilities'}
 with tarfile.open(sys.argv[1],'r:gz') as package:
     members=package.getmembers()
     if not members: raise ValueError('Empty website package')
     for member in members:
         path=pathlib.PurePosixPath(member.name)
-        if not (path.parts and path.parts[0]=='pnl' and '..' not in path.parts and not path.is_absolute()): raise ValueError('Invalid archive path')
+        registered=path.parts and (path.parts[0]=='pnl' or str(path)==shared or member.isdir() and str(path) in parents)
+        if not (registered and '..' not in path.parts and not path.is_absolute()): raise ValueError('Invalid archive path')
         if not (member.isdir() or member.isfile()): raise ValueError('Website package must contain only files and directories')
 PY
 install -d -m 0755 "$release"
@@ -50,6 +53,8 @@ find "$release" -type d -exec chmod 0755 {} +
 find "$release" -type f -exec chmod 0644 {} +
 chmod 0755 "$release"/pnl/deploy/*.sh
 "$node_source" --check "$release/pnl/server.mjs"
+"$node_source" --input-type=module -e 'import { pathToFileURL } from "node:url"; const files=process.argv.slice(1); process.argv.length=1; for (const file of files) await import(pathToFileURL(file).href);' \
+  "$release/pnl/server.mjs" "$release/pnl/backup.mjs" "$release/pnl/publish.mjs"
 runuser -u tiger-pnl -- test -r "$release/pnl/public/index.html"
 previous="$(readlink -f /opt/tiger-pnl/current || true)"
 if [[ -n "$previous" && -f "$previous/pnl/backup.mjs" ]]; then

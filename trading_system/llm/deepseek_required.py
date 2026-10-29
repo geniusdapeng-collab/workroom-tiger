@@ -14,13 +14,16 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 import requests
+from urllib3.exceptions import ProtocolError, ReadTimeoutError, SSLError
+from urllib3.util import Timeout
 
 from ..redline import LLMUnavailable
 from ..redline.model_diagnostics import RequiredModelUnavailable
@@ -34,6 +37,8 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 60.0
 RESPONSE_DEADLINE = 180.0
+RESPONSES_ERROR_BYTES = 16384
+RESPONSES_ERROR_DEADLINE = 2.0
 _URL = re.compile(r"https?://[^\s<>\"'`\[\]{}]+", re.IGNORECASE)
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
 _CREDENTIAL = re.compile(
@@ -46,7 +51,7 @@ _SENSITIVE_QUERY = frozenset({
     "sessiontoken", "clientsecret", "accesskey", "accesskeyid", "securitytoken", "jwt",
 })
 _SCHEMA_KEYS = frozenset({
-    "type", "properties", "required", "additionalProperties", "items", "enum",
+    "type", "properties", "required", "additionalProperties", "items", "contains", "enum",
     "const", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
     "minItems", "maxItems", "minLength", "maxLength", "pattern", "uniqueItems",
     "anyOf", "oneOf", "allOf", "title", "description", "$schema",
@@ -122,6 +127,8 @@ def _check_schema(schema: object, depth: int = 0) -> None:
             _check_schema(extra, depth + 1)
     if "items" in schema:
         _check_schema(schema["items"], depth + 1)
+    if "contains" in schema:
+        _check_schema(schema["contains"], depth + 1)
     for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
         if key in schema and not _finite_number(schema[key]):
             _fail("INVALID_SCHEMA_BOUND")
@@ -196,6 +203,8 @@ def _matches(value: object, schema: dict, depth: int = 0) -> bool:
             return False
         if "items" in schema and any(not _matches(v, schema["items"], depth + 1) for v in value):
             return False
+        if "contains" in schema and not any(_matches(v, schema["contains"], depth + 1) for v in value):
+            return False
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value)):
             return False
@@ -223,11 +232,13 @@ def _schema_child_path(path: str, segment: str | int) -> str | None:
 
 
 def _schema_mismatch(value: object, schema: dict, depth: int = 0,
-                     path: str = "") -> tuple[str, str]:
+                     path: str = "", *, trusted_properties=frozenset()) -> tuple[str, str]:
     """Locate a rejected instance without returning its keys, values or text.
 
     This runs only after the unchanged acceptance validator rejects the value.
-    Combinator and extra-property failures stay at the parent instance path.
+    One uniquely failing allOf child may be located more precisely. A shared
+    additionalProperties rule may name only keys declared by sibling schemas;
+    arbitrary model keys and unresolved alternatives stay at the parent path.
     """
     if depth > 64:
         return path, "depth"
@@ -241,6 +252,14 @@ def _schema_mismatch(value: object, schema: dict, depth: int = 0,
         return path, "enum"
     for key, accept in (("allOf", all), ("anyOf", any)):
         if key in schema and not accept(_matches(value, child, depth + 1) for child in schema[key]):
+            if key == "allOf":
+                failed = [child for child in schema[key] if not _matches(value, child, depth + 1)]
+                if len(failed) == 1:
+                    known = set(trusted_properties) | set(schema.get("properties", {}))
+                    for child in schema[key]:
+                        known.update(child.get("properties", {}))
+                    return _schema_mismatch(value, failed[0], depth + 1, path,
+                                            trusted_properties=frozenset(known))
             return path, key
     if "oneOf" in schema and sum(_matches(value, child, depth + 1) for child in schema["oneOf"]) != 1:
         return path, "oneOf"
@@ -258,6 +277,10 @@ def _schema_mismatch(value: object, schema: dict, depth: int = 0,
                     return ((path, "depth") if child is None else
                             _schema_mismatch(item, props[key], depth + 1, child))
             elif extra is False or (isinstance(extra, dict) and not _matches(item, extra, depth + 1)):
+                if isinstance(extra, dict) and key in trusted_properties:
+                    child = _schema_child_path(path, key)
+                    return ((path, "depth") if child is None else
+                            _schema_mismatch(item, extra, depth + 1, child))
                 return path, "additionalProperties"
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0):
@@ -273,6 +296,9 @@ def _schema_mismatch(value: object, schema: dict, depth: int = 0,
                     child = _schema_child_path(path, index)
                     return ((path, "depth") if child is None else
                             _schema_mismatch(item, schema["items"], depth + 1, child))
+        if "contains" in schema and not any(_matches(item, schema["contains"], depth + 1) for item in value):
+            # No element matched; there is no unique failing item to expose.
+            return path, "contains"
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             return path, "minLength"
@@ -375,13 +401,133 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict:
     return result
 
 
-def _json_loads(value: bytes | str) -> object:
+def _json_loads(value: bytes | str, *, finite_floats: bool = False) -> object:
+    def parse_float(text: str) -> float:
+        number = float(text)
+        if not math.isfinite(number):
+            _fail("NONFINITE_RESPONSE_JSON")
+        return number
+
     try:
         if isinstance(value, bytes):
             value = value.decode("utf-8", "strict")
-        return json.loads(value, parse_constant=_reject_constant, object_pairs_hook=_unique_pairs)
+        return json.loads(value, parse_constant=_reject_constant, object_pairs_hook=_unique_pairs,
+                          **({"parse_float": parse_float} if finite_floats else {}))
     except (ValueError, UnicodeError, RecursionError):
         _fail("INVALID_RESPONSE_JSON")
+
+
+def build_chat_request(*, system: str, user: str, schema_hint: dict,
+                       schema: dict, max_tokens: int = 16384,
+                       temperature: float = 0.2, reasoning_effort: str = "high",
+                       thinking_mode: str = THINKING_MODE) -> dict:
+    """Pure exact request framing, also used by the read-only proof replay."""
+    if thinking_mode not in ("enabled", "disabled"):
+        _fail("INVALID_CHAT_REQUEST")
+    request = {"model": MODEL, "messages": [
+        {"role": "system", "content": system + "\nReturn exactly one JSON object. JSON only."},
+        {"role": "user", "content": user + "\nJSON schema:\n" +
+         _canonical(schema).decode() + "\nJSON field guidance:\n" +
+         _canonical(schema_hint).decode()}],
+        "max_tokens": max_tokens, "temperature": temperature, "stream": False,
+        "response_format": {"type": "json_object"}, "thinking": {"type": thinking_mode}}
+    if thinking_mode == "enabled":
+        if not isinstance(reasoning_effort, str) or not reasoning_effort:
+            _fail("INVALID_CHAT_REQUEST")
+        request["reasoning_effort"] = reasoning_effort
+    return request
+
+
+def stage_reasoning_effort(stage: str, *, upgrade: bool = False) -> str:
+    """Extraction gets bounded low effort; research and decisions retain high.
+
+    Official low/high support was checked on 2026-10-27 at
+    https://api-docs.deepseek.com/guides/thinking_mode/ . This is a versioned
+    request policy, not evidence that lower effort improves semantic accuracy.
+    """
+    return "low" if upgrade and stage == "clean.llm_semantic" else "high"
+
+
+def stage_thinking_mode(stage: str, *, upgrade: bool = False) -> str:
+    """Current required-model requests never spend output on hidden thinking.
+
+    Historical verifiers reconstruct the retired enabled/high request from the
+    absence of ``model_contract.thinking_mode`` in their frozen policy. New
+    requests always use JSON mode with thinking disabled and omit the
+    incompatible reasoning-effort field.
+    """
+    return THINKING_MODE
+
+
+def responses_usage(value: object) -> tuple[dict, dict]:
+    """Keep observed native usage; derive only its exact existing budget keys.
+
+    No usage is invented for absent fields. Unknown provider fields are never
+    persisted; known optional numeric details are preserved when supplied.
+    The caller settles this mapping before any output/identity acceptance.
+    """
+    if type(value) is not dict:
+        _fail("USAGE_REQUIRED")
+    native = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        count = value.get(key)
+        if type(count) is not int or count < 0:
+            _fail("INVALID_USAGE")
+        native[key] = count
+    if native["input_tokens"] + native["output_tokens"] != native["total_tokens"]:
+        _fail("INCONSISTENT_USAGE")
+    for parent, child, limit in (("input_tokens_details", "cached_tokens", "input_tokens"),
+                                 ("output_tokens_details", "reasoning_tokens", "output_tokens")):
+        if parent not in value:
+            continue
+        details = value[parent]
+        if type(details) is not dict:
+            _fail("INVALID_USAGE")
+        if child in details:
+            count = details[child]
+            if type(count) is not int or not 0 <= count <= native[limit]:
+                _fail("INVALID_USAGE")
+            native[parent] = {child: count}
+    normalized = {"prompt_tokens": native["input_tokens"],
+                  "completion_tokens": native["output_tokens"], "total_tokens": native["total_tokens"]}
+    return native, normalized
+
+
+class _BodyDeadline:
+    """Interrupt the owned raw response at the remaining monotonic deadline.
+
+    urllib3 read/total timeouts measure socket idle intervals, so blank-line
+    keepalives alone cannot enforce a body deadline. Its public shutdown method
+    interrupts a blocked read. Cancel and join before closing this response;
+    never leave a callback that could act after cleanup. No exception text is
+    retained, including errors caused by an already released connection.
+    """
+
+    def __init__(self, raw, deadline: float):
+        self.expired = threading.Event()
+        self.shutdown_failed = threading.Event()
+        self._timer = None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _fail("RESPONSE_DEADLINE")
+        shutdown = getattr(raw, "shutdown", None)
+        if callable(shutdown):
+            def interrupt():
+                self.expired.set()
+                try:
+                    shutdown()
+                except Exception:
+                    # A released/closed connection has nothing left to read.
+                    # The main thread still rejects this expired response.
+                    self.shutdown_failed.set()
+            self._timer = threading.Timer(remaining, interrupt)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def close(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer.join()
 
 
 class DeepSeekRequiredClient:
@@ -404,15 +550,100 @@ class DeepSeekRequiredClient:
         self.search_receipts: list[dict] = []
         self.fetch_receipts: list[dict] = []
         self._remote_requests = 0
+        self._used_call_ids: set[str] = set()
+        self._clean_operation_lock = threading.Lock()
+        self._clean_logical_calls: set[str] = set()
+        self._clean_regenerations_used = 0
+        self.budget = None
+        if getattr(execution, "upgrade", False):
+            from .request_budget import BudgetGuard
+            from .clean_output import clean_output_policy, CleanOutputInvalid
+            try:
+                self.budget = BudgetGuard.for_policy(getattr(getattr(execution, "policy", None), "budget_policy_id", None),
+                    clean_output_policy_id=clean_output_policy(execution))
+            except CleanOutputInvalid:
+                _fail("TRUSTED_CONFIGURATION_MISMATCH")
+
+    def _admit_call(self, kind: str, call_id: str, request: dict, inputs: dict) -> None:
+        if call_id in self._used_call_ids:
+            _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+        self._used_call_ids.add(call_id)
+        if self.budget is not None:
+            from .request_budget import BudgetRefused
+            try:
+                inputs["budget_reservation"] = self.budget.reserve(kind, call_id, request)
+            except BudgetRefused:
+                _fail("REQUEST_BUDGET_REFUSED")
+            inputs["started_at_utc"] = datetime.now(timezone.utc).isoformat()
+
+    def _settle_budget(self, call_id: str, usage: dict | None) -> None:
+        if self.budget is not None:
+            from .request_budget import BudgetRefused
+            try:
+                self.budget.settle(call_id, usage)
+            except BudgetRefused:
+                _fail("REQUEST_BUDGET_REFUSED")
+
+    def _budget_proof(self, inputs: dict) -> dict:
+        if self.budget is None:
+            return {}
+        end = datetime.now(timezone.utc)
+        start = datetime.fromisoformat(inputs["started_at_utc"])
+        return {"budget_reservation": inputs["budget_reservation"],
+                "budget_after": self.budget.snapshot(),
+                "started_at_utc": inputs["started_at_utc"],
+                "finished_at_utc": end.isoformat(),
+                "elapsed_ms": max(0.0, round((end - start).total_seconds() * 1000, 3))}
+
+    def _record_call(self, method: str, inputs: dict, invoke, *, observation=None,
+                     responses_protocol: bool = False):
+        def recorded_invoke():
+            try:
+                return invoke()
+            except BaseException as error:
+                if self.budget is not None:
+                    self.budget.mark_unknown(inputs["call_id"])
+                    if type(error) is RequiredModelUnavailable:
+                        budget = self.budget.snapshot()
+                        record = next(row for row in budget["records"]
+                                      if row["reservation"]["call_id"] == inputs["call_id"])
+                        accounting = {"schema": "tiger.model-call-accounting.v3" if self.budget.policy_id else "tiger.model-call-accounting.v2",
+                            **({"budget_policy_id": self.budget.policy_id} if self.budget.policy_id else {}),
+                            "call_id": inputs["call_id"], "request_sha256": inputs["request_sha256"],
+                            "kind": record["reservation"]["kind"], "status": record["status"],
+                            "usage": ({key: record["usage"][key] for key in
+                                ("prompt_tokens", "completion_tokens", "total_tokens")}
+                                if record["usage"] is not None else None),
+                            **{key: budget[key] for key in ("counts", "actual_tokens", "reserved_tokens",
+                                "estimated_charged_usd", "estimated_reserved_usd", "frozen")},
+                            "finish_reason": (observation or {}).get("finish_reason")}
+                        if responses_protocol:
+                            accounting.pop("finish_reason")
+                            accounting.update(schema="tiger.model-call-accounting.v4",
+                                output_policy_id=inputs["output_policy_id"],
+                                response_status=(observation or {}).get("response_status", "unknown"),
+                                native_usage=((observation or {}).get("native_usage")
+                                              if record["status"] == "settled" else None))
+                        error.bind_accounting(accounting)
+                raise
+        try:
+            return self.execution.call_io(method, inputs, recorded_invoke)
+        except BaseException:
+            if self.budget is not None:
+                self.budget.mark_unknown(inputs["call_id"])
+            raise
 
     def describe(self) -> dict:
-        return {"mode": "required", "enabled": True, "provider": "deepseek",
+        value = {"mode": "required", "enabled": True, "provider": "deepseek",
                 "model": MODEL, "version": RELEASE, "release": RELEASE,
                 "version_binding": "official-current-alias-mapping",
                 "thinking_mode": THINKING_MODE,
                 "search": SEARCH_MODE, "remote_requests": self._remote_requests,
                 "chat_calls": len(self.receipts), "search_calls": len(self.search_receipts),
                 "fetch_calls": len(self.fetch_receipts)}
+        if self.budget is not None:
+            value["request_budget"] = self.budget.snapshot()
+        return value
 
     def _stage(self) -> str:
         scope = getattr(self.execution, "_active", None)
@@ -447,21 +678,72 @@ class DeepSeekRequiredClient:
         return value
 
     def _post_json(self, path: str, request: dict) -> tuple[dict, str]:
-        if path not in ("/chat/completions", "/v1/tools/search", "/v1/tools/fetch"):
+        if path not in ("/chat/completions", "/beta/chat/completions", "/responses", "/v1/tools/search", "/v1/tools/fetch"):
             _fail("ENDPOINT_NOT_ALLOWED")
         if len(_canonical(request)) > MAX_RESPONSE_BYTES:
             _fail("REQUEST_TOO_LARGE")
+        from .clean_output import (clean_output_policy, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+                                   CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+        # New slots policy transmits the exact canonical bytes prepaid and
+        # hashed by BudgetGuard. Historical protocols retain requests' original
+        # json= framing, so archived request builders and behavior stay exact.
+        output_policy = clean_output_policy(self.execution)
+        canonical_slots = ((path == "/responses" and output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+            or (path == "/beta/chat/completions" and output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1))
+        body = {"data": _canonical(request)} if canonical_slots else {"json": request}
         response = None
-        deadline = time.monotonic() + RESPONSE_DEADLINE
+        body_deadline = None
+        started = time.monotonic()
+        duration = RESPONSE_DEADLINE
+        from .request_budget import (BUDGET_POLICY_V4, SEMANTIC_OUTPUT_STAGES,
+            SEMANTIC_RESPONSE_DEADLINE_V4, BudgetRefused, policy_limits, semantic_output_tokens)
+        non_thinking = (request.get("thinking") == {"type": "disabled"}
+                        and "reasoning_effort" not in request)
+        historical_thinking = (request.get("reasoning_effort") == "high"
+                               and request.get("thinking") == {"type": "enabled"})
+        if (getattr(getattr(self, "budget", None), "policy_id", None) == BUDGET_POLICY_V4
+                and path == "/chat/completions" and self._stage() in SEMANTIC_OUTPUT_STAGES
+                and (non_thinking or historical_thinking)):
+            if (getattr(self.execution.policy, "budget_policy_id", None) != BUDGET_POLICY_V4
+                    or type(request.get("max_tokens")) is not int
+                    or request["max_tokens"] != semantic_output_tokens(self._stage(), BUDGET_POLICY_V4)):
+                _fail("INVALID_CHAT_REQUEST")
+            try:
+                admitted = datetime.fromisoformat(self.execution.admitted_at_utc.replace("Z", "+00:00"))
+                if admitted.tzinfo is None or admitted.utcoffset() != timedelta(0):
+                    _fail("INVALID_CHAT_REQUEST")
+                absolute_remaining = (admitted + timedelta(
+                    seconds=policy_limits(BUDGET_POLICY_V4)["deadline_seconds"])
+                    - datetime.now(timezone.utc)).total_seconds()
+                duration = min(SEMANTIC_RESPONSE_DEADLINE_V4, self.budget.remaining_seconds(), absolute_remaining)
+            except (AttributeError, TypeError, ValueError, OverflowError, BudgetRefused):
+                _fail("INVALID_CHAT_REQUEST")
+            if not math.isfinite(duration) or duration <= 0:
+                _fail("RESPONSE_DEADLINE")
+        deadline = started + duration
+
+        def deadline_expired() -> bool:
+            return (body_deadline is not None and body_deadline.expired.is_set()
+                    or time.monotonic() >= deadline)
+
         self._remote_requests += 1
         try:
             response = requests.post(
-                BASE_URL + path, json=request,
+                BASE_URL + path, **body,
                 headers={"Content-Type": "application/json", "Accept": "application/json",
                          "Accept-Encoding": "identity", "Authorization": "Bearer " + self._api_key},
-                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), allow_redirects=False, verify=True, stream=True)
+                # A non-streaming Chat may legitimately wait beyond a native
+                # Search/Fetch idle timeout. Only the frozen v4 nonclean high
+                # stages use the bounded longer window; no extra paid request.
+                timeout=Timeout(total=duration, connect=CONNECT_TIMEOUT,
+                                read=duration if path in ("/chat/completions", "/beta/chat/completions", "/responses") else READ_TIMEOUT),
+                allow_redirects=False, verify=True, stream=True)
             status = response.status_code
             if type(status) is not int or status != 200:
+                if path == "/responses" and type(status) is int and status in (400, 422):
+                    detail = self._responses_error_detail(response, deadline)
+                    raise RequiredModelUnavailable("HTTP_ERROR", http_status=status,
+                                                   provider_error=detail) from None
                 _fail(f"HTTP_{status}" if type(status) is int and 100 <= status <= 599 else "HTTP_INVALID")
             encoding = response.headers.get("Content-Encoding", "identity").lower()
             if encoding not in ("", "identity"):
@@ -471,13 +753,14 @@ class DeepSeekRequiredClient:
             declared = response.headers.get("Content-Length")
             if declared is not None and (not declared.isdecimal() or int(declared) > MAX_RESPONSE_BYTES):
                 _fail("RESPONSE_TOO_LARGE")
+            body_deadline = _BodyDeadline(response.raw, deadline)
             chunks: list[bytes] = []
             size = 0
             while True:
-                if time.monotonic() > deadline:
+                if deadline_expired():
                     _fail("RESPONSE_DEADLINE")
                 chunk = response.raw.read1(16384)
-                if time.monotonic() > deadline:
+                if deadline_expired():
                     _fail("RESPONSE_DEADLINE")
                 if not chunk:
                     break
@@ -488,17 +771,27 @@ class DeepSeekRequiredClient:
                     _fail("RESPONSE_TOO_LARGE")
                 chunks.append(chunk)
             raw = b"".join(chunks)
-            obj = _json_loads(raw)
+            # Compact envelopes may carry ignored metadata. Reject numeric
+            # overflow while decoding the complete JSON, before projection.
+            # Historical protocols retain their original parser behavior.
+            obj = _json_loads(raw, finite_floats=(path == "/beta/chat/completions"
+                and output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1))
             if not isinstance(obj, dict):
                 _fail("RESPONSE_NOT_OBJECT")
             return obj, hashlib.sha256(raw).hexdigest()
         except LLMUnavailable:
             raise
-        except requests.Timeout:
-            _fail("NETWORK_TIMEOUT")
+        except (requests.Timeout, ReadTimeoutError):
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "NETWORK_TIMEOUT")
+        except (requests.exceptions.SSLError, SSLError):
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "NETWORK_TLS_ERROR")
+        except (requests.exceptions.ChunkedEncodingError, ProtocolError):
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "NETWORK_PROTOCOL_ERROR")
         except Exception:
-            _fail("TRANSPORT_FAILURE")
+            _fail("RESPONSE_DEADLINE" if deadline_expired() else "TRANSPORT_FAILURE")
         finally:
+            if body_deadline is not None:
+                body_deadline.close()
             if response is not None:
                 try:
                     response.close()
@@ -513,7 +806,94 @@ class DeepSeekRequiredClient:
         return value
 
     @staticmethod
-    def _usage(value: object) -> dict:
+    def _responses_error_detail(response, deadline: float) -> dict:
+        """Observe at most 16 KiB/2 seconds, retaining fixed labels only.
+
+        Categories describe the provider's claim, never a verified root cause.
+        HTTP failure remains the outcome even when this optional observation
+        cannot be read, parsed or interrupted safely. Other endpoints retain
+        their historic no-error-body behavior.
+        """
+        detail = {"schema": "tiger.responses-provider-error.v1", "category": "unknown", "body_state": "unavailable"}
+        watchdog = None
+        try:
+            if (response.headers.get("Content-Encoding", "identity").lower() not in ("", "identity")
+                    or response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json"
+                    or not callable(getattr(response.raw, "shutdown", None))):
+                return detail
+            declared = response.headers.get("Content-Length")
+            if declared is not None:
+                if type(declared) is not str or not declared.isdecimal():
+                    return {**detail, "body_state": "malformed"}
+                if len(declared) > 8 or int(declared) > RESPONSES_ERROR_BYTES:
+                    return {**detail, "body_state": "too_large"}
+            end = min(deadline, time.monotonic() + RESPONSES_ERROR_DEADLINE)
+            watchdog = _BodyDeadline(response.raw, end)
+            chunks, size = [], 0
+            while True:
+                if watchdog.expired.is_set() or time.monotonic() >= end:
+                    return detail
+                chunk = response.raw.read1(min(4096, RESPONSES_ERROR_BYTES + 1 - size))
+                if watchdog.expired.is_set() or time.monotonic() >= end:
+                    return detail
+                if type(chunk) is not bytes:
+                    return {**detail, "body_state": "malformed"}
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > RESPONSES_ERROR_BYTES:
+                    return {**detail, "body_state": "too_large"}
+                chunks.append(chunk)
+            try:
+                body = _json_loads(b"".join(chunks))
+                _canonical(body)  # Includes overflowed finite JSON numbers.
+                if type(body) is not dict or set(body) != {"error"}:
+                    raise ValueError
+                error = body["error"]
+                if (type(error) is not dict or not error or set(error) - {"type", "code", "param", "message"}
+                        or any(value is not None and (type(value) is not str or len(value) > 4096)
+                               for value in error.values())
+                        or "message" in error and type(error["message"]) is not str):
+                    raise ValueError
+            except (LLMUnavailable, ValueError, TypeError, UnicodeError, RecursionError, OverflowError):
+                return {**detail, "body_state": "malformed"}
+            parameter, code = error.get("param"), error.get("code")
+            if type(parameter) is str and (parameter in ("schema", "json_schema", "text.format.schema")
+                    or parameter.startswith(("text.format.schema.", "text.format.schema["))):
+                category = "schema"
+            elif parameter == "tool_choice":
+                category = "tool_choice"
+            elif parameter == "model":
+                category = "model"
+            elif code in ("invalid_json_schema", "json_schema_error", "schema_validation_error"):
+                category = "schema"
+            elif code == "invalid_tool_choice":
+                category = "tool_choice"
+            elif code in ("invalid_model", "model_not_found"):
+                category = "model"
+            elif parameter or code in ("invalid_parameter", "invalid_parameters", "unsupported_parameter", "invalid_value"):
+                category = "parameters"
+            else:
+                message = (error.get("message") or "").lower()
+                claimed = {category for category, pattern in (
+                    ("schema", r"\b(?:json_schema|schema)\b"), ("tool_choice", r"\btool_choice\b"),
+                    ("parameters", r"\bparameters?\b"), ("model", r"\bmodel\b")) if re.search(pattern, message)}
+                category = (next(iter(claimed)) if len(claimed) == 1 else "unknown")
+                if not claimed and (error.get("type") == "invalid_request_error" or code == "invalid_request_error"):
+                    category = "request"
+            return {**detail, "category": category, "body_state": "parsed"}
+        except Exception:
+            # Only this bounded diagnostic is unavailable. The caller still
+            # raises the observed HTTP status and freezes its unknown usage.
+            return detail
+        finally:
+            if watchdog is not None:
+                watchdog.close()
+
+    _responses_usage = staticmethod(responses_usage)
+
+    @staticmethod
+    def _usage(value: object, *, require_non_thinking: bool = True) -> dict:
         if not isinstance(value, dict):
             _fail("USAGE_REQUIRED")
         result = {}
@@ -539,37 +919,74 @@ class DeepSeekRequiredClient:
                     n = details[child]
                     if type(n) is not int or not 0 <= n <= result[limit]:
                         _fail("INVALID_USAGE")
-                    if parent == "completion_tokens_details" and child == "reasoning_tokens" and n != 0:
+                    if (require_non_thinking and parent == "completion_tokens_details"
+                            and child == "reasoning_tokens" and n != 0):
                         _fail("NON_THINKING_OUTPUT_REQUIRED")
                     result[parent] = {child: n}
         return result
 
     def complete_json(self, *, system: str, user: str, schema_hint: dict,
-                      max_tokens: int = 16384, temperature: float = 0.2, schema: dict) -> dict:
+                      max_tokens: int = 16384, temperature: float = 0.2, schema: dict,
+                      reasoning_effort: str = "high") -> dict:
         stage = self._stage()
+        from .clean_output import (clean_output_policy, CleanOutputInvalid,
+            CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+            CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1)
+        try:
+            output_policy = clean_output_policy(self.execution)
+        except CleanOutputInvalid:
+            _fail("TRUSTED_CONFIGURATION_MISMATCH")
+        if output_policy is not None and stage == "clean.llm_semantic":
+            if output_policy == CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1:
+                return self._complete_clean_compact(system=system, user=user, schema_hint=schema_hint,
+                    max_tokens=max_tokens, temperature=temperature, schema=schema,
+                    reasoning_effort=reasoning_effort)
+            if output_policy in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1):
+                return self._complete_clean_responses(system=system, user=user, schema_hint=schema_hint,
+                    max_tokens=max_tokens, temperature=temperature, schema=schema,
+                    reasoning_effort=reasoning_effort)
+            return self._complete_clean_function(system=system, user=user, schema_hint=schema_hint,
+                max_tokens=max_tokens, temperature=temperature, schema=schema,
+                reasoning_effort=reasoning_effort)
         _check_schema(schema)
         if _canonical(self._clean(schema)) != _canonical(schema):
             _fail("UNSAFE_OUTPUT_SCHEMA")
         if (not isinstance(system, str) or not system.strip() or not isinstance(user, str) or not user.strip()
                 or not isinstance(schema_hint, dict) or type(max_tokens) is not int
                 or not 1 <= max_tokens <= 393216 or not _finite_number(temperature)
-                or not 0 <= temperature <= 2):
+                or not 0 <= temperature <= 2 or type(reasoning_effort) is not str
+                or reasoning_effort != stage_reasoning_effort(stage, upgrade=self.budget is not None)):
             _fail("INVALID_CHAT_REQUEST")
-        request = {"model": MODEL, "messages": [
-            {"role": "system", "content": self._text(system) + "\nReturn exactly one JSON object. JSON only."},
-            {"role": "user", "content": self._text(user) + "\nJSON schema:\n" +
-             _canonical(schema).decode() + "\nJSON field guidance:\n" +
-             _canonical(self._clean(schema_hint)).decode()}],
-            "max_tokens": max_tokens, "temperature": temperature, "stream": False,
-            "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}}
+        from .request_budget import BUDGET_POLICY_V4, SEMANTIC_OUTPUT_STAGES, semantic_output_tokens
+        if (self.budget is not None and self.budget.policy_id == BUDGET_POLICY_V4
+                and stage in SEMANTIC_OUTPUT_STAGES
+                and (getattr(self.execution.policy, "budget_policy_id", None) != BUDGET_POLICY_V4
+                     or max_tokens != semantic_output_tokens(stage, BUDGET_POLICY_V4))):
+            _fail("INVALID_CHAT_REQUEST")
+        request = build_chat_request(system=self._text(system), user=self._text(user),
+            schema_hint=self._clean(schema_hint), schema=schema,
+            max_tokens=max_tokens, temperature=temperature, reasoning_effort=reasoning_effort,
+            thinking_mode=stage_thinking_mode(stage, upgrade=self.budget is not None))
         call_id = uuid.uuid4().hex
         inputs = {"schema": "tiger.deepseek-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/chat/completions",
                   "request": request, "request_sha256": _hash(request), "output_schema": schema,
                   "schema_sha256": _hash(schema), "release": RELEASE}
+        self._admit_call("chat", call_id, request, inputs)
+        observation = {}
 
         def invoke():
             response, body_hash = self._post_json("/chat/completions", request)
+            choices = response.get("choices")
+            observed_finish = (choices[0].get("finish_reason") if isinstance(choices, list)
+                               and len(choices) == 1 and isinstance(choices[0], dict) else None)
+            observation["finish_reason"] = (observed_finish if observed_finish in
+                ("stop", "length", "tool_calls", "content_filter") else
+                "unknown" if observed_finish is None else "other")
+            # Charge actual usage even if a later schema/identity check rejects
+            # the answer. A failed answer must never erase its paid usage.
+            usage = self._usage(response.get("usage"))
+            self._settle_budget(call_id, usage)
             if response.get("model") != MODEL:
                 _fail("RESPONSE_MODEL_MISMATCH")
             if response.get("object") != "chat.completion":
@@ -600,7 +1017,6 @@ class DeepSeekRequiredClient:
                 fingerprint = self._identifier(fingerprint)
                 if self._api_key in fingerprint:
                     _fail("UNSAFE_RESPONSE_FINGERPRINT")
-            usage = self._usage(response.get("usage"))
             safe_response = {
                 "id": response_id, "model": MODEL, "system_fingerprint": fingerprint,
                 "choices": [{"index": 0, "finish_reason": "stop", "message": {
@@ -614,10 +1030,462 @@ class DeepSeekRequiredClient:
                     "finish_reason": "stop", "request_sha256": inputs["request_sha256"],
                     "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
                     "schema_sha256": inputs["schema_sha256"], "response": safe_response,
-                    "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed}
+                    "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed,
+                    **self._budget_proof(inputs)}
 
-        proof = self.execution.call_io("model.deepseek.chat", inputs, invoke)
+        proof = self._record_call("model.deepseek.chat", inputs, invoke, observation=observation)
         self.receipts.append({k: v for k, v in proof.items() if k not in ("schema", "parsed", "response")})
+        return proof["parsed"]
+
+    def _complete_clean_compact(self, *, system: str, user: str, schema_hint: dict,
+                                max_tokens: int, temperature: float, schema: dict,
+                                reasoning_effort: str) -> dict:
+        """One complete batch; only a sealed known schema rejection may regenerate.
+
+        The nonblocking guard serializes the entire logical operation. Every
+        generation has its own durable call_io input before paid invoke. A
+        crash/unknown result cannot resume or consume this logical call again.
+        """
+        from copy import deepcopy
+        from .clean_output import (CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1, CLEAN_COMPACT_LISTS_WIRE_V1,
+            CLEAN_REGENERATION_POLICY_V1, CLEAN_OUTPUT_FUNCTION, CLEAN_OUTPUT_PATH,
+            CleanOutputInvalid, clean_output_policy, clean_compact_lists_schema_v1,
+            clean_compact_lists_output_v1, build_clean_compact_lists_request,
+            build_clean_compact_lists_safe_response, clean_regeneration_feedback_v1,
+            clean_logical_call_sha256, clean_compact_execution_limits)
+        from .candidate_research import assessment_from_execution
+        from .request_budget import BUDGET_POLICY_V3, BUDGET_POLICY_V4
+        if (self.budget is None or self.budget.policy_id not in (BUDGET_POLICY_V3, BUDGET_POLICY_V4)
+                or self.budget.policy_id != getattr(getattr(self.execution, 'policy', None), 'budget_policy_id', None)
+                or getattr(self.execution, 'upgrade', False) is not True
+                or self._stage() != 'clean.llm_semantic'
+                or clean_output_policy(self.execution) != CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1
+                or reasoning_effort != 'none'):
+            _fail('INVALID_CHAT_REQUEST')
+        if not self._clean_operation_lock.acquire(blocking=False):
+            _fail('INVALID_CHAT_REQUEST')
+        try:
+            schema = deepcopy(schema)
+            _check_schema(schema)
+            if _canonical(self._clean(schema)) != _canonical(schema):
+                _fail('UNSAFE_OUTPUT_SCHEMA')
+            try:
+                # Safety checks do not modify this protocol's complete input.
+                if (type(system) is not str or type(user) is not str
+                        or self._text(system) != system or self._text(user) != user
+                        or _canonical(self._clean(schema_hint)) != _canonical(schema_hint)):
+                    _fail('INVALID_CHAT_REQUEST')
+                original_request = build_clean_compact_lists_request(system=system, user=user,
+                    schema_hint=schema_hint, schema=schema, max_tokens=max_tokens, temperature=temperature,
+                    instruction_revision=getattr(self.execution, 'clean_instruction_revision', 'v1'))
+                local = clean_compact_lists_schema_v1(schema)
+                batch_limit, regeneration_limit = clean_compact_execution_limits(self.execution)
+                if len({name.split('__', 1)[0] for name in local['properties']}) > batch_limit:
+                    _fail('INVALID_CHAT_REQUEST')
+                logical = clean_logical_call_sha256(run_id=getattr(self.execution, 'run_id', None),
+                    assessment=assessment_from_execution(self.execution), request=original_request, schema=schema)
+            except CleanOutputInvalid:
+                _fail('INVALID_CHAT_REQUEST')
+            if logical in self._clean_logical_calls:
+                _fail('RESPONSE_IDENTITY_REUSED_OR_UNSAFE')
+            self._clean_logical_calls.add(logical)
+            previous, feedback = None, None
+            for generation in (0, 1):
+                request = (original_request if generation == 0 else
+                    build_clean_compact_lists_request(system=system, user=user, schema_hint=schema_hint,
+                        schema=schema, max_tokens=max_tokens, temperature=temperature,
+                        regeneration_feedback=feedback,
+                        instruction_revision=getattr(self.execution, 'clean_instruction_revision', 'v1')))
+                call_id = uuid.uuid4().hex
+                provenance = {'output_policy_id': CLEAN_OUTPUT_COMPACT_REGEN_POLICY_V1,
+                    'output_codec_id': CLEAN_COMPACT_LISTS_WIRE_V1,
+                    'regeneration_policy_id': CLEAN_REGENERATION_POLICY_V1,
+                    'generation_index': generation, 'logical_call_sha256': logical,
+                    'previous_rejection_sha256': previous}
+                inputs = {'schema': 'tiger.deepseek-request.v4', 'call_id': call_id,
+                    'stage': 'clean.llm_semantic', 'provider': 'deepseek', 'method': 'POST',
+                    'endpoint': BASE_URL + CLEAN_OUTPUT_PATH, 'request': request,
+                    'request_sha256': _hash(request), 'output_schema': schema,
+                    'schema_sha256': _hash(schema), 'release': RELEASE, **provenance}
+                # reserve precedes call_io, whose input capture precedes invoke.
+                self._admit_call('chat', call_id, request, inputs)
+                if generation == 1:
+                    self._clean_regenerations_used += 1
+                observation = {}
+
+                def invoke():
+                    response, body_hash = self._post_json(CLEAN_OUTPUT_PATH, request)
+                    choices = response.get('choices')
+                    observed = (choices[0].get('finish_reason') if type(choices) is list
+                        and len(choices) == 1 and type(choices[0]) is dict else None)
+                    observation['finish_reason'] = (observed if observed in
+                        ('stop', 'length', 'tool_calls', 'content_filter') else
+                        'unknown' if observed is None else 'other')
+                    usage = self._usage(response.get('usage'))
+                    self._settle_budget(call_id, usage)
+                    if response.get('model') != MODEL:
+                        _fail('RESPONSE_MODEL_MISMATCH')
+                    if response.get('object') != 'chat.completion':
+                        _fail('RESPONSE_OBJECT_MISMATCH')
+                    response_id = self._identifier(response.get('id'))
+                    if (self._text(response_id) != response_id or self._api_key in response_id
+                            or any(row['response_id'] == response_id for row in self.receipts)):
+                        _fail('RESPONSE_IDENTITY_REUSED_OR_UNSAFE')
+                    if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
+                        _fail('INVALID_CHOICES')
+                    choice, message = choices[0], choices[0].get('message')
+                    if type(choice.get('index')) is not int or choice['index'] != 0:
+                        _fail('COMPACT_INVALID_CHOICE_INDEX')
+                    if choice.get('finish_reason') != 'tool_calls':
+                        _fail('COMPACT_INVALID_FINISH_REASON')
+                    if type(message) is not dict:
+                        _fail('COMPACT_INVALID_MESSAGE_TYPE')
+                    if message.get('role') != 'assistant':
+                        _fail('COMPACT_INVALID_MESSAGE_ROLE')
+                    # Chat content may accompany a tool call. Preserve safe
+                    # visible text exactly in evidence; semantic output still
+                    # comes only from the independently validated arguments.
+                    # Official response contract checked 2026-10-28:
+                    # https://api-docs.deepseek.com/api/create-chat-completion/
+                    if 'content' not in message or (message['content'] is not None and type(message['content']) is not str):
+                        _fail('COMPACT_INVALID_CONTENT_TYPE')
+                    visible_content = message['content']
+                    if visible_content is not None:
+                        try:
+                            content_bytes = visible_content.encode('utf-8', 'strict')
+                        except UnicodeError:
+                            _fail('COMPACT_INVALID_CONTENT_UTF8')
+                        if len(content_bytes) > MAX_RESPONSE_BYTES:
+                            _fail('COMPACT_CONTENT_TOO_LARGE')
+                        if self._text(visible_content) != visible_content:
+                            _fail('COMPACT_UNSAFE_CONTENT')
+                    if message.get('function_call'):
+                        _fail('COMPACT_LEGACY_FUNCTION_PRESENT')
+                    if message.get('reasoning_content'):
+                        _fail('COMPACT_REASONING_PRESENT')
+                    if type(message.get('tool_calls')) is not list or len(message['tool_calls']) != 1:
+                        _fail('COMPACT_INVALID_TOOL_COUNT')
+                    tool = message['tool_calls'][0]
+                    if type(tool) is not dict:
+                        _fail('COMPACT_TOOL_NOT_OBJECT')
+                    if not {'id', 'type', 'function'}.issubset(tool):
+                        _fail('COMPACT_INVALID_TOOL_FIELDS')
+                    if tool['type'] != 'function':
+                        _fail('COMPACT_INVALID_TOOL_TYPE')
+                    if type(tool['function']) is not dict:
+                        _fail('COMPACT_FUNCTION_NOT_OBJECT')
+                    if not {'name', 'arguments'}.issubset(tool['function']):
+                        _fail('COMPACT_INVALID_FUNCTION_FIELDS')
+                    # Required response fields are consumed and validated;
+                    # unconsumed envelope metadata is ignored, not interpreted.
+                    # The safe projection below omits it while the original
+                    # complete transport body remains bound by body_hash.
+                    if tool['function']['name'] != CLEAN_OUTPUT_FUNCTION:
+                        _fail('COMPACT_INVALID_FUNCTION_NAME')
+                    tool_id = self._identifier(tool['id'])
+                    if (self._text(tool_id) != tool_id or self._api_key in tool_id
+                            or any(row.get('output_tool_call_id') == tool_id for row in self.receipts)):
+                        _fail('RESPONSE_IDENTITY_REUSED_OR_UNSAFE')
+                    fingerprint = response.get('system_fingerprint')
+                    if fingerprint is not None:
+                        fingerprint = self._identifier(fingerprint)
+                        if self._text(fingerprint) != fingerprint or self._api_key in fingerprint:
+                            _fail('UNSAFE_RESPONSE_FINGERPRINT')
+                    arguments = tool['function']['arguments']
+                    if type(arguments) is not str or not arguments.strip():
+                        _fail('EMPTY_MODEL_OUTPUT')
+                    try:
+                        arguments_bytes = arguments.encode('utf-8')
+                    except UnicodeError:
+                        _fail('INVALID_JSON_VALUE')
+                    if len(arguments_bytes) > MAX_RESPONSE_BYTES:
+                        _fail('RESPONSE_TOO_LARGE')
+                    # Never retain a raw schema rejection until BOTH lexical
+                    # and every decoded key/value pass sanitizer equality.
+                    if self._text(arguments) != arguments:
+                        _fail('INVALID_JSON_VALUE')
+                    parsed = _json_loads(arguments)
+                    if _canonical(self._clean(parsed)) != _canonical(parsed):
+                        _fail('INVALID_JSON_VALUE')
+                    rejection = None
+                    try:
+                        validate_schema(parsed, local)
+                        clean_compact_lists_output_v1(parsed, schema, decode=True)
+                    except RequiredModelUnavailable as error:
+                        if error.diagnostic['code'] != 'OUTPUT_SCHEMA_MISMATCH':
+                            raise
+                        rejection = error.diagnostic
+                    outcome = 'rejected' if rejection is not None else 'accepted'
+                    safe = build_clean_compact_lists_safe_response(response_id=response_id,
+                        system_fingerprint=fingerprint, usage=usage, tool_call_id=tool_id,
+                        visible_content=visible_content,
+                        **({'visible_arguments': arguments} if rejection is not None else {'parsed': parsed}))
+                    return {'schema': 'tiger.deepseek-call.v4', 'call_id': call_id,
+                        'stage': 'clean.llm_semantic', 'provider': 'deepseek', 'requested_model': MODEL,
+                        'response_id': response_id, 'model': MODEL, 'release': RELEASE, 'usage': usage,
+                        'finish_reason': 'tool_calls', 'output_tool_call_id': tool_id,
+                        'request_sha256': inputs['request_sha256'], 'response_sha256': _hash(safe),
+                        'transport_response_sha256': body_hash, 'schema_sha256': inputs['schema_sha256'],
+                        'response': safe, 'system_fingerprint': fingerprint, 'search_mode': SEARCH_MODE,
+                        'outcome': outcome, **provenance,
+                        **({'visible_arguments_sha256': hashlib.sha256(arguments_bytes).hexdigest(),
+                            'rejection_diagnostic': rejection} if rejection is not None else {'parsed': parsed}),
+                        **self._budget_proof(inputs)}
+
+                proof = self._record_call('model.deepseek.chat', inputs, invoke, observation=observation)
+                self.receipts.append({key: value for key, value in proof.items()
+                    if key not in ('schema', 'parsed', 'response', 'rejection_diagnostic')}
+                    | {'proof_sha256': _hash(proof)})
+                if proof['outcome'] == 'accepted':
+                    return proof['parsed']
+                if generation == 1 or self._clean_regenerations_used >= regeneration_limit:
+                    # This rejected output_ref already durably records the
+                    # real attempt. Fail the stage once, without a fake IO.
+                    diagnostic = proof['rejection_diagnostic']
+                    raise RequiredModelUnavailable('OUTPUT_SCHEMA_MISMATCH',
+                        **{key: diagnostic[key] for key in ('schema_path', 'schema_keyword') if key in diagnostic})
+                previous = _hash(proof)
+                feedback = clean_regeneration_feedback_v1(proof['rejection_diagnostic'])
+            _fail('INCOMPLETE_MODEL_RESPONSE')
+        finally:
+            self._clean_operation_lock.release()
+
+    def _complete_clean_responses(self, *, system: str, user: str, schema_hint: dict,
+                                  max_tokens: int, temperature: float, schema: dict,
+                                  reasoning_effort: str) -> dict:
+        """Accept one completed native message under the unchanged full schema."""
+        from .clean_output import (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1,
+            CLEAN_OUTPUT_RESPONSES_PATH, build_clean_slots_responses_request, clean_slots_schema_v1,
+            CleanOutputInvalid, build_clean_responses_request, build_clean_responses_safe_response,
+            clean_output_policy)
+        stage = self._stage()
+        output_policy = clean_output_policy(self.execution)
+        if (self.budget is None or stage != "clean.llm_semantic"
+                or output_policy not in (CLEAN_OUTPUT_RESPONSES_POLICY_V1, CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1)
+                or reasoning_effort != "none"):
+            _fail("INVALID_CHAT_REQUEST")
+        _check_schema(schema)
+        if _canonical(self._clean(schema)) != _canonical(schema):
+            _fail("UNSAFE_OUTPUT_SCHEMA")
+        try:
+            slots_clean = output_policy == CLEAN_OUTPUT_RESPONSES_SLOTS_POLICY_V1
+            builder = build_clean_slots_responses_request if slots_clean else build_clean_responses_request
+            request = builder(system=self._text(system) if type(system) is str else system,
+                user=self._text(user) if type(user) is str else user,
+                schema_hint=self._clean(schema_hint), schema=schema,
+                max_tokens=max_tokens, temperature=temperature)
+            output_schema = clean_slots_schema_v1(schema) if slots_clean else schema
+        except CleanOutputInvalid:
+            _fail("INVALID_CHAT_REQUEST")
+        call_id = uuid.uuid4().hex
+        inputs = {"schema": "tiger.deepseek-request.v3", "call_id": call_id, "stage": stage,
+            "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + CLEAN_OUTPUT_RESPONSES_PATH,
+            "request": request, "request_sha256": _hash(request), "output_schema": schema,
+            "schema_sha256": _hash(schema), "release": RELEASE, "output_policy_id": output_policy}
+        self._admit_call("chat", call_id, request, inputs)
+        observation = {}
+
+        def invoke():
+            response, body_hash = self._post_json(CLEAN_OUTPUT_RESPONSES_PATH, request)
+            status = response.get("status")
+            observation["response_status"] = (status if type(status) is str and status in
+                ("in_progress", "completed", "incomplete", "failed") else "unknown" if status is None else "other")
+            native, usage = responses_usage(response.get("usage"))
+            observation["native_usage"] = native
+            # A paid but incomplete/rejected answer still has a charge. Only
+            # unknown, inconsistent or out-of-bound usage retains reservation.
+            self._settle_budget(call_id, usage)
+            if response.get("model") != MODEL:
+                _fail("RESPONSE_MODEL_MISMATCH")
+            if response.get("object") != "response":
+                _fail("RESPONSE_OBJECT_MISMATCH")
+            response_id = self._identifier(response.get("id"))
+            if self._api_key in response_id or any(row["response_id"] == response_id for row in self.receipts):
+                _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+            created = response.get("created_at")
+            output = response.get("output")
+            if status != "completed":
+                _fail("RESPONSES_NOT_COMPLETED")
+            if type(created) is not int or created <= 0:
+                _fail("RESPONSES_INVALID_CREATED_AT")
+            if response.get("error") is not None:
+                _fail("RESPONSES_ERROR_PRESENT")
+            if response.get("incomplete_details") is not None:
+                _fail("RESPONSES_INCOMPLETE_DETAILS_PRESENT")
+            if type(output) is not list:
+                _fail("RESPONSES_INVALID_OUTPUT_TYPE")
+            if len(output) != 1:
+                _fail("RESPONSES_INVALID_OUTPUT_COUNT")
+            if type(output[0]) is not dict:
+                _fail("RESPONSES_INVALID_OUTPUT_ITEM")
+            message = output[0]
+            message_fields = {"type", "id", "status", "role", "content"}
+            if not message_fields.issubset(message) or set(message) - message_fields - {"phase"}:
+                _fail("RESPONSES_INVALID_MESSAGE_FIELDS")
+            if message["type"] != "message":
+                _fail("RESPONSES_UNEXPECTED_OUTPUT_TYPE")
+            if message["status"] != "completed":
+                _fail("RESPONSES_MESSAGE_NOT_COMPLETED")
+            if message["role"] != "assistant":
+                _fail("RESPONSES_INVALID_MESSAGE_ROLE")
+            # Compatible optional metadata must still describe a final answer.
+            # It never enters the sealed semantic response projection.
+            if message.get("phase") is not None and message["phase"] != "final_answer":
+                _fail("RESPONSES_INVALID_MESSAGE_PHASE")
+            if type(message["content"]) is not list:
+                _fail("RESPONSES_INVALID_CONTENT_TYPE")
+            if len(message["content"]) != 1:
+                _fail("RESPONSES_INVALID_CONTENT_COUNT")
+            if type(message["content"][0]) is not dict:
+                _fail("RESPONSES_INVALID_CONTENT_PART")
+            message_id = self._identifier(message["id"])
+            if self._api_key in message_id or any(row.get("output_message_id") == message_id for row in self.receipts):
+                _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+            part = message["content"][0]
+            part_fields = {"type", "text"}
+            if not part_fields.issubset(part) or set(part) - part_fields - {"annotations", "logprobs"}:
+                _fail("RESPONSES_INVALID_CONTENT_FIELDS")
+            if part["type"] != "output_text":
+                _fail("RESPONSES_UNEXPECTED_CONTENT_TYPE")
+            annotations = part.get("annotations", [])
+            if type(annotations) is not list or annotations:
+                _fail("RESPONSES_INVALID_ANNOTATIONS")
+            logprobs = part.get("logprobs")
+            if logprobs is not None and (type(logprobs) is not list or logprobs):
+                _fail("RESPONSES_INVALID_LOGPROBS")
+            text = part["text"]
+            if type(text) is not str or not text.strip():
+                _fail("EMPTY_MODEL_OUTPUT")
+            parsed = _json_loads(text)
+            if type(parsed) is not dict or not parsed:
+                _fail("EMPTY_OR_NONOBJECT_MODEL_OUTPUT")
+            if _canonical(self._clean(parsed)) != _canonical(parsed):
+                _fail("INVALID_JSON_VALUE")
+            validate_schema(parsed, output_schema)
+            if slots_clean:
+                from .required import clean_slots_output_v1
+                # Validate original min/max/unique semantics and no holes now,
+                # before creating a completed provider proof. Keep parsed and
+                # safe_response as the actual slot answer, never its expansion.
+                clean_slots_output_v1(parsed, schema, decode=True)
+            safe_response = build_clean_responses_safe_response(response_id=response_id,
+                created_at=created, usage=native, parsed=parsed, message_id=message_id)
+            return {"schema": "tiger.deepseek-call.v3", "call_id": call_id, "stage": stage,
+                "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
+                "model": MODEL, "release": RELEASE, "usage": usage, "native_usage": native,
+                "response_status": "completed", "created_at": created, "output_message_id": message_id,
+                "output_policy_id": output_policy,
+                "request_sha256": inputs["request_sha256"], "response_sha256": _hash(safe_response),
+                "transport_response_sha256": body_hash, "schema_sha256": inputs["schema_sha256"],
+                "response": safe_response, "search_mode": SEARCH_MODE, "parsed": parsed,
+                **self._budget_proof(inputs)}
+
+        proof = self._record_call("model.deepseek.chat", inputs, invoke,
+                                  observation=observation, responses_protocol=True)
+        self.receipts.append({key: value for key, value in proof.items() if key not in ("schema", "parsed", "response")})
+        return proof["parsed"]
+
+    def _complete_clean_function(self, *, system: str, user: str, schema_hint: dict,
+                                 max_tokens: int, temperature: float, schema: dict,
+                                 reasoning_effort: str) -> dict:
+        """Accept one named strict output function; never execute or follow it."""
+        from .clean_output import (CLEAN_OUTPUT_POLICY_V1, CLEAN_OUTPUT_FUNCTION,
+            CLEAN_OUTPUT_PATH, CleanOutputInvalid, build_clean_request,
+            build_clean_safe_response, clean_output_policy)
+        stage = self._stage()
+        if (self.budget is None or stage != "clean.llm_semantic"
+                or clean_output_policy(self.execution) != CLEAN_OUTPUT_POLICY_V1
+                or reasoning_effort != "none"):
+            _fail("INVALID_CHAT_REQUEST")
+        _check_schema(schema)
+        if _canonical(self._clean(schema)) != _canonical(schema):
+            _fail("UNSAFE_OUTPUT_SCHEMA")
+        if (not isinstance(system, str) or not system.strip() or not isinstance(user, str) or not user.strip()
+                or not isinstance(schema_hint, dict) or type(max_tokens) is not int
+                or not 1 <= max_tokens <= 393216 or not _finite_number(temperature) or not 0 <= temperature <= 2):
+            _fail("INVALID_CHAT_REQUEST")
+        try:
+            request = build_clean_request(system=self._text(system) if isinstance(system, str) else system,
+                user=self._text(user) if isinstance(user, str) else user,
+                schema_hint=self._clean(schema_hint), schema=schema,
+                max_tokens=max_tokens, temperature=temperature)
+        except CleanOutputInvalid:
+            _fail("UNSUPPORTED_OUTPUT_SCHEMA")
+        call_id = uuid.uuid4().hex
+        inputs = {"schema": "tiger.deepseek-request.v2", "call_id": call_id, "stage": stage,
+            "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + CLEAN_OUTPUT_PATH,
+            "request": request, "request_sha256": _hash(request), "output_schema": schema,
+            "schema_sha256": _hash(schema), "release": RELEASE, "output_policy_id": CLEAN_OUTPUT_POLICY_V1}
+        self._admit_call("chat", call_id, request, inputs)
+        observation = {}
+
+        def invoke():
+            response, body_hash = self._post_json(CLEAN_OUTPUT_PATH, request)
+            choices = response.get("choices")
+            observed = (choices[0].get("finish_reason") if isinstance(choices, list)
+                and len(choices) == 1 and isinstance(choices[0], dict) else None)
+            observation["finish_reason"] = (observed if observed in
+                ("stop", "length", "tool_calls", "content_filter") else
+                "unknown" if observed is None else "other")
+            # A rejected output is still a paid call. Settle before validating
+            # model, finish reason, arguments, source ownership or semantics.
+            usage = self._usage(response.get("usage"))
+            self._settle_budget(call_id, usage)
+            if response.get("model") != MODEL:
+                _fail("RESPONSE_MODEL_MISMATCH")
+            if response.get("object") != "chat.completion":
+                _fail("RESPONSE_OBJECT_MISMATCH")
+            response_id = self._identifier(response.get("id"))
+            if self._api_key in response_id or any(row["response_id"] == response_id for row in self.receipts):
+                _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+            if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
+                _fail("INVALID_CHOICES")
+            choice, message = choices[0], choices[0].get("message")
+            if (type(choice.get("index")) is not int or choice["index"] != 0
+                    or choice.get("finish_reason") != "tool_calls" or type(message) is not dict
+                    or message.get("role") != "assistant" or message.get("content") not in (None, "")
+                    or message.get("function_call") or message.get("reasoning_content")
+                    or type(message.get("tool_calls")) is not list or len(message["tool_calls"]) != 1):
+                _fail("INCOMPLETE_MODEL_RESPONSE")
+            tool = message["tool_calls"][0]
+            if (type(tool) is not dict or set(tool) != {"id", "type", "function"}
+                    or tool["type"] != "function" or type(tool["function"]) is not dict
+                    or set(tool["function"]) != {"name", "arguments"}
+                    or tool["function"]["name"] != CLEAN_OUTPUT_FUNCTION):
+                _fail("INCOMPLETE_MODEL_RESPONSE")
+            tool_id = self._identifier(tool["id"])
+            if self._api_key in tool_id or any(row.get("output_tool_call_id") == tool_id for row in self.receipts):
+                _fail("RESPONSE_IDENTITY_REUSED_OR_UNSAFE")
+            arguments = tool["function"]["arguments"]
+            if type(arguments) is not str or not arguments.strip():
+                _fail("EMPTY_MODEL_OUTPUT")
+            parsed = _json_loads(arguments)
+            if type(parsed) is not dict or not parsed:
+                _fail("EMPTY_OR_NONOBJECT_MODEL_OUTPUT")
+            if _canonical(self._clean(parsed)) != _canonical(parsed):
+                # Do not redact/repair a semantic answer into an accepted one.
+                # The failure retains only fixed diagnostics and paid usage.
+                _fail("INVALID_JSON_VALUE")
+            validate_schema(parsed, schema)
+            fingerprint = response.get("system_fingerprint")
+            if fingerprint is not None:
+                fingerprint = self._identifier(fingerprint)
+                if self._api_key in fingerprint:
+                    _fail("UNSAFE_RESPONSE_FINGERPRINT")
+            safe_response = build_clean_safe_response(response_id=response_id,
+                system_fingerprint=fingerprint, usage=usage, parsed=parsed, tool_call_id=tool_id)
+            return {"schema": "tiger.deepseek-call.v2", "call_id": call_id, "stage": stage,
+                "provider": "deepseek", "requested_model": MODEL, "response_id": response_id,
+                "model": MODEL, "release": RELEASE, "usage": usage,
+                "finish_reason": "tool_calls", "output_policy_id": CLEAN_OUTPUT_POLICY_V1,
+                "output_tool_call_id": tool_id, "request_sha256": inputs["request_sha256"],
+                "response_sha256": _hash(safe_response), "transport_response_sha256": body_hash,
+                "schema_sha256": inputs["schema_sha256"], "response": safe_response,
+                "system_fingerprint": fingerprint, "search_mode": SEARCH_MODE, "parsed": parsed,
+                **self._budget_proof(inputs)}
+
+        proof = self._record_call("model.deepseek.chat", inputs, invoke, observation=observation)
+        self.receipts.append({key: value for key, value in proof.items() if key not in ("schema", "parsed", "response")})
         return proof["parsed"]
 
     def _source_title(self, title: str) -> str:
@@ -661,9 +1529,11 @@ class DeepSeekRequiredClient:
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/v1/tools/search",
                   "request": request, "request_sha256": _hash(request),
                   "query_sha256": hashlib.sha256(query.encode()).hexdigest(), "search_mode": SEARCH_MODE}
+        self._admit_call("search", call_id, request, inputs)
 
         def invoke():
             response, body_hash = self._post_json("/v1/tools/search", request)
+            self._settle_budget(call_id, None)
             original = response.get("results")
             if not isinstance(original, list) or len(original) > count:
                 _fail("INVALID_SEARCH_RESPONSE")
@@ -680,18 +1550,24 @@ class DeepSeekRequiredClient:
                 if (not title or len(title) > 500
                         or not isinstance(content, str) or not content.strip()):
                     continue
-                results.append(self._document(url=url, title=title, content=content,
-                               published=item.get("date"), source="deepseek_search"))
-            if not results:
+                document = self._document(url=url, title=title, content=content,
+                               published=item.get("date"), source="deepseek_search")
+                if self.budget is not None:
+                    metadata = {key: item[key] for key in ("authority", "rerank_score", "site_name")
+                                if key in item and (item[key] is None or type(item[key]) in (str, int, float))}
+                    document["retrieval"] = self._clean(metadata)
+                results.append(document)
+            if not results and self.budget is None:
                 _fail("NO_USABLE_SEARCH_RESULTS")
             return {"schema": "tiger.deepseek-search.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "method": "POST", "search_mode": SEARCH_MODE,
                     "query_sha256": inputs["query_sha256"], "request_sha256": inputs["request_sha256"],
                     "result_count": len(original), "usable_result_count": len(results),
                     "response_sha256": _hash({"results": results}),
-                    "transport_response_sha256": body_hash, "results": results}
+                    "transport_response_sha256": body_hash, "results": results,
+                    **self._budget_proof(inputs)}
 
-        proof = self.execution.call_io("model.deepseek.search", inputs, invoke)
+        proof = self._record_call("model.deepseek.search", inputs, invoke)
         self.search_receipts.append({k: v for k, v in proof.items() if k not in ("schema", "results")})
         return proof["results"]
 
@@ -705,9 +1581,11 @@ class DeepSeekRequiredClient:
         inputs = {"schema": "tiger.deepseek-fetch-request.v1", "call_id": call_id, "stage": stage,
                   "provider": "deepseek", "method": "POST", "endpoint": BASE_URL + "/v1/tools/fetch",
                   "request": request, "request_sha256": _hash(request), "search_mode": SEARCH_MODE}
+        self._admit_call("fetch", call_id, request, inputs)
 
         def invoke():
             response, body_hash = self._post_json("/v1/tools/fetch", request)
+            self._settle_budget(call_id, None)
             if not isinstance(response.get("title"), str) or not isinstance(response.get("content"), str):
                 _fail("INVALID_FETCH_RESPONSE")
             page = self._document(url=safe_url, title=response["title"], content=response["content"],
@@ -715,8 +1593,9 @@ class DeepSeekRequiredClient:
             return {"schema": "tiger.deepseek-fetch.v1", "call_id": call_id, "stage": stage,
                     "provider": "deepseek", "method": "POST", "search_mode": SEARCH_MODE,
                     "request_sha256": inputs["request_sha256"], "response_sha256": _hash({"page": page}),
-                    "transport_response_sha256": body_hash, "page": page}
+                    "transport_response_sha256": body_hash, "page": page,
+                    **self._budget_proof(inputs)}
 
-        proof = self.execution.call_io("model.deepseek.fetch", inputs, invoke)
+        proof = self._record_call("model.deepseek.fetch", inputs, invoke)
         self.fetch_receipts.append({k: v for k, v in proof.items() if k not in ("schema", "page")})
         return proof["page"]

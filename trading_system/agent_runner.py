@@ -282,9 +282,9 @@ def submit(state: Path, request: dict, *, source: Path = SOURCE_ROOT) -> dict:
                 "schema": "tiger.status.v1", "run_id": run_id,
                 "status": "accepted", "error": None,
             })
-            clock = frozen_clock()
-            parent = pointer_read(state)
             policy = policy_manifest(request["profile"])
+            clock = frozen_clock(budget_policy_id=policy["execution"].get("budget_policy_id"))
+            parent = pointer_read(state)
             atomic_json(run, "policy.json", policy, exclusive=True)
             freeze_source(run, source)
             stage_account(state, run, parent)

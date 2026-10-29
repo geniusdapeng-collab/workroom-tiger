@@ -25,6 +25,7 @@ import argparse
 import glob
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 
@@ -155,16 +156,17 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
     from trading_system.governance_bridge import GovernanceBridge
     from trading_system.journal import Journal
     from trading_system.ledger_io import read_json_strict, write_text_atomic
-    from trading_system.pipeline import _single_with_fallback
+    from trading_system.pipeline import _batch_with_fallback, _single_with_fallback
     from trading_system.providers import get_provider
     from trading_system.providers.base import is_synthetic
     from trading_system.redline.execution import (EvidenceWriteError, ExecutionContractError,
                                                    StrictObservationError, StrictSourceSynthetic)
     from trading_system.review.chief import ReviewChief
-    from trading_system.simulator import Bar, SimEngine
+    from trading_system.simulator import Bar, SimEngine, bar_from_frame
     from trading_system.state import purge_run_state
 
     paths = execution.paths
+    upgrade = bool(getattr(execution, "upgrade", False))
 
     def file_value(path):
         target = Path(path)
@@ -195,8 +197,10 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
             "mode", "market", "universe", "universe_file", "top", "picks",
             "account", "out", "demo", "use_tuned", "html")},
     }) as stage:
-        if (args.mode != "daily" or args.market != "us" or args.demo
-                or args.use_tuned or not args.html or args.universe not in ("file", "extended")
+        mode_valid = args.mode == (execution.workflow_phase if upgrade else "daily")
+        universe_valid = args.universe == "full" if upgrade else args.universe in ("file", "extended")
+        if (not mode_valid or args.market != "us" or args.demo
+                or args.use_tuned or not args.html or not universe_valid
                 or Path(args.out).resolve() != paths.reports_dir
                 or Path.cwd().resolve() != paths.work_dir):
             raise ExecutionContractError("Daily request differs from the trusted public paper profile")
@@ -206,7 +210,7 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
             if not universe_path.is_relative_to(paths.work_dir):
                 raise ExecutionContractError("Universe input must be staged in the unique work directory")
         elif args.universe_file is not None:
-            raise ExecutionContractError("Extended universe cannot carry an ignored file override")
+            raise ExecutionContractError("A requested built-in universe cannot carry an ignored file override")
         settle_provider = get_provider(provider, execution=execution)
         if is_synthetic(settle_provider):
             raise StrictSourceSynthetic("Synthetic data is forbidden in the public paper workflow")
@@ -218,7 +222,8 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
         stage.output({"provider": settle_provider.name, "synthetic": False,
                       "journal": before_journal, "sim": before_sim,
                       "calibration": before_calibration, "account_currency": "USD",
-                      "universe": (read_file(universe_path) if universe_path else {"source": "frozen_extended"}),
+                      "universe": (read_file(universe_path) if universe_path else
+                                   {"source": "requested_full_listing" if upgrade else "frozen_extended"}),
                       "calendar": read_file(paths.calendar_override_path)})
 
     with execution.step("state.reset", {"work_dir": paths.work_dir}) as stage:
@@ -251,11 +256,12 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
                                    lambda: to_markdown(result, str(paths.reports_dir), strict=True))
         stage.output({"json": read_file(json_path), "markdown": read_file(md_path)})
 
+    journal_account_usd = result.raw["portfolio_snapshot"]["nav"] if upgrade else args.account
     with execution.step("journal.log", {"records": j.records, "result": result,
-                                         "account_usd": args.account}) as stage:
+                                         "account_usd": journal_account_usd}) as stage:
         added = execution.call_io("journal.log_picks", {"records": j.records, "picks": result.picks,
-                                  "trade_date": result.trade_date, "account_usd": args.account},
-                                  lambda: j.log_picks(result, args.account))
+                                  "trade_date": result.trade_date, "account_usd": journal_account_usd},
+                                  lambda: j.log_picks(result, journal_account_usd))
         actual = read_json(paths.journal_path)
         if actual != j.records:
             raise OSError("Journal log readback differs")
@@ -263,7 +269,7 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
 
     with execution.step("journal.settle", {"records": j.records, "as_of_date": execution.run_date,
                                             "provider": settle_provider.name}) as stage:
-        settled = j.settle(settle_provider, as_of_date=execution.run_date)
+        settled = j.settle(settle_provider, as_of_date=execution.daily_bars_cutoff if upgrade else execution.run_date)
         actual = read_json(paths.journal_path)
         if actual != j.records:
             raise OSError("Journal settlement readback differs")
@@ -280,30 +286,45 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
     def get_bar(ticker):
         if ticker in bar_cache:
             return bar_cache[ticker]
-        bar = None
         try:
             frame = _single_with_fallback(settle_provider, "ohlcv", ticker, days=400)
-            if frame is not None and len(frame):
-                # The frozen market date is the accounting cutoff. Source dates
-                # remain attached to the actual bar and are never relabelled.
-                frame = frame[frame.index.date <= execution.run_date]
-                if len(frame):
-                    row = frame.iloc[-1]
-                    adv = (float((frame["Close"] * frame["Volume"]).tail(20).mean())
-                           if "Volume" in frame.columns else 0.0)
-                    bar = Bar(open=float(row["Open"]), high=float(row["High"]),
-                              low=float(row["Low"]), close=float(row["Close"]),
-                              adv=adv, date=str(frame.index[-1].date()))
+            bar = bar_from_frame(
+                frame, execution.daily_bars_cutoff if upgrade else execution.run_date)
         except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
             raise
         except Exception as error:
             log.warning("Strict paper bar unavailable for %s (%s); transition deferred",
                         ticker, type(error).__name__)
+            bar = None
         bar_cache[ticker] = bar
         return bar
 
     with execution.step("paper.step", {"state": sim.state, "result": result,
                                        "run_date": execution.run_date}) as stage:
+        if upgrade:
+            # The v2 workflow can require many account-management observations.
+            # Complete the same fallback chain in bounded batches, then feed the
+            # existing pure paper engine exactly one dated Bar per symbol.
+            from trading_system.simulator import paper_symbols
+            symbols = paper_symbols(sim.state, result)
+            try:
+                frames = _batch_with_fallback(
+                    settle_provider, symbols, 400, "paper.step",
+                    require_complete=True, as_of_date=execution.run_date)
+            except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
+                raise
+            except Exception as error:
+                log.warning("Strict paper batch unavailable (%s); transition deferred",
+                            type(error).__name__)
+                frames = {}
+            for symbol in symbols:
+                try:
+                    bar_cache[symbol] = bar_from_frame(
+                        frames.get(symbol), execution.daily_bars_cutoff)
+                except Exception as error:
+                    log.warning("Strict paper bar invalid for %s (%s); transition deferred",
+                                symbol, type(error).__name__)
+                    bar_cache[symbol] = None
         sim_out = sim.step(result.trade_date, result, get_bar)
         stage.output({"transition": sim_out, "state": sim.state, "bars": bar_cache})
 
@@ -316,6 +337,18 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
         sim_stats = sim.stats()
         stage.output({"state": sim_readback, "stats": sim_stats,
                       "accounting": result.raw["accounting"]})
+
+    if upgrade:
+        with execution.step("journal.execution_sync", {"records": j.records, "paper_state": sim.state,
+                                                        "as_of": result.trade_date}) as stage:
+            synchronization = execution.call_io("journal.sync_execution", {
+                "records": j.records, "paper_state": sim.state, "as_of": result.trade_date},
+                lambda: j.sync_execution(sim.state, as_of=result.trade_date))
+            actual = read_json(paths.journal_path)
+            if actual != j.records:
+                raise OSError("Execution-synchronized journal readback differs")
+            stats = j.stats()
+            stage.output({"synchronization": synchronization, "records": actual, "stats": stats})
 
     with execution.step("governance.initialize", {"path": paths.governance_path}) as stage:
         before_governance = read_file(paths.governance_path)
@@ -358,6 +391,22 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
                       "events": governance_records}
         stage.output(governance)
 
+    if upgrade:
+        from trading_system.pipeline import quote_observation_batch
+        from trading_system.workflow_runtime_v2 import opportunity_stage, evaluation_stage
+        with execution.step("opportunity.lifecycle", {"result": result, "paper_state": sim.state,
+                                                       "run_id": execution.run_id}) as stage:
+            lifecycle = opportunity_stage(execution, result, sim.state,
+                                          lambda ticker: quote_observation_batch(settle_provider, [ticker])["quotes"][ticker],
+                                          get_quotes=lambda symbols: quote_observation_batch(settle_provider, symbols))
+            stage.output(lifecycle)
+        with execution.step("business.evaluate", {"result": result, "paper_state": sim.state,
+                                                   "lifecycle": result.raw["opportunity_lifecycle"],
+                                                   "run_id": execution.run_id}) as stage:
+            evaluated = evaluation_stage(execution, result, sim.state,
+                lambda ticker: _single_with_fallback(settle_provider, "ohlcv", ticker, days=400))
+            stage.output(evaluated)
+
     with execution.step("report.final_json", {"result": result}) as stage:
         json_path = execution.call_io("report.to_json", {"result": result, "out_dir": paths.reports_dir},
                                      lambda: to_json(result, str(paths.reports_dir), strict=True))
@@ -368,12 +417,18 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
         # is evidence; no extra trading plan is silently introduced.
         stage.output({"enabled": True, "mode": args.mode, "path": None,
                       "plan": {"action_summary": result.raw["action_summary"],
-                               "execution_decisions": result.raw["execution_decisions"]}}
+                               "execution_decisions": result.raw["execution_decisions"],
+                               **({"workflow_phase": execution.workflow_phase,
+                                   "lifecycle_observation": result.raw["lifecycle_observation"]}
+                                  if upgrade else {})}}
                      if execution.model_required else
                      {"enabled": False, "mode": args.mode, "path": None, "plan": None})
 
     with execution.step("report.markdown", {"result": result, "journal_stats": stats}) as stage:
         markdown_text = render_markdown(result) + "\n" + _journal_section(stats)
+        if upgrade:
+            from trading_system.workflow_runtime_v2 import render_workflow_markdown
+            markdown_text += "\n" + render_workflow_markdown(result)
         stage.output(write_text(md_path, markdown_text))
 
     with execution.step("report.html", {"result": result, "journal_stats": stats,
@@ -385,7 +440,7 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
             try:
                 frame = _single_with_fallback(settle_provider, "ohlcv", symbol, days=400)
                 if frame is not None and len(frame):
-                    frame = frame[frame.index.date <= execution.run_date]
+                    frame = frame[frame.index.date <= (execution.daily_bars_cutoff if upgrade else execution.run_date)]
                     benchmarks[symbol] = [[str(day.date()), round(float(close), 2)]
                                           for day, close in zip(frame.index, frame["Close"])]
             except (EvidenceWriteError, ExecutionContractError, StrictObservationError):
@@ -395,6 +450,11 @@ def _daily_strict(args, provider, execution) -> DailyRunResult:
                             symbol, type(error).__name__)
         html_text = render_html(result, stats, j.records,
                                 sim={"state": sim.state, "stats": sim_stats}, bench=benchmarks)
+        if upgrade:
+            from trading_system.workflow_runtime_v2 import render_workflow_html
+            if html_text.count("</body>") != 1:
+                raise ValueError("Workflow report requires one complete HTML body")
+            html_text = html_text.replace("</body>", render_workflow_html(result) + "</body>", 1)
         html_path = paths.reports_dir / f"日报_{result.trade_date.replace('-', '')}.html"
         stage.output({"benchmarks": benchmarks, "html": write_text(html_path, html_text)})
 
@@ -678,21 +738,46 @@ def _backtest(args, provider) -> None:
     from trading_system.providers import get_provider
     from trading_system.universe import load_universe
 
+    selected_policy = getattr(args, "bt_execution_policy", "whitepaper-execution-v2")
+    if selected_policy not in {"legacy-execution-v1", "whitepaper-execution-v2"}:
+        raise SystemExit("回测执行规则版本不受支持。")
+    if (isinstance(args.account, bool) or not isinstance(args.account, (int, float))
+            or not math.isfinite(args.account) or args.account <= 0
+            or type(args.picks) is not int or not 1 <= args.picks <= config.MAX_POSITIONS_V2):
+        raise SystemExit("回测要求正的有限 USD 初始净值与 1–10 的持仓数量上限。")
+    params = GateParams(execution_policy=selected_policy, initial_cash=args.account,
+                        max_positions=args.picks, max_picks=args.picks)
     prov = get_provider(provider or ("demo" if args.demo else None))
     universe = load_universe(args.universe, args.universe_file)
     frames, panel, _ = collect_day_frames(
         prov, universe, days=args.bt_days + 200, signal_days=args.bt_days, top_n=args.top)
-    res = run_backtest(frames, panel, GateParams())
+    res = run_backtest(frames, panel, params)
 
-    lines = [f"# 回测报告 — {res['n_days']} 个信号日（provider={prov.name}）", ""]
-    lines.append(f"- 交易 **{res['n_trades']}** 笔 ｜ 胜率 **{res['win_rate']:.1%}** ｜ "
-                 f"期望 **{res['expectancy_r']}R** ｜ 利润因子 {res['profit_factor']}")
+    lines = [f"# 回测报告 — {res['n_days']} 个回放观测日（provider={prov.name}）", ""]
+    lines.append(f"- 执行规则：{res['execution_policy']}；证据范围：{res['evidence_scope']}")
+    lines.append(f"- 初始净值 ${args.account:,.2f}；持仓上限 {args.picks}（不构成交易配额）")
+    win_rate = f"{res['win_rate']:.1%}" if res["n_trades"] else "样本不足"
+    expectancy = f"{res['expectancy_r']}R" if res["n_trades"] else "样本不足"
+    factor = res["profit_factor"]
+    factor = factor if isinstance(factor, (int, float)) and math.isfinite(factor) else "样本不足"
+    lines.append(f"- 交易 **{res['n_trades']}** 笔 ｜ 胜率 **{win_rate}** ｜ "
+                 f"期望 **{expectancy}** ｜ 利润因子 {factor}")
     lines.append(f"- 累计 {res['total_r']}R ｜ 组合收益 {res['port_total_return']:.2%} ｜ "
                  f"夏普 {res['port_sharpe']} ｜ 最大回撤 {res['port_max_dd']:.2%}")
     lines.append("")
     # v6.0 诚实披露（白皮书§14 "在统计面前保持诚实"）：净口径与已知偏差
     lines.append("## 口径与已知偏差披露")
-    lines.append(f"- 交易成本：单边 {config.COST_BPS}bp 已计入（净口径 R 与组合收益）")
+    if selected_policy == "whitepaper-execution-v2":
+        lines.append("- 资金与执行：按回放当时净值、账户已占资金与风险预算分配整数股数，"
+                     "40/40/20 三段沿用同一纸面引擎；追加需前一完整交易日的有效确认。")
+        lines.append("- 交易成本：佣金与信号期成交额对应的滑点档逐笔计入；开盘、出场、"
+                     "高点达 2R 后下一根保护与第 5–7 日时间退出沿用当前 v2 规则。")
+        lines.append("- 这是数值规则与纸面执行的历史回放，未重建历史逐股模型研究，"
+                     "不能证明完整 required-model 策略的历史收益。")
+    else:
+        lines.append(f"- 交易成本：单边 {config.COST_BPS}bp 已计入（旧版净口径 R 与组合收益）")
+        lines.append("- 本结果明确采用旧版执行规则，解释历史口径；不代表当前 v2 的分批与账户执行。")
+    lines.extend(f"- 限制：{item}" for item in res.get("limitations", []))
     lines.append("- 幸存者偏差：回测使用【当前】股票池回放历史，已退市标的缺失，"
                  "结果方向性偏乐观；")
     lines.append("- 映射时点偏差：产业链归属/板块映射按【当前】定义应用于历史信号日；")
@@ -827,6 +912,10 @@ def main() -> None:
     parser.add_argument("--backtest", action="store_true", help="运行无未来函数回测")
     parser.add_argument("--tune", action="store_true", help="滚动 WFA 调参 + DSR 校正")
     parser.add_argument("--bt-days", type=int, default=260, help="回测信号日数")
+    parser.add_argument("--bt-execution-policy",
+                        choices=["legacy-execution-v1", "whitepaper-execution-v2"],
+                        default="whitepaper-execution-v2",
+                        help="回测执行规则（默认与新版纸盘一致；旧版须显式选择）")
     parser.add_argument("--interval", type=int, default=300, help="盘中轮询间隔（秒）")
     parser.add_argument("--cycles", type=int, default=12, help="盘中轮询轮数")
     parser.add_argument("--watch", default=None, help="盘中监控子集（逗号分隔代码）")

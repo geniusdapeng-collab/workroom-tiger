@@ -71,6 +71,12 @@ class SentimentRow:
 
 
 @dataclass
+class SentimentEvidenceRow(SentimentRow):
+    """v2 adds evidence identity while the legacy dataclass stays byte-stable."""
+    evidence_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
 class RiskAlert:
     severity: float              # 1..10
     chain_id: str
@@ -78,6 +84,14 @@ class RiskAlert:
     type: str                    # supply_chain/policy/patent/capacity/other
     headline_zh: str
     transmission: list[str] = field(default_factory=list)
+    evidence_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RiskAssessment:
+    """The coverage and uncertainty statement survives even an empty alert list."""
+    assessment: str
+    alerts: list[RiskAlert] = field(default_factory=list)
     evidence_ids: list[str] = field(default_factory=list)
 
 
