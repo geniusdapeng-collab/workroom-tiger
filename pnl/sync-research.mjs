@@ -14,6 +14,7 @@ const PROFILES = new Set([MODEL_PROFILE, ...UPGRADE_PROFILES]);
 const V3_BYTES = 4 * 1_048_576;
 const RUN_ID = /^run-[0-9a-f]{32}$/;
 const COMPLETE = new Set(['completed']);
+const VERIFICATION_OBSERVATION_MS = 300000;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 export class SyncError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const error = (code, message) => { throw new SyncError(code, message); };
@@ -181,8 +182,14 @@ export async function syncResearch({ env = process.env, date = marketDate(), pro
         const observed = await call('status', { run_id: state.runId });
         if (observed.run_id !== state.runId || !observed.operation_ok) error(observed.error?.code ?? 'RESULT_INVALID', 'Unable to inspect the existing run identity');
         if (COMPLETE.has(observed.status)) {
-          const receipt = await call('receipt', { run_id: state.runId });
-          const verification = await call('verify', { run_id: state.runId });
+          // Terminal verification rebuilds the complete evidence graph and can
+          // legitimately exceed the short 50-second run-observation window.
+          // Give each independent verifier the same bounded 5-minute budget as
+          // the controlled CLI; neither operation can mutate the run.
+          const receipt = await invoke('receipt', { run_id: state.runId }, config,
+            VERIFICATION_OBSERVATION_MS);
+          const verification = await invoke('verify', { run_id: state.runId }, config,
+            VERIFICATION_OBSERVATION_MS);
           const built = await buildResearch({ receipt, verification, stateRoot: config.stateRoot, profile, idempotencyKey: `pnl-${identity}`, expectedRequest: state.request });
           state.payload = built.record; state.evidence = built.evidence; state.request = built.originalRequest; state.phase = 'verified'; await saveState(file, state, env); break;
         }

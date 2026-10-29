@@ -46,17 +46,18 @@ async function setup(t, profile = PROFILE) {
   const receipt = envelope('receipt', { summary, verification: verified, evidence_refs: refs });
   const verification = envelope('verify', { verification: verified, evidence_refs: refs, data: { source: { tree_sha256: 'b'.repeat(64) } } });
   const env = { TIGER_AGENT_PYTHON: '/test/trusted/python', TIGER_AGENT_STATE_ROOT: stateRoot, TIGER_AGENT_PERMISSION: 'paper', TIGER_PNL_SYNC_STATE_DIR: join(path, 'sync'), TIGER_PNL_WRITE_TOKEN: TEST_TOKEN, TIGER_PNL_URL: 'https://example.com', LLM_BACKEND: 'api', LLM_BASE_URL: 'https://api.deepseek.com', LLM_MODEL: 'deepseek-flash', LLM_API_KEY: 'SYNC-UNIT-TEST-ONLY-MODEL-KEY' };
-  const calls = []; const published = [];
-  const invoke = async (operation, input) => { calls.push({ operation, input }); if (operation === 'doctor') return envelope(operation, { status: 'ready', data: { access_mode: 'paper' } }); if (operation === 'describe') return envelope(operation, { status: 'ready', data: { profile: { profile: input.profile, execution: { model_mode: 'enabled' }, model_contract: { provider: 'deepseek', model: 'deepseek-flash', release: 'DeepSeek-V4.1-Flash-1017', required: true, search_mode: 'provider_native_search' } }, access_mode: 'paper' } }); if (operation === 'run') return envelope(operation, { status: 'accepted' }); if (operation === 'status') return envelope(operation); if (operation === 'receipt') return receipt; if (operation === 'verify') return verification; throw new Error('Unexpected operation'); };
+  const calls = []; const published = []; const observationTimeouts = [];
+  const invoke = async (operation, input, _config, timeoutMs) => { calls.push({ operation, input }); observationTimeouts.push({ operation, timeoutMs }); if (operation === 'doctor') return envelope(operation, { status: 'ready', data: { access_mode: 'paper' } }); if (operation === 'describe') return envelope(operation, { status: 'ready', data: { profile: { profile: input.profile, execution: { model_mode: 'enabled' }, model_contract: { provider: 'deepseek', model: 'deepseek-flash', release: 'DeepSeek-V4.1-Flash-1017', required: true, search_mode: 'provider_native_search' } }, access_mode: 'paper' } }); if (operation === 'run') return envelope(operation, { status: 'accepted' }); if (operation === 'status') return envelope(operation); if (operation === 'receipt') return receipt; if (operation === 'verify') return verification; throw new Error('Unexpected operation'); };
   const publish = async options => { published.push(options); return { idempotencyKey: options.record.idempotencyKey, payloadHash: hash(canonical(options.record)), hash: 'c'.repeat(64), sequence: 1 }; };
   const stateFile = join(env.TIGER_PNL_SYNC_STATE_DIR, `${profile}-${DATE}.json`);
-  return { path, env, originalRequest, raw, runDir, receipt, verification, calls, published, invoke, publish, stateFile };
+  return { path, env, originalRequest, raw, runDir, receipt, verification, calls, observationTimeouts, published, invoke, publish, stateFile };
 }
 
 test('verified sync calls the controlled six operations, publishes research only, and persists no token or paper holdings', async t => {
   const f = await setup(t);
   const result = await syncResearch({ env: f.env, date: DATE, profile: PROFILE }, { invoke: f.invoke, publish: f.publish });
   assert.equal(result.status, 'published_and_verified'); assert.deepEqual(f.calls.map(c => c.operation), ['doctor', 'describe', 'run', 'status', 'receipt', 'verify']);
+  assert.deepEqual(f.observationTimeouts.filter(row => ['receipt', 'verify'].includes(row.operation)).map(row => [row.operation, row.timeoutMs]), [['receipt', 300000], ['verify', 300000]]);
   const payload = f.published[0].record; assert.equal(payload.decisions[0].action, 'buy'); assert.equal(payload.decisions[0].targetWeight, 0.1); assert.equal(payload.executionDecisions[0].thesis.status, 'sufficient');
   assert.equal(payload.dataAsOf, '2026-01-02'); assert.equal(payload.asOf, '2026-01-03T20:01:30.123Z'); assert.equal(payload.modelMode, 'enabled');
   assert.equal(Object.hasOwn(payload, 'positions'), false); assert.equal(Object.hasOwn(payload, 'account'), false); assert.equal(Object.hasOwn(payload, 'trades'), false);
