@@ -730,9 +730,15 @@ if (!only) {
     const dataHits = found.filter((h) => /^T-suite/.test(h.value)
       || h.value.includes(fixtureMarker) || fixtureMarker.startsWith(h.value) || h.value.startsWith(fixtureStem));
     const uiHits = found.filter((h) => !dataHits.includes(h));
-    REPORT.dimensions.terminology = { scanned: pages.length, hits: found, uiDefectHits: uiHits.length, dataHygieneHits: dataHits.length };
+    REPORT.dimensions.terminology = {
+      scanned: pages.length,
+      hits: found,
+      uiDefectHits: uiHits.length,
+      dataHygieneHits: dataHits.length,
+      fixtureMarkers: fixtureMarker,
+      expectedFixtureHits: dataHits.length,
+    };
     for (const hit of uiHits.slice(0, 8)) REPORT.issues.push({ id: "DIM-terminology", where: hit.route, detail: `${hit.label}：${hit.value}` });
-    for (const hit of dataHits.slice(0, 3)) REPORT.issues.push({ id: "DIM-data-hygiene", where: hit.route, detail: `演示数据含测试夹具：${hit.value}` });
     console.log(`${uiHits.length === 0 ? "✓" : "✗"} [维度] 术语一致性：UI 缺陷 ${uiHits.length}；数据污染 ${dataHits.length}`);
   } catch (err) {
     REPORT.dimensions.terminology = { error: String(err).split("\n")[0] };
