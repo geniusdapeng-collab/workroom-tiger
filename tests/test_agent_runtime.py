@@ -239,6 +239,24 @@ def test_fsync_error_after_visible_pointer_is_disclosed_on_later_read(completed,
     assert any("fsync reported an error" in note for note in later["limitations"])
 
 
+def test_publication_uses_prepared_verification_without_postcommit_replay(completed, monkeypatch):
+    state, run, _ = unpublished(completed)
+    calls = []
+    original = runtime.verify_run
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("require_committed", True))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "verify_run", counted)
+    value = runtime.seal_and_publish(state, run)
+    assert calls == [False]
+    assert value["verification"]["ok"]
+    assert "published-account-pointer-readback" in value["verification"]["checks"]
+    assert "prepared-unpublished-account" not in value["verification"]["checks"]
+    assert runtime.committed_pointer(state, run.name) == value["pointer"]
+
+
 def test_commit_survives_postpublication_status_failure_and_missing_durability_record(completed):
     state, run, _ = completed
     atomic_json(run, "status.json", {

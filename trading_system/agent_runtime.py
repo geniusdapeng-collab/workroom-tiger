@@ -1013,4 +1013,30 @@ def seal_and_publish(state: Path, run: Path, *, deadline: float | None = None) -
         # Publication already happened. A read-only verifier explicitly reports
         # missing durability confirmation instead of inventing a rollback.
         pass
-    return verify_run(state, run.name, current_source=None)
+    # The prepared verification already recomputed the complete event graph,
+    # account arithmetic and receipt. Re-running that expensive replay after
+    # the pointer becomes visible can cross the business deadline and falsely
+    # rewrite a committed run as failed. Prove the publication by its exact
+    # pointer readback and retain the prepared evidence summary.
+    limitations = list(prepared["limitations"])
+    durability_file = run / "publication-durability.json"
+    if not durability_file.exists():
+        limitations.append(
+            "Account publication is visible; post-publication durability confirmation is unavailable.")
+    else:
+        durability = read_json(run, "publication-durability.json")
+        if (not isinstance(durability, dict) or set(durability) != {
+                "schema", "run_id", "pointer", "directory_fsync_confirmed"}
+                or durability["schema"] != "tiger.publication-durability.v1"
+                or durability["run_id"] != run.name or durability["pointer"] != prepared["pointer"]
+                or not isinstance(durability["directory_fsync_confirmed"], bool)):
+            raise EvidenceInvalid("RESULT_INVALID", "Publication durability record differs")
+        if not durability["directory_fsync_confirmed"]:
+            limitations.append(
+                "Account publication is visible; its directory fsync reported an error.")
+    verification = dict(prepared["verification"])
+    verification["checks"] = [
+        check for check in verification["checks"]
+        if check != "prepared-unpublished-account"
+    ] + ["published-account-pointer-readback"]
+    return {**prepared, "limitations": limitations, "verification": verification}

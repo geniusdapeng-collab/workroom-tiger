@@ -13,7 +13,7 @@ export const PROFILE = "us-public-paper-v1";
 export const REQUIRED_PROFILE = "us-public-model-required-paper-v1";
 export const OPERATIONS = Object.freeze(["doctor", "describe", "run", "status", "receipt", "verify"]);
 export const LIMITS = Object.freeze({ inputBytes: 65536, outputBytes: 1024 * 1024, v2OutputBytes: 4 * 1024 * 1024, stderrBytes: 65536,
-  frameBytes: 131072, requestMs: 60000, waitMs: 7260000, pollMs: 1000, depth: 64, concurrent: 4,
+  frameBytes: 131072, requestMs: 60000, verificationRequestMs: 300000, waitMs: 7260000, pollMs: 1000, depth: 64, concurrent: 4,
   terminateMs: 250, cleanupMs: 2000 });
 const RUN_ID = /^run-[0-9a-f]{32}$/u;
 const TERMINAL_OK = new Set(["completed", "completed_degraded"]);
@@ -368,8 +368,15 @@ export function startupOptions(options = {}) {
   return Object.freeze({ mode, python, stateRoot: resolve(stateRoot) });
 }
 
+export function observationTimeoutMs(operation) {
+  // Full receipt/verify replay can legitimately exceed one minute for a large
+  // v2 evidence graph. Submission and status remain on the short observation bound.
+  return operation === "receipt" || operation === "verify"
+    ? LIMITS.verificationRequestMs : LIMITS.requestMs;
+}
+
 /** No env/argv/root override comes from a business request. Accepted detached workers are owned by Python. */
-export async function invokeWorkflow(operation, input, options = {}, { signal, timeoutMs = LIMITS.requestMs } = {}) {
+export async function invokeWorkflow(operation, input, options = {}, { signal, timeoutMs = observationTimeoutMs(operation) } = {}) {
   let config;
   try {
     config = startupOptions(options);
@@ -501,10 +508,10 @@ export async function waitForReceipt(runId, options, { signal, waitMs = LIMITS.w
       if (signal?.aborted) throw new WorkflowError("CANCELLED", "Observation was cancelled.");
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new WorkflowError("TIMEOUT", "Waiting for the existing run exceeded the observation deadline.");
-      const current = await invoke("status", { run_id: runId }, options, { signal, timeoutMs: Math.min(remaining, LIMITS.requestMs) });
+      const current = await invoke("status", { run_id: runId }, options, { signal, timeoutMs: Math.min(remaining, observationTimeoutMs("status")) });
       if (!current.operation_ok) return current;
       if (TERMINAL_OK.has(current.status)) {
-        const receipt = await invoke("receipt", { run_id: runId }, options, { signal, timeoutMs: Math.min(Math.max(1, deadline - Date.now()), LIMITS.requestMs) });
+        const receipt = await invoke("receipt", { run_id: runId }, options, { signal, timeoutMs: Math.min(Math.max(1, deadline - Date.now()), observationTimeoutMs("receipt")) });
         return receipt;
       }
       if (!["accepted", "running"].includes(current.status)) {
