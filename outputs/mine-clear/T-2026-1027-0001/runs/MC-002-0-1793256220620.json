@@ -1,0 +1,40 @@
+{
+  "schema": "workloom.evidence-run/v1",
+  "id": "MC-002-0-1793256220620",
+  "command": "python3 -m pytest -q tests/test_short_term_lifecycle_v2.py -k not evaluation",
+  "exec": {
+    "file": "python3",
+    "args": [
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_short_term_lifecycle_v2.py",
+      "-k",
+      "not evaluation"
+    ]
+  },
+  "actor": "mcd_acceptance_retry",
+  "role": "acceptance",
+  "subject": {
+    "card_id": "MC-002",
+    "assertion_index": 0
+  },
+  "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+  "working_tree_dirty": false,
+  "started_at": "2026-10-29T06:43:40.620Z",
+  "finished_at": "2026-10-29T06:43:41.320Z",
+  "exit_code": 0,
+  "signal": null,
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "result": "pass",
+  "outputs": [
+    {
+      "path": "evidence/MC-002-0-1793256220620.txt",
+      "sha256": "5939f399a1793ba634c81fa9711dba6b4a2dde8d07d5beaa7f48e1690839f182",
+      "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+    }
+  ]
+}

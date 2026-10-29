@@ -1,0 +1,6 @@
+.............                                                            [100%]
+13 passed, 107 deselected in 0.23s
+
+
+exit_code=0 signal=none error=none
+assertion_validation={"ok":true,"errors":[]}

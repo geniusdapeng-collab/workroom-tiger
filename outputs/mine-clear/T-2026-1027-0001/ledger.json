@@ -5,7 +5,7 @@
   "repo_path": "/Users/mac/Documents/Codex/2026-10-25/tiger-tigerpnl-com-tiger-tiger-tiger-2/work/tiger-source",
   "title": "白皮书短线闭环六项修复与真实评测迭代",
   "created_at": "2026-10-26T19:26:13.881Z",
-  "updated_at": "2026-10-26T19:37:59.659Z",
+  "updated_at": "2026-10-29T06:43:54.134Z",
   "baseline": {
     "audit": {
       "commit": "deab886aad743451e7f380323824950df4f825fd",
@@ -20,8 +20,8 @@
       "reverified_problem_ids": []
     },
     "acceptance": {
-      "commit": null,
-      "is_descendant_of_repair": null
+      "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+      "is_descendant_of_repair": true
     }
   },
   "environment": {
@@ -97,7 +97,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 2,
-      "state": "open",
+      "state": "verified",
       "title": "候选扫描后没有逐个发行人补证与完整交易假设",
       "evidence": [
         {
@@ -129,7 +129,17 @@
               "tests/test_short_term_research_v2.py"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-001-0-1793256219308.json",
+            "sha256": "485469915655603d21e080ba7079b3e37b6a0509375f1085b369e937a984a2d9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "evidence": {
+            "path": "evidence/MC-001-0-1793256219308.txt",
+            "sha256": "c2567f6c0347e10109fea3ad357b3658eb44c658f7eb9255391ea44df9742f7f",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
         }
       ],
       "regression": {
@@ -137,8 +147,34 @@
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
       "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
-      "verified_by": null,
-      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+      "verified_by": "mcd_acceptance_retry",
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance.",
+      "verified_at": "2026-10-29T06:43:40.490Z",
+      "verification_evidence": {
+        "path": "runs/MC-001-0-1793256219308.json",
+        "sha256": "485469915655603d21e080ba7079b3e37b6a0509375f1085b369e937a984a2d9",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "last_assertion_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "role": "acceptance",
+        "result": "pass",
+        "at": "2026-10-29T06:43:39.307Z",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+        "finished_at": "2026-10-29T06:43:40.490Z"
+      },
+      "last_verification_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "result": "pass",
+        "at": "2026-10-29T06:43:40.490Z",
+        "runs": [
+          {
+            "path": "runs/MC-001-0-1793256219308.json",
+            "sha256": "485469915655603d21e080ba7079b3e37b6a0509375f1085b369e937a984a2d9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        ]
+      }
     },
     {
       "id": "MC-002",
@@ -146,7 +182,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 2,
-      "state": "open",
+      "state": "verified",
       "title": "WATCH与持仓缺少持续复核到执行回报的状态链",
       "evidence": [
         {
@@ -180,7 +216,17 @@
               "not evaluation"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-002-0-1793256220620.json",
+            "sha256": "422bf106849ffdcd59d14975b937c03e360426e7577f3b0c89a8ee184da0003c",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "evidence": {
+            "path": "evidence/MC-002-0-1793256220620.txt",
+            "sha256": "5939f399a1793ba634c81fa9711dba6b4a2dde8d07d5beaa7f48e1690839f182",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
         }
       ],
       "regression": {
@@ -188,8 +234,34 @@
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
       "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
-      "verified_by": null,
-      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+      "verified_by": "mcd_acceptance_retry",
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance.",
+      "verified_at": "2026-10-29T06:43:41.413Z",
+      "verification_evidence": {
+        "path": "runs/MC-002-0-1793256220620.json",
+        "sha256": "422bf106849ffdcd59d14975b937c03e360426e7577f3b0c89a8ee184da0003c",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "last_assertion_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "role": "acceptance",
+        "result": "pass",
+        "at": "2026-10-29T06:43:40.619Z",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+        "finished_at": "2026-10-29T06:43:41.413Z"
+      },
+      "last_verification_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "result": "pass",
+        "at": "2026-10-29T06:43:41.413Z",
+        "runs": [
+          {
+            "path": "runs/MC-002-0-1793256220620.json",
+            "sha256": "422bf106849ffdcd59d14975b937c03e360426e7577f3b0c89a8ee184da0003c",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        ]
+      }
     },
     {
       "id": "MC-003",
@@ -197,7 +269,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 1,
-      "state": "open",
+      "state": "verified",
       "title": "信号结算与模拟账户及回测的入场退出口径不同",
       "evidence": [
         {
@@ -231,7 +303,17 @@
               "exit or template or backtest or journal"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-003-0-1793256221560.json",
+            "sha256": "e8f324b2adfd325603b7e7295d479438556e565224a5ca02e1bc1db605b2daf9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "evidence": {
+            "path": "evidence/MC-003-0-1793256221560.txt",
+            "sha256": "acdeeda254b7f1777e8ad73cce3948714cd04fde11aadf9576cc92069cae44d6",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
         }
       ],
       "regression": {
@@ -239,8 +321,34 @@
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
       "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
-      "verified_by": null,
-      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+      "verified_by": "mcd_acceptance_retry",
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance.",
+      "verified_at": "2026-10-29T06:43:42.062Z",
+      "verification_evidence": {
+        "path": "runs/MC-003-0-1793256221560.json",
+        "sha256": "e8f324b2adfd325603b7e7295d479438556e565224a5ca02e1bc1db605b2daf9",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "last_assertion_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "role": "acceptance",
+        "result": "pass",
+        "at": "2026-10-29T06:43:41.559Z",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+        "finished_at": "2026-10-29T06:43:42.062Z"
+      },
+      "last_verification_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "result": "pass",
+        "at": "2026-10-29T06:43:42.062Z",
+        "runs": [
+          {
+            "path": "runs/MC-003-0-1793256221560.json",
+            "sha256": "e8f324b2adfd325603b7e7295d479438556e565224a5ca02e1bc1db605b2daf9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        ]
+      }
     },
     {
       "id": "MC-004",
@@ -248,7 +356,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 2,
-      "state": "open",
+      "state": "verified",
       "title": "分批建仓只有文字而没有分批执行与风险预留",
       "evidence": [
         {
@@ -282,7 +390,17 @@
               "tranche"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-004-0-1793256222216.json",
+            "sha256": "aaecf77cb059d5537ca5a89e1097aa5b61a1382757eabd5b75cf0e37d0e1b5b9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "evidence": {
+            "path": "evidence/MC-004-0-1793256222216.txt",
+            "sha256": "923da6517f8bb152a136440494c4953d9e7dcc3f92b4c2380401bf39a92d0dbb",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
         }
       ],
       "regression": {
@@ -290,8 +408,34 @@
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
       "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
-      "verified_by": null,
-      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+      "verified_by": "mcd_acceptance_retry",
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance.",
+      "verified_at": "2026-10-29T06:43:42.659Z",
+      "verification_evidence": {
+        "path": "runs/MC-004-0-1793256222216.json",
+        "sha256": "aaecf77cb059d5537ca5a89e1097aa5b61a1382757eabd5b75cf0e37d0e1b5b9",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "last_assertion_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "role": "acceptance",
+        "result": "pass",
+        "at": "2026-10-29T06:43:42.216Z",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+        "finished_at": "2026-10-29T06:43:42.659Z"
+      },
+      "last_verification_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "result": "pass",
+        "at": "2026-10-29T06:43:42.659Z",
+        "runs": [
+          {
+            "path": "runs/MC-004-0-1793256222216.json",
+            "sha256": "aaecf77cb059d5537ca5a89e1097aa5b61a1382757eabd5b75cf0e37d0e1b5b9",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        ]
+      }
     },
     {
       "id": "MC-005",
@@ -299,7 +443,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 1,
-      "state": "open",
+      "state": "verified",
       "title": "信号固定参考资金未完整冻结净值与账户承诺风险",
       "evidence": [
         {
@@ -333,7 +477,17 @@
               "snapshot or allocation or nav or risk"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-005-0-1793256222782.json",
+            "sha256": "d67ad0dc1a160eb2102362f30247eb0b51382945a0b468a7675705fa4d77e437",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "evidence": {
+            "path": "evidence/MC-005-0-1793256222782.txt",
+            "sha256": "e749212a9fe2c782ef685d475ec05c0d2fb200264e5eab89e31d76fb7a758b13",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
         }
       ],
       "regression": {
@@ -341,8 +495,34 @@
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
       "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
-      "verified_by": null,
-      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+      "verified_by": "mcd_acceptance_retry",
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance.",
+      "verified_at": "2026-10-29T06:43:43.232Z",
+      "verification_evidence": {
+        "path": "runs/MC-005-0-1793256222782.json",
+        "sha256": "d67ad0dc1a160eb2102362f30247eb0b51382945a0b468a7675705fa4d77e437",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "last_assertion_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "role": "acceptance",
+        "result": "pass",
+        "at": "2026-10-29T06:43:42.782Z",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+        "finished_at": "2026-10-29T06:43:43.232Z"
+      },
+      "last_verification_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "result": "pass",
+        "at": "2026-10-29T06:43:43.232Z",
+        "runs": [
+          {
+            "path": "runs/MC-005-0-1793256222782.json",
+            "sha256": "d67ad0dc1a160eb2102362f30247eb0b51382945a0b468a7675705fa4d77e437",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        ]
+      }
     },
     {
       "id": "MC-006",
@@ -350,7 +530,7 @@
       "level": "L2",
       "severity": "P1",
       "batch": 2,
-      "state": "open",
+      "state": "verified",
       "title": "缺少冻结机会队列与资金周转及净损益评估",
       "evidence": [
         {
@@ -384,7 +564,17 @@
               "evaluation"
             ]
           },
-          "last_result": "not-run"
+          "last_result": "pass",
+          "run": {
+            "path": "runs/MC-006-0-1793256223356.json",
+            "sha256": "e727c3cd6f971adf9fa5a9d19c2a8bf5d4dcdf097e67bb51e9cf12a888714071",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          },
+          "evidence": {
+            "path": "evidence/MC-006-0-1793256223356.txt",
+            "sha256": "0d3ce835cd5c6986298e52470163d66522fbd481f8d3204cd9d5f95237123f39",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
         }
       ],
       "regression": {
@@ -392,13 +582,44 @@
       },
       "rollback": "普通revert代码；保留只增事件，按显式版本加载旧数据，不覆盖旧账本",
       "fixed_by": "Codex <codex@users.noreply.github.com>@9a4572ea7cf7219560236ae57c56741fc592638a",
-      "verified_by": null,
-      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance."
+      "verified_by": "mcd_acceptance_retry",
+      "notes": "User authorized repair plus several real complete runs followed by independent business audit and another optimization/rerun. Local unit evidence alone cannot close production business acceptance.",
+      "verified_at": "2026-10-29T06:43:43.605Z",
+      "verification_evidence": {
+        "path": "runs/MC-006-0-1793256223356.json",
+        "sha256": "e727c3cd6f971adf9fa5a9d19c2a8bf5d4dcdf097e67bb51e9cf12a888714071",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+      },
+      "last_assertion_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "role": "acceptance",
+        "result": "pass",
+        "at": "2026-10-29T06:43:43.356Z",
+        "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc",
+        "finished_at": "2026-10-29T06:43:43.605Z"
+      },
+      "last_verification_attempt": {
+        "actor": "mcd_acceptance_retry",
+        "result": "pass",
+        "at": "2026-10-29T06:43:43.605Z",
+        "runs": [
+          {
+            "path": "runs/MC-006-0-1793256223356.json",
+            "sha256": "e727c3cd6f971adf9fa5a9d19c2a8bf5d4dcdf097e67bb51e9cf12a888714071",
+            "commit": "878b755947e1cd3bdf505be4747ce22c472a81dc"
+          }
+        ]
+      }
     }
   ],
   "gates": [],
   "issue": {
     "slug": "geniusdapeng-collab/workroom-tiger",
     "number": 39
+  },
+  "handoff": {
+    "generated_at": "2026-10-29T06:43:54.134Z",
+    "acceptance_command": "node scripts/acceptance/fleet-run.mjs --repo tiger-source --env client-runtime",
+    "open_problem_ids": []
   }
 }
