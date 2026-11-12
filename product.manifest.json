@@ -4,7 +4,7 @@
   "role": "industry",
   "displayName": "老虎全球资产管理系统",
   "packageName": "workloom-im",
-  "repository": "workloom-ai/workroom-tiger",
+  "repository": "geniusdapeng-collab/workroom-tiger",
   "defaultBundle": "trading",
   "demoWorkspaceSlug": "tiger-trading",
   "demoMemberNo": "MEM-T001",
@@ -19,8 +19,17 @@
     "portOffset": 610
   },
   "clients": {
-    "bPc": { "enabled": true, "entry": "apps/web" },
-    "bMobile": { "enabled": true, "entry": "apps/webb" },
-    "cMobile": { "enabled": true, "entry": "apps/webc" }
+    "bPc": {
+      "enabled": true,
+      "entry": "apps/web"
+    },
+    "bMobile": {
+      "enabled": true,
+      "entry": "apps/webb"
+    },
+    "cMobile": {
+      "enabled": true,
+      "entry": "apps/webc"
+    }
   }
 }
