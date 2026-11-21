@@ -616,9 +616,8 @@ def clean_round(llm, docs, *, acquisition):
                     code = semantic_failure_code(error)
                     if code is None:
                         raise
-                    failure = semantic_failure_value(
+                    output = semantic_failure_value(
                         "metadata_synthesis", raw, None, code)
-                    stage.output(failure)
                 else:
                     validate_schema(native, summary_schema())
                     reviewed = [store.read_result(unit_id)["value"]["output"]
@@ -659,7 +658,7 @@ def clean_round(llm, docs, *, acquisition):
                                   "document_id": raw.doc_id, "native": native,
                                   "summary_zh": native["summary_zh"],
                                   "global_review": global_review}
-                    stage.output(output)
+                stage.output(output)
             value = {"child_seal_ref": client.execution.seal(), "output": output}
             if output.get("schema") == SEMANTIC_FAILURE_SCHEMA:
                 return UnitResult(value, {raw.doc_id: {
