@@ -7,7 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { parseOptions, prepareConfiguration, writeConfiguration } from "./tiger-agent-config.mjs";
-import { MODEL_ENV_NAMES } from "../bundles/trading/capabilities/workflow-client.mjs";
+import { LIMITS, MODEL_ENV_NAMES } from "../bundles/trading/capabilities/workflow-client.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const python = process.env.TIGER_TEST_PYTHON ?? join(root, ".venv/bin/python");
@@ -39,6 +39,22 @@ test("R04: Codex preserves unrelated bytes, supports spaces/Unicode, is idempote
   assert.match(paper.proposed, /"--mode",\s*"paper"/u); writeConfiguration(paper);
   const readonly = prepareConfiguration(f.options); writeConfiguration(readonly);
   assert.equal(await readFile(readonly.file, "utf8"), again.proposed);
+});
+
+test("Codex configuration upgrades the owned proof timeout and matches the portable template", async (t) => {
+  const f = await fixture(t);
+  const timeout = (text) => Number(text.match(/^tool_timeout_sec = (\d+)$/mu)?.[1]);
+  const original = prepareConfiguration(f.options).proposed.replace(/^tool_timeout_sec = \d+$/mu, "tool_timeout_sec = 65");
+  await f.file(".codex/config.toml", original);
+  const upgraded = prepareConfiguration(f.options);
+  const template = await readFile(join(root, "config/agent-clients/codex.toml.example"), "utf8");
+
+  assert.equal(upgraded.changed, true);
+  assert.ok(timeout(upgraded.proposed) * 1000 > LIMITS.receiptMs + LIMITS.cleanupMs);
+  assert.equal(timeout(upgraded.proposed), timeout(template));
+  assert.equal(withoutBlock(upgraded.proposed), withoutBlock(original));
+  writeConfiguration(upgraded);
+  assert.equal(prepareConfiguration(f.options).changed, false);
 });
 
 test("R04: DSH block and flow lists preserve plugins and owned separators across repeated generation", async (t) => {
@@ -233,6 +249,22 @@ function qoderOwned(text) {
     text.indexOf("// END TIGER AGENT MCP v1")).trim().replace(/^,\s*/u, "");
   return JSON.parse(`{${body}}`)["tiger-workflow"];
 }
+test("Qoder and DSH configurations cover proof plus cleanup and match their portable templates", async (t) => {
+  const f = await fixture(t);
+  const yaml = require("yaml");
+  const qoder = prepareConfiguration({ ...f.options, client: "qoder" });
+  const dsh = prepareConfiguration({ ...f.options, client: "dsh" });
+  const qoderTemplate = JSON.parse(await readFile(join(root, "config/agent-clients/qoder.json.example"), "utf8"));
+  const dshTemplate = yaml.parse(await readFile(join(root, "config/agent-clients/dsh.yaml.example"), "utf8"));
+  const qoderTimeout = qoderOwned(qoder.proposed).timeout;
+  const dshTimeout = yaml.parse(dsh.proposed)[0].config.toolCallTimeoutMs;
+
+  assert.ok(qoderTimeout > LIMITS.receiptMs + LIMITS.cleanupMs);
+  assert.ok(dshTimeout > LIMITS.receiptMs + LIMITS.cleanupMs);
+  assert.equal(qoderTimeout, qoderTemplate.mcpServers["tiger-workflow"].timeout);
+  assert.equal(dshTimeout, dshTemplate[0].config.toolCallTimeoutMs);
+});
+
 test("Qoder CLI preserves comments, unrelated settings and Unicode while updating only its owned server", async (t) => {
   const originals = ["", "// empty settings 😀\n", "{}\n", '\ufeff{"language":"zh-CN"}\r\n', '// CR-only comment\r{"language":"zh-CN"}\r', '{"language":"zh-CN"}\n',
     '{"language":"zh-CN", /* trailing separator */}\n',
@@ -260,7 +292,7 @@ test("Qoder CLI preserves comments, unrelated settings and Unicode while updatin
     assert.equal(server.type, "stdio"); assert.equal(server.command, process.execPath);
     assert.deepEqual(server.args, [join(f.project, "scripts/tiger-agent-mcp.mjs"), "--python", python,
       "--state-root", join(f.project, ".tiger-agent"), "--mode", "readonly"]);
-    assert.equal(server.cwd, f.project); assert.equal(server.timeout, 65000);
+    assert.equal(server.cwd, f.project); assert.equal(server.timeout, LIMITS.receiptMs + 5000);
     assert.equal(Object.hasOwn(server, "trust"), false); assert.equal(Object.hasOwn(server, "alwaysAllow"), false);
     assert.equal(Object.hasOwn(server, "env"), false);
     writeConfiguration(prepared);

@@ -195,3 +195,71 @@ test("buy instructions require positive bounded facts from the approved plan", (
     assert.throws(() => validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
   }
 });
+
+function intelligenceReceiptWithChatAccounting() {
+  const receipt = modelReceipt();
+  const contract = "tiger.intelligence-acquisition.v2";
+  const bundleId = "bundle_" + "a".repeat(32);
+  receipt.summary.disclosures.intelligence = {
+    contract,
+    bundle: { bundle_id: bundleId, manifest_sha256: "b".repeat(64), usage: { requests: 0 } },
+  };
+  Object.assign(receipt.summary.model, {
+    search_mode: "intelligence_source_registry",
+    search_count: 0,
+    fetch_count: 0,
+    acquisition_contract: contract,
+    bundle_id: bundleId,
+    source_requests: 0,
+    chat_accounting: {
+      accounting_scope: "chat_completions_only",
+      source_accounting: "not_certified_by_this_report",
+      other_model_io_count: 0,
+      native_count: 5,
+      observed_attempts_count: 5,
+      known_native_attempts: 5,
+      known_usage: { prompt_tokens: 15, completion_tokens: 10, total_tokens: 25 },
+      unknown_attempts: 0,
+      observation_state: "known_usage",
+      requires_reconciliation: false,
+      format_reanswers: 0,
+      observed_attempts: stages.map((stage, index) => ({
+        stage,
+        call_id: index.toString(16).padStart(32, "0"),
+        request_sha256: index.toString(16).padStart(64, "0"),
+        ordinal: 1,
+        observation_ref: {
+          path: "evidence/" + (index + 1).toString(16).padStart(64, "0") + ".json",
+          schema: "tiger.snapshot.v1",
+          bytes: 64,
+          sha256: (index + 1).toString(16).padStart(64, "0"),
+        },
+        response_id: receipt.summary.model.response_ids[index],
+        diagnostic: null,
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5, prompt_cache_hit_tokens: 1 },
+      })),
+    },
+  });
+  return receipt;
+}
+
+test("intelligence receipt exposes independently verified chat accounting", () => {
+  const receipt = intelligenceReceiptWithChatAccounting();
+  assert.equal(validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), receipt);
+  delete receipt.summary.model.chat_accounting;
+  assert.equal(validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), receipt);
+});
+
+test("chat accounting leaves the receipt model closed and validates its known structure", () => {
+  for (const mutate of [
+    model => { model.unrecognized = true; },
+    model => { model.chat_accounting.unrecognized = true; },
+    model => { delete model.chat_accounting.known_usage; },
+    model => { model.chat_accounting.observed_attempts[0].request_sha256 = "bad"; },
+    model => { model.chat_accounting.observed_attempts[0].usage.total_tokens = "5"; },
+  ]) {
+    const receipt = intelligenceReceiptWithChatAccounting();
+    mutate(receipt.summary.model);
+    assert.throws(() => validateEnvelope(receipt, "receipt", { run_id: RUN_ID }), { code: "RESULT_INVALID" });
+  }
+});

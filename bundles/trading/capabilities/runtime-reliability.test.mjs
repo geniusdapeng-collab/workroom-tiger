@@ -1,11 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LIMITS, waitForReceipt } from "./workflow-client.mjs";
-import { RUN_ID, result } from "../../../scripts/tiger-agent-test-support.mjs";
+import { LIMITS, invokeWorkflow, waitForReceipt } from "./workflow-client.mjs";
+import { RUN_ID, result, runnerFixture } from "../../../scripts/tiger-agent-test-support.mjs";
 
 test("large-run receipt proof has a bounded 90-minute request budget", () => {
   assert.equal(LIMITS.receiptMs, 90 * 60 * 1000);
   assert.equal(LIMITS.maxWaitSeconds, 4 * 60 * 60);
+});
+
+test("direct proof operations get the proof budget while status and explicit deadlines keep their limits", async (t) => {
+  const fixture = await runnerFixture(t);
+  const delays = [];
+  const schedule = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    delays.push(delay);
+    return schedule(callback, delay, ...args);
+  });
+
+  const input = { run_id: RUN_ID };
+  for (const operation of ["status", "receipt", "verify"]) {
+    const value = await invokeWorkflow(operation, input, fixture.options);
+    assert.equal(value.operation_ok, true, operation);
+  }
+  const explicitTimeoutMs = 5000;
+  const value = await invokeWorkflow("verify", input, fixture.options, { timeoutMs: explicitTimeoutMs });
+  assert.equal(value.operation_ok, true);
+  assert.deepEqual(delays, [LIMITS.requestMs, LIMITS.receiptMs, LIMITS.receiptMs, explicitTimeoutMs]);
 });
 
 test("run wait retries a transient status timeout without resubmitting", async () => {
