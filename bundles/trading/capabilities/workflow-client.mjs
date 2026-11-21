@@ -512,17 +512,21 @@ export async function waitForReceipt(runId, options, { operation = "run", signal
   invoke = invokeWorkflow } = {}) {
   const deadline = Date.now() + waitMs;
   let retryDelay = pollMs;
+  function remainingWait() {
+    if (signal?.aborted) throw new WorkflowError("CANCELLED", "Observation was cancelled.");
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new WorkflowError("TIMEOUT", "Waiting for the existing run exceeded the observation deadline.");
+    return remaining;
+  }
   try {
     validateRequest("status", { run_id: runId });
     for (;;) {
-      if (signal?.aborted) throw new WorkflowError("CANCELLED", "Observation was cancelled.");
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new WorkflowError("TIMEOUT", "Waiting for the existing run exceeded the observation deadline.");
-      const current = await invoke("status", { run_id: runId }, options, { signal, timeoutMs: Math.min(remaining, LIMITS.requestMs) });
+      const current = await invoke("status", { run_id: runId }, options,
+        { signal, timeoutMs: Math.min(remainingWait(), LIMITS.requestMs) });
       if (!current.operation_ok) {
         const transientObservation = current.error?.code === "TIMEOUT" || current.error?.retryable === true;
         if (!transientObservation) return current;
-        await abortableDelay(Math.min(retryDelay, Math.max(1, deadline - Date.now())), signal);
+        await abortableDelay(Math.min(retryDelay, remainingWait()), signal);
         retryDelay = Math.min(retryDelay * 2, 30000);
         continue;
       }
@@ -530,11 +534,11 @@ export async function waitForReceipt(runId, options, { operation = "run", signal
       if (TERMINAL_OK.has(current.status)) {
         for (;;) {
           const receipt = await invoke("receipt", { run_id: runId }, options,
-            { signal, timeoutMs: Math.min(Math.max(1, deadline - Date.now()), LIMITS.receiptMs) });
+            { signal, timeoutMs: Math.min(remainingWait(), LIMITS.receiptMs) });
           if (receipt.operation_ok) return receipt;
           const transientProof = receipt.error?.code === "TIMEOUT" || receipt.error?.retryable === true;
           if (!transientProof) return receipt;
-          await abortableDelay(Math.min(retryDelay, Math.max(1, deadline - Date.now())), signal);
+          await abortableDelay(Math.min(retryDelay, remainingWait()), signal);
           retryDelay = Math.min(retryDelay * 2, 30000);
         }
       }
@@ -544,7 +548,7 @@ export async function waitForReceipt(runId, options, { operation = "run", signal
         failed.data = { observed_status: current.status };
         return failed;
       }
-      await abortableDelay(Math.min(pollMs, Math.max(1, deadline - Date.now())), signal);
+      await abortableDelay(Math.min(pollMs, remainingWait()), signal);
     }
   } catch (error) { return failureEnvelope(operation, error, runId); }
 }
