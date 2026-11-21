@@ -73,6 +73,22 @@ def _same(actual, expected, stage=None):
         _fail(stage)
 
 
+def _report_projection(value):
+    """Project only report JSON missing values at the verified report boundary."""
+    def visit(item):
+        if isinstance(item, list):
+            return [visit(child) for child in item]
+        if isinstance(item, dict):
+            if (set(item) == {"__type__", "reason"}
+                    and item["__type__"] == "missing"
+                    and item["reason"] in ("nan", "pandas_na", "positive_infinity", "negative_infinity")):
+                return None
+            return {key: visit(child) for key, child in item.items()}
+        return item
+
+    return visit(_plain(value))
+
+
 def frozen_clean_format_contract(run):
     """Recognize only known frozen prompt code, without importing/executing it."""
     stage = "clean.llm_semantic"
@@ -1743,7 +1759,7 @@ def verify_intelligence_model(run, result, admission, *, scene_policy_path=None,
         _same(result["raw"]["model"], summary)
         _same(result["raw"]["cross_validation"], stats)
         _same(result["raw"]["tech_signals"], [signal.to_dict() for signal in signals])
-        reported = _plain(replay.value("report.emit"))
+        reported = _report_projection(replay.value("report.emit"))
         for key in ("mrs", "sectors", "chains", "watchlist"):
             _same(result[key], reported[key], "report.emit")
         for key in ("scan_stats", "entry_budget", "security_roster", "security_identities"):
