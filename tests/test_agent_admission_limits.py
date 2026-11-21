@@ -1,10 +1,12 @@
 """Preparation has its own deadline before detached worker acceptance exists."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import io
 import os
 import signal
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -70,14 +72,19 @@ def test_slow_archive_staging_is_inside_preparation_deadline(tmp_path, monkeypat
 def test_slow_account_copy_is_inside_preparation_deadline(tmp_path, monkeypatch):
     source = fixture_source(tmp_path / "source")
     reached = []
+    state = tmp_path / "state"
     previous_handler = signal.getsignal(signal.SIGALRM)
     def slow(*_args):
+        descriptor = runner._lock_fd(state, "submission.lock", create=False, nonblocking=True)
+        os.close(descriptor)
+        with pytest.raises(BlockingIOError):
+            runner._lock_fd(state, "account.lock", create=False, nonblocking=True)
         # Source freezing precedes this operation and varies with filesystem
         # speed. Inject expiry at the operation under test, under the actual
         # original admission handler, rather than requiring all preparation
         # before this point to finish in 500 ms on every hosted runner.
         remaining, interval = signal.getitimer(signal.ITIMER_REAL)
-        assert 0 < remaining <= 45 and interval == 0
+        assert 45 < remaining <= 600 and interval == 0
         assert callable(signal.getsignal(signal.SIGALRM))
         assert signal.getsignal(signal.SIGALRM) != previous_handler
         reached.append("account")
@@ -347,7 +354,7 @@ def test_ack_observation_timeout_does_not_kill_accepted_detached_worker(tmp_path
         # acknowledgement. This separates the tested parent observation
         # timeout from variable source-copy and worker-bootstrap latency.
         remaining, interval = signal.getitimer(signal.ITIMER_REAL)
-        assert 0 < remaining <= 45 and interval == 0
+        assert 45 < remaining <= 600 and interval == 0
         assert callable(signal.getsignal(signal.SIGALRM))
         assert signal.getsignal(signal.SIGALRM) != previous_handler
         acknowledged.append(True)
@@ -374,3 +381,83 @@ def test_thread_submit_keeps_same_key_concurrency_and_real_worker_semantics(tmp_
     run_id = results[0]["run_id"]
     assert wait_terminal(state, run_id)["status"] == "completed_degraded"
     assert len(list((state / "runs").iterdir())) == 1
+
+
+def test_cli_short_input_guard_exits_before_admission_while_reusing_entry_clock(tmp_path, monkeypatch, capsys):
+    clock = {"fixed_entry_clock": True}
+    monkeypatch.setattr(runner, "frozen_clock", lambda: clock)
+
+    class Input(io.BytesIO):
+        def read(self, limit):
+            remaining, interval = signal.getitimer(signal.ITIMER_REAL)
+            assert 0 < remaining <= 45 and interval == 0
+            return super().read(limit)
+
+    def execute(operation, request, *, mode, state, _entry_clock):
+        assert signal.getitimer(signal.ITIMER_REAL) == (0, 0)
+        assert _entry_clock is clock
+        assert (operation, request, mode, state) == ("run", REQUEST, "paper", tmp_path)
+        return runner.envelope(operation)
+
+    monkeypatch.setattr(runner.sys, "stdin", SimpleNamespace(buffer=Input(runner.json_bytes(REQUEST))))
+    monkeypatch.setattr(runner, "execute", execute)
+    assert runner.main(["--mode", "paper", "--state-root", str(tmp_path), "run"]) == 0
+    assert runner.strict_json(capsys.readouterr().out)["operation_ok"] is True
+
+
+def test_supplement_parent_proof_is_inside_preparation_deadline(tmp_path, monkeypatch):
+    def slow(*_args):
+        time.sleep(0.12)
+        raise EvidenceInvalid("SUPPLEMENT_UNAVAILABLE", "Fixture should time out first")
+
+    monkeypatch.setattr(runner, "_supplement_inputs", slow)
+    request = {"schema_version": "tiger.research-supplement-request/v1",
+               "parent_run_id": "run-" + "1" * 32, "symbols": ["TEST"],
+               "idempotency_key": "supplement-parent-timeout"}
+    result = runner.submit_supplement(tmp_path, request, _preparation_seconds=0.03)
+    assert result["error"]["code"] == "TIMEOUT"
+    assert result["error"]["stage"] == "admission.prepare"
+
+
+def test_resume_committed_proof_is_inside_preparation_deadline(tmp_path, monkeypatch):
+    def slow(*_args, **_kwargs):
+        time.sleep(0.12)
+        raise EvidenceInvalid("RESULT_INVALID", "Fixture should time out first")
+
+    run_id = "run-" + "1" * 32
+    monkeypatch.setattr(runner, "observe_run", lambda *_: {"active": False})
+    monkeypatch.setattr(runner, "pointer_read", lambda *_: {"run_id": run_id})
+    monkeypatch.setattr(runner, "verify_run", slow)
+    result = runner.submit_resume(tmp_path, {"run_id": run_id}, _preparation_seconds=0.03)
+    assert result["error"]["code"] == "TIMEOUT"
+    assert result["error"]["stage"] == "admission.prepare"
+    assert result["run_id"] == run_id
+
+
+def test_next_run_independently_verifies_committed_parent_under_long_admission_budget(tmp_path, monkeypatch):
+    from trading_system import agent_runtime
+
+    state = tmp_path / "state"
+    source = fixture_source(tmp_path / "source")
+    first = runner.submit(state, REQUEST, source=source)
+    assert first["operation_ok"], first
+    assert wait_terminal(state, first["run_id"])["status"] == "completed_degraded"
+    original_verify = agent_runtime.verify_run
+    reached = []
+
+    def verify(state_root, run_id, **kwargs):
+        remaining, interval = signal.getitimer(signal.ITIMER_REAL)
+        assert 45 < remaining <= 600 and interval == 0
+        assert kwargs["require_committed"] is True
+        reached.append(run_id)
+        return original_verify(state_root, run_id, **kwargs)
+
+    monkeypatch.setattr(agent_runtime, "verify_run", verify)
+    request = REQUEST | {"idempotency_key": "test-next-account-run"}
+    second = runner.submit(state, request, source=source)
+    assert second["operation_ok"] and second["run_id"] != first["run_id"], second
+    assert reached == [first["run_id"]]
+    assert wait_terminal(state, second["run_id"])["status"] == "completed_degraded"
+    assert pointer_read(state)["run_id"] == second["run_id"]
+    assert runner.submit(state, request, source=source)["run_id"] == second["run_id"]
+    assert reached == [first["run_id"]]

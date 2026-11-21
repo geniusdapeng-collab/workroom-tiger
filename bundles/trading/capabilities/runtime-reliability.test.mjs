@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LIMITS, invokeWorkflow, waitForReceipt } from "./workflow-client.mjs";
-import { RUN_ID, result, runnerFixture } from "../../../scripts/tiger-agent-test-support.mjs";
+import { REQUEST, RUN_ID, result, runnerFixture } from "../../../scripts/tiger-agent-test-support.mjs";
 
 test("large-run receipt proof has a bounded 90-minute request budget", () => {
   assert.equal(LIMITS.receiptMs, 90 * 60 * 1000);
@@ -26,6 +26,30 @@ test("direct proof operations get the proof budget while status and explicit dea
   const value = await invokeWorkflow("verify", input, fixture.options, { timeoutMs: explicitTimeoutMs });
   assert.equal(value.operation_ok, true);
   assert.deepEqual(delays, [LIMITS.requestMs, LIMITS.receiptMs, LIMITS.receiptMs, explicitTimeoutMs]);
+});
+
+test("admission operations use a longer request timer without changing status", async (t) => {
+  const fixture = await runnerFixture(t);
+  const delays = [];
+  const schedule = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    delays.push(delay);
+    return schedule(callback, delay, ...args);
+  });
+
+  const identity = { run_id: RUN_ID };
+  const operations = [
+    ["run", REQUEST],
+    ["resume", identity],
+    ["supplement", { schema_version: "tiger.research-supplement-request/v1",
+      parent_run_id: RUN_ID, symbols: ["TEST"], idempotency_key: "test-supplement-key" }],
+    ["status", identity],
+  ];
+  for (const [operation, input] of operations) {
+    const value = await invokeWorkflow(operation, input, fixture.options);
+    assert.equal(value.operation_ok, true, operation);
+  }
+  assert.deepEqual(delays, [660000, 660000, 660000, LIMITS.requestMs]);
 });
 
 test("run wait retries a transient status timeout without resubmitting", async () => {

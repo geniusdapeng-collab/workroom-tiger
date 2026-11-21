@@ -10,10 +10,11 @@ export const REQUIRED_PROFILE = "us-public-model-required-paper-v1";
 export const INTELLIGENCE_PROFILE = "us-public-intelligence-paper-v2";
 export const OPERATIONS = Object.freeze(["doctor", "describe", "run", "resume", "supplement", "cancel", "status", "receipt", "verify"]);
 export const LIMITS = Object.freeze({ inputBytes: 65536, outputBytes: 1024 * 1024, stderrBytes: 65536,
-  frameBytes: 131072, requestMs: 60000, receiptMs: 5400000, waitMs: 14400000, pollMs: 1000, depth: 64, concurrent: 4,
+  frameBytes: 131072, requestMs: 60000, admissionMs: 660000, receiptMs: 5400000, waitMs: 14400000, pollMs: 1000, depth: 64, concurrent: 4,
   terminateMs: 250, cleanupMs: 2000, maxWaitSeconds: 14400 });
 const RUN_ID = /^run-[0-9a-f]{32}$/u;
 const TERMINAL_OK = new Set(["completed", "completed_degraded"]);
+const ADMISSION_OPERATIONS = new Set(["run", "resume", "supplement"]);
 const ENV_NAMES = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TMP", "TEMP",
   "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -361,9 +362,15 @@ export function startupOptions(options = {}) {
   return Object.freeze({ mode, python, stateRoot: resolve(stateRoot) });
 }
 
+function requestBudgetMs(operation) {
+  if (ADMISSION_OPERATIONS.has(operation)) return LIMITS.admissionMs;
+  if (operation === "receipt" || operation === "verify") return LIMITS.receiptMs;
+  return LIMITS.requestMs;
+}
+
 /** No env/argv/root override comes from a business request. Accepted detached workers are owned by Python. */
 export async function invokeWorkflow(operation, input, options = {}, {
-  signal, timeoutMs = operation === "receipt" || operation === "verify" ? LIMITS.receiptMs : LIMITS.requestMs,
+  signal, timeoutMs = requestBudgetMs(operation),
 } = {}) {
   let config;
   try {
