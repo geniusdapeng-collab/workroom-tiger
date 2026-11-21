@@ -102,6 +102,14 @@ def frozen_clean_format_contract(run):
     return semantic.CLEAN_FORMAT_CONTRACT
 
 
+def _selected_pick_rationale(rationale, buys):
+    if rationale is None:
+        return {}
+    if type(rationale) is not dict:
+        _fail("decision.debate")
+    return {key: item for key, item in rationale.items() if key in buys}
+
+
 def _request(parameters):
     return SearchRequest(**{key: tuple(value) if key in {"domains", "entities", "targets"} else value
                             for key, value in parameters.items()})
@@ -1454,7 +1462,7 @@ def _verify_decision(replay, cleaned, frontier, bundle, market, result):
     if (replay.policy or {}).get("research_work") is not None:
         from .work_proof import verify_decision_outcome
         verify_decision_outcome(replay, value, selected_symbols=[symbol for symbol in picks if symbol in buys],
-            pick_rationale={key: item for key, item in bound["rationale"].items() if key in buys})
+            pick_rationale=_selected_pick_rationale(bound["rationale"], buys))
     _same(replay.value(stage), value, stage)
     raw = result["raw"]
     _same(raw["debate"], value, stage)
