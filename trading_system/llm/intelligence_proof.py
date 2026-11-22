@@ -73,6 +73,22 @@ def _same(actual, expected, stage=None):
         _fail(stage)
 
 
+def _report_projection(value):
+    """Project only report JSON missing values at the verified report boundary."""
+    def visit(item):
+        if isinstance(item, list):
+            return [visit(child) for child in item]
+        if isinstance(item, dict):
+            if (set(item) == {"__type__", "reason"}
+                    and item["__type__"] == "missing"
+                    and item["reason"] in ("nan", "pandas_na", "positive_infinity", "negative_infinity")):
+                return None
+            return {key: visit(child) for key, child in item.items()}
+        return item
+
+    return visit(_plain(value))
+
+
 def frozen_clean_format_contract(run):
     """Recognize only known frozen prompt code, without importing/executing it."""
     stage = "clean.llm_semantic"
@@ -100,6 +116,14 @@ def frozen_clean_format_contract(run):
     except (UnicodeError, SyntaxError, TypeError, ValueError):
         _fail(stage)
     return semantic.CLEAN_FORMAT_CONTRACT
+
+
+def _selected_pick_rationale(rationale, buys):
+    if rationale is None:
+        return {}
+    if type(rationale) is not dict:
+        _fail("decision.debate")
+    return {key: item for key, item in rationale.items() if key in buys}
 
 
 def _request(parameters):
@@ -1454,7 +1478,7 @@ def _verify_decision(replay, cleaned, frontier, bundle, market, result):
     if (replay.policy or {}).get("research_work") is not None:
         from .work_proof import verify_decision_outcome
         verify_decision_outcome(replay, value, selected_symbols=[symbol for symbol in picks if symbol in buys],
-            pick_rationale={key: item for key, item in bound["rationale"].items() if key in buys})
+            pick_rationale=_selected_pick_rationale(bound["rationale"], buys))
     _same(replay.value(stage), value, stage)
     raw = result["raw"]
     _same(raw["debate"], value, stage)
@@ -1735,7 +1759,7 @@ def verify_intelligence_model(run, result, admission, *, scene_policy_path=None,
         _same(result["raw"]["model"], summary)
         _same(result["raw"]["cross_validation"], stats)
         _same(result["raw"]["tech_signals"], [signal.to_dict() for signal in signals])
-        reported = _plain(replay.value("report.emit"))
+        reported = _report_projection(replay.value("report.emit"))
         for key in ("mrs", "sectors", "chains", "watchlist"):
             _same(result[key], reported[key], "report.emit")
         for key in ("scan_stats", "entry_budget", "security_roster", "security_identities"):

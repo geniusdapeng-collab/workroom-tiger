@@ -10,10 +10,11 @@ export const REQUIRED_PROFILE = "us-public-model-required-paper-v1";
 export const INTELLIGENCE_PROFILE = "us-public-intelligence-paper-v2";
 export const OPERATIONS = Object.freeze(["doctor", "describe", "run", "resume", "supplement", "cancel", "status", "receipt", "verify"]);
 export const LIMITS = Object.freeze({ inputBytes: 65536, outputBytes: 1024 * 1024, stderrBytes: 65536,
-  frameBytes: 131072, requestMs: 60000, receiptMs: 5400000, waitMs: 14400000, pollMs: 1000, depth: 64, concurrent: 4,
+  frameBytes: 131072, requestMs: 60000, admissionMs: 660000, receiptMs: 5400000, waitMs: 14400000, pollMs: 1000, depth: 64, concurrent: 4,
   terminateMs: 250, cleanupMs: 2000, maxWaitSeconds: 14400 });
 const RUN_ID = /^run-[0-9a-f]{32}$/u;
 const TERMINAL_OK = new Set(["completed", "completed_degraded"]);
+const ADMISSION_OPERATIONS = new Set(["run", "resume", "supplement"]);
 const ENV_NAMES = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TMP", "TEMP",
   "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -361,8 +362,16 @@ export function startupOptions(options = {}) {
   return Object.freeze({ mode, python, stateRoot: resolve(stateRoot) });
 }
 
+function requestBudgetMs(operation) {
+  if (ADMISSION_OPERATIONS.has(operation)) return LIMITS.admissionMs;
+  if (operation === "receipt" || operation === "verify") return LIMITS.receiptMs;
+  return LIMITS.requestMs;
+}
+
 /** No env/argv/root override comes from a business request. Accepted detached workers are owned by Python. */
-export async function invokeWorkflow(operation, input, options = {}, { signal, timeoutMs = LIMITS.requestMs } = {}) {
+export async function invokeWorkflow(operation, input, options = {}, {
+  signal, timeoutMs = requestBudgetMs(operation),
+} = {}) {
   let config;
   try {
     config = startupOptions(options);
@@ -512,17 +521,21 @@ export async function waitForReceipt(runId, options, { operation = "run", signal
   invoke = invokeWorkflow } = {}) {
   const deadline = Date.now() + waitMs;
   let retryDelay = pollMs;
+  function remainingWait() {
+    if (signal?.aborted) throw new WorkflowError("CANCELLED", "Observation was cancelled.");
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new WorkflowError("TIMEOUT", "Waiting for the existing run exceeded the observation deadline.");
+    return remaining;
+  }
   try {
     validateRequest("status", { run_id: runId });
     for (;;) {
-      if (signal?.aborted) throw new WorkflowError("CANCELLED", "Observation was cancelled.");
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new WorkflowError("TIMEOUT", "Waiting for the existing run exceeded the observation deadline.");
-      const current = await invoke("status", { run_id: runId }, options, { signal, timeoutMs: Math.min(remaining, LIMITS.requestMs) });
+      const current = await invoke("status", { run_id: runId }, options,
+        { signal, timeoutMs: Math.min(remainingWait(), LIMITS.requestMs) });
       if (!current.operation_ok) {
         const transientObservation = current.error?.code === "TIMEOUT" || current.error?.retryable === true;
         if (!transientObservation) return current;
-        await abortableDelay(Math.min(retryDelay, Math.max(1, deadline - Date.now())), signal);
+        await abortableDelay(Math.min(retryDelay, remainingWait()), signal);
         retryDelay = Math.min(retryDelay * 2, 30000);
         continue;
       }
@@ -530,11 +543,11 @@ export async function waitForReceipt(runId, options, { operation = "run", signal
       if (TERMINAL_OK.has(current.status)) {
         for (;;) {
           const receipt = await invoke("receipt", { run_id: runId }, options,
-            { signal, timeoutMs: Math.min(Math.max(1, deadline - Date.now()), LIMITS.receiptMs) });
+            { signal, timeoutMs: Math.min(remainingWait(), LIMITS.receiptMs) });
           if (receipt.operation_ok) return receipt;
           const transientProof = receipt.error?.code === "TIMEOUT" || receipt.error?.retryable === true;
           if (!transientProof) return receipt;
-          await abortableDelay(Math.min(retryDelay, Math.max(1, deadline - Date.now())), signal);
+          await abortableDelay(Math.min(retryDelay, remainingWait()), signal);
           retryDelay = Math.min(retryDelay * 2, 30000);
         }
       }
@@ -544,7 +557,7 @@ export async function waitForReceipt(runId, options, { operation = "run", signal
         failed.data = { observed_status: current.status };
         return failed;
       }
-      await abortableDelay(Math.min(pollMs, Math.max(1, deadline - Date.now())), signal);
+      await abortableDelay(Math.min(pollMs, remainingWait()), signal);
     }
   } catch (error) { return failureEnvelope(operation, error, runId); }
 }

@@ -124,7 +124,9 @@ node scripts/tiger-agent.mjs verify --python /absolute/path/to/python \
 
 查询可以保持 readonly，但必须使用提交时同一个 state-root。`receipt` 独立验证证据和账户提交后才提供选股、持仓、挂单、现金、权益、日期及数据/模型限制；`verify` 提供验证结果而不重复业务动作。CLI 每次仅输出一个 JSON envelope；所有返回字段的契约在 `bundles/trading/agent-workflow.schema.json`。
 
-需要持续等待时，`run`、`resume`、`supplement` 可加 `--wait`，可选 `--wait-timeout-seconds 1..3600`。默认观察窗口 2460 秒；Python 业务 deadline 默认独立为 2400 秒。Node 单次提交/查询上限 60 秒，等待循环只轮询已有 `run_id`，不会重新提交。
+CLI 和 MCP 的 `receipt`、`verify` 单次只读验真上限为 5400 秒。`run`、`resume`、`supplement` 的接单请求上限为 660 秒，覆盖 Python 最多 600 秒的准备过程和退出收尾。Python 读取并解析标准输入保留独立的 45 秒上限。状态等其他请求仍以 60 秒为上限。已有账户需在复用其状态前验真上次提交的完整证据。新任务的准备时间计入原业务时限，超时后按原请求和幂等键恢复身份。
+
+需要持续等待时，`run`、`resume`、`supplement` 可加 `--wait`，可选 `--wait-timeout-seconds 1..14400`。默认观察窗口为 14400 秒，Python 业务时限默认独立为 2400 秒。等待只查询已有的 `run_id`，单次回执验真同时受剩余观察窗口与 5400 秒上限约束。
 
 仅对 `us-public-intelligence-paper-v2`，可信启动环境可设置 `TIGER_AGENT_RUNTIME_POLICY_FILE`，
 指向 `{"schema":"tiger.agent-runtime-policy/v1","business_deadline_seconds":5400}` 形式的本地文件。
@@ -190,7 +192,7 @@ node scripts/tiger-agent-config.mjs --client codex \
 
 可选 `--project /absolute/path/to/workroom-tiger`、`--state-root /absolute/path/to/tiger-state` 和项目相对 `--config`。生成结果包含实际 Node/Python 路径、解释器版本、写入状态；不保存凭据、不编辑用户全局配置。原文件会原子替换，重复生成结果一致。`durability=unknown` 表示已发生替换，但目录同步或当前内容复核未确认；`cleanup=incomplete` 表示文件或写入锁清理未完全确认。两者都不能当成“没有写入”自动重试，应按 warning 核对现有文件和锁。
 
-提交到仓库的是 `config/agent-clients/codex.toml.example` 可移植模板；带有本机绝对路径的实际配置留在本地并被 Git 忽略。
+提交到仓库的是 `config/agent-clients/codex.toml.example` 可移植模板；带有本机绝对路径的实际配置留在本地并被 Git 忽略。生成的 Tiger MCP 配置为独立验真和请求收尾预留 5405 秒。Codex 使用 `tool_timeout_sec = 5405`，Qoder 使用 `timeout: 5405000`，DSH 使用 `toolCallTimeoutMs: 5405000`。旧的托管配置可重新生成并按正常流程重连。如果宿主先停止观察，用同一 state-root、原 `run_id` 和只读 CLI 取回执并验真。
 
 显式 paper 配置包含 `env_vars`，名称来自共享 `MODEL_ENV_NAMES`：必需模型配置及已支持的来源凭据、registry/archive 路径和可选的 `TIGER_AGENT_RUNTIME_POLICY_FILE`。只保存变量名；值由可信宿主启动环境提供，切回 readonly 时移除该业务名单。生成器不读取受保护凭据文件、不复制环境值，始终返回 `credentials_verified=false`；paper 回执中的 `environment_requirements` 只列所需名称和验证边界。配置语法及 Python 版本通过，不代表模型登录或调用已验证。Codex 环境转发字段依据 [官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp)。
 

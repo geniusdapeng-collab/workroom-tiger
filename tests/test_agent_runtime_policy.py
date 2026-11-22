@@ -329,7 +329,7 @@ def cli_process(tmp_path, request, source, *, seconds=45):
         def submit(state, request, **kwargs):
             return original_submit(state, request, source=pathlib.Path(source), **kwargs)
         runner.frozen_clock, runner.submit = clock, submit
-        runner.PREPARATION_SECONDS = float(seconds)
+        runner.REQUEST_INPUT_SECONDS = float(seconds)
         raise SystemExit(runner.main(["--mode", "paper", "--state-root", state, "run"]))
     ''')
     process = subprocess.Popen([sys.executable, "-I", "-B", "-c", bootstrap,
@@ -373,14 +373,14 @@ def test_cli_captures_business_clock_before_real_slow_stdin(tmp_path, monkeypatc
             process.communicate(timeout=5)
 
 
-def test_cli_blocked_stdin_consumes_existing_preparation_lease(tmp_path):
+def test_cli_blocked_stdin_expires_its_short_input_lease(tmp_path):
     process, _marker = cli_process(tmp_path, REQUEST, runtime.SOURCE_ROOT, seconds=.12)
     try:
         process.wait(timeout=3)  # Keep stdin open; the child must terminate itself.
         output, errors = process.communicate(timeout=3)
         value = json.loads(output)
         assert process.returncode == 9, errors.decode()
-        assert value["error"]["code"] == "TIMEOUT" and value["error"]["stage"] == "admission.prepare"
+        assert value["error"]["code"] == "TIMEOUT" and value["error"]["stage"] == "admission.input"
         assert value["run_id"] is None and not (tmp_path / "state").exists()
     finally:
         if process.poll() is None:

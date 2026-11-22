@@ -1,11 +1,55 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LIMITS, waitForReceipt } from "./workflow-client.mjs";
-import { RUN_ID, result } from "../../../scripts/tiger-agent-test-support.mjs";
+import { LIMITS, invokeWorkflow, waitForReceipt } from "./workflow-client.mjs";
+import { REQUEST, RUN_ID, result, runnerFixture } from "../../../scripts/tiger-agent-test-support.mjs";
 
 test("large-run receipt proof has a bounded 90-minute request budget", () => {
   assert.equal(LIMITS.receiptMs, 90 * 60 * 1000);
   assert.equal(LIMITS.maxWaitSeconds, 4 * 60 * 60);
+});
+
+test("direct proof operations get the proof budget while status and explicit deadlines keep their limits", async (t) => {
+  const fixture = await runnerFixture(t);
+  const delays = [];
+  const schedule = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    delays.push(delay);
+    return schedule(callback, delay, ...args);
+  });
+
+  const input = { run_id: RUN_ID };
+  for (const operation of ["status", "receipt", "verify"]) {
+    const value = await invokeWorkflow(operation, input, fixture.options);
+    assert.equal(value.operation_ok, true, operation);
+  }
+  const explicitTimeoutMs = 5000;
+  const value = await invokeWorkflow("verify", input, fixture.options, { timeoutMs: explicitTimeoutMs });
+  assert.equal(value.operation_ok, true);
+  assert.deepEqual(delays, [LIMITS.requestMs, LIMITS.receiptMs, LIMITS.receiptMs, explicitTimeoutMs]);
+});
+
+test("admission operations use a longer request timer without changing status", async (t) => {
+  const fixture = await runnerFixture(t);
+  const delays = [];
+  const schedule = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    delays.push(delay);
+    return schedule(callback, delay, ...args);
+  });
+
+  const identity = { run_id: RUN_ID };
+  const operations = [
+    ["run", REQUEST],
+    ["resume", identity],
+    ["supplement", { schema_version: "tiger.research-supplement-request/v1",
+      parent_run_id: RUN_ID, symbols: ["TEST"], idempotency_key: "test-supplement-key" }],
+    ["status", identity],
+  ];
+  for (const [operation, input] of operations) {
+    const value = await invokeWorkflow(operation, input, fixture.options);
+    assert.equal(value.operation_ok, true, operation);
+  }
+  assert.deepEqual(delays, [660000, 660000, 660000, LIMITS.requestMs]);
 });
 
 test("run wait retries a transient status timeout without resubmitting", async () => {
@@ -83,4 +127,74 @@ test("run wait retries a transient receipt proof timeout without resubmitting", 
   assert.equal(value.operation, "receipt");
   assert.equal(value.operation_ok, true);
   assert.deepEqual(calls, ["status", "receipt", "receipt"]);
+});
+
+test("run wait starts no receipt proof when terminal status exhausts its deadline", async (t) => {
+  let now = 1000;
+  t.mock.method(Date, "now", () => now);
+  const calls = [];
+  const value = await waitForReceipt(RUN_ID, {}, {
+    waitMs: 10,
+    invoke: async (operation) => {
+      calls.push(operation);
+      now = 1010;
+      return result(operation);
+    },
+  });
+
+  assert.equal(value.error?.code, "TIMEOUT");
+  assert.equal(value.operation, "run");
+  assert.equal(value.run_id, RUN_ID);
+  assert.equal(value.error.run_id, RUN_ID);
+  assert.deepEqual(calls, ["status"]);
+});
+
+test("run wait starts no new receipt proof after a transient proof exhausts its deadline", async (t) => {
+  let now = 1000;
+  t.mock.method(Date, "now", () => now);
+  const calls = [];
+  const value = await waitForReceipt(RUN_ID, {}, {
+    operation: "resume",
+    pollMs: 1,
+    waitMs: 10,
+    invoke: async (operation, input, options, { timeoutMs }) => {
+      calls.push({ operation, input, timeoutMs });
+      if (operation === "status" || calls.length > 2) return result(operation);
+      now = 1010;
+      return {
+        ...result("receipt"),
+        operation_ok: false,
+        status: "interrupted",
+        error: {
+          code: "TIMEOUT", message: "receipt proof exceeded its request budget",
+          run_id: RUN_ID, stage: null, retryable: false, details_ref: null,
+        },
+      };
+    },
+  });
+
+  assert.equal(value.error?.code, "TIMEOUT");
+  assert.equal(value.operation, "resume");
+  assert.equal(value.run_id, RUN_ID);
+  assert.deepEqual(calls, [
+    { operation: "status", input: { run_id: RUN_ID }, timeoutMs: 10 },
+    { operation: "receipt", input: { run_id: RUN_ID }, timeoutMs: 10 },
+  ]);
+});
+
+test("run wait does not start receipt proof after observation is cancelled", async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const value = await waitForReceipt(RUN_ID, {}, {
+    signal: controller.signal,
+    invoke: async (operation) => {
+      calls.push(operation);
+      if (operation === "status") controller.abort();
+      return result(operation);
+    },
+  });
+
+  assert.equal(value.error?.code, "CANCELLED");
+  assert.equal(value.run_id, RUN_ID);
+  assert.deepEqual(calls, ["status"]);
 });

@@ -169,15 +169,11 @@ class ResearchWorkProof:
                     or diagnostic.get("json_stage") != "assistant_content"
                     or attempts[-1][2]["diagnostic"] != diagnostic):
                 _fail(stage)
-            from .rejected_native import response_identity
-            for _, native, result in attempts:
-                if result["usage"] is None:
-                    _fail(stage)
-                response_id, _ = response_identity(native)
-                if response_id is not None:
-                    replay.response_ids.append(response_id)
+            # _observed_attempts retains these replies in native accounting.
+            # The business summary counts only schema-accepted responses.
+            if any(result["usage"] is None for _, _, result in attempts):
+                _fail(stage)
             replay.call_ids.add(call_id)
-            replay.counts[stage] += 1
             self.work_call_ids.add(call_id)
             return {"schema_failure_code": failure_code}
         fields = {"schema", "response_observation_contract", "call_id", "stage", "provider",
@@ -452,21 +448,24 @@ class ResearchWorkProof:
                              "phase": "metadata_synthesis",
                              "unit_id": summary_spec.unit_id, "arguments": args})
             if type(value) is dict and value.get("schema") == SEMANTIC_FAILURE_SCHEMA:
-                try:
-                    merged = merge_segment_annotations(
-                        raw, annotations, summary_zh=native["summary_zh"],
-                        limits=merged_annotation_limits(len(segments)),
-                        target_ids=legacy.TARGET_IDS)
-                    validate_annotation(merged, self.replay.cutoff, **validation_context)
-                except Exception as error:
-                    code = semantic_failure_code(error)
-                    if code is None:
-                        _fail(stage)
+                if value.get("error_code") in DOCUMENT_FORMAT_RESULT_CODES:
+                    expect_semantic_failure(value, native, raw, "metadata_synthesis", None)
                 else:
-                    _fail(stage)
-                expected = semantic_failure_value(
-                    "metadata_synthesis", raw, None, code)
-                _same(value, expected, stage)
+                    try:
+                        merged = merge_segment_annotations(
+                            raw, annotations, summary_zh=native["summary_zh"],
+                            limits=merged_annotation_limits(len(segments)),
+                            target_ids=legacy.TARGET_IDS)
+                        validate_annotation(merged, self.replay.cutoff, **validation_context)
+                    except Exception as error:
+                        code = semantic_failure_code(error)
+                        if code is None:
+                            _fail(stage)
+                    else:
+                        _fail(stage)
+                    expected = semantic_failure_value(
+                        "metadata_synthesis", raw, None, code)
+                    _same(value, expected, stage)
                 terminal_disposition(result, TERMINAL_REASON)
                 self.document_hashes[raw.doc_id] = text_digest(raw.content)
                 return (None, index) if return_count else None
