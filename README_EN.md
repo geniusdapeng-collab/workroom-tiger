@@ -1,8 +1,6 @@
 # Tiger Global Asset Management (TGAM)
 
-> A fully automated trading system orchestrated by an AI fund manager — covering US / CN / HK markets, running 24 hours.
->
-> **No prediction. Process, discipline, audit.**
+Tiger is a multi-market research and paper asset-management system. It screens securities, gathers public evidence, applies numeric risk checks, and records paper decisions and account activity. The controlled public-intelligence workflow uses the US-equity profile described below.
 
 Tiger Global Asset Management (TGAM) uses the [Caishen AI trading system](docs/CAISHEN_README.md) (v6.3) as its trading kernel and [WorkLoom IM](governance/README.md) as its governance shell, strictly following every trading discipline in the [White Paper: AI Short-Term US Equity Trading (1–15 Day Swing Edition)](reports/AI短线美股交易白皮书_20260730.pdf).
 
@@ -42,9 +40,9 @@ and profile; a new daily task changes its logical idempotency key.
 
 ```bash
 pip install -r requirements.txt
-python3 -m pytest tests/ -q          # 252 tests
+python3 -m pytest tests/ -q          # trading-kernel test suite
 python3 main.py --demo               # offline demo (synthetic data, end-to-end 21 steps)
-python3 main.py --universe full --top 30 --picks 8   # production mode (daily full market)
+python3 main.py --universe full --top 30 --picks 8   # legacy full-universe research entry
 
 # S6 review loop & approval flow
 python3 main.py --review-list                              # list WFA parameter proposals
