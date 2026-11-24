@@ -1,6 +1,6 @@
 # Tiger · 老虎全球资产管理
 
-Tiger 是一个面向多市场投研的**模拟资产管理系统**。它把行情、公开情报、候选筛选、风险检查和模拟账户记录串成一条可复核的研究流程。运行报告能回答三个问题：系统用了哪些资料、为什么给出某项纸面判断、哪些条件让判断停在观察阶段。
+Tiger 是一个用于多市场投研与**模拟资产管理**的系统。研究人员可从行情和公开资料筛选候选，核对观察或纸面计划的依据，并将判断与风险检查、模拟账户记录及独立回执对照。当前受控公开情报研究使用美股配置，治理界面提供审批、围栏和事件追溯。
 
 [English](README_EN.md) · [系统怎么工作](#系统怎么工作) · [示例界面](#示例界面) · [快速开始](#快速开始交易内核) · [Agent 操作指南](docs/TIGER-OPERATOR.md)
 
@@ -61,7 +61,7 @@ Agent 会先检查环境，再按固定 CLI/MCP 提交与查询同一个任务�
 bash scripts/setup.sh                # 一键安装+自检（或 pip install -r requirements.txt）
 python3 -m pytest tests/ -q          # 交易内核测试（本机实测 327 passed，2026-09-19）
 python3 main.py --demo               # 离线演示（合成数据，端到端 21 环节）
-python3 main.py --universe focused --top 30 --picks 8 # 受控 v2 默认：120 只核心扫描
+python3 main.py --universe focused --top 30 --picks 8 # 旧通用入口的核心扫描池
 python3 main.py --universe full --top 30 --picks 8    # 旧通用入口的全市场实验
 bash scripts/stack_setup.sh          # 全栈：+ WorkLoom 治理底座（Node≥24/Docker）
 
@@ -156,7 +156,7 @@ Apache-2.0。
 
 ## 桌面 Agent 接入（Codex / Qoder / DeepSeek Harness）
 
-完整后端研究使用 `node scripts/tiger-agent.mjs`（固定八操作 CLI）或
+完整后端研究使用 `node scripts/tiger-agent.mjs`（固定 CLI）或
 `node scripts/tiger-agent-mcp.mjs`（独立 STDIO MCP）。通过
 `node scripts/tiger-agent-config.mjs --client codex` 生成 Codex 本机项目配置，默认只读；
 Qoder CLI 与 DSH 分别选择 `--client qoder` 和 `--client dsh`。
